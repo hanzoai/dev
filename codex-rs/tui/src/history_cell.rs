@@ -350,6 +350,12 @@ pub(crate) enum ExploreEntryStatus {
 }
 
 #[derive(Clone)]
+struct CommandSummary {
+    display: String,
+    annotation: Option<String>,
+}
+
+#[derive(Clone)]
 enum ExploreSummary {
     Search {
         query: Option<String>,
@@ -362,6 +368,9 @@ enum ExploreSummary {
         display_path: String,
         annotation: Option<String>,
         range: Option<(u32, u32)>,
+    },
+    Command {
+        command: CommandSummary,
     },
     Fallback {
         text: String,
@@ -377,9 +386,12 @@ struct ExploreEntry {
 
 impl ExploreEntry {
     fn label(&self) -> &'static str {
+        if matches!(self.summary, ExploreSummary::Command { .. }) {
+            return "Ran";
+        }
         match self.action {
             ExecAction::Read => "Read",
-            ExecAction::Search => "Searched",
+            ExecAction::Search => "Search",
             ExecAction::List => "List",
             ExecAction::Run => "Run",
         }
@@ -435,6 +447,16 @@ impl ExploreEntry {
                 }
                 spans
             }
+            ExploreSummary::Command { command } => {
+                let mut spans = highlight_command_summary(&command.display);
+                if let Some(annotation) = &command.annotation {
+                    spans.push(Span::styled(
+                        format!(" {}", annotation),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                spans
+            }
             ExploreSummary::Fallback { text } => vec![Span::styled(
                 text.clone(),
                 Style::default().fg(crate::colors::text()),
@@ -449,6 +471,84 @@ impl ExploreEntry {
     fn is_error(&self) -> bool {
         matches!(self.status, ExploreEntryStatus::Error { .. })
     }
+}
+
+fn highlight_command_summary(command: &str) -> Vec<Span<'static>> {
+    let normalized = normalize_shell_command_display(command);
+    let display_line = insert_line_breaks_after_double_ampersand(&normalized);
+    let highlighted = crate::syntax_highlight::highlight_code_block(&display_line, Some("bash"));
+    if let Some(mut first) = highlighted.into_iter().next() {
+        emphasize_shell_command_name(&mut first);
+        first.spans
+    } else {
+        vec![Span::styled(
+            display_line,
+            Style::default().fg(crate::colors::text()),
+        )]
+    }
+}
+
+fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
+    let display = select_command_display(cmd, original_command);
+    let (annotation, _) = parse_read_line_annotation_with_range(&display);
+    CommandSummary {
+        display,
+        annotation,
+    }
+}
+
+fn select_command_display(cmd: &str, original_command: &[String]) -> String {
+    if let Some(script) = extract_bash_script(original_command) {
+        let trimmed = script.trim();
+        if !trimmed.is_empty() {
+            if command_string_has_connector(trimmed) || trimmed != cmd {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    if command_tokens_have_connectors(original_command) {
+        let joined = original_command.join(" ").trim().to_string();
+        if !joined.is_empty() {
+            if command_string_has_connector(&joined) || joined != cmd {
+                return joined;
+            }
+        }
+    }
+
+    cmd.to_string()
+}
+
+fn extract_bash_script(command: &[String]) -> Option<String> {
+    if command.len() < 3 {
+        return None;
+    }
+    let exe = command[0].as_str();
+    let flag = command[1].as_str();
+    if looks_like_bash(exe) && (flag == "-c" || flag == "-lc") {
+        command.get(2).cloned()
+    } else {
+        None
+    }
+}
+
+fn looks_like_bash(exe: &str) -> bool {
+    if exe.eq_ignore_ascii_case("bash") || exe.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(exe)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
+}
+
+fn command_tokens_have_connectors(command: &[String]) -> bool {
+    command.iter().any(|token| matches!(token.as_str(), "|" | "&&" | "||" | ";"))
+}
+
+fn command_string_has_connector(value: &str) -> bool {
+    value.contains('|') || value.contains("&&") || value.contains("||") || value.contains(';')
 }
 
 fn normalize_separators(mut value: String) -> String {
@@ -560,13 +660,19 @@ fn annotation_for_range(start: u32, end: u32) -> Option<String> {
 
 pub(crate) struct ExploreAggregationCell {
     entries: Vec<ExploreEntry>,
+    is_trailing: bool,
 }
 
 impl ExploreAggregationCell {
     pub(crate) fn new() -> Self {
         Self {
             entries: Vec::new(),
+            is_trailing: true,
         }
+    }
+
+    pub(crate) fn set_trailing(&mut self, trailing: bool) {
+        self.is_trailing = trailing;
     }
 
     pub(crate) fn push_from_parsed(
@@ -575,6 +681,7 @@ impl ExploreAggregationCell {
         status: ExploreEntryStatus,
         cwd: &Path,
         session_root: &Path,
+        original_command: &[String],
     ) -> Option<usize> {
         let action = action_enum_from_parsed(&parsed.to_vec());
         let summary = match action {
@@ -615,7 +722,12 @@ impl ExploreAggregationCell {
                 }
                 _ => None,
             }),
-            ExecAction::Run => None,
+            ExecAction::Run => parsed.iter().find_map(|p| match p {
+                ParsedCommand::ReadCommand { cmd } => Some(ExploreSummary::Command {
+                    command: build_command_summary(cmd, original_command),
+                }),
+                _ => None,
+            }),
         };
 
         let summary = summary.or_else(|| {
@@ -699,6 +811,20 @@ impl ExploreAggregationCell {
             }
         }
 
+        if let ExploreSummary::Command { command: new_cmd } = &summary {
+            for idx in (0..self.entries.len()).rev() {
+                if let ExploreSummary::Command { command: existing } = &mut self.entries[idx].summary
+                {
+                    if existing.display == new_cmd.display
+                        && existing.annotation == new_cmd.annotation
+                    {
+                        self.entries[idx].status = status;
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+
         self.entries.push(ExploreEntry {
             action,
             summary,
@@ -739,18 +865,31 @@ impl HistoryCell for ExploreAggregationCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
+        let header = if self.is_trailing {
+            "Exploring..."
+        } else {
+            "Explored"
+        };
+
         if self.entries.is_empty() {
             return vec![Line::styled(
-                "Exploring",
+                header,
                 Style::default().fg(crate::colors::text()),
             )];
         }
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::styled(
-            "Exploring",
+            header,
             Style::default().fg(crate::colors::text()),
         ));
+
+        let max_label_len = self
+            .entries
+            .iter()
+            .map(|e| e.label().chars().count())
+            .max()
+            .unwrap_or(0);
 
         for (idx, entry) in self.entries.iter().enumerate() {
             let prefix = if idx == 0 { "└ " } else { "  " };
@@ -758,8 +897,14 @@ impl HistoryCell for ExploreAggregationCell {
                 prefix,
                 Style::default().add_modifier(Modifier::DIM),
             )];
+            let label = entry.label();
+            let label_len = label.chars().count();
+            let padding = max_label_len.saturating_sub(label_len) + 1;
+            let mut padded_label = String::with_capacity(label.len() + padding);
+            padded_label.push_str(label);
+            padded_label.extend(std::iter::repeat(' ').take(padding));
             spans.push(Span::styled(
-                format!("{} ", entry.label()),
+                padded_label,
                 Style::default().fg(crate::colors::text_dim()),
             ));
             spans.extend(entry.summary_spans());
@@ -901,6 +1046,13 @@ impl HistoryCell for PlainHistoryCell {
 pub(crate) struct PlanUpdateCell {
     lines: Vec<Line<'static>>,
     icon: &'static str,
+    is_complete: bool,
+}
+
+impl PlanUpdateCell {
+    pub(crate) fn is_complete(&self) -> bool {
+        self.is_complete
+    }
 }
 
 impl HistoryCell for PlanUpdateCell {
@@ -2298,7 +2450,7 @@ impl HistoryCell for MergedExecCell {
                 Style::default().fg(crate::colors::text()),
             )),
             ExecKind::Search => Some(Line::styled(
-                "Searched",
+                "Search",
                 Style::default().fg(crate::colors::text_dim()),
             )),
             ExecKind::List => Some(Line::styled(
@@ -2681,7 +2833,7 @@ fn exec_render_parts_parsed(
                     Style::default().fg(crate::colors::text()),
                 )),
                 ExecAction::Search => pre.push(Line::styled(
-                    "Searched",
+                    "Search",
                     Style::default().fg(crate::colors::text_dim()),
                 )),
                 ExecAction::List => pre.push(Line::styled(
@@ -2703,7 +2855,7 @@ fn exec_render_parts_parsed(
             Some(o) if o.exit_code == 0 => {
                 let done = match action {
                     ExecAction::Read => "Read".to_string(),
-                    ExecAction::Search => "Searched".to_string(),
+                    ExecAction::Search => "Search".to_string(),
                     ExecAction::List => "List".to_string(),
                     ExecAction::Run => match &ctx_path {
                         Some(p) => format!("Ran in {}", p),
@@ -2730,7 +2882,7 @@ fn exec_render_parts_parsed(
             Some(_) => {
                 let done = match action {
                     ExecAction::Read => "Read".to_string(),
-                    ExecAction::Search => "Searched".to_string(),
+                    ExecAction::Search => "Search".to_string(),
                     ExecAction::List => "List".to_string(),
                     ExecAction::Run => match &ctx_path {
                         Some(p) => format!("Ran in {}", p),
@@ -2880,6 +3032,7 @@ fn exec_render_parts_parsed(
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
+            ParsedCommand::ReadCommand { cmd } => ("Run".to_string(), cmd.clone()),
             // Upstream variants not present in our core parser are ignored or treated as generic runs
             ParsedCommand::Unknown { cmd } => {
                 // Suppress separator helpers like `echo ---` which are used
@@ -4886,7 +5039,7 @@ const STREAMING_EXIT_CODE: i32 = i32::MIN;
 /// Normalize common TTY overwrite sequences within a text block so that
 /// progress lines using carriage returns, backspaces, or ESC[K erase behave as
 /// expected when rendered in a pure-buffered UI (no cursor movement).
-fn normalize_overwrite_sequences(input: &str) -> String {
+pub(crate) fn normalize_overwrite_sequences(input: &str) -> String {
     // Process per line, but keep CR/BS/CSI semantics within logical lines.
     // Treat "\n" as committing a line and resetting the cursor.
     let mut out = String::with_capacity(input.len());
@@ -5796,7 +5949,7 @@ fn new_parsed_command(
                     };
                     let header = match action {
                         ExecAction::Read => "Read",
-                        ExecAction::Search => "Searched",
+                        ExecAction::Search => "Search",
                         ExecAction::List => "List",
                         ExecAction::Run => unreachable!(),
                     };
@@ -5814,7 +5967,7 @@ fn new_parsed_command(
                     lines.push(Line::styled(
                         match action {
                             ExecAction::Read => "Read",
-                            ExecAction::Search => "Searched",
+                            ExecAction::Search => "Search",
                             ExecAction::List => "List",
                             ExecAction::Run => unreachable!(),
                         },
@@ -5841,7 +5994,7 @@ fn new_parsed_command(
                     lines.push(Line::styled(
                         match action {
                             ExecAction::Read => "Read",
-                            ExecAction::Search => "Searched",
+                            ExecAction::Search => "Search",
                             ExecAction::List => "List",
                             ExecAction::Run => unreachable!(),
                         },
@@ -5984,6 +6137,7 @@ fn new_parsed_command(
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
+            ParsedCommand::ReadCommand { cmd } => ("Run".to_string(), cmd.clone()),
             // Upstream-only variants handled as generic runs in this fork
             ParsedCommand::Unknown { cmd } => {
                 let t = cmd.trim();
@@ -7635,7 +7789,7 @@ fn plan_progress_icon(total: usize, completed: usize) -> &'static str {
 }
 
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
-    let UpdatePlanArgs { explanation, plan } = update;
+    let UpdatePlanArgs { name, plan } = update;
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let total = plan.len();
@@ -7644,6 +7798,12 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
         .filter(|p| matches!(p.status, StepStatus::Completed))
         .count();
     let icon = plan_progress_icon(total, completed);
+    let is_complete = total > 0 && completed >= total;
+    let header_color = if is_complete {
+        crate::colors::success()
+    } else {
+        crate::colors::info()
+    };
 
     let width: usize = 10;
     let filled = if total > 0 {
@@ -7655,10 +7815,15 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
 
     // Build header without leading icon; icon will render in the gutter
     let mut header: Vec<Span> = Vec::new();
+    let title = name
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Plan");
     header.push(Span::styled(
-        "Plan",
+        title.to_string(),
         Style::default()
-            .fg(crate::colors::success())
+            .fg(header_color)
             .add_modifier(Modifier::BOLD),
     ));
     header.push(Span::raw(" ["));
@@ -7678,16 +7843,6 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     header.push(Span::raw(format!("{completed}/{total}")));
     lines.push(Line::from(header));
 
-    // Optional explanation/note from the model
-    if let Some(expl) = explanation.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
-    }) {
-        for l in expl.lines() {
-            lines.push(Line::from(l.to_string()).dim());
-        }
-    }
-
     // Steps styled as checkbox items
     if plan.is_empty() {
         lines.push(Line::from("(no steps provided)".dim().italic()));
@@ -7703,12 +7858,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
                 ),
                 StepStatus::InProgress => (
                     Span::raw("□"),
-                    Span::styled(
-                        step,
-                        Style::default()
-                            .fg(crate::colors::text_bright())
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(step, Style::default().fg(crate::colors::info())),
                 ),
                 StepStatus::Pending => (
                     Span::raw("□"),
@@ -7729,7 +7879,11 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
         }
     }
 
-    PlanUpdateCell { lines, icon }
+    PlanUpdateCell {
+        lines,
+        icon,
+        is_complete,
+    }
 }
 
 pub(crate) fn new_patch_event(

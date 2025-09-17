@@ -18,6 +18,9 @@ pub enum ParsedCommand {
         query: Option<String>,
         path: Option<String>,
     },
+    ReadCommand {
+        cmd: String,
+    },
     Unknown {
         cmd: String,
     },

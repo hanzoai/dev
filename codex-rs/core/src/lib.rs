@@ -27,6 +27,7 @@ pub mod config_profile;
 pub mod config_types;
 pub mod config_edit;
 mod conversation_history;
+mod dry_run_guard;
 pub mod custom_prompts;
 mod environment_context;
 pub mod error;

@@ -1,12 +1,14 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -34,6 +36,7 @@ mod layout_scroll;
 mod message;
 mod perf;
 mod streaming;
+mod terminal_handlers;
 mod tools;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
@@ -83,6 +86,8 @@ use tracing::info;
 // use image::GenericImageView;
 
 use crate::app_event::AppEvent;
+use crate::app_event::TerminalAfter;
+use crate::app_event::TerminalLaunch;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
@@ -94,16 +99,22 @@ use crate::history_cell;
 use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PatchEventType;
+use crate::history_cell::normalize_overwrite_sequences;
 use crate::live_wrap::RowBuilder;
+use crate::sanitize::Mode as SanitizeMode;
+use crate::sanitize::Options as SanitizeOptions;
+use crate::sanitize::sanitize_for_tui;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
 use crate::user_approval_widget::ApprovalRequest;
+use codex_ansi_escape::ansi_escape_line;
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
 use codex_core::config::set_github_check_on_push;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::plan_tool::StepStatus;
 use ratatui::style::Stylize;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
 use ratatui::text::Text as RtText;
@@ -204,6 +215,7 @@ pub(crate) struct ChatWidget<'a> {
     agent_context: Option<String>,
     agent_task: Option<String>,
     overall_task_status: String,
+    active_plan_title: Option<String>,
     // Sparkline data for showing agent activity (using RefCell for interior mutability)
     // Each tuple is (value, is_completed) where is_completed indicates if any agent was complete at that time
     sparkline_data: std::cell::RefCell<Vec<(u64, bool)>>,
@@ -226,6 +238,12 @@ pub(crate) struct ChatWidget<'a> {
 
     // Help overlay state
     help: HelpState,
+
+    // Terminal overlay state
+    terminal: TerminalState,
+
+    // Persisted selection for Agents overview
+    agents_overview_selected_index: usize,
 
     // Cache for expensive height calculations per cell and width
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
@@ -577,22 +595,23 @@ impl ChatWidget<'_> {
         }
 
         self.internal_seq = self.internal_seq.saturating_add(1);
-        match placement {
-            SystemPlacement::EarlyInCurrent => OrderKey {
-                req,
-                out: i32::MIN + 2,
-                seq: self.internal_seq,
-            },
-            SystemPlacement::EndOfCurrent => OrderKey {
-                req,
-                out: i32::MAX,
-                seq: self.internal_seq,
-            },
-            SystemPlacement::PrePromptInCurrent => OrderKey {
-                req,
-                out: i32::MIN,
-                seq: self.internal_seq,
-            },
+        let mut out = match placement {
+            SystemPlacement::EarlyInCurrent => i32::MIN + 2,
+            SystemPlacement::EndOfCurrent => i32::MAX,
+            SystemPlacement::PrePromptInCurrent => i32::MIN,
+        };
+
+        if order.is_none()
+            && self.pending_user_prompts_for_next_turn > 0
+            && matches!(placement, SystemPlacement::EarlyInCurrent)
+        {
+            out = i32::MIN;
+        }
+
+        OrderKey {
+            req,
+            out,
+            seq: self.internal_seq,
         }
     }
 
@@ -793,6 +812,15 @@ impl ChatWidget<'_> {
                 rc.set_in_progress(true);
             }
         }
+    }
+
+    fn apply_plan_terminal_title(&mut self, title: Option<String>) {
+        if self.active_plan_title == title {
+            return;
+        }
+        self.active_plan_title = title.clone();
+        self.app_event_tx
+            .send(AppEvent::SetTerminalTitle { title });
     }
     // Allocate a new synthetic key for internal (non-LLM) messages at the bottom of the
     // current (active) request: (req = last_seen, out = +∞, seq = monotonic).
@@ -1377,7 +1405,7 @@ impl ChatWidget<'_> {
     }
 
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
-    /// previous cell when they represent the same action header (e.g., Searched, Read).
+    /// previous cell when they represent the same action header (e.g., Search, Read).
 
     // MCP tool call handlers now live in chatwidget::tools
 
@@ -1739,8 +1767,10 @@ impl ChatWidget<'_> {
                 while let Some(op) = codex_op_rx.recv().await {
                     if let Err(e) = conversation_clone.submit(op).await {
                         tracing::error!("failed to submit op: {e}");
-                        app_event_tx_submit
-                            .send_background_event(format!("⚠️ Failed to submit Op to core: {}", e));
+                        app_event_tx_submit.send_background_event(format!(
+                            "⚠️ Failed to submit Op to core: {}",
+                            e
+                        ));
                     }
                 }
             });
@@ -1808,6 +1838,7 @@ impl ChatWidget<'_> {
             agent_context: None,
             agent_task: None,
             overall_task_status: "preparing".to_string(),
+            active_plan_title: None,
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
@@ -1831,6 +1862,8 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            terminal: TerminalState::default(),
+            agents_overview_selected_index: 0,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -1987,6 +2020,7 @@ impl ChatWidget<'_> {
             agent_context: None,
             agent_task: None,
             overall_task_status: "preparing".to_string(),
+            active_plan_title: None,
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
@@ -2010,6 +2044,8 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            terminal: TerminalState::default(),
+            agents_overview_selected_index: 0,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -2175,6 +2211,9 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if terminal_handlers::handle_terminal_key(self, key_event) {
+            return;
+        }
         // Intercept keys for overlays when active (help first, then diff)
         if help_handlers::handle_help_key(self, key_event) {
             return;
@@ -2620,6 +2659,7 @@ impl ChatWidget<'_> {
         // Maintain input focus when new history arrives
         self.bottom_pane.ensure_input_focus();
         self.app_event_tx.send(AppEvent::RequestRedraw);
+        self.refresh_explore_trailing_flags();
         self.refresh_reasoning_collapsed_visibility();
         pos
     }
@@ -2669,6 +2709,7 @@ impl ChatWidget<'_> {
             self.history_cells[idx] = cell;
             self.invalidate_height_cache();
             self.request_redraw();
+            self.refresh_explore_trailing_flags();
             // Keep debug info for this cell index as-is.
         }
     }
@@ -2684,6 +2725,7 @@ impl ChatWidget<'_> {
             }
             self.invalidate_height_cache();
             self.request_redraw();
+            self.refresh_explore_trailing_flags();
         }
     }
 
@@ -2792,6 +2834,30 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn refresh_explore_trailing_flags(&mut self) {
+        let mut trailing_non_reasoning: Option<usize> = None;
+        for i in (0..self.history_cells.len()).rev() {
+            if self.history_cells[i]
+                .as_any()
+                .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                .is_some()
+            {
+                continue;
+            }
+            trailing_non_reasoning = Some(i);
+            break;
+        }
+
+        for (idx, cell) in self.history_cells.iter_mut().enumerate() {
+            if let Some(explore) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::ExploreAggregationCell>()
+            {
+                explore.set_trailing(Some(idx) == trailing_non_reasoning);
+            }
+        }
+    }
+
     fn submit_user_message(&mut self, user_message: UserMessage) {
         // Surface a local diagnostic note and anchor it to the NEXT turn,
         // placing it directly after the user prompt so ordering is stable.
@@ -2828,8 +2894,10 @@ impl ChatWidget<'_> {
                     );
                     self.app_event_tx.send_background_event(msg);
                     // Re-submit this exact message after switching cwd
-                    self.app_event_tx
-                        .send(AppEvent::SwitchCwd(fallback_root, Some(display_text.clone())));
+                    self.app_event_tx.send(AppEvent::SwitchCwd(
+                        fallback_root,
+                        Some(display_text.clone()),
+                    ));
                     return;
                 }
             }
@@ -3720,6 +3788,22 @@ impl ChatWidget<'_> {
                 self.on_error(message);
             }
             EventMsg::PlanUpdate(update) => {
+                let (plan_title, plan_active) = {
+                    let title = update
+                        .name
+                        .as_ref()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string());
+                    let total = update.plan.len();
+                    let completed = update
+                        .plan
+                        .iter()
+                        .filter(|p| matches!(p.status, StepStatus::Completed))
+                        .count();
+                    let active = total > 0 && completed < total;
+                    (title, active)
+                };
                 // Insert plan updates at the time they occur. If the provider
                 // supplied OrderMeta, honor it. Otherwise, derive a key within
                 // the current (last-seen) request — do NOT advance to the next
@@ -3732,6 +3816,12 @@ impl ChatWidget<'_> {
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
+                let desired_title = if plan_active {
+                    Some(plan_title.unwrap_or_else(|| "Plan".to_string()))
+                } else {
+                    None
+                };
+                self.apply_plan_terminal_title(desired_title);
             }
             EventMsg::ExecApprovalRequest(ev) => {
                 let id2 = id.clone();
@@ -4599,7 +4689,277 @@ impl ChatWidget<'_> {
             .collect();
         commands.extend(custom);
 
-        self.bottom_pane.show_agents_overview(agent_rows, commands);
+        let total_rows = agent_rows
+            .len()
+            .saturating_add(commands.len())
+            .saturating_add(1);
+        let selected = if total_rows == 0 {
+            0
+        } else {
+            self.agents_overview_selected_index
+                .min(total_rows.saturating_sub(1))
+        };
+        self.agents_overview_selected_index = selected;
+        self.bottom_pane
+            .show_agents_overview(agent_rows, commands, selected);
+    }
+
+    pub(crate) fn set_agents_overview_selection(&mut self, index: usize) {
+        self.agents_overview_selected_index = index;
+    }
+
+    fn resolve_agent_install_command(&self, agent_name: &str) -> Option<(Vec<String>, String)> {
+        let cmd = self
+            .config
+            .agents
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(agent_name))
+            .map(|cfg| cfg.command.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| agent_name.to_string());
+        if cmd.trim().is_empty() {
+            return None;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!(
+                "if (Get-Command {cmd} -ErrorAction SilentlyContinue) {{ Write-Output \"{cmd} already installed\"; exit 0 }} else {{ Write-Warning \"{cmd} is not installed.\"; Write-Output \"Please install {cmd} via winget, Chocolatey, or the vendor installer.\"; exit 1 }}",
+                cmd = cmd
+            );
+            let command = vec![
+                "powershell.exe".to_string(),
+                "-NoProfile".to_string(),
+                "-ExecutionPolicy".to_string(),
+                "Bypass".to_string(),
+                "-Command".to_string(),
+                script.clone(),
+            ];
+            return Some((command, format!("PowerShell install check for {cmd}")));
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let script = format!("brew install {cmd}");
+            let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
+            return Some((command, script));
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let script = format!(
+                "{cmd} --version || (echo \"Please install {cmd} via your package manager\" && false)",
+                cmd = cmd
+            );
+            let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
+            return Some((command, script));
+        }
+
+        #[allow(unreachable_code)]
+        {
+            None
+        }
+    }
+
+    pub(crate) fn launch_agent_install(
+        &mut self,
+        name: String,
+        selected_index: usize,
+    ) -> Option<TerminalLaunch> {
+        self.agents_overview_selected_index = selected_index;
+        let Some((command, display)) = self.resolve_agent_install_command(&name) else {
+            self.history_push(history_cell::new_error_event(format!(
+                "No install command available for agent '{name}' on this platform."
+            )));
+            self.show_agents_overview_ui();
+            return None;
+        };
+        let id = self.terminal.alloc_id();
+        self.terminal.after = Some(TerminalAfter::RefreshAgentsAndClose { selected_index });
+        Some(TerminalLaunch {
+            id,
+            title: format!("Install {name}"),
+            command,
+            command_display: display,
+        })
+    }
+
+    pub(crate) fn terminal_open(&mut self, launch: &TerminalLaunch) {
+        let mut overlay = TerminalOverlay::new(
+            launch.id,
+            launch.title.clone(),
+            launch.command_display.clone(),
+        );
+        let visible = self.terminal.last_visible_rows.get();
+        overlay.visible_rows = visible;
+        overlay.clamp_scroll();
+        self.terminal.overlay = Some(overlay);
+        self.request_redraw();
+    }
+
+    pub(crate) fn terminal_append_chunk(&mut self, id: u64, chunk: &[u8], is_stderr: bool) {
+        let mut needs_redraw = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                if visible != overlay.visible_rows {
+                    overlay.visible_rows = visible;
+                    overlay.clamp_scroll();
+                }
+                overlay.append_chunk(chunk, is_stderr);
+                needs_redraw = true;
+            }
+        }
+        if needs_redraw {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_finalize(
+        &mut self,
+        id: u64,
+        exit_code: Option<i32>,
+        duration: Duration,
+    ) -> Option<TerminalAfter> {
+        let mut success = false;
+        let mut after = None;
+        let mut needs_redraw = false;
+        let mut should_close = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                if visible != overlay.visible_rows {
+                    overlay.visible_rows = visible;
+                    overlay.clamp_scroll();
+                }
+                let was_following = overlay.is_following();
+                overlay.finalize(exit_code, duration);
+                overlay.auto_follow(was_following);
+                needs_redraw = true;
+                if exit_code == Some(0) {
+                    success = true;
+                    after = self.terminal.after.take();
+                    should_close = true;
+                }
+            }
+        }
+        if should_close {
+            self.terminal.overlay = None;
+        }
+        if needs_redraw {
+            self.request_redraw();
+        }
+        if success { after } else { None }
+    }
+
+    pub(crate) fn terminal_prepare_rerun(&mut self, id: u64) -> bool {
+        let mut reset = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id && !overlay.running {
+                overlay.reset_for_rerun();
+                overlay.visible_rows = visible;
+                overlay.clamp_scroll();
+                reset = true;
+            }
+        }
+        if reset {
+            self.request_redraw();
+        }
+        reset
+    }
+
+    pub(crate) fn close_terminal_overlay(&mut self) {
+        self.terminal.clear();
+        self.request_redraw();
+    }
+
+    pub(crate) fn terminal_overlay_id(&self) -> Option<u64> {
+        self.terminal.overlay().map(|o| o.id)
+    }
+
+    pub(crate) fn terminal_is_running(&self) -> bool {
+        self.terminal.overlay().map(|o| o.running).unwrap_or(false)
+    }
+
+    pub(crate) fn terminal_scroll_lines(&mut self, delta: i32) {
+        let mut updated = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if visible != overlay.visible_rows {
+                overlay.visible_rows = visible;
+            }
+            let current = overlay.scroll as i32;
+            let max_scroll = overlay.max_scroll() as i32;
+            let mut next = current + delta;
+            if next < 0 {
+                next = 0;
+            } else if next > max_scroll {
+                next = max_scroll;
+            }
+            if next as u16 != overlay.scroll {
+                overlay.scroll = next as u16;
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_scroll_page(&mut self, direction: i32) {
+        let mut delta = None;
+        let visible_value = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            let visible = visible_value.max(1);
+            if visible != overlay.visible_rows {
+                overlay.visible_rows = visible;
+            }
+            delta = Some((visible.saturating_sub(1)) as i32 * direction);
+        }
+        if let Some(amount) = delta {
+            self.terminal_scroll_lines(amount);
+        }
+    }
+
+    pub(crate) fn terminal_scroll_to_top(&mut self) {
+        let mut updated = false;
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.scroll != 0 {
+                overlay.scroll = 0;
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_scroll_to_bottom(&mut self) {
+        let mut updated = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if visible != overlay.visible_rows {
+                overlay.visible_rows = visible;
+            }
+            let max_scroll = overlay.max_scroll();
+            if overlay.scroll != max_scroll {
+                overlay.scroll = max_scroll;
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn handle_terminal_after(&mut self, after: TerminalAfter) {
+        match after {
+            TerminalAfter::RefreshAgentsAndClose { selected_index } => {
+                self.agents_overview_selected_index = selected_index;
+                self.show_agents_overview_ui();
+            }
+        }
     }
 
     // show_subagent_editor_ui removed; use show_subagent_editor_for_name or show_new_subagent_editor
@@ -5974,6 +6334,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.has_active_modal_view()
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
+            || self.terminal.overlay.is_some()
     }
 
     /// Forward an `Op` directly to codex.
@@ -8292,8 +8653,9 @@ impl ChatWidget<'_> {
             codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
-            app_event_tx
-                .send_background_event("✅ Switched to internal browser mode (reconnected)".to_string());
+            app_event_tx.send_background_event(
+                "✅ Switched to internal browser mode (reconnected)".to_string(),
+            );
 
             // Clear any existing screenshot
             if let Ok(mut screenshot) = latest_screenshot.lock() {
@@ -8403,8 +8765,7 @@ impl ChatWidget<'_> {
                         tracing::warn!("[cdp] failed to stop external Chrome connection: {}", e);
                     }
                     // Notify UI
-                    app_event_tx
-                        .send_background_event("🔌 Disconnected from Chrome".to_string());
+                    app_event_tx.send_background_event("🔌 Disconnected from Chrome".to_string());
                     let _ = tx.send(true);
                 } else {
                     // Not connected externally; proceed to connect
@@ -9266,7 +9627,11 @@ impl ChatWidget<'_> {
         });
     }
 
-    pub(crate) fn switch_cwd(&mut self, new_cwd: std::path::PathBuf, initial_prompt: Option<String>) {
+    pub(crate) fn switch_cwd(
+        &mut self,
+        new_cwd: std::path::PathBuf,
+        initial_prompt: Option<String>,
+    ) {
         let previous_cwd = self.config.cwd.clone();
         self.config.cwd = new_cwd.clone();
 
@@ -9427,59 +9792,60 @@ impl ChatWidget<'_> {
             let worktree_display = work_cwd.display().to_string();
             let tx_for_switch = tx.clone();
             let git_root_for_switch = git_root.clone();
-            let send_agent_handoff = |mut reasons: Vec<String>,
-                                      extra_note: Option<String>,
-                                      worktree_status: String,
-                                      repo_status: String,
-                                      worktree_diff: Option<String>| {
-                if reasons.is_empty() {
-                    reasons.push("manual follow-up requested".to_string());
-                }
-                let reason_text = reasons.join(", ");
-                send_background(
-                    &tx,
-                    format!("`/merge` — handing off to agent ({})", reason_text),
-                );
-                let _ = tx.send(AppEvent::PrepareAgents);
-                let mut preface = format!(
-                    "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
-                    reason_text,
-                    root_display,
-                    worktree_display,
-                    branch_label,
-                    default_branch_hint,
-                    worktree_status,
-                    repo_status,
-                    worktree_display,
-                    branch_label,
-                    default_branch_hint,
-                    default_branch_hint,
-                    root_display,
-                    default_branch_hint,
-                    branch_label,
-                    default_branch_hint,
-                    root_display,
-                    branch_label,
-                    worktree_display,
-                    branch_label,
-                    root_display
-                );
-                if let Some(note) = extra_note {
-                    preface.push_str("\n\nAdditional notes:\n");
-                    preface.push_str(&note);
-                }
-                if let Some(diff) = worktree_diff {
-                    preface.push_str("\n\nWorktree diff summary:\n");
-                    preface.push_str(&diff);
-                }
-                let visible = format!(
-                    "Finalize branch '{}' via /merge (agent handoff)",
-                    branch_label
-                );
-                let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
-                let _ = tx_for_switch
-                    .send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
-            };
+            let send_agent_handoff =
+                |mut reasons: Vec<String>,
+                 extra_note: Option<String>,
+                 worktree_status: String,
+                 repo_status: String,
+                 worktree_diff: Option<String>| {
+                    if reasons.is_empty() {
+                        reasons.push("manual follow-up requested".to_string());
+                    }
+                    let reason_text = reasons.join(", ");
+                    send_background(
+                        &tx,
+                        format!("`/merge` — handing off to agent ({})", reason_text),
+                    );
+                    let _ = tx.send(AppEvent::PrepareAgents);
+                    let mut preface = format!(
+                        "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
+                        reason_text,
+                        root_display,
+                        worktree_display,
+                        branch_label,
+                        default_branch_hint,
+                        worktree_status,
+                        repo_status,
+                        worktree_display,
+                        branch_label,
+                        default_branch_hint,
+                        default_branch_hint,
+                        root_display,
+                        default_branch_hint,
+                        branch_label,
+                        default_branch_hint,
+                        root_display,
+                        branch_label,
+                        worktree_display,
+                        branch_label,
+                        root_display
+                    );
+                    if let Some(note) = extra_note {
+                        preface.push_str("\n\nAdditional notes:\n");
+                        preface.push_str(&note);
+                    }
+                    if let Some(diff) = worktree_diff {
+                        preface.push_str("\n\nWorktree diff summary:\n");
+                        preface.push_str(&diff);
+                    }
+                    let visible = format!(
+                        "Finalize branch '{}' via /merge (agent handoff)",
+                        branch_label
+                    );
+                    let _ =
+                        tx_for_switch.send(AppEvent::SwitchCwd(git_root_for_switch.clone(), None));
+                    let _ = tx.send(AppEvent::SubmitTextWithPreface { visible, preface });
+                };
 
             if !handoff_reasons.is_empty() {
                 send_agent_handoff(
@@ -9599,12 +9965,7 @@ impl ChatWidget<'_> {
             let local_default_ref = format!("refs/heads/{}", default_branch);
             let local_default_exists = Command::new("git")
                 .current_dir(&git_root)
-                .args([
-                    "rev-parse",
-                    "--verify",
-                    "--quiet",
-                    &local_default_ref,
-                ])
+                .args(["rev-parse", "--verify", "--quiet", &local_default_ref])
                 .output()
                 .await
                 .map(|o| o.status.success())
@@ -11490,8 +11851,8 @@ impl WidgetRef for &ChatWidget<'_> {
                         {
                             match &exec.output {
                                 None => crate::colors::text(), // Running...
-                                // On successful completion, turn the gutter arrow solid black
-                                Some(o) if o.exit_code == 0 => ratatui::style::Color::Black, // Ran
+                                // Successful runs use the theme success color so the arrow stays visible on all themes
+                                Some(o) if o.exit_code == 0 => crate::colors::text(),
                                 Some(_) => crate::colors::error(),
                             }
                         } else {
@@ -11500,7 +11861,7 @@ impl WidgetRef for &ChatWidget<'_> {
                                 crate::history_cell::HistoryCellType::Exec {
                                     kind: crate::history_cell::ExecKind::Run,
                                     status: crate::history_cell::ExecStatus::Success,
-                                } => ratatui::style::Color::Black,
+                                } => crate::colors::text(),
                                 crate::history_cell::HistoryCellType::Exec {
                                     kind: crate::history_cell::ExecKind::Run,
                                     status: crate::history_cell::ExecStatus::Error,
@@ -11529,7 +11890,18 @@ impl WidgetRef for &ChatWidget<'_> {
                             _ => crate::colors::primary(),
                         }
                     } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
-                        crate::colors::success()
+                        if let Some(plan_cell) = item
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::PlanUpdateCell>()
+                        {
+                            if plan_cell.is_complete() {
+                                crate::colors::success()
+                            } else {
+                                crate::colors::info()
+                            }
+                        } else {
+                            crate::colors::success()
+                        }
                     } else {
                         match symbol {
                             "›" => crate::colors::text(),        // user
@@ -11743,364 +12115,16 @@ impl WidgetRef for &ChatWidget<'_> {
         // The composer has its own layout with hints at the bottom
         (&self.bottom_pane).render(bottom_pane_area, buf);
 
-        // Welcome animation is kept as a normal cell in history; no overlay.
-
-        // The welcome animation is no longer rendered as an overlay.
-
-        // Render diff overlay (covering the history area, aligned with padding) if active
-        if let Some(overlay) = &self.diffs.overlay {
-            // Global scrim: dim the whole background to draw focus to the viewer
-            // We intentionally do this across the entire widget area rather than just the
-            // history area so the viewer stands out even with browser HUD or status bars.
-            let scrim_bg = Style::default()
-                .bg(crate::colors::overlay_scrim())
-                .fg(crate::colors::text_dim());
-            let _perf_scrim_start = if self.perf_state.enabled {
-                Some(std::time::Instant::now())
-            } else {
-                None
-            };
-            for y in area.y..area.y + area.height {
-                for x in area.x..area.x + area.width {
-                    // Overwrite with a dimmed style; we don't Clear so existing glyphs remain,
-                    // but foreground is muted to reduce visual competition.
-                    buf[(x, y)].set_style(scrim_bg);
-                }
-            }
-            if let Some(t0) = _perf_scrim_start {
-                let dt = t0.elapsed().as_nanos();
-                let mut p = self.perf_state.stats.borrow_mut();
-                p.ns_overlay_scrim = p.ns_overlay_scrim.saturating_add(dt);
-                let cells = (area.width as u64) * (area.height as u64);
-                p.cells_overlay_scrim = p.cells_overlay_scrim.saturating_add(cells);
-            }
-            // Match the horizontal padding used by status bar and input
-            let padding = 1u16;
-            let area = Rect {
-                x: history_area.x + padding,
-                y: history_area.y,
-                width: history_area.width.saturating_sub(padding * 2),
-                height: history_area.height,
-            };
-
-            // Clear and repaint the overlay area with theme scrim background
-            Clear.render(area, buf);
-            let bg_style = Style::default().bg(crate::colors::overlay_scrim());
-            let _perf_overlay_area_bg_start = if self.perf_state.enabled {
-                Some(std::time::Instant::now())
-            } else {
-                None
-            };
-            for y in area.y..area.y + area.height {
-                for x in area.x..area.x + area.width {
-                    buf[(x, y)].set_style(bg_style);
-                }
-            }
-            if let Some(t0) = _perf_overlay_area_bg_start {
-                let dt = t0.elapsed().as_nanos();
-                let mut p = self.perf_state.stats.borrow_mut();
-                p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
-                let cells = (area.width as u64) * (area.height as u64);
-                p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
-            }
-
-            // Build a styled title: keys/icons in normal text color; descriptors and dividers dim
-            let t_dim = Style::default().fg(crate::colors::text_dim());
-            let t_fg = Style::default().fg(crate::colors::text());
-            let has_tabs = overlay.tabs.len() > 1;
-            let mut title_spans: Vec<ratatui::text::Span<'static>> = vec![
-                ratatui::text::Span::styled(" ", t_dim),
-                ratatui::text::Span::styled("Diff viewer", t_fg),
-            ];
-            if has_tabs {
-                title_spans.extend_from_slice(&[
-                    ratatui::text::Span::styled(" ——— ", t_dim),
-                    ratatui::text::Span::styled("◂ ▸", t_fg),
-                    ratatui::text::Span::styled(" change tabs ", t_dim),
-                ]);
-            }
-            title_spans.extend_from_slice(&[
-                ratatui::text::Span::styled("——— ", t_dim),
-                ratatui::text::Span::styled("e", t_fg),
-                ratatui::text::Span::styled(" explain ", t_dim),
-                ratatui::text::Span::styled("——— ", t_dim),
-                ratatui::text::Span::styled("u", t_fg),
-                ratatui::text::Span::styled(" undo ", t_dim),
-                ratatui::text::Span::styled("——— ", t_dim),
-                ratatui::text::Span::styled("Esc", t_fg),
-                ratatui::text::Span::styled(" close ", t_dim),
-            ]);
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(ratatui::text::Line::from(title_spans))
-                // Use normal background for the window itself so it contrasts against the
-                // dimmed scrim behind
-                .style(Style::default().bg(crate::colors::background()))
-                .border_style(
-                    Style::default()
-                        .fg(crate::colors::border())
-                        .bg(crate::colors::background()),
-                );
-            let inner = block.inner(area);
-            block.render(area, buf);
-
-            // Paint inner content background as the normal theme background
-            let inner_bg = Style::default().bg(crate::colors::background());
-            let _perf_overlay_inner_bg_start = if self.perf_state.enabled {
-                Some(std::time::Instant::now())
-            } else {
-                None
-            };
-            for y in inner.y..inner.y + inner.height {
-                for x in inner.x..inner.x + inner.width {
-                    buf[(x, y)].set_style(inner_bg);
-                }
-            }
-            if let Some(t0) = _perf_overlay_inner_bg_start {
-                let dt = t0.elapsed().as_nanos();
-                let mut p = self.perf_state.stats.borrow_mut();
-                p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
-                let cells = (inner.width as u64) * (inner.height as u64);
-                p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
-            }
-
-            // Split into header tabs and body/footer
-            // Add one cell padding around the entire inside of the window
-            let padded_inner = inner.inner(ratatui::layout::Margin::new(1, 1));
-            let [tabs_area, body_area] = if has_tabs {
-                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(padded_inner)
-            } else {
-                // Keep a small header row to show file path and counts
-                let [t, b] = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)])
-                    .areas(padded_inner);
-                [t, b]
-            };
-
-            // Render tabs only if we have more than one file
-            if has_tabs {
-                let labels: Vec<String> = overlay
-                    .tabs
-                    .iter()
-                    .map(|(t, _)| format!("  {}  ", t))
-                    .collect();
-                let mut constraints: Vec<Constraint> = Vec::new();
-                let mut total: u16 = 0;
-                for label in &labels {
-                    let w =
-                        (label.chars().count() as u16).min(tabs_area.width.saturating_sub(total));
-                    constraints.push(Constraint::Length(w));
-                    total = total.saturating_add(w);
-                    if total >= tabs_area.width.saturating_sub(4) {
-                        break;
-                    }
-                }
-                constraints.push(Constraint::Fill(1));
-                let chunks = Layout::horizontal(constraints).split(tabs_area);
-                // Draw a light bottom border across the entire tabs strip
-                let tabs_bottom_rule = Block::default()
-                    .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(crate::colors::border()));
-                tabs_bottom_rule.render(tabs_area, buf);
-                for i in 0..labels.len() {
-                    // last chunk is filler; guard below
-                    if i >= chunks.len().saturating_sub(1) {
-                        break;
-                    }
-                    let rect = chunks[i];
-                    if rect.width == 0 {
-                        continue;
-                    }
-                    let selected = i == overlay.selected;
-
-                    // Both selected and unselected tabs use the normal background
-                    let tab_bg = crate::colors::background();
-                    let bg_style = Style::default().bg(tab_bg);
-                    for y in rect.y..rect.y + rect.height {
-                        for x in rect.x..rect.x + rect.width {
-                            buf[(x, y)].set_style(bg_style);
-                        }
-                    }
-
-                    // Render label at the top line, with padding
-                    let label_rect = Rect {
-                        x: rect.x + 1,
-                        y: rect.y,
-                        width: rect.width.saturating_sub(2),
-                        height: 1,
-                    };
-                    let label_style = if selected {
-                        Style::default()
-                            .fg(crate::colors::text())
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(crate::colors::text_dim())
-                    };
-                    let line = ratatui::text::Line::from(ratatui::text::Span::styled(
-                        labels[i].clone(),
-                        label_style,
-                    ));
-                    Paragraph::new(RtText::from(vec![line]))
-                        .wrap(ratatui::widgets::Wrap { trim: true })
-                        .render(label_rect, buf);
-                    // Selected tab: thin underline using text_bright under the label width
-                    if selected {
-                        let label_len = labels[i].chars().count() as u16;
-                        let accent_w = label_len.min(rect.width.saturating_sub(2)).max(1);
-                        let accent_rect = Rect {
-                            x: label_rect.x,
-                            y: rect.y + rect.height.saturating_sub(1),
-                            width: accent_w,
-                            height: 1,
-                        };
-                        let underline = Block::default()
-                            .borders(Borders::BOTTOM)
-                            .border_style(Style::default().fg(crate::colors::text_bright()));
-                        underline.render(accent_rect, buf);
-                    }
-                }
-            } else {
-                // Single-file header: show full path with (+adds -dels)
-                if let Some((label, _)) = overlay.tabs.get(overlay.selected) {
-                    let header_line = ratatui::text::Line::from(ratatui::text::Span::styled(
-                        label.clone(),
-                        Style::default()
-                            .fg(crate::colors::text())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                    let para = Paragraph::new(RtText::from(vec![header_line]))
-                        .wrap(ratatui::widgets::Wrap { trim: true });
-                    ratatui::widgets::Widget::render(para, tabs_area, buf);
-                }
-            }
-
-            // Render selected tab with vertical scroll and highlight current diff block
-            if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
-                // Flatten blocks into lines and record block start indices
-                let mut all_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-                let mut block_starts: Vec<(usize, usize)> = Vec::new(); // (start_index, len)
-                for b in blocks {
-                    let start = all_lines.len();
-                    block_starts.push((start, b.lines.len()));
-                    all_lines.extend(b.lines.clone());
-                }
-
-                let raw_skip = overlay
-                    .scroll_offsets
-                    .get(overlay.selected)
-                    .copied()
-                    .unwrap_or(0) as usize;
-                let visible_rows = body_area.height as usize;
-                // Cache visible rows so key handler can clamp
-                self.diffs.body_visible_rows.set(body_area.height);
-                let max_off = all_lines.len().saturating_sub(visible_rows.max(1));
-                let skip = raw_skip.min(max_off);
-                let body_inner = body_area;
-                let visible_rows = body_inner.height as usize;
-
-                // Collect visible slice
-                let end = (skip + visible_rows).min(all_lines.len());
-                let visible = if skip < all_lines.len() {
-                    &all_lines[skip..end]
-                } else {
-                    &[]
-                };
-                // Fill body background with a slightly lighter paper-like background
-                let bg = crate::colors::background();
-                let paper_color = match bg {
-                    ratatui::style::Color::Rgb(r, g, b) => {
-                        let alpha = 0.06f32; // subtle lightening toward white
-                        let nr = ((r as f32) * (1.0 - alpha) + 255.0 * alpha).round() as u8;
-                        let ng = ((g as f32) * (1.0 - alpha) + 255.0 * alpha).round() as u8;
-                        let nb = ((b as f32) * (1.0 - alpha) + 255.0 * alpha).round() as u8;
-                        ratatui::style::Color::Rgb(nr, ng, nb)
-                    }
-                    _ => bg,
-                };
-                let body_bg = Style::default().bg(paper_color);
-                let _perf_overlay_body_bg2 = if self.perf_state.enabled {
-                    Some(std::time::Instant::now())
-                } else {
-                    None
-                };
-                for y in body_inner.y..body_inner.y + body_inner.height {
-                    for x in body_inner.x..body_inner.x + body_inner.width {
-                        buf[(x, y)].set_style(body_bg);
-                    }
-                }
-                if let Some(t0) = _perf_overlay_body_bg2 {
-                    let dt = t0.elapsed().as_nanos();
-                    let mut p = self.perf_state.stats.borrow_mut();
-                    p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
-                    let cells = (body_inner.width as u64) * (body_inner.height as u64);
-                    p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
-                }
-                let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
-                    .wrap(ratatui::widgets::Wrap { trim: false });
-                ratatui::widgets::Widget::render(paragraph, body_inner, buf);
-
-                // No explicit current-block highlight for a cleaner look
-
-                // Render confirmation dialog if active
-                if self.diffs.confirm.is_some() {
-                    // Centered small box
-                    let w = (body_inner.width as i16 - 10).max(20) as u16;
-                    let h = 5u16;
-                    let x = body_inner.x + (body_inner.width.saturating_sub(w)) / 2;
-                    let y = body_inner.y + (body_inner.height.saturating_sub(h)) / 2;
-                    let dialog = Rect {
-                        x,
-                        y,
-                        width: w,
-                        height: h,
-                    };
-                    Clear.render(dialog, buf);
-                    let dlg_block = Block::default()
-                        .borders(Borders::ALL)
-                        .title("Confirm Undo")
-                        .style(
-                            Style::default()
-                                .bg(crate::colors::background())
-                                .fg(crate::colors::text()),
-                        )
-                        .border_style(Style::default().fg(crate::colors::border()));
-                    let dlg_inner = dlg_block.inner(dialog);
-                    dlg_block.render(dialog, buf);
-                    // Fill dialog inner area with theme background for consistent look
-                    let dlg_bg = Style::default().bg(crate::colors::background());
-                    for y in dlg_inner.y..dlg_inner.y + dlg_inner.height {
-                        for x in dlg_inner.x..dlg_inner.x + dlg_inner.width {
-                            buf[(x, y)].set_style(dlg_bg);
-                        }
-                    }
-                    let lines = vec![
-                        ratatui::text::Line::from("Are you sure you want to undo this diff?"),
-                        ratatui::text::Line::from(
-                            "Press Enter to confirm • Esc to cancel".to_string().dim(),
-                        ),
-                    ];
-                    let para = Paragraph::new(RtText::from(lines))
-                        .style(
-                            Style::default()
-                                .bg(crate::colors::background())
-                                .fg(crate::colors::text()),
-                        )
-                        .wrap(ratatui::widgets::Wrap { trim: true });
-                    ratatui::widgets::Widget::render(para, dlg_inner, buf);
-                }
-            }
-        }
-
-        // Render help overlay (covering the history area) if active
-        if let Some(overlay) = &self.help.overlay {
-            // Global scrim across widget
-            let scrim_bg = Style::default()
+        if let Some(overlay) = self.terminal.overlay() {
+            let scrim_style = Style::default()
                 .bg(crate::colors::overlay_scrim())
                 .fg(crate::colors::text_dim());
             for y in area.y..area.y + area.height {
                 for x in area.x..area.x + area.width {
-                    buf[(x, y)].set_style(scrim_bg);
+                    buf[(x, y)].set_style(scrim_style);
                 }
             }
+
             let padding = 1u16;
             let window_area = Rect {
                 x: history_area.x + padding,
@@ -12109,6 +12133,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 height: history_area.height,
             };
             Clear.render(window_area, buf);
+
             let block = Block::default()
                 .borders(Borders::ALL)
                 .title(ratatui::text::Line::from(vec![
@@ -12116,15 +12141,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         " ",
                         Style::default().fg(crate::colors::text_dim()),
                     ),
-                    ratatui::text::Span::styled("Help", Style::default().fg(crate::colors::text())),
                     ratatui::text::Span::styled(
-                        " ——— ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
-                    ratatui::text::Span::styled("Esc", Style::default().fg(crate::colors::text())),
-                    ratatui::text::Span::styled(
-                        " close ",
-                        Style::default().fg(crate::colors::text_dim()),
+                        overlay.title.clone(),
+                        Style::default().fg(crate::colors::text()),
                     ),
                 ]))
                 .style(Style::default().bg(crate::colors::background()))
@@ -12136,7 +12155,6 @@ impl WidgetRef for &ChatWidget<'_> {
             let inner = block.inner(window_area);
             block.render(window_area, buf);
 
-            // Paint inner bg
             let inner_bg = Style::default().bg(crate::colors::background());
             for y in inner.y..inner.y + inner.height {
                 for x in inner.x..inner.x + inner.width {
@@ -12144,23 +12162,576 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
 
-            // Body area with one cell padding
-            let body = inner.inner(ratatui::layout::Margin::new(1, 1));
-
-            // Compute visible slice
-            let visible_rows = body.height as usize;
-            self.help.body_visible_rows.set(body.height);
-            let max_off = overlay.lines.len().saturating_sub(visible_rows.max(1));
-            let skip = (overlay.scroll as usize).min(max_off);
-            let end = (skip + visible_rows).min(overlay.lines.len());
-            let visible = if skip < overlay.lines.len() {
-                &overlay.lines[skip..end]
+            let content = inner.inner(ratatui::layout::Margin::new(1, 1));
+            if content.height == 0 || content.width == 0 {
+                self.terminal.last_visible_rows.set(0);
             } else {
-                &[]
-            };
-            let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
-                .wrap(ratatui::widgets::Wrap { trim: false });
-            ratatui::widgets::Widget::render(paragraph, body, buf);
+                let header_area = Rect {
+                    x: content.x,
+                    y: content.y,
+                    width: content.width,
+                    height: 1.min(content.height),
+                };
+                let footer_area = if content.height >= 2 {
+                    Rect {
+                        x: content.x,
+                        y: content.y + content.height.saturating_sub(1),
+                        width: content.width,
+                        height: 1,
+                    }
+                } else {
+                    header_area
+                };
+                let body_height =
+                    content
+                        .height
+                        .saturating_sub(if content.height >= 2 { 2 } else { 1 });
+                let body_area = Rect {
+                    x: content.x,
+                    y: header_area.y.saturating_add(header_area.height),
+                    width: content.width,
+                    height: body_height,
+                };
+
+                // Header content
+                let mut status_text = if overlay.running {
+                    "Running…".to_string()
+                } else if let Some(code) = overlay.exit_code {
+                    format!("Exit {code}")
+                } else {
+                    "Idle".to_string()
+                };
+                if let Some(duration) = overlay.duration {
+                    status_text.push(' ');
+                    status_text.push('(');
+                    status_text.push_str(&format_duration_short(duration));
+                    status_text.push(')');
+                }
+                let status_color = if overlay.running {
+                    crate::colors::function()
+                } else if overlay.exit_code == Some(0) {
+                    crate::colors::success()
+                } else if overlay.exit_code.is_some() {
+                    crate::colors::error()
+                } else {
+                    crate::colors::text_dim()
+                };
+                let header_line = ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled(
+                        overlay.command_display.clone(),
+                        Style::default().fg(crate::colors::text()),
+                    ),
+                    ratatui::text::Span::raw("  "),
+                    ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
+                ]);
+                Paragraph::new(RtText::from(vec![header_line]))
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .render(header_area, buf);
+
+                // Body content
+                self.terminal.last_visible_rows.set(body_area.height);
+                if body_area.height > 0 && body_area.width > 0 {
+                    let mut rows: Vec<RtLine<'static>> = Vec::new();
+                    if overlay.truncated {
+                        rows.push(ratatui::text::Line::from(vec![
+                            ratatui::text::Span::styled(
+                                "… output truncated (showing last 10,000 lines)",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    }
+                    rows.extend(overlay.lines.iter().cloned());
+                    let total = rows.len();
+                    let visible = body_area.height as usize;
+                    if visible > 0 {
+                        let max_scroll = total.saturating_sub(visible);
+                        let scroll = (overlay.scroll as usize).min(max_scroll);
+                        let end = (scroll + visible).min(total);
+                        let window = rows.get(scroll..end).unwrap_or(&[]);
+                        Paragraph::new(RtText::from(window.to_vec()))
+                            .wrap(ratatui::widgets::Wrap { trim: false })
+                            .render(body_area, buf);
+                    }
+                }
+
+                // Footer hints
+                let mut footer_spans = vec![
+                    ratatui::text::Span::styled(
+                        "↑↓",
+                        Style::default().fg(crate::colors::function()),
+                    ),
+                    ratatui::text::Span::styled(
+                        " Scroll  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                    ratatui::text::Span::styled(
+                        "PgUp/PgDn",
+                        Style::default().fg(crate::colors::function()),
+                    ),
+                    ratatui::text::Span::styled(
+                        " Page  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                    ratatui::text::Span::styled("Esc", Style::default().fg(crate::colors::error())),
+                    ratatui::text::Span::styled(
+                        " Close  ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                ];
+                if overlay.running {
+                    footer_spans.push(ratatui::text::Span::styled(
+                        "Ctrl+C",
+                        Style::default().fg(crate::colors::warning()),
+                    ));
+                    footer_spans.push(ratatui::text::Span::styled(
+                        " Cancel",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                } else {
+                    footer_spans.push(ratatui::text::Span::styled(
+                        "R",
+                        Style::default().fg(crate::colors::primary()),
+                    ));
+                    footer_spans.push(ratatui::text::Span::styled(
+                        " Rerun",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                Paragraph::new(RtText::from(vec![ratatui::text::Line::from(footer_spans)]))
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .render(footer_area, buf);
+            }
+
+            // Terminal overlay takes precedence over other overlays
+        }
+
+        // Welcome animation is kept as a normal cell in history; no overlay.
+
+        // The welcome animation is no longer rendered as an overlay.
+
+        if self.terminal.overlay().is_none() {
+            // Render diff overlay (covering the history area, aligned with padding) if active
+            if let Some(overlay) = &self.diffs.overlay {
+                // Global scrim: dim the whole background to draw focus to the viewer
+                // We intentionally do this across the entire widget area rather than just the
+                // history area so the viewer stands out even with browser HUD or status bars.
+                let scrim_bg = Style::default()
+                    .bg(crate::colors::overlay_scrim())
+                    .fg(crate::colors::text_dim());
+                let _perf_scrim_start = if self.perf_state.enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
+                for y in area.y..area.y + area.height {
+                    for x in area.x..area.x + area.width {
+                        // Overwrite with a dimmed style; we don't Clear so existing glyphs remain,
+                        // but foreground is muted to reduce visual competition.
+                        buf[(x, y)].set_style(scrim_bg);
+                    }
+                }
+                if let Some(t0) = _perf_scrim_start {
+                    let dt = t0.elapsed().as_nanos();
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.ns_overlay_scrim = p.ns_overlay_scrim.saturating_add(dt);
+                    let cells = (area.width as u64) * (area.height as u64);
+                    p.cells_overlay_scrim = p.cells_overlay_scrim.saturating_add(cells);
+                }
+                // Match the horizontal padding used by status bar and input
+                let padding = 1u16;
+                let area = Rect {
+                    x: history_area.x + padding,
+                    y: history_area.y,
+                    width: history_area.width.saturating_sub(padding * 2),
+                    height: history_area.height,
+                };
+
+                // Clear and repaint the overlay area with theme scrim background
+                Clear.render(area, buf);
+                let bg_style = Style::default().bg(crate::colors::overlay_scrim());
+                let _perf_overlay_area_bg_start = if self.perf_state.enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
+                for y in area.y..area.y + area.height {
+                    for x in area.x..area.x + area.width {
+                        buf[(x, y)].set_style(bg_style);
+                    }
+                }
+                if let Some(t0) = _perf_overlay_area_bg_start {
+                    let dt = t0.elapsed().as_nanos();
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
+                    let cells = (area.width as u64) * (area.height as u64);
+                    p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
+                }
+
+                // Build a styled title: keys/icons in normal text color; descriptors and dividers dim
+                let t_dim = Style::default().fg(crate::colors::text_dim());
+                let t_fg = Style::default().fg(crate::colors::text());
+                let has_tabs = overlay.tabs.len() > 1;
+                let mut title_spans: Vec<ratatui::text::Span<'static>> = vec![
+                    ratatui::text::Span::styled(" ", t_dim),
+                    ratatui::text::Span::styled("Diff viewer", t_fg),
+                ];
+                if has_tabs {
+                    title_spans.extend_from_slice(&[
+                        ratatui::text::Span::styled(" ——— ", t_dim),
+                        ratatui::text::Span::styled("◂ ▸", t_fg),
+                        ratatui::text::Span::styled(" change tabs ", t_dim),
+                    ]);
+                }
+                title_spans.extend_from_slice(&[
+                    ratatui::text::Span::styled("——— ", t_dim),
+                    ratatui::text::Span::styled("e", t_fg),
+                    ratatui::text::Span::styled(" explain ", t_dim),
+                    ratatui::text::Span::styled("——— ", t_dim),
+                    ratatui::text::Span::styled("u", t_fg),
+                    ratatui::text::Span::styled(" undo ", t_dim),
+                    ratatui::text::Span::styled("——— ", t_dim),
+                    ratatui::text::Span::styled("Esc", t_fg),
+                    ratatui::text::Span::styled(" close ", t_dim),
+                ]);
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(ratatui::text::Line::from(title_spans))
+                    // Use normal background for the window itself so it contrasts against the
+                    // dimmed scrim behind
+                    .style(Style::default().bg(crate::colors::background()))
+                    .border_style(
+                        Style::default()
+                            .fg(crate::colors::border())
+                            .bg(crate::colors::background()),
+                    );
+                let inner = block.inner(area);
+                block.render(area, buf);
+
+                // Paint inner content background as the normal theme background
+                let inner_bg = Style::default().bg(crate::colors::background());
+                let _perf_overlay_inner_bg_start = if self.perf_state.enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
+                for y in inner.y..inner.y + inner.height {
+                    for x in inner.x..inner.x + inner.width {
+                        buf[(x, y)].set_style(inner_bg);
+                    }
+                }
+                if let Some(t0) = _perf_overlay_inner_bg_start {
+                    let dt = t0.elapsed().as_nanos();
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
+                    let cells = (inner.width as u64) * (inner.height as u64);
+                    p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
+                }
+
+                // Split into header tabs and body/footer
+                // Add one cell padding around the entire inside of the window
+                let padded_inner = inner.inner(ratatui::layout::Margin::new(1, 1));
+                let [tabs_area, body_area] = if has_tabs {
+                    Layout::vertical([Constraint::Length(2), Constraint::Fill(1)])
+                        .areas(padded_inner)
+                } else {
+                    // Keep a small header row to show file path and counts
+                    let [t, b] = Layout::vertical([Constraint::Length(2), Constraint::Fill(1)])
+                        .areas(padded_inner);
+                    [t, b]
+                };
+
+                // Render tabs only if we have more than one file
+                if has_tabs {
+                    let labels: Vec<String> = overlay
+                        .tabs
+                        .iter()
+                        .map(|(t, _)| format!("  {}  ", t))
+                        .collect();
+                    let mut constraints: Vec<Constraint> = Vec::new();
+                    let mut total: u16 = 0;
+                    for label in &labels {
+                        let w = (label.chars().count() as u16)
+                            .min(tabs_area.width.saturating_sub(total));
+                        constraints.push(Constraint::Length(w));
+                        total = total.saturating_add(w);
+                        if total >= tabs_area.width.saturating_sub(4) {
+                            break;
+                        }
+                    }
+                    constraints.push(Constraint::Fill(1));
+                    let chunks = Layout::horizontal(constraints).split(tabs_area);
+                    // Draw a light bottom border across the entire tabs strip
+                    let tabs_bottom_rule = Block::default()
+                        .borders(Borders::BOTTOM)
+                        .border_style(Style::default().fg(crate::colors::border()));
+                    tabs_bottom_rule.render(tabs_area, buf);
+                    for i in 0..labels.len() {
+                        // last chunk is filler; guard below
+                        if i >= chunks.len().saturating_sub(1) {
+                            break;
+                        }
+                        let rect = chunks[i];
+                        if rect.width == 0 {
+                            continue;
+                        }
+                        let selected = i == overlay.selected;
+
+                        // Both selected and unselected tabs use the normal background
+                        let tab_bg = crate::colors::background();
+                        let bg_style = Style::default().bg(tab_bg);
+                        for y in rect.y..rect.y + rect.height {
+                            for x in rect.x..rect.x + rect.width {
+                                buf[(x, y)].set_style(bg_style);
+                            }
+                        }
+
+                        // Render label at the top line, with padding
+                        let label_rect = Rect {
+                            x: rect.x + 1,
+                            y: rect.y,
+                            width: rect.width.saturating_sub(2),
+                            height: 1,
+                        };
+                        let label_style = if selected {
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(crate::colors::text_dim())
+                        };
+                        let line = ratatui::text::Line::from(ratatui::text::Span::styled(
+                            labels[i].clone(),
+                            label_style,
+                        ));
+                        Paragraph::new(RtText::from(vec![line]))
+                            .wrap(ratatui::widgets::Wrap { trim: true })
+                            .render(label_rect, buf);
+                        // Selected tab: thin underline using text_bright under the label width
+                        if selected {
+                            let label_len = labels[i].chars().count() as u16;
+                            let accent_w = label_len.min(rect.width.saturating_sub(2)).max(1);
+                            let accent_rect = Rect {
+                                x: label_rect.x,
+                                y: rect.y + rect.height.saturating_sub(1),
+                                width: accent_w,
+                                height: 1,
+                            };
+                            let underline = Block::default()
+                                .borders(Borders::BOTTOM)
+                                .border_style(Style::default().fg(crate::colors::text_bright()));
+                            underline.render(accent_rect, buf);
+                        }
+                    }
+                } else {
+                    // Single-file header: show full path with (+adds -dels)
+                    if let Some((label, _)) = overlay.tabs.get(overlay.selected) {
+                        let header_line = ratatui::text::Line::from(ratatui::text::Span::styled(
+                            label.clone(),
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        let para = Paragraph::new(RtText::from(vec![header_line]))
+                            .wrap(ratatui::widgets::Wrap { trim: true });
+                        ratatui::widgets::Widget::render(para, tabs_area, buf);
+                    }
+                }
+
+                // Render selected tab with vertical scroll and highlight current diff block
+                if let Some((_, blocks)) = overlay.tabs.get(overlay.selected) {
+                    // Flatten blocks into lines and record block start indices
+                    let mut all_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                    let mut block_starts: Vec<(usize, usize)> = Vec::new(); // (start_index, len)
+                    for b in blocks {
+                        let start = all_lines.len();
+                        block_starts.push((start, b.lines.len()));
+                        all_lines.extend(b.lines.clone());
+                    }
+
+                    let raw_skip = overlay
+                        .scroll_offsets
+                        .get(overlay.selected)
+                        .copied()
+                        .unwrap_or(0) as usize;
+                    let visible_rows = body_area.height as usize;
+                    // Cache visible rows so key handler can clamp
+                    self.diffs.body_visible_rows.set(body_area.height);
+                    let max_off = all_lines.len().saturating_sub(visible_rows.max(1));
+                    let skip = raw_skip.min(max_off);
+                    let body_inner = body_area;
+                    let visible_rows = body_inner.height as usize;
+
+                    // Collect visible slice
+                    let end = (skip + visible_rows).min(all_lines.len());
+                    let visible = if skip < all_lines.len() {
+                        &all_lines[skip..end]
+                    } else {
+                        &[]
+                    };
+                    // Fill body background with a slightly lighter paper-like background
+                    let bg = crate::colors::background();
+                    let paper_color = match bg {
+                        ratatui::style::Color::Rgb(r, g, b) => {
+                            let alpha = 0.06f32; // subtle lightening toward white
+                            let nr = ((r as f32) * (1.0 - alpha) + 255.0 * alpha).round() as u8;
+                            let ng = ((g as f32) * (1.0 - alpha) + 255.0 * alpha).round() as u8;
+                            let nb = ((b as f32) * (1.0 - alpha) + 255.0 * alpha).round() as u8;
+                            ratatui::style::Color::Rgb(nr, ng, nb)
+                        }
+                        _ => bg,
+                    };
+                    let body_bg = Style::default().bg(paper_color);
+                    let _perf_overlay_body_bg2 = if self.perf_state.enabled {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
+                    for y in body_inner.y..body_inner.y + body_inner.height {
+                        for x in body_inner.x..body_inner.x + body_inner.width {
+                            buf[(x, y)].set_style(body_bg);
+                        }
+                    }
+                    if let Some(t0) = _perf_overlay_body_bg2 {
+                        let dt = t0.elapsed().as_nanos();
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        p.ns_overlay_body_bg = p.ns_overlay_body_bg.saturating_add(dt);
+                        let cells = (body_inner.width as u64) * (body_inner.height as u64);
+                        p.cells_overlay_body_bg = p.cells_overlay_body_bg.saturating_add(cells);
+                    }
+                    let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
+                        .wrap(ratatui::widgets::Wrap { trim: false });
+                    ratatui::widgets::Widget::render(paragraph, body_inner, buf);
+
+                    // No explicit current-block highlight for a cleaner look
+
+                    // Render confirmation dialog if active
+                    if self.diffs.confirm.is_some() {
+                        // Centered small box
+                        let w = (body_inner.width as i16 - 10).max(20) as u16;
+                        let h = 5u16;
+                        let x = body_inner.x + (body_inner.width.saturating_sub(w)) / 2;
+                        let y = body_inner.y + (body_inner.height.saturating_sub(h)) / 2;
+                        let dialog = Rect {
+                            x,
+                            y,
+                            width: w,
+                            height: h,
+                        };
+                        Clear.render(dialog, buf);
+                        let dlg_block = Block::default()
+                            .borders(Borders::ALL)
+                            .title("Confirm Undo")
+                            .style(
+                                Style::default()
+                                    .bg(crate::colors::background())
+                                    .fg(crate::colors::text()),
+                            )
+                            .border_style(Style::default().fg(crate::colors::border()));
+                        let dlg_inner = dlg_block.inner(dialog);
+                        dlg_block.render(dialog, buf);
+                        // Fill dialog inner area with theme background for consistent look
+                        let dlg_bg = Style::default().bg(crate::colors::background());
+                        for y in dlg_inner.y..dlg_inner.y + dlg_inner.height {
+                            for x in dlg_inner.x..dlg_inner.x + dlg_inner.width {
+                                buf[(x, y)].set_style(dlg_bg);
+                            }
+                        }
+                        let lines = vec![
+                            ratatui::text::Line::from("Are you sure you want to undo this diff?"),
+                            ratatui::text::Line::from(
+                                "Press Enter to confirm • Esc to cancel".to_string().dim(),
+                            ),
+                        ];
+                        let para = Paragraph::new(RtText::from(lines))
+                            .style(
+                                Style::default()
+                                    .bg(crate::colors::background())
+                                    .fg(crate::colors::text()),
+                            )
+                            .wrap(ratatui::widgets::Wrap { trim: true });
+                        ratatui::widgets::Widget::render(para, dlg_inner, buf);
+                    }
+                }
+            }
+
+            // Render help overlay (covering the history area) if active
+            if let Some(overlay) = &self.help.overlay {
+                // Global scrim across widget
+                let scrim_bg = Style::default()
+                    .bg(crate::colors::overlay_scrim())
+                    .fg(crate::colors::text_dim());
+                for y in area.y..area.y + area.height {
+                    for x in area.x..area.x + area.width {
+                        buf[(x, y)].set_style(scrim_bg);
+                    }
+                }
+                let padding = 1u16;
+                let window_area = Rect {
+                    x: history_area.x + padding,
+                    y: history_area.y,
+                    width: history_area.width.saturating_sub(padding * 2),
+                    height: history_area.height,
+                };
+                Clear.render(window_area, buf);
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(ratatui::text::Line::from(vec![
+                        ratatui::text::Span::styled(
+                            " ",
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                        ratatui::text::Span::styled(
+                            "Help",
+                            Style::default().fg(crate::colors::text()),
+                        ),
+                        ratatui::text::Span::styled(
+                            " ——— ",
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                        ratatui::text::Span::styled(
+                            "Esc",
+                            Style::default().fg(crate::colors::text()),
+                        ),
+                        ratatui::text::Span::styled(
+                            " close ",
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]))
+                    .style(Style::default().bg(crate::colors::background()))
+                    .border_style(
+                        Style::default()
+                            .fg(crate::colors::border())
+                            .bg(crate::colors::background()),
+                    );
+                let inner = block.inner(window_area);
+                block.render(window_area, buf);
+
+                // Paint inner bg
+                let inner_bg = Style::default().bg(crate::colors::background());
+                for y in inner.y..inner.y + inner.height {
+                    for x in inner.x..inner.x + inner.width {
+                        buf[(x, y)].set_style(inner_bg);
+                    }
+                }
+
+                // Body area with one cell padding
+                let body = inner.inner(ratatui::layout::Margin::new(1, 1));
+
+                // Compute visible slice
+                let visible_rows = body.height as usize;
+                self.help.body_visible_rows.set(body.height);
+                let max_off = overlay.lines.len().saturating_sub(visible_rows.max(1));
+                let skip = (overlay.scroll as usize).min(max_off);
+                let end = (skip + visible_rows).min(overlay.lines.len());
+                let visible = if skip < overlay.lines.len() {
+                    &overlay.lines[skip..end]
+                } else {
+                    &[]
+                };
+                let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                ratatui::widgets::Widget::render(paragraph, body, buf);
+            }
         }
         // Finalize widget render timing
         if let Some(t0) = _perf_widget_start {
@@ -12362,6 +12933,253 @@ impl HelpOverlay {
         Self { lines, scroll: 0 }
     }
 }
+
+#[derive(Default)]
+struct TerminalState {
+    overlay: Option<TerminalOverlay>,
+    next_id: u64,
+    after: Option<TerminalAfter>,
+    last_visible_rows: std::cell::Cell<u16>,
+}
+
+impl TerminalState {
+    fn alloc_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        id
+    }
+
+    fn overlay(&self) -> Option<&TerminalOverlay> {
+        self.overlay.as_ref()
+    }
+
+    fn overlay_mut(&mut self) -> Option<&mut TerminalOverlay> {
+        self.overlay.as_mut()
+    }
+
+    fn clear(&mut self) {
+        self.overlay = None;
+        self.after = None;
+    }
+}
+
+const TERMINAL_MAX_LINES: usize = 10_000;
+
+struct TerminalOverlay {
+    id: u64,
+    title: String,
+    command_display: String,
+    lines: VecDeque<RtLine<'static>>,
+    scroll: u16,
+    visible_rows: u16,
+    running: bool,
+    exit_code: Option<i32>,
+    duration: Option<Duration>,
+    truncated: bool,
+    pending_utf8: Vec<u8>,
+    pending_line: String,
+    pending_line_is_stderr: bool,
+}
+
+impl TerminalOverlay {
+    fn new(id: u64, title: String, command_display: String) -> Self {
+        Self {
+            id,
+            title,
+            command_display,
+            lines: VecDeque::new(),
+            scroll: 0,
+            visible_rows: 0,
+            running: true,
+            exit_code: None,
+            duration: None,
+            truncated: false,
+            pending_utf8: Vec::new(),
+            pending_line: String::new(),
+            pending_line_is_stderr: false,
+        }
+    }
+
+    fn total_render_lines(&self) -> usize {
+        let base = self.lines.len();
+        if self.truncated {
+            base.saturating_add(1)
+        } else {
+            base
+        }
+    }
+
+    fn max_scroll(&self) -> u16 {
+        let visible = self.visible_rows.max(1) as usize;
+        let total = self.total_render_lines();
+        total.saturating_sub(visible).min(u16::MAX as usize) as u16
+    }
+
+    fn clamp_scroll(&mut self) {
+        let max_scroll = self.max_scroll();
+        if self.scroll > max_scroll {
+            self.scroll = max_scroll;
+        }
+    }
+
+    fn is_following(&self) -> bool {
+        let visible = self.visible_rows.max(1) as usize;
+        let total = self.total_render_lines();
+        (self.scroll as usize).saturating_add(visible) >= total
+    }
+
+    fn auto_follow(&mut self, was_following: bool) {
+        if !was_following {
+            return;
+        }
+        let visible = self.visible_rows.max(1) as usize;
+        let total = self.total_render_lines();
+        let max_scroll = total.saturating_sub(visible);
+        self.scroll = max_scroll.min(u16::MAX as usize) as u16;
+    }
+
+    fn reset_for_rerun(&mut self) {
+        self.lines.clear();
+        self.scroll = 0;
+        self.visible_rows = 0;
+        self.running = true;
+        self.exit_code = None;
+        self.duration = None;
+        self.truncated = false;
+        self.pending_utf8.clear();
+        self.pending_line.clear();
+        self.pending_line_is_stderr = false;
+    }
+
+    fn append_chunk(&mut self, chunk: &[u8], is_stderr: bool) {
+        if chunk.is_empty() && self.pending_utf8.is_empty() && self.pending_line.is_empty() {
+            return;
+        }
+        let was_following = self.is_following();
+        let mut appended = false;
+        if self.pending_line_is_stderr != is_stderr && !self.pending_line.is_empty() {
+            appended |= self.flush_pending_line();
+        }
+        self.pending_line_is_stderr = is_stderr;
+        self.pending_utf8.extend_from_slice(chunk);
+
+        loop {
+            match std::str::from_utf8(&self.pending_utf8) {
+                Ok(valid) => {
+                    self.pending_line.push_str(valid);
+                    self.pending_utf8.clear();
+                    break;
+                }
+                Err(err) => {
+                    let valid_up_to = err.valid_up_to();
+                    if valid_up_to > 0 {
+                        if let Ok(valid) = std::str::from_utf8(&self.pending_utf8[..valid_up_to]) {
+                            self.pending_line.push_str(valid);
+                        } else {
+                            let slice = &self.pending_utf8[..valid_up_to];
+                            let owned = String::from_utf8_lossy(slice);
+                            self.pending_line.push_str(&owned);
+                        }
+                        self.pending_utf8.drain(..valid_up_to);
+                    }
+                    if let Some(err_len) = err.error_len() {
+                        self.pending_line.push('�');
+                        let drain_len = err_len.min(self.pending_utf8.len());
+                        self.pending_utf8.drain(..drain_len);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        while let Some(pos) = self.pending_line.find('\n') {
+            let mut segment = self.pending_line[..pos].to_string();
+            self.pending_line.drain(..=pos);
+            segment.push('\n');
+            appended |= self.push_segment(&segment, is_stderr);
+        }
+
+        if appended {
+            self.auto_follow(was_following);
+        }
+    }
+
+    fn flush_pending_line(&mut self) -> bool {
+        let was_following = self.is_following();
+        let mut appended = false;
+        if !self.pending_utf8.is_empty() {
+            if let Ok(valid) = std::str::from_utf8(&self.pending_utf8) {
+                self.pending_line.push_str(valid);
+            } else {
+                let owned = String::from_utf8_lossy(&self.pending_utf8);
+                self.pending_line.push_str(&owned);
+            }
+            self.pending_utf8.clear();
+        }
+        if self.pending_line.is_empty() {
+            return false;
+        }
+        let segment = std::mem::take(&mut self.pending_line);
+        appended |= self.push_segment(&segment, self.pending_line_is_stderr);
+        if appended {
+            self.auto_follow(was_following);
+        }
+        appended
+    }
+
+    fn finalize(&mut self, exit_code: Option<i32>, duration: Duration) {
+        let _ = self.flush_pending_line();
+        self.running = false;
+        self.exit_code = exit_code;
+        self.duration = Some(duration);
+    }
+
+    fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {
+        let mut appended = false;
+        let normalized = normalize_overwrite_sequences(segment);
+        for raw_line in normalized.split_inclusive('\n') {
+            let line_text = raw_line.trim_end_matches('\n');
+            let sanitized = sanitize_for_tui(
+                line_text,
+                SanitizeMode::AnsiPreserving,
+                SanitizeOptions {
+                    expand_tabs: true,
+                    ..Default::default()
+                },
+            );
+            let mut line = ansi_escape_line(&sanitized);
+            if is_stderr {
+                let warn = crate::colors::warning();
+                for span in line.spans.iter_mut() {
+                    if span.style.fg.is_none() {
+                        span.style.fg = Some(warn);
+                    }
+                }
+            }
+            self.lines.push_back(line);
+            appended = true;
+            if self.lines.len() > TERMINAL_MAX_LINES {
+                self.lines.pop_front();
+                self.truncated = true;
+            }
+        }
+        appended
+    }
+}
+
+fn format_duration_short(duration: Duration) -> String {
+    if duration.as_secs() >= 60 {
+        format!("{:.1}m", duration.as_secs_f32() / 60.0)
+    } else if duration.as_secs() >= 1 {
+        format!("{:.1}s", duration.as_secs_f32())
+    } else if duration.as_millis() >= 1 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{}µs", duration.as_micros())
+    }
+}
+
 #[derive(Default)]
 struct PerfState {
     enabled: bool,
