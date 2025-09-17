@@ -1394,7 +1394,7 @@ impl ChatWidget<'_> {
     }
 
     /// If a completed exec cell sits at `idx`, attempt to merge it into the
-    /// previous cell when they represent the same action header (e.g., Searched, Read).
+    /// previous cell when they represent the same action header (e.g., Search, Read).
 
     // MCP tool call handlers now live in chatwidget::tools
 
@@ -2646,6 +2646,7 @@ impl ChatWidget<'_> {
         // Maintain input focus when new history arrives
         self.bottom_pane.ensure_input_focus();
         self.app_event_tx.send(AppEvent::RequestRedraw);
+        self.refresh_explore_trailing_flags();
         self.refresh_reasoning_collapsed_visibility();
         pos
     }
@@ -2695,6 +2696,7 @@ impl ChatWidget<'_> {
             self.history_cells[idx] = cell;
             self.invalidate_height_cache();
             self.request_redraw();
+            self.refresh_explore_trailing_flags();
             // Keep debug info for this cell index as-is.
         }
     }
@@ -2710,6 +2712,7 @@ impl ChatWidget<'_> {
             }
             self.invalidate_height_cache();
             self.request_redraw();
+            self.refresh_explore_trailing_flags();
         }
     }
 
@@ -2814,6 +2817,30 @@ impl ChatWidget<'_> {
                     // New layout: status is a separate BackgroundEvent cell — remove it
                     self.history_remove_at(idx);
                 }
+            }
+        }
+    }
+
+    fn refresh_explore_trailing_flags(&mut self) {
+        let mut trailing_non_reasoning: Option<usize> = None;
+        for i in (0..self.history_cells.len()).rev() {
+            if self.history_cells[i]
+                .as_any()
+                .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                .is_some()
+            {
+                continue;
+            }
+            trailing_non_reasoning = Some(i);
+            break;
+        }
+
+        for (idx, cell) in self.history_cells.iter_mut().enumerate() {
+            if let Some(explore) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::ExploreAggregationCell>()
+            {
+                explore.set_trailing(Some(idx) == trailing_non_reasoning);
             }
         }
     }
