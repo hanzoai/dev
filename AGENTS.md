@@ -10,6 +10,7 @@ Completion/build step
 - Always validate using `./build-fast.sh` from the repo root. This is the single required check and must pass cleanly.
 - Policy: All errors AND all warnings must be fixed before you’re done. Treat any compiler warning as a failure and address it (rename unused vars with `_`, remove `mut`, delete dead code, etc.).
 - Do not run additional format/lint/test commands on completion (e.g., `just fmt`, `just fix`, `cargo test`) unless explicitly requested for a specific task.
+- ***NEVER run rustfmt***
 
 ## Strict Ordering In The TUI History
 
