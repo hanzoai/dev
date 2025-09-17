@@ -487,7 +487,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::WebSearchBegin(WebSearchBeginEvent { .. }) => {}
             EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id: _, query }) => {
                 if let Some(query) = query {
-                    ts_println!(self, "🌐 Searched: {query}");
+                    ts_println!(self, "🌐 Search: {query}");
                 }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
@@ -655,8 +655,8 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 println!();
             }
             EventMsg::PlanUpdate(plan_update_event) => {
-                let UpdatePlanArgs { explanation, plan } = plan_update_event;
-                ts_println!(self, "explanation: {explanation:?}");
+                let UpdatePlanArgs { name, plan } = plan_update_event;
+                ts_println!(self, "name: {name:?}");
                 ts_println!(self, "plan: {plan:?}");
             }
             EventMsg::GetHistoryEntryResponse(_) => {

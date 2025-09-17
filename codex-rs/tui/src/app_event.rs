@@ -25,6 +25,19 @@ impl<T> fmt::Debug for Redacted<T> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct TerminalLaunch {
+    pub id: u64,
+    pub title: String,
+    pub command: Vec<String>,
+    pub command_display: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalAfter {
+    RefreshAgentsAndClose { selected_index: usize },
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -35,6 +48,9 @@ pub(crate) enum AppEvent {
 
     /// Actually draw the next frame.
     Redraw,
+
+    /// Update the terminal title override. `None` restores the default title.
+    SetTerminalTitle { title: Option<String> },
 
     /// Schedule a one-shot animation frame roughly after the given duration.
     /// Multiple requests are coalesced by the central frame scheduler.
@@ -190,6 +206,14 @@ pub(crate) enum AppEvent {
     /// (clear spinner/status, finalize running exec/tool cells) while the core
     /// continues its own abort/cleanup in parallel.
     CancelRunningTask,
+    OpenTerminal(TerminalLaunch),
+    TerminalChunk { id: u64, chunk: Vec<u8>, is_stderr: bool },
+    TerminalExit { id: u64, exit_code: Option<i32>, duration: Duration },
+    TerminalCancel { id: u64 },
+    TerminalRerun { id: u64 },
+    TerminalAfter(TerminalAfter),
+    RequestAgentInstall { name: String, selected_index: usize },
+    AgentsOverviewSelectionChanged { index: usize },
     /// Add or update an agent's settings (enabled, params, instructions)
     UpdateAgentConfig {
         name: String,

@@ -21,6 +21,9 @@ pub enum ParsedCommand {
         query: Option<String>,
         path: Option<String>,
     },
+    ReadCommand {
+        cmd: String,
+    },
     Unknown {
         cmd: String,
     },
@@ -35,6 +38,7 @@ impl From<ParsedCommand> for codex_protocol::parse_command::ParsedCommand {
             ParsedCommand::Read { cmd, name } => P::Read { cmd, name },
             ParsedCommand::ListFiles { cmd, path } => P::ListFiles { cmd, path },
             ParsedCommand::Search { cmd, query, path } => P::Search { cmd, query, path },
+            ParsedCommand::ReadCommand { cmd } => P::ReadCommand { cmd },
             ParsedCommand::Unknown { cmd } => P::Unknown { cmd },
         }
     }
@@ -100,10 +104,10 @@ mod tests {
     }
 
     #[test]
-    fn git_status_is_unknown() {
+    fn git_status_is_read_command() {
         assert_parsed(
             &vec_str(&["git", "status"]),
-            vec![ParsedCommand::Unknown {
+            vec![ParsedCommand::ReadCommand {
                 cmd: "git status".to_string(),
             }],
         );
@@ -114,8 +118,28 @@ mod tests {
         let inner = "git status | wc -l";
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
-            vec![ParsedCommand::Unknown {
+            vec![ParsedCommand::ReadCommand {
                 cmd: "git status".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_diff_staged_is_read_command() {
+        assert_parsed(
+            &vec_str(&["git", "--no-pager", "diff", "--staged", "--stat"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git --no-pager diff --staged --stat".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_add_remains_unknown() {
+        assert_parsed(
+            &vec_str(&["git", "add", "."]),
+            vec![ParsedCommand::Unknown {
+                cmd: "git add .".to_string(),
             }],
         );
     }
@@ -1407,6 +1431,59 @@ fn drop_small_formatting_commands(mut commands: Vec<Vec<String>>) -> Vec<Vec<Str
     commands
 }
 
+fn git_flag_consumes_value(flag: &str) -> bool {
+    matches!(
+        flag,
+        "-C" | "-c"
+            | "--git-dir"
+            | "--work-tree"
+            | "--namespace"
+            | "--super-prefix"
+            | "--config"
+            | "--config-env"
+    )
+}
+
+fn git_subcommand_index(args: &[String]) -> Option<usize> {
+    let mut i = 0;
+    while i < args.len() {
+        let token = args[i].as_str();
+        if token == "--" {
+            return if i + 1 < args.len() {
+                Some(i + 1)
+            } else {
+                None
+            };
+        }
+        if token.starts_with('-') {
+            if git_flag_consumes_value(token) && i + 1 < args.len() {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        return Some(i);
+    }
+    None
+}
+
+fn git_command_is_read_only(subcmd: &str, args: &[String]) -> bool {
+    match subcmd {
+        "status" => true,
+        "diff" => args
+            .iter()
+            .all(|arg| !(arg == "-o" || arg == "--output" || arg.starts_with("--output="))),
+        "log" => true,
+        "show" => true,
+        "rev-parse" => true,
+        "rev-list" => true,
+        "describe" => true,
+        "ls-files" => true,
+        "ls-tree" => true,
+        _ => false,
+    }
+}
+
 fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
     match main_cmd.split_first() {
         Some((head, tail)) if head == "ls" => {
@@ -1430,6 +1507,21 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
             ParsedCommand::ListFiles {
                 cmd: shlex_join(main_cmd),
                 path,
+            }
+        }
+        Some((head, tail)) if head == "git" => {
+            let cmd = shlex_join(main_cmd);
+            let is_read = git_subcommand_index(tail)
+                .map(|idx| {
+                    let sub = tail[idx].as_str();
+                    let rest = &tail[idx + 1..];
+                    git_command_is_read_only(sub, rest)
+                })
+                .unwrap_or(false);
+            if is_read {
+                ParsedCommand::ReadCommand { cmd }
+            } else {
+                ParsedCommand::Unknown { cmd }
             }
         }
         Some((head, tail)) if head == "rg" => {
