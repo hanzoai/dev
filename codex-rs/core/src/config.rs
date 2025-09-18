@@ -1786,8 +1786,14 @@ fn path_exists(path: &Path) -> bool {
 /// Resolve the filesystem path used for *reading* Codex state that may live in
 /// a legacy `~/.codex` directory. Writes should continue targeting `codex_home`.
 pub fn resolve_codex_path_for_read(codex_home: &Path, relative: &Path) -> PathBuf {
+    let default_path = codex_home.join(relative);
+
     if env_overrides_present() {
-        return codex_home.join(relative);
+        return default_path;
+    }
+
+    if path_exists(&default_path) {
+        return default_path;
     }
 
     if let Some(legacy) = legacy_codex_home_dir() {
@@ -1797,7 +1803,7 @@ pub fn resolve_codex_path_for_read(codex_home: &Path, relative: &Path) -> PathBu
         }
     }
 
-    codex_home.join(relative)
+    default_path
 }
 
 /// Returns the path to the Code/Codex configuration directory, which can be
