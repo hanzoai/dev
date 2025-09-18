@@ -17,6 +17,8 @@ use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
+use codex_browser::BrowserConfig as CodexBrowserConfig;
+use codex_browser::BrowserManager;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
 use codex_protocol::protocol::TurnAbortReason;
@@ -3304,6 +3306,193 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 }
             };
 
+            struct BrowserFetchOutcome {
+                html: String,
+                final_url: Option<String>,
+                headless: bool,
+            }
+
+            async fn fetch_html_via_headless_browser(
+                url: &str,
+                timeout: Duration,
+            ) -> Result<BrowserFetchOutcome, String> {
+                let mut config = CodexBrowserConfig::default();
+                config.enabled = true;
+                config.headless = true;
+                config.fullpage = false;
+                config.segments_max = 2;
+                config.persist_profile = false;
+                config.idle_timeout_ms = 10_000;
+
+                let manager = BrowserManager::new(config);
+                manager.set_enabled_sync(true);
+
+                const CHECK_JS: &str = r#"(function(){
+  const discuss = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]');
+  const timeline = document.querySelectorAll('.js-timeline-item');
+  const article = document.querySelectorAll('article, main');
+  return (discuss.length + timeline.length + article.length);
+})()"#;
+                const HTML_JS: &str =
+                    "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+
+                let goto_result = match tokio::time::timeout(timeout, manager.goto(url)).await {
+                    Ok(Ok(res)) => res,
+                    Ok(Err(e)) => {
+                        let _ = manager.stop().await;
+                        return Err(format!("Headless goto failed: {e}"));
+                    }
+                    Err(_) => {
+                        let _ = manager.stop().await;
+                        return Err("Headless goto timed out".to_string());
+                    }
+                };
+
+                for _ in 0..6 {
+                    match tokio::time::timeout(Duration::from_millis(1500), manager.execute_javascript(CHECK_JS)).await {
+                        Ok(Ok(val)) => {
+                            let count = val
+                                .get("value")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0);
+                            if count > 0 {
+                                break;
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            tracing::debug!("Headless readiness check failed: {}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            tracing::debug!("Headless readiness check timed out");
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                }
+
+                let html_value = match tokio::time::timeout(timeout, manager.execute_javascript(HTML_JS)).await {
+                    Ok(Ok(val)) => val,
+                    Ok(Err(e)) => {
+                        let _ = manager.stop().await;
+                        return Err(format!("Headless HTML extraction failed: {e}"));
+                    }
+                    Err(_) => {
+                        let _ = manager.stop().await;
+                        return Err("Headless HTML extraction timed out".to_string());
+                    }
+                };
+
+                let html = html_value
+                    .get("value")
+                    .and_then(|v| v.get("html"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if html.trim().is_empty() {
+                    let _ = manager.stop().await;
+                    return Err("Headless browser returned empty HTML".to_string());
+                }
+
+                let final_url = Some(goto_result.url.clone());
+                let _ = manager.stop().await;
+
+                Ok(BrowserFetchOutcome {
+                    html,
+                    final_url,
+                    headless: true,
+                })
+            }
+
+            async fn fetch_html_via_browser(
+                url: &str,
+                timeout: Duration,
+                prefer_global: bool,
+            ) -> Option<BrowserFetchOutcome> {
+                const HTML_JS: &str =
+                    "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+                const CHECK_JS: &str = r#"(function(){
+  const discuss = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]');
+  const timeline = document.querySelectorAll('.js-timeline-item');
+  const article = document.querySelectorAll('article, main');
+  return (discuss.length + timeline.length + article.length);
+})()"#;
+
+                if prefer_global {
+                    if let Some(manager) = codex_browser::global::get_browser_manager().await {
+                        if manager.is_enabled_sync() {
+                            match tokio::time::timeout(timeout, manager.goto(url)).await {
+                                Ok(Ok(res)) => {
+                                    for _ in 0..6 {
+                                        match tokio::time::timeout(Duration::from_millis(1500), manager.execute_javascript(CHECK_JS)).await {
+                                            Ok(Ok(val)) => {
+                                                let count = val
+                                                    .get("value")
+                                                    .and_then(|v| v.as_i64())
+                                                    .unwrap_or(0);
+                                                if count > 0 {
+                                                    break;
+                                                }
+                                            }
+                                            Ok(Err(e)) => {
+                                                tracing::debug!("Global browser readiness check failed: {}", e);
+                                                break;
+                                            }
+                                            Err(_) => {
+                                                tracing::debug!("Global browser readiness timed out");
+                                                break;
+                                            }
+                                        }
+                                        tokio::time::sleep(Duration::from_millis(800)).await;
+                                    }
+
+                                    match tokio::time::timeout(timeout, manager.execute_javascript(HTML_JS)).await {
+                                        Ok(Ok(val)) => {
+                                            if let Some(html) = val
+                                                .get("value")
+                                                .and_then(|v| v.get("html"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                if !html.trim().is_empty() {
+                                                    return Some(BrowserFetchOutcome {
+                                                        html: html.to_string(),
+                                                        final_url: Some(res.url.clone()),
+                                                        headless: false,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        Ok(Err(e)) => {
+                                            tracing::debug!("Global browser HTML extraction failed: {}", e);
+                                        }
+                                        Err(_) => {
+                                            tracing::debug!("Global browser HTML extraction timed out");
+                                        }
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    tracing::warn!("Global browser navigation failed: {}", e);
+                                }
+                                Err(_) => {
+                                    tracing::warn!("Global browser navigation timed out");
+                                }
+                            }
+                        } else {
+                            tracing::debug!("Global browser manager disabled; skipping UI fetch");
+                        }
+                    }
+                }
+
+                match fetch_html_via_headless_browser(url, timeout).await {
+                    Ok(outcome) => Some(outcome),
+                    Err(err) => {
+                        tracing::warn!("Headless browser fallback failed for {}: {}", url, err);
+                        None
+                    }
+                }
+            }
+
             // Helper: build a client with a specific UA and common headers.
             async fn do_request(
                 url: &str,
@@ -3753,89 +3942,33 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
             let codex_ua = crate::default_client::get_codex_user_agent(Some("web_fetch"));
 
-            // Heuristic: some domains render key content client-side. Prefer a
-            // quick browser render first so we capture comments/timelines.
-            let is_dynamic_domain = {
-                let u = params.url.to_lowercase();
-                u.contains("github.com/")
-            };
-
-            if !matches!(params.mode.as_deref(), Some("http")) && is_dynamic_domain {
-                let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                if let Ok(res) = browser_manager.goto(&params.url).await {
-                    // Poll briefly for discussion/timeline elements to appear
-                    for _ in 0..6 {
-                        let js = r#"(function(){ const sel1 = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]'); const sel2 = document.querySelectorAll('.js-timeline-item'); return (sel1.length + sel2.length); })()"#;
-                        if let Ok(val) = browser_manager.execute_javascript(js).await {
-                            let n = val.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
-                            if n > 0 { break; }
-                        }
-                        tokio::time::sleep(Duration::from_millis(800)).await;
-                    }
-                    if let Ok(val) = browser_manager.execute_javascript(r#"(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()"#).await {
-                        if let Some(html) = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()) {
-                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
-                                }
-                            };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": res.url,
-                                "content_type": "text/html",
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated,
-                                "markdown": markdown,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                        }
-                    }
-                }
-            }
-
-            // If explicit browser mode requested, try the internal browser first.
             if matches!(params.mode.as_deref(), Some("browser")) {
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    if let Ok(res) = browser_manager.goto(&params.url).await {
-                        // Allow a few short settles for JS/cookie challenges to auto-resolve
-                        let mut html: Option<String> = None;
-                        for _ in 0..4 {
-                            if let Ok(val) = browser_manager.execute_javascript("(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()").await {
-                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
-                                    break;
-                                }
-                            }
-                            tokio::time::sleep(Duration::from_millis(1200)).await;
-                        }
-                        if let Some(html) = html {
-                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput {
-                                        call_id: call_id_clone,
-                                        output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                    };
-                                }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, true).await {
+                    let (markdown, truncated) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                             };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": res.url,
-                                "content_type": "text/html",
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated,
-                                "markdown": markdown,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
                         }
-                    }
+                    };
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| params.url.clone()),
+                        "content_type": "text/html",
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated,
+                        "markdown": markdown,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
             }
             // Attempt 1: Codex UA + polite headers
@@ -3913,71 +4046,37 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 if let Some(ra) = retry_after { diag["retry_after"] = serde_json::json!(ra); }
                 if let Some(ray) = cf_ray { diag["cf_ray"] = serde_json::json!(ray); }
 
-                // Attempt a last-resort browser-based fetch if the live browser is available.
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    browser_manager.set_enabled_sync(true);
-                    // Try navigate and extract outerHTML via JS (after SPA settles per manager config)
-                    if browser_manager.goto(&params.url).await.is_ok() {
-                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
-                        if let Ok(val) = browser_manager.execute_javascript(js).await {
-                            let html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let title = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("");
-                            if !html.is_empty() && title.to_lowercase() != "just a moment..." {
-                                let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                    Ok(t) => t,
-                                    Err(e) => {
-                                        return ResponseInputItem::FunctionCallOutput {
-                                            call_id: call_id_clone,
-                                            output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                        };
-                                    }
-                                };
-                                diag["via_browser"] = serde_json::json!(true);
-                                let body = serde_json::json!({
-                                    "url": params.url,
-                                    "status": 200,
-                                    "final_url": final_url,
-                                    "content_type": content_type,
-                                    "used_browser_ua": used_browser_ua,
-                                    "truncated": truncated,
-                                    "markdown": markdown,
-                                });
-                                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                            }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, false).await {
+                    let (markdown, truncated) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
+                            };
                         }
+                    };
 
-                        // If JS extraction failed, try a CDP outerHTML of root
-                        let root = browser_manager.execute_cdp("DOM.getDocument", json!({"depth": 1})).await.ok();
-                        if let Some(root) = root {
-                            if let Some(node_id) = root.get("root").and_then(|r| r.get("nodeId")).and_then(|n| n.as_u64()) {
-                                if let Ok(outer) = browser_manager.execute_cdp("DOM.getOuterHTML", json!({"nodeId": node_id})).await {
-                                    if let Some(html) = outer.get("outerHTML").and_then(|v| v.as_str()) {
-                                        let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
-                                            Ok(t) => t,
-                                            Err(e) => {
-                                                return ResponseInputItem::FunctionCallOutput {
-                                                    call_id: call_id_clone,
-                                                    output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                                };
-                                            }
-                                        };
-                                        diag["via_browser"] = serde_json::json!(true);
-                                        let body = serde_json::json!({
-                                            "url": params.url,
-                                            "status": 200,
-                                            "final_url": final_url,
-                                            "content_type": content_type,
-                                            "used_browser_ua": used_browser_ua,
-                                            "truncated": truncated,
-                                            "markdown": markdown,
-                                        });
-                                        return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                                    }
-                                }
-                            }
-                        }
+                    diag["via_browser"] = serde_json::json!(true);
+                    if browser_fetch.headless {
+                        diag["headless"] = serde_json::json!(true);
                     }
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| final_url.clone()),
+                        "content_type": content_type,
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated,
+                        "markdown": markdown,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
 
                 let (md_preview, _trunc) = match convert_html_to_markdown_trimmed(body_text, 2000) {
@@ -4070,42 +4169,32 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
             // If the rendered markdown still looks like a challenge page, attempt browser fallback (unless http-only).
             if !matches!(params.mode.as_deref(), Some("http")) && looks_like_challenge_markdown(&markdown) {
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    browser_manager.set_enabled_sync(true);
-                    if browser_manager.goto(&params.url).await.is_ok() {
-                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
-                        let mut html: Option<String> = None;
-                        for _ in 0..3 {
-                            if let Ok(val) = browser_manager.execute_javascript(js).await {
-                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
-                                    break;
-                                }
-                            }
-                            tokio::time::sleep(Duration::from_millis(1200)).await;
-                        }
-                        if let Some(html) = html {
-                            let (md2, truncated2) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
-                                }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, false).await {
+                    let (md2, truncated2) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                             };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": final_url,
-                                "content_type": content_type,
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated2,
-                                "markdown": md2,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
                         }
-                    }
+                    };
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| final_url.clone()),
+                        "content_type": content_type,
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated2,
+                        "markdown": md2,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
 
                 // If fallback not possible, return structured error rather than a useless challenge page
