@@ -78,6 +78,7 @@ use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
 use std::cell::RefCell;
 use tokio::sync::mpsc::UnboundedSender;
+use serde_json::Value as JsonValue;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
 // use image::GenericImageView;
@@ -1066,37 +1067,30 @@ impl ChatWidget<'_> {
                         _ => {}
                     }
                 }
-                // Show internal system status messages (rendered with markdown) so
-                // code blocks and formatting are consistent with assistant output.
-                if text.contains("== System Status ==") {
-                    use ratatui::text::Line as RLine;
-                    let mut lines: Vec<RLine<'static>> = Vec::new();
-                    crate::markdown::append_markdown(&text, &mut lines, &self.config);
-                    let key = self.next_internal_key();
-                    let _ = self.history_insert_with_key_global(
-                        Box::new(crate::history_cell::PlainHistoryCell {
-                            lines,
-                            kind: crate::history_cell::HistoryCellType::Notice,
-                        }),
-                        key,
-                    );
+                let text = text.trim();
+                if text.is_empty() {
+                    return;
+                }
+                if text.starts_with("== System Status ==") {
+                    return;
+                }
+                if role == "assistant" {
+                    let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+                    crate::markdown::append_markdown(text, &mut lines, &self.config);
+                    self.insert_final_answer_with_id(None, lines, text.to_string());
                     return;
                 }
                 if role == "user" {
                     let key = self.next_internal_key();
                     let _ = self.history_insert_with_key_global(
-                        Box::new(crate::history_cell::new_user_prompt(text)),
+                        Box::new(crate::history_cell::new_user_prompt(text.to_string())),
                         key,
                     );
                 } else {
-                    // Build a PlainHistoryCell with Assistant kind; header line hidden by renderer
                     use crate::history_cell::HistoryCellType;
                     use crate::history_cell::PlainHistoryCell;
                     let mut lines = Vec::new();
-                    lines.push(ratatui::text::Line::from("assistant"));
-                    for l in text.lines() {
-                        lines.push(ratatui::text::Line::from(l.to_string()));
-                    }
+                    crate::markdown::append_markdown(text, &mut lines, &self.config);
                     let key = self.next_internal_key();
                     let _ = self.history_insert_with_key_global(
                         Box::new(PlainHistoryCell {
@@ -1106,6 +1100,24 @@ impl ChatWidget<'_> {
                         key,
                     );
                 }
+            }
+            ResponseItem::FunctionCall { name, arguments, call_id, .. } => {
+                let pretty_args = serde_json::from_str::<JsonValue>(&arguments)
+                    .and_then(|v| serde_json::to_string_pretty(&v))
+                    .unwrap_or_else(|_| arguments.clone());
+                let mut message = format!("🔧 Tool call: {}", name);
+                if !pretty_args.trim().is_empty() {
+                    message.push_str("\n");
+                    message.push_str(&pretty_args);
+                }
+                if !call_id.is_empty() {
+                    message.push_str(&format!("\ncall_id: {}", call_id));
+                }
+                let key = self.next_internal_key();
+                let _ = self.history_insert_with_key_global(
+                    Box::new(crate::history_cell::new_background_event(message)),
+                    key,
+                );
             }
             ResponseItem::Reasoning { summary, .. } => {
                 for s in summary {
@@ -1122,17 +1134,50 @@ impl ChatWidget<'_> {
                         .finalize(crate::streaming::StreamKind::Reasoning, true, &sink);
                 }
             }
-            ResponseItem::FunctionCallOutput { output, .. } => {
-                // Try to unwrap common JSON wrapper {"output": "...", ...}
-                let mut content = output.content;
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            ResponseItem::FunctionCallOutput { output, call_id, .. } => {
+                let mut content = output.content.clone();
+                let mut metadata_summary = String::new();
+                if let Ok(v) = serde_json::from_str::<JsonValue>(&content) {
                     if let Some(s) = v.get("output").and_then(|x| x.as_str()) {
                         content = s.to_string();
                     }
+                    if let Some(meta) = v.get("metadata").and_then(|m| m.as_object()) {
+                        let mut parts = Vec::new();
+                        if let Some(code) = meta.get("exit_code").and_then(|x| x.as_i64()) {
+                            parts.push(format!("exit_code={}", code));
+                        }
+                        if let Some(duration) =
+                            meta.get("duration_seconds").and_then(|x| x.as_f64())
+                        {
+                            parts.push(format!("duration={:.2}s", duration));
+                        }
+                        if !parts.is_empty() {
+                            metadata_summary = parts.join(", ");
+                        }
+                    }
+                }
+                let mut message = String::new();
+                if !content.trim().is_empty() {
+                    message.push_str(content.trim_end());
+                }
+                if !metadata_summary.is_empty() {
+                    if !message.is_empty() {
+                        message.push_str("\n\n");
+                    }
+                    message.push_str(&format!("({})", metadata_summary));
+                }
+                if !call_id.is_empty() {
+                    if !message.is_empty() {
+                        message.push_str("\n");
+                    }
+                    message.push_str(&format!("call_id: {}", call_id));
+                }
+                if message.trim().is_empty() {
+                    return;
                 }
                 let key = self.next_internal_key();
                 let _ = self.history_insert_with_key_global(
-                    Box::new(crate::history_cell::new_background_event(content)),
+                    Box::new(crate::history_cell::new_background_event(message)),
                     key,
                 );
             }
@@ -1702,15 +1747,25 @@ impl ChatWidget<'_> {
         let config_for_agent_loop = config.clone();
         tokio::spawn(async move {
             // Use ConversationManager with an AuthManager (API key by default)
-            let conversation_manager = ConversationManager::new(AuthManager::shared(
+            let auth_manager = AuthManager::shared(
                 config_for_agent_loop.codex_home.clone(),
                 AuthMode::ApiKey,
                 config_for_agent_loop.responses_originator_header.clone(),
-            ));
-            let new_conversation = match conversation_manager
-                .new_conversation(config_for_agent_loop)
-                .await
-            {
+            );
+            let conversation_manager = ConversationManager::new(auth_manager.clone());
+            let resume_path = config_for_agent_loop.experimental_resume.clone();
+            let new_conversation = match resume_path {
+                Some(path) => conversation_manager
+                    .resume_conversation_from_rollout(
+                        config_for_agent_loop,
+                        path,
+                        auth_manager,
+                    )
+                    .await,
+                None => conversation_manager.new_conversation(config_for_agent_loop).await,
+            };
+
+            let new_conversation = match new_conversation {
                 Ok(conv) => conv,
                 Err(e) => {
                     tracing::error!("failed to initialize conversation: {e}");
@@ -1891,16 +1946,20 @@ impl ChatWidget<'_> {
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
         w.standard_terminal_mode = !config.tui.alternate_screen;
-        w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
-        let connecting_mcp = !w.config.mcp_servers.is_empty();
-        w.history_push_top_next_req(history_cell::new_popular_commands_notice(false)); // tag: prelude
-        if connecting_mcp {
-            // Render connecting status as a separate cell with standard gutter and spacing
-            w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
+        if config.experimental_resume.is_none() {
+            w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
+            let connecting_mcp = !w.config.mcp_servers.is_empty();
+            w.history_push_top_next_req(history_cell::new_popular_commands_notice(false)); // tag: prelude
+            if connecting_mcp {
+                // Render connecting status as a separate cell with standard gutter and spacing
+                w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
+            }
+            // Mark welcome as shown to avoid duplicating the Popular commands section
+            // when SessionConfigured arrives shortly after.
+            w.welcome_shown = true;
+        } else {
+            w.welcome_shown = true;
         }
-        // Mark welcome as shown to avoid duplicating the Popular commands section
-        // when SessionConfigured arrives shortly after.
-        w.welcome_shown = true;
         w
     }
 
@@ -3318,9 +3377,37 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
             }
             EventMsg::ReplayHistory(ev) => {
-                // Render prior transcript items statically without executing tools
-                for item in ev.items {
-                    self.render_replay_item(item);
+                let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
+                let mut max_req = self.last_seen_request_index;
+                if events.is_empty() {
+                    for item in &items {
+                        self.render_replay_item(item.clone());
+                    }
+                } else {
+                    for recorded in events {
+                        if matches!(recorded.msg, EventMsg::ReplayHistory(_)) {
+                            continue;
+                        }
+                        if let Some(order) = recorded.order.as_ref() {
+                            max_req = max_req.max(order.request_ordinal);
+                        }
+                        let event = Event {
+                            id: recorded.id,
+                            event_seq: recorded.event_seq,
+                            msg: recorded.msg,
+                            order: recorded.order,
+                        };
+                        self.handle_codex_event(event);
+                    }
+                }
+                if !items.is_empty() {
+                    // History items were inserted using synthetic keys; promote current request
+                    // index so subsequent messages append to the end instead of the top.
+                    self.last_seen_request_index = self.last_seen_request_index.max(self.current_request_index);
+                }
+                if max_req > 0 {
+                    self.last_seen_request_index = self.last_seen_request_index.max(max_req);
+                    self.current_request_index = self.last_seen_request_index;
                 }
                 self.request_redraw();
             }
