@@ -52,6 +52,7 @@ pub use model_provider_info::built_in_model_providers;
 pub use model_provider_info::create_oss_provider_with_base_url;
 mod conversation_manager;
 mod event_mapping;
+pub mod review_format;
 pub use codex_protocol::protocol::InitialHistory;
 pub use conversation_manager::ConversationManager;
 pub use conversation_manager::NewConversation;
@@ -95,6 +96,8 @@ pub use crate::client_common::Prompt;
 pub use crate::client_common::TextFormat;
 pub use crate::client_common::ResponseEvent;
 pub use crate::client_common::ResponseStream;
+// Upstream also exports REVIEW_PROMPT; include it to preserve compatibility.
+pub use crate::client_common::REVIEW_PROMPT;
 pub use codex_protocol::models::ContentItem;
 pub use codex_protocol::models::ReasoningItemContent;
 pub use codex_protocol::models::ResponseItem;
