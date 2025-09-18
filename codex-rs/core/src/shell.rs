@@ -365,6 +365,7 @@ mod tests {
                 },
                 SandboxType::None,
                 &SandboxPolicy::DangerFullAccess,
+                temp_home.path(),
                 &None,
                 None,
             )
@@ -474,6 +475,7 @@ mod macos_tests {
                 },
                 SandboxType::None,
                 &SandboxPolicy::DangerFullAccess,
+                temp_home.path(),
                 &None,
                 None,
             )
