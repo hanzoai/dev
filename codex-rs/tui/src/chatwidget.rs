@@ -293,6 +293,7 @@ pub(crate) struct ChatWidget<'a> {
     // point we submit one queued message and move its cell into the
     // normal history within the new turn window.
     queued_user_messages: std::collections::VecDeque<UserMessage>,
+    pending_dispatched_user_messages: std::collections::VecDeque<String>,
     // Number of user prompts we pre-pended to history just before starting
     // a new turn; used to anchor the next turn window so assistant output
     // appears after them.
@@ -1135,6 +1136,14 @@ impl ChatWidget<'_> {
                 if text.is_empty() {
                     return;
                 }
+                if role == "user" {
+                    if let Some(expected) = self.pending_dispatched_user_messages.front() {
+                        if expected.trim() == text {
+                            self.pending_dispatched_user_messages.pop_front();
+                            return;
+                        }
+                    }
+                }
                 if text.starts_with("== System Status ==") {
                     return;
                 }
@@ -1150,6 +1159,13 @@ impl ChatWidget<'_> {
                         Box::new(crate::history_cell::new_user_prompt(text.to_string())),
                         key,
                     );
+
+                    if let Some(front) = self.queued_user_messages.front() {
+                        if front.display_text.trim() == text.trim() {
+                            self.queued_user_messages.pop_front();
+                            self.refresh_queued_user_messages();
+                        }
+                    }
                 } else {
                     use crate::history_cell::HistoryCellType;
                     use crate::history_cell::PlainHistoryCell;
@@ -1762,20 +1778,33 @@ impl ChatWidget<'_> {
             // Restore any queued messages back into the composer so the user can
             // immediately press Enter to resume the conversation where they left off.
             if !self.queued_user_messages.is_empty() {
-                let mut prefill = String::new();
+                let existing_input = self.bottom_pane.composer_text();
+                let mut segments: Vec<String> = Vec::new();
+
+                let mut queued_block = String::new();
                 for (i, qm) in self.queued_user_messages.iter().enumerate() {
                     if i > 0 {
-                        prefill.push('\n');
+                        queued_block.push_str("\n\n");
                     }
-                    prefill.push_str(qm.display_text.trim_end());
+                    queued_block.push_str(qm.display_text.trim_end());
                 }
+                if !queued_block.trim().is_empty() {
+                    segments.push(queued_block);
+                }
+
+                if !existing_input.trim().is_empty() {
+                    segments.push(existing_input);
+                }
+
+                let combined = segments.join("\n\n");
                 self.clear_composer();
-                if !prefill.is_empty() {
-                    self.insert_str(&prefill);
+                if !combined.is_empty() {
+                    self.insert_str(&combined);
                 }
                 self.queued_user_messages.clear();
-                // Clear any sticky status like "queued for next turn" now that we returned text
                 self.bottom_pane.update_status_text(String::new());
+                self.pending_dispatched_user_messages.clear();
+                self.refresh_queued_user_messages();
             }
             self.maybe_hide_spinner();
             self.request_redraw();
@@ -1987,6 +2016,7 @@ impl ChatWidget<'_> {
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
+            pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
             browser_is_external: false,
             // Stable ordering & routing init
@@ -2174,6 +2204,7 @@ impl ChatWidget<'_> {
             pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
+            pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
             browser_is_external: false,
             // Strict ordering init for forked widget
@@ -2963,10 +2994,7 @@ impl ChatWidget<'_> {
         for cell in &self.history_cells {
             cell.trigger_fade();
         }
-        let UserMessage {
-            display_text,
-            mut ordered_items,
-        } = user_message;
+        let mut message = user_message;
         // If our configured cwd no longer exists (e.g., a worktree folder was
         // deleted outside the app), try to automatically recover to the repo
         // root for worktrees and re-submit the same message there.
@@ -2993,7 +3021,7 @@ impl ChatWidget<'_> {
                     // Re-submit this exact message after switching cwd
                     self.app_event_tx.send(AppEvent::SwitchCwd(
                         fallback_root,
-                        Some(display_text.clone()),
+                        Some(message.display_text.clone()),
                     ));
                     return;
                 }
@@ -3005,10 +3033,10 @@ impl ChatWidget<'_> {
             )));
             return;
         }
-        let original_text = display_text.clone();
+        let original_text = message.display_text.clone();
         // Build a combined string view of the text-only parts to process slash commands
         let mut text_only = String::new();
-        for it in &ordered_items {
+        for it in &message.ordered_items {
             if let InputItem::Text { text } = it {
                 if !text_only.is_empty() {
                     text_only.push('\n');
@@ -3078,8 +3106,12 @@ impl ChatWidget<'_> {
                         kind: crate::history_cell::HistoryCellType::Notice,
                     });
 
-                    ordered_items.clear();
-                    ordered_items.push(InputItem::Text { text: res.prompt });
+                    message
+                        .ordered_items
+                        .clear();
+                    message
+                        .ordered_items
+                        .push(InputItem::Text { text: res.prompt });
                     // Continue with normal submission after this match block
                 }
             }
@@ -3130,13 +3162,21 @@ impl ChatWidget<'_> {
                     });
 
                     // Replace the message with the resolved prompt
-                    ordered_items.clear();
-                    ordered_items.push(InputItem::Text { text: res.prompt });
+                    message
+                        .ordered_items
+                        .clear();
+                    message
+                        .ordered_items
+                        .push(InputItem::Text { text: res.prompt });
                 } else {
                     // Fallback to default expansion behavior
                     let expanded = _expanded;
-                    ordered_items.clear();
-                    ordered_items.push(InputItem::Text { text: expanded });
+                    message
+                        .ordered_items
+                        .clear();
+                    message
+                        .ordered_items
+                        .push(InputItem::Text { text: expanded });
                 }
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
@@ -3298,18 +3338,131 @@ impl ChatWidget<'_> {
         }
 
         // Use the ordered items (text + images interleaved with markers)
-        items.extend(ordered_items);
+        items.extend(message.ordered_items.clone());
+        message.ordered_items = items;
 
-        if items.is_empty() {
+        if message.ordered_items.is_empty() {
             return;
         }
 
-        // Debug logging for what we're sending
-        let ephemeral_count = items
+        let turn_active = self.is_task_running()
+            || !self.active_task_ids.is_empty()
+            || self.stream.is_write_cycle_active()
+            || !self.queued_user_messages.is_empty();
+
+        if turn_active {
+            tracing::info!(
+                "Queuing user input while turn is active (queued: {})",
+                self.queued_user_messages.len() + 1
+            );
+            self.queued_user_messages.push_back(message);
+            self.refresh_queued_user_messages();
+
+            let queue_items = self
+                .queued_user_messages
+                .back()
+                .map(|msg| msg.ordered_items.clone())
+                .unwrap_or_default();
+
+            match self.codex_op_tx.send(Op::QueueUserInput { items: queue_items }) {
+                Ok(()) => {
+                    if let Some(sent_message) = self.queued_user_messages.pop_back() {
+                        self.refresh_queued_user_messages();
+                        self.finalize_sent_user_message(sent_message);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("failed to send QueueUserInput op: {e}");
+                }
+            }
+
+            return;
+        }
+
+        let mut batch: Vec<UserMessage> = self.queued_user_messages.drain(..).collect();
+        batch.push(message);
+        self.refresh_queued_user_messages();
+        self.send_user_messages_to_agent(batch);
+
+        // (debug watchdog removed)
+    }
+
+    fn flush_pending_agent_notes(&mut self) {
+        for note in self.pending_agent_notes.drain(..) {
+            if let Err(e) = self.codex_op_tx.send(Op::AddToHistory { text: note }) {
+                tracing::error!("failed to send AddToHistory op: {e}");
+            }
+        }
+    }
+
+    fn finalize_sent_user_message(&mut self, message: UserMessage) {
+        let UserMessage {
+            display_text,
+            ..
+        } = message;
+
+        if !display_text.is_empty() {
+            self.history_push_prompt_next_req(history_cell::new_user_prompt(display_text.clone()));
+            self.pending_user_prompts_for_next_turn =
+                self.pending_user_prompts_for_next_turn.saturating_add(1);
+            self.pending_dispatched_user_messages
+                .push_back(display_text.clone());
+        }
+
+        self.flush_pending_agent_notes();
+
+        if !display_text.is_empty() {
+            if let Err(e) = self
+                .codex_op_tx
+                .send(Op::AddToHistory { text: display_text })
+            {
+                tracing::error!("failed to send AddHistory op: {e}");
+            }
+        }
+
+        self.request_redraw();
+    }
+
+    fn send_user_messages_to_agent(&mut self, messages: Vec<UserMessage>) {
+        if messages.is_empty() {
+            return;
+        }
+
+        let mut combined_items: Vec<InputItem> = Vec::new();
+        let mut history_texts: Vec<String> = Vec::new();
+
+        for (idx, UserMessage {
+            display_text,
+            ordered_items,
+        }) in messages.into_iter().enumerate()
+        {
+            if !display_text.is_empty() {
+                self.history_push_prompt_next_req(history_cell::new_user_prompt(
+                    display_text.clone(),
+                ));
+                self.pending_user_prompts_for_next_turn =
+                    self.pending_user_prompts_for_next_turn.saturating_add(1);
+                history_texts.push(display_text.clone());
+            }
+
+            if idx > 0 && !combined_items.is_empty() && !ordered_items.is_empty() {
+                combined_items.push(InputItem::Text {
+                    text: "\n\n".to_string(),
+                });
+            }
+
+            combined_items.extend(ordered_items);
+        }
+
+        if combined_items.is_empty() {
+            return;
+        }
+
+        let total_items = combined_items.len();
+        let ephemeral_count = combined_items
             .iter()
             .filter(|item| matches!(item, InputItem::EphemeralImage { .. }))
             .count();
-        let total_items = items.len();
         if ephemeral_count > 0 {
             tracing::info!(
                 "Sending {} items to model (including {} ephemeral images)",
@@ -3318,40 +3471,26 @@ impl ChatWidget<'_> {
             );
         }
 
-        // New policy: always send immediately even if a task is running.
-        // The core will abort any current task on UserInput and start a new turn.
-        // This prevents messages from being stranded in `queued_user_messages`
-        // after an interrupt (there is no TaskComplete after Op::Interrupt).
-        if self.bottom_pane.is_task_running() || !self.active_task_ids.is_empty() {
-            self.bottom_pane
-                .update_status_text("interrupting & starting new turn".to_string());
+        self.flush_pending_agent_notes();
+
+        if let Err(e) = self
+            .codex_op_tx
+            .send(Op::UserInput {
+                items: combined_items,
+            })
+        {
+            tracing::error!("failed to send Op::UserInput: {e}");
         }
 
-        // Idle path: append the user cell first so the upcoming TaskStarted
-        // window begins after it, ensuring assistant output renders below.
-        if !original_text.is_empty() {
-            self.history_push_prompt_next_req(history_cell::new_user_prompt(original_text.clone()));
-            self.pending_user_prompts_for_next_turn =
-                self.pending_user_prompts_for_next_turn.saturating_add(1);
+        for text in history_texts {
+            if let Err(e) = self.codex_op_tx.send(Op::AddToHistory { text }) {
+                tracing::error!("failed to send AddHistory op: {e}");
+            }
         }
+    }
 
-        // If an access-mode change was pending, record it in the agent's
-        // conversation history right before the next user turn.
-        for note in self.pending_agent_notes.drain(..) {
-            let _ = self.codex_op_tx.send(Op::AddToHistory { text: note });
-        }
-
-        // Now send to the agent
-        let _ = self.codex_op_tx.send(Op::UserInput { items });
-        if !original_text.is_empty() {
-            self.codex_op_tx
-                .send(Op::AddToHistory {
-                    text: original_text.clone(),
-                })
-                .unwrap_or_else(|e| tracing::error!("failed to send AddHistory op: {e}"));
-        }
-
-        // (debug watchdog removed)
+    fn refresh_queued_user_messages(&mut self) {
+        self.request_redraw();
     }
 
     #[allow(dead_code)]
@@ -3758,40 +3897,6 @@ impl ChatWidget<'_> {
                 }
                 // Now that streaming is complete, flush any queued interrupts
                 self.flush_interrupt_queue();
-
-                // If any user messages were queued while the previous task was
-                // running, dispatch exactly one now to start the next turn.
-                if let Some(next) = self.queued_user_messages.pop_front() {
-                    // Move it from the sticky queue preview into history
-                    let UserMessage {
-                        display_text,
-                        ordered_items,
-                    } = next;
-                    if !display_text.is_empty() {
-                        self.history_push_prompt_next_req(history_cell::new_user_prompt(
-                            display_text.clone(),
-                        ));
-                        self.pending_user_prompts_for_next_turn =
-                            self.pending_user_prompts_for_next_turn.saturating_add(1);
-                    }
-                    self.codex_op_tx
-                        .send(Op::UserInput {
-                            items: ordered_items,
-                        })
-                        .unwrap_or_else(|e| tracing::error!("failed to send queued message: {e}"));
-                    if !display_text.is_empty() {
-                        self.codex_op_tx
-                            .send(Op::AddToHistory { text: display_text })
-                            .unwrap_or_else(|e| {
-                                tracing::error!("failed to send AddHistory for queued: {e}")
-                            });
-                    }
-                    // Keep the spinner up; TaskStarted will follow.
-                    self.bottom_pane.set_task_running(true);
-                    self.bottom_pane
-                        .update_status_text("waiting for model".to_string());
-                    self.request_redraw();
-                }
 
                 // Only drop the working status if nothing is actually running.
                 let any_tools_running = !self.exec.running_commands.is_empty()

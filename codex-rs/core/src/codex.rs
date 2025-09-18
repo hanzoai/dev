@@ -634,6 +634,7 @@ struct State {
     current_task: Option<AgentTask>,
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pending_input: Vec<ResponseInputItem>,
+    pending_user_input: Vec<QueuedUserInput>,
     history: ConversationHistory,
     /// Tracks which completed agents (by id) have already been returned to the
     /// model for a given batch when using `agent_wait` without `return_all`.
@@ -648,6 +649,13 @@ struct State {
     request_ordinal: u64,
     dry_run_guard: DryRunGuardState,
     next_internal_sub_id: u64,
+}
+
+#[derive(Clone)]
+pub(crate) struct QueuedUserInput {
+    submission_id: String,
+    response_item: ResponseInputItem,
+    core_items: Vec<InputItem>,
 }
 
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
@@ -843,6 +851,24 @@ impl Session {
             if agent.sub_id == sub_id {
                 state.current_task.take();
             }
+        }
+    }
+
+    pub fn has_running_task(&self) -> bool {
+        self.state.lock().unwrap().current_task.is_some()
+    }
+
+    pub fn queue_user_input(&self, queued: QueuedUserInput) {
+        let mut state = self.state.lock().unwrap();
+        state.pending_user_input.push(queued);
+    }
+
+    pub fn pop_next_queued_user_input(&self) -> Option<QueuedUserInput> {
+        let mut state = self.state.lock().unwrap();
+        if state.pending_user_input.is_empty() {
+            None
+        } else {
+            Some(state.pending_user_input.remove(0))
         }
     }
 
@@ -1566,11 +1592,25 @@ impl Session {
 
     pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
         let mut state = self.state.lock().unwrap();
-        if state.pending_input.is_empty() {
+        if state.pending_input.is_empty() && state.pending_user_input.is_empty() {
             Vec::with_capacity(0)
         } else {
             let mut ret = Vec::new();
-            std::mem::swap(&mut ret, &mut state.pending_input);
+            if !state.pending_input.is_empty() {
+                let mut model_inputs = Vec::new();
+                std::mem::swap(&mut model_inputs, &mut state.pending_input);
+                ret.extend(model_inputs);
+            }
+
+            if !state.pending_user_input.is_empty() {
+                let mut queued_user_inputs = Vec::new();
+                std::mem::swap(&mut queued_user_inputs, &mut state.pending_user_input);
+                ret.extend(
+                    queued_user_inputs
+                        .into_iter()
+                        .map(|queued| queued.response_item),
+                );
+            }
             ret
         }
     }
@@ -2149,6 +2189,31 @@ async fn submission_loop(
                 let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub.id.clone(), items);
                 sess.set_task(agent);
             }
+            Op::QueueUserInput { items } => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => sess,
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+
+                if sess.has_running_task() {
+                    let response_item = response_input_from_core_items(items.clone());
+                    let queued = QueuedUserInput {
+                        submission_id: sub.id.clone(),
+                        response_item,
+                        core_items: items,
+                    };
+                    sess.queue_user_input(queued);
+                } else {
+                    // No task running: treat this as immediate user input without aborting.
+                    sess.cleanup_old_status_items().await;
+                    let turn_context = sess.make_turn_context();
+                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub.id.clone(), items);
+                    sess.set_task(agent);
+                }
+            }
             Op::ExecApproval { id, decision } => {
                 let sess = match sess.as_ref() {
                     Some(sess) => sess,
@@ -2540,6 +2605,18 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         _ => {}
     }
     sess.tx_event.send(event).await.ok();
+
+    if let Some(queued) = sess.pop_next_queued_user_input() {
+        let sess_clone = Arc::clone(&sess);
+        tokio::spawn(async move {
+            sess_clone.cleanup_old_status_items().await;
+            let turn_context = sess_clone.make_turn_context();
+            let submission_id = queued.submission_id;
+            let items = queued.core_items;
+            let agent = AgentTask::spawn(Arc::clone(&sess_clone), turn_context, submission_id, items);
+            sess_clone.set_task(agent);
+        });
+    }
 }
 
 async fn run_turn(
