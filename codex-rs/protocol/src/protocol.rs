@@ -1276,6 +1276,7 @@ pub struct TurnAbortedEvent {
 pub enum TurnAbortReason {
     Interrupted,
     Replaced,
+    ReviewEnded,
 }
 
 #[cfg(test)]
