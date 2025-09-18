@@ -24,6 +24,7 @@ fn main() -> anyhow::Result<()> {
         let usage = run_main(inner, codex_linux_sandbox_exe).await?;
         if !usage.is_zero() {
             println!("{}", codex_core::protocol::FinalOutput::from(usage));
+            // Conversation id hint not available in fork run_main() return type.
         }
         Ok(())
     })
