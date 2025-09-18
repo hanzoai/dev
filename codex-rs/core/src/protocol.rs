@@ -26,6 +26,13 @@ use crate::model_provider_info::ModelProviderInfo;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
 
+// Re-export review types from the shared protocol crate so callers can use
+// `codex_core::protocol::ReviewFinding` and friends.
+pub use codex_protocol::protocol::ReviewCodeLocation;
+pub use codex_protocol::protocol::ReviewFinding;
+pub use codex_protocol::protocol::ReviewLineRange;
+pub use codex_protocol::protocol::ReviewOutputEvent;
+
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Submission {
