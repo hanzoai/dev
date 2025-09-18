@@ -19,6 +19,7 @@ use codex_core::protocol::FileChange;
 use codex_core::protocol::McpInvocation;
 use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TokenUsage;
+use codex_protocol::num_format::format_with_separators;
 use image::DynamicImage;
 use image::ImageReader;
 use mcp_types::EmbeddedResourceResource;
@@ -8843,7 +8844,11 @@ pub(crate) fn new_model_output(model: &str, effort: ReasoningEffort) -> PlainHis
 
 // Continue with more factory functions...
 // I'll add the rest in the next part to keep this manageable
-pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHistoryCell {
+pub(crate) fn new_status_output(
+    config: &Config,
+    total_usage: &TokenUsage,
+    last_usage: &TokenUsage,
+) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     lines.push(Line::from("/status").fg(crate::colors::keyword()));
@@ -8960,24 +8965,77 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     // Input: <input> [+ <cached> cached]
     let mut input_line_spans: Vec<Span<'static>> = vec![
         "  • Input: ".into(),
-        usage.non_cached_input().to_string().into(),
+        format_with_separators(last_usage.non_cached_input()).into(),
     ];
-    if let Some(cached) = usage.cached_input_tokens {
+    if let Some(cached) = last_usage.cached_input_tokens {
         if cached > 0 {
-            input_line_spans.push(format!(" (+ {cached} cached)").into());
+            input_line_spans.push(format!(" (+ {} cached)", format_with_separators(cached)).into());
         }
     }
     lines.push(Line::from(input_line_spans));
     // Output: <output>
     lines.push(Line::from(vec![
         "  • Output: ".into(),
-        usage.output_tokens.to_string().into(),
+        format_with_separators(last_usage.output_tokens).into(),
     ]));
     // Total: <total>
     lines.push(Line::from(vec![
         "  • Total: ".into(),
-        usage.blended_total().to_string().into(),
+        format_with_separators(last_usage.blended_total()).into(),
     ]));
+    lines.push(Line::from(vec![
+        "  • Session total: ".into(),
+        format_with_separators(total_usage.blended_total()).into(),
+    ]));
+
+    // 📐 Model Limits
+    let context_window = config.model_context_window;
+    let max_output_tokens = config.model_max_output_tokens;
+    let auto_compact_limit = config.model_auto_compact_token_limit;
+
+    if context_window.is_some() || max_output_tokens.is_some() || auto_compact_limit.is_some() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec!["📐 ".into(), "Model Limits".bold()]));
+
+        if let Some(context_window) = context_window {
+            let used = last_usage.tokens_in_context_window().min(context_window);
+            let percent_full = if context_window > 0 {
+                ((used as f64 / context_window as f64) * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            lines.push(Line::from(format!(
+                "  • Context window: {} used of {} ({:.0}% full)",
+                format_with_separators(used),
+                format_with_separators(context_window),
+                percent_full
+            )));
+        }
+
+        if let Some(max_output_tokens) = max_output_tokens {
+            lines.push(Line::from(format!(
+                "  • Max output tokens: {}",
+                format_with_separators(max_output_tokens)
+            )));
+        }
+
+        if let Some(limit) = auto_compact_limit {
+            if limit <= 0 {
+                lines.push(Line::from("  • Auto-compact threshold: disabled"));
+            } else {
+                let limit_u64 = limit as u64;
+                let remaining = limit_u64.saturating_sub(total_usage.total_tokens);
+                lines.push(Line::from(format!(
+                    "  • Auto-compact threshold: {} ({} remaining)",
+                    format_with_separators(limit_u64),
+                    format_with_separators(remaining)
+                )));
+                if total_usage.total_tokens > limit_u64 {
+                    lines.push(Line::from("    • Compacting will trigger on the next turn".dim()));
+                }
+            }
+        }
+    }
 
     PlainHistoryCell {
         lines,
