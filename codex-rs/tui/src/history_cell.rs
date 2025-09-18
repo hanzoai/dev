@@ -5598,7 +5598,6 @@ pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("user"));
-    lines.push(Line::from(String::new()));
     // Sanitize user-provided text for terminal safety and stable layout:
     // - Normalize common TTY overwrite sequences (\r, \x08, ESC[K)
     // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
@@ -5636,7 +5635,6 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
         Span::from("user "),
         Span::from("(queued)").style(Style::default().fg(crate::colors::text_dim())),
     ]));
-    lines.push(Line::from(String::new()));
     // Normalize and render body like normal user messages
     let normalized = normalize_overwrite_sequences(&message);
     let sanitized = sanitize_for_tui(
