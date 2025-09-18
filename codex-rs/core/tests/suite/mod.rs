@@ -12,6 +12,7 @@ mod model_overrides;
 mod prompt_caching;
 mod review;
 mod rollout_list_find;
+mod rollout_resume;
 mod seatbelt;
 mod stream_error_allows_next_turn;
 mod stream_no_completed;

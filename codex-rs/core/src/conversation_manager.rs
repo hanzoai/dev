@@ -183,9 +183,9 @@ impl ConversationManager {
             .collect();
         if !response_items.is_empty() {
             recorder
-                .record_items(&response_items)
+                .record_response_items(&response_items)
                 .await
-                .map_err(|e| CodexErr::Io(e))?;
+                .map_err(CodexErr::Io)?;
         }
         // Ensure data is flushed to disk before resuming.
         recorder.shutdown().await.map_err(|e| CodexErr::Io(e))?;
