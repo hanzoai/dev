@@ -57,7 +57,7 @@ pub enum InputResult {
 }
 
 struct TokenUsageInfo {
-    total_token_usage: TokenUsage,
+    _total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
     model_context_window: Option<u64>,
     /// Baseline token count present in the context before the user's first
@@ -476,7 +476,7 @@ impl ChatComposer {
             .unwrap_or_else(|| last_token_usage.cached_input_tokens.unwrap_or(0));
 
         self.token_usage_info = Some(TokenUsageInfo {
-            total_token_usage,
+            _total_token_usage: total_token_usage,
             last_token_usage,
             model_context_window,
             initial_prompt_tokens,
@@ -1632,22 +1632,24 @@ impl WidgetRef for ChatComposer {
                 // Prepare token usage spans (always shown when available)
                 let mut token_spans: Vec<Span> = Vec::new();
                 if let Some(token_usage_info) = &self.token_usage_info {
-                    let token_usage = &token_usage_info.total_token_usage;
-                    let used_str = format_with_thousands(token_usage.blended_total());
+                    let turn_usage = &token_usage_info.last_token_usage;
+                    let turn_tokens = turn_usage.blended_total();
+                    let used_str = format_with_thousands(turn_tokens);
                     token_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
-                    token_spans.push(Span::from(" tokens ").style(label_style));
+                    token_spans.push(Span::from(" tokens").style(label_style));
                     if let Some(context_window) = token_usage_info.model_context_window {
-                        let last_token_usage = &token_usage_info.last_token_usage;
-                        let percent_remaining: u8 = if context_window > 0 {
-                            let percent = 100.0
-                                - (last_token_usage.tokens_in_context_window() as f32
-                                    / context_window as f32
-                                    * 100.0);
-                            percent.clamp(0.0, 100.0) as u8
-                        } else { 100 };
-                        token_spans.push(Span::from("(").style(label_style));
-                        token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
-                        token_spans.push(Span::from("% left)").style(label_style));
+                        if context_window > 0 {
+                            let percent_remaining = {
+                                let percent = 100.0
+                                    - (turn_usage.tokens_in_context_window() as f32
+                                        / context_window as f32
+                                        * 100.0);
+                                percent.clamp(0.0, 100.0) as u8
+                            };
+                            token_spans.push(Span::from(" (").style(label_style));
+                            token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
+                            token_spans.push(Span::from("% left)").style(label_style));
+                        }
                     }
                 }
 
@@ -1814,15 +1816,16 @@ impl WidgetRef for ChatComposer {
             .textarea
             .cursor_pos_with_state(padded_textarea_rect, &self.textarea_state.borrow())
         {
-            let overlay_style = Style::default()
-                .bg(crate::theme::current_theme().cursor)
-                .fg(crate::colors::background());
+            let cursor_bg = crate::theme::current_theme().cursor;
             if cx < buf.area.width.saturating_add(buf.area.x)
                 && cy < buf.area.height.saturating_add(buf.area.y)
             {
                 let cell = &mut buf[(cx, cy)];
-                // Preserve the displayed character but apply the overlay colors
-                cell.set_style(overlay_style);
+                // Only tint the background so the foreground glyph stays intact. Some
+                // terminals (e.g. GNOME Terminal/VTE) temporarily hide the hardware
+                // cursor while processing arrow keys; preserving the foreground color
+                // keeps the caret location visible instead of flashing blank cells.
+                cell.set_bg(cursor_bg);
             }
         }
     }
