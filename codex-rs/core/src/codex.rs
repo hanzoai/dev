@@ -481,6 +481,7 @@ use crate::protocol::InputItem;
 use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
+use crate::protocol::RecordedEvent;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
@@ -823,8 +824,39 @@ impl Session {
         }
     }
 
+    /// Persist an event into the rollout log if appropriate.
+    fn persist_event(&self, event: &Event) {
+        if !crate::rollout::policy::should_persist_event_msg(&event.msg) {
+            return;
+        }
+        let Some(msg) = crate::protocol::event_msg_to_protocol(&event.msg) else {
+            return;
+        };
+        let recorder = {
+            let guard = self.rollout.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+        if let Some(rec) = recorder {
+            let order = event
+                .order
+                .as_ref()
+                .map(crate::protocol::order_meta_to_protocol);
+            let protocol_event = codex_protocol::protocol::RecordedEvent {
+                id: event.id.clone(),
+                event_seq: event.event_seq,
+                order,
+                msg,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = rec.record_events(&[protocol_event]).await {
+                    warn!("failed to persist rollout event: {e}");
+                }
+            });
+        }
+    }
+
     /// Create a stamped Event with a per-turn sequence number.
-    pub(crate) fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+    fn stamp_event(&self, sub_id: &str, msg: EventMsg) -> Event {
         let mut state = self.state.lock().unwrap();
         let seq = match msg {
             EventMsg::TaskStarted => {
@@ -847,7 +879,18 @@ impl Session {
                 *e
             }
         };
-        Event { id: sub_id.to_string(), event_seq: seq, msg, order: None }
+        Event {
+            id: sub_id.to_string(),
+            event_seq: seq,
+            msg,
+            order: None,
+        }
+    }
+
+    pub(crate) fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+        let event = self.stamp_event(sub_id, msg);
+        self.persist_event(&event);
+        event
     }
 
     /// Same as make_event but allows supplying a provider sequence_number
@@ -856,10 +899,9 @@ impl Session {
     /// and local to our runtime. Provider ordering is carried via
     /// `OrderMeta` when applicable.
     fn make_event_with_hint(&self, sub_id: &str, msg: EventMsg, _seq_hint: Option<u64>) -> Event {
-        // Preserve the monotonic invariant of event_seq by delegating to make_event.
-        // Any ordering hints from the provider should be conveyed through
-        // OrderMeta (see make_event_with_order) rather than event_seq.
-        self.make_event(sub_id, msg)
+        let event = self.stamp_event(sub_id, msg);
+        self.persist_event(&event);
+        event
     }
 
     fn make_event_with_order(
@@ -867,10 +909,11 @@ impl Session {
         sub_id: &str,
         msg: EventMsg,
         order: crate::protocol::OrderMeta,
-        seq_hint: Option<u64>,
+        _seq_hint: Option<u64>,
     ) -> Event {
-        let mut ev = self.make_event_with_hint(sub_id, msg, seq_hint);
+        let mut ev = self.stamp_event(sub_id, msg);
         ev.order = Some(order);
+        self.persist_event(&ev);
         ev
     }
 
@@ -1104,7 +1147,7 @@ impl Session {
             if let Err(e) = rec.record_state(snapshot).await {
                 error!("failed to record rollout state: {e:#}");
             }
-            if let Err(e) = rec.record_items(items).await {
+            if let Err(e) = rec.record_response_items(items).await {
                 error!("failed to record rollout items: {e:#}");
             }
         }
@@ -1732,6 +1775,7 @@ async fn submission_loop(
 
                 // Optionally resume an existing rollout.
                 let mut restored_items: Option<Vec<ResponseItem>> = None;
+                let mut restored_events: Option<Vec<RecordedEvent>> = None;
                 let rollout_recorder: Option<RolloutRecorder> =
                     if let Some(path) = resume_path.as_ref() {
                         match RolloutRecorder::resume(&config, path).await {
@@ -1739,6 +1783,9 @@ async fn submission_loop(
                                 session_id = saved.session_id;
                                 if !saved.items.is_empty() {
                                     restored_items = Some(saved.items);
+                                }
+                                if !saved.events.is_empty() {
+                                    restored_events = Some(saved.events);
                                 }
                                 Some(rec)
                             }
@@ -1908,10 +1955,12 @@ async fn submission_loop(
                     }
                 }
                 // If we resumed from a rollout, replay the prior transcript into the UI.
-                if let Some(items) = restored_items {
+                if restored_items.is_some() || restored_events.is_some() {
+                    let items = restored_items.unwrap_or_default();
+                    let events = restored_events.unwrap_or_default();
                     let event = sess_arc.make_event(
                         &sub.id,
-                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }),
+                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items, events }),
                     );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
