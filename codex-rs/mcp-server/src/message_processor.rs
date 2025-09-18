@@ -510,7 +510,7 @@ impl MessageProcessor {
 
         let codex = match self
             .conversation_manager
-            .get_conversation(codex_protocol::mcp_protocol::ConversationId(session_id))
+            .get_conversation(codex_protocol::mcp_protocol::ConversationId::from(session_id))
             .await
         {
             Ok(c) => c,
@@ -596,7 +596,7 @@ impl MessageProcessor {
         // Obtain the Codex conversation from the server.
         let codex_arc = match self
             .conversation_manager
-            .get_conversation(codex_protocol::mcp_protocol::ConversationId(session_id))
+            .get_conversation(codex_protocol::mcp_protocol::ConversationId::from(session_id))
             .await
         {
             Ok(c) => c,
