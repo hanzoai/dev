@@ -24,7 +24,8 @@ pub struct ResumeCandidate {
 
 // No fallback scan: meta parsing for rollout headers no longer needed here.
 
-/// Return rollout files under ~/.codex/sessions matching the provided cwd.
+/// Return rollout files under ~/.code/sessions matching the provided cwd (Code
+/// still reads legacy ~/.codex/sessions directories).
 /// Reads only the first line of each file to avoid heavy IO.
 pub fn list_sessions_for_cwd(cwd: &Path, codex_home: &Path) -> Vec<ResumeCandidate> {
     use std::collections::HashMap;
