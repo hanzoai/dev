@@ -1810,15 +1810,16 @@ impl WidgetRef for ChatComposer {
             .textarea
             .cursor_pos_with_state(padded_textarea_rect, &self.textarea_state.borrow())
         {
-            let overlay_style = Style::default()
-                .bg(crate::theme::current_theme().cursor)
-                .fg(crate::colors::background());
+            let cursor_bg = crate::theme::current_theme().cursor;
             if cx < buf.area.width.saturating_add(buf.area.x)
                 && cy < buf.area.height.saturating_add(buf.area.y)
             {
                 let cell = &mut buf[(cx, cy)];
-                // Preserve the displayed character but apply the overlay colors
-                cell.set_style(overlay_style);
+                // Only tint the background so the foreground glyph stays intact. Some
+                // terminals (e.g. GNOME Terminal/VTE) temporarily hide the hardware
+                // cursor while processing arrow keys; preserving the foreground color
+                // keeps the caret location visible instead of flashing blank cells.
+                cell.set_bg(cursor_bg);
             }
         }
     }
