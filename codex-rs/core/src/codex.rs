@@ -43,7 +43,7 @@ use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::RolloutItem;
 
-mod compact;
+pub mod compact;
 use self::compact::build_compacted_history;
 use self::compact::collect_user_messages;
 
