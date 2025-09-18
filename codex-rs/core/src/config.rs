@@ -31,9 +31,10 @@ use dirs::home_dir;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
-use std::io::ErrorKind;
+use std::sync::OnceLock;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
 use toml_edit::Array as TomlArray;
@@ -284,8 +285,8 @@ pub fn load_config_as_toml_with_cli_overrides(
 /// Read `CODEX_HOME/config.toml` and return it as a generic TOML value. Returns
 /// an empty TOML table when the file does not exist.
 pub fn load_config_as_toml(codex_home: &Path) -> std::io::Result<TomlValue> {
-    let config_path = codex_home.join(CONFIG_TOML_FILE);
-    match std::fs::read_to_string(&config_path) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    match std::fs::read_to_string(&read_path) {
         Ok(contents) => match toml::from_str::<TomlValue>(&contents) {
             Ok(val) => Ok(val),
             Err(e) => {
@@ -323,7 +324,8 @@ pub fn write_global_mcp_servers(
     servers: &BTreeMap<String, McpServerConfig>,
 ) -> std::io::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let mut doc = match std::fs::read_to_string(&config_path) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(contents) => contents
             .parse::<DocumentMut>()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
@@ -397,7 +399,8 @@ pub async fn persist_model_selection(
     use tokio::fs;
 
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let existing = match fs::read_to_string(&config_path).await {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let existing = match fs::read_to_string(&read_path).await {
         Ok(raw) => Some(raw),
         Err(err) if err.kind() == ErrorKind::NotFound => None,
         Err(err) => return Err(err.into()),
@@ -473,7 +476,8 @@ pub async fn persist_model_selection(
 pub fn set_project_trusted(codex_home: &Path, project_path: &Path) -> anyhow::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
     // Parse existing config if present; otherwise start a new document.
-    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -559,7 +563,8 @@ pub fn set_tui_theme_name(codex_home: &Path, theme: ThemeName) -> anyhow::Result
     let config_path = codex_home.join(CONFIG_TOML_FILE);
 
     // Parse existing config if present; otherwise start a new document.
-    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -613,7 +618,8 @@ pub fn set_tui_spinner_name(codex_home: &Path, spinner_name: &str) -> anyhow::Re
     let config_path = codex_home.join(CONFIG_TOML_FILE);
 
     // Parse existing config if present; otherwise start a new document.
-    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -645,7 +651,8 @@ pub fn set_custom_spinner(
     frames: &[String],
 ) -> anyhow::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let mut doc = match std::fs::read_to_string(&config_path) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -678,7 +685,8 @@ pub fn set_custom_theme(
     is_dark: Option<bool>,
 ) -> anyhow::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let mut doc = match std::fs::read_to_string(&config_path) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -742,7 +750,8 @@ pub fn set_tui_alternate_screen(codex_home: &Path, enabled: bool) -> anyhow::Res
     let config_path = codex_home.join(CONFIG_TOML_FILE);
 
     // Parse existing config if present; otherwise start a new document.
-    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -769,7 +778,8 @@ pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Res
     let config_path = codex_home.join(CONFIG_TOML_FILE);
 
     // Parse existing config if present; otherwise start a new document.
-    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -802,7 +812,8 @@ pub fn set_project_access_mode(
     let config_path = codex_home.join(CONFIG_TOML_FILE);
 
     // Parse existing config if present; otherwise start a new document.
-    let mut doc = match std::fs::read_to_string(config_path.clone()) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -864,8 +875,8 @@ pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
     Vec<(String, McpServerConfig)>,
     Vec<(String, McpServerConfig)>,
 )> {
-    let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let doc_str = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let doc_str = std::fs::read_to_string(&read_path).unwrap_or_default();
     let doc = doc_str.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
 
     fn table_to_list(tbl: &toml_edit::Table) -> Vec<(String, McpServerConfig)> {
@@ -937,7 +948,8 @@ pub fn add_mcp_server(
     }
 
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let mut doc = match std::fs::read_to_string(&config_path) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -994,7 +1006,8 @@ pub fn set_mcp_server_enabled(
     enabled: bool,
 ) -> anyhow::Result<bool> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
-    let mut doc = match std::fs::read_to_string(&config_path) {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
         Ok(s) => s.parse::<DocumentMut>()?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
         Err(e) => return Err(e.into()),
@@ -1731,26 +1744,76 @@ fn default_review_model() -> String {
     OPENAI_DEFAULT_REVIEW_MODEL.to_string()
 }
 
+fn env_path(var: &str) -> std::io::Result<Option<PathBuf>> {
+    match std::env::var(var) {
+        Ok(val) if !val.trim().is_empty() => {
+            let canonical = PathBuf::from(val).canonicalize()?;
+            Ok(Some(canonical))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn env_overrides_present() -> bool {
+    matches!(std::env::var("CODE_HOME"), Ok(ref v) if !v.trim().is_empty())
+        || matches!(std::env::var("CODEX_HOME"), Ok(ref v) if !v.trim().is_empty())
+}
+
+fn legacy_codex_home_dir() -> Option<PathBuf> {
+    static LEGACY: OnceLock<Option<PathBuf>> = OnceLock::new();
+    LEGACY
+        .get_or_init(|| {
+            if env_overrides_present() {
+                return None;
+            }
+            let Some(home) = home_dir() else {
+                return None;
+            };
+            let candidate = home.join(".codex");
+            if path_exists(&candidate) {
+                Some(candidate)
+            } else {
+                None
+            }
+        })
+        .clone()
+}
+
+fn path_exists(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok()
+}
+
+/// Resolve the filesystem path used for *reading* Codex state that may live in
+/// a legacy `~/.codex` directory. Writes should continue targeting `codex_home`.
+pub fn resolve_codex_path_for_read(codex_home: &Path, relative: &Path) -> PathBuf {
+    if env_overrides_present() {
+        return codex_home.join(relative);
+    }
+
+    if let Some(legacy) = legacy_codex_home_dir() {
+        let candidate = legacy.join(relative);
+        if path_exists(&candidate) {
+            return candidate;
+        }
+    }
+
+    codex_home.join(relative)
+}
+
 /// Returns the path to the Code/Codex configuration directory, which can be
 /// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set,
-/// defaults to `~/.code` (falling back to `~/.codex` if it exists for compatibility).
+/// defaults to `~/.code` for the fork.
 ///
 /// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
 ///   function will Err if the path does not exist.
 /// - If neither is set, this function does not verify that the directory exists.
 pub fn find_codex_home() -> std::io::Result<PathBuf> {
-    // First check CODE_HOME for the fork
-    if let Ok(val) = std::env::var("CODE_HOME") {
-        if !val.is_empty() {
-            return PathBuf::from(val).canonicalize();
-        }
+    if let Some(path) = env_path("CODE_HOME")? {
+        return Ok(path);
     }
 
-    // Fall back to CODEX_HOME for compatibility
-    if let Ok(val) = std::env::var("CODEX_HOME") {
-        if !val.is_empty() {
-            return PathBuf::from(val).canonicalize();
-        }
+    if let Some(path) = env_path("CODEX_HOME")? {
+        return Ok(path);
     }
 
     let home = home_dir().ok_or_else(|| {
@@ -1760,17 +1823,9 @@ pub fn find_codex_home() -> std::io::Result<PathBuf> {
         )
     })?;
 
-    // Check if ~/.codex exists for backward compatibility
-    let mut codex_path = home.clone();
-    codex_path.push(".codex");
-    if codex_path.exists() {
-        return Ok(codex_path);
-    }
-
-    // Otherwise use ~/.code for the fork
-    let mut p = home;
-    p.push(".code");
-    Ok(p)
+    let mut write_path = home;
+    write_path.push(".code");
+    Ok(write_path)
 }
 
 /// Returns the path to the folder where Codex logs are stored. Does not verify
