@@ -70,6 +70,7 @@ pub mod shell;
 pub mod spawn;
 pub mod terminal;
 mod tool_apply_patch;
+mod user_instructions;
 pub mod turn_diff_tracker;
 pub use rollout::list::ConversationsPage;
 pub use rollout::list::find_conversation_path_by_id_str;

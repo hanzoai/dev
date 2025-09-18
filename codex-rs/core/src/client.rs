@@ -114,6 +114,11 @@ impl ModelClient {
         self.effort
     }
 
+    /// Get the reasoning summary configuration
+    pub fn get_reasoning_summary(&self) -> ReasoningSummaryConfig {
+        self.summary
+    }
+
     /// Get the text verbosity configuration
     #[allow(dead_code)]
     pub fn get_text_verbosity(&self) -> TextVerbosityConfig {
@@ -133,10 +138,19 @@ impl ModelClient {
         match self.provider.wire_api {
             WireApi::Responses => self.stream_responses(prompt).await,
             WireApi::Chat => {
+                let effective_family = prompt
+                    .model_family_override
+                    .as_ref()
+                    .unwrap_or(&self.config.model_family);
+                let model_slug = prompt
+                    .model_override
+                    .as_deref()
+                    .unwrap_or(self.config.model.as_str());
                 // Create the raw streaming connection first.
                 let response_stream = stream_chat_completions(
                     prompt,
-                    &self.config.model_family,
+                    effective_family,
+                    model_slug,
                     &self.client,
                     &self.provider,
                     &self.debug_logger,
@@ -231,6 +245,11 @@ impl ModelClient {
         // For Azure, we send `store: true` and preserve reasoning item IDs.
         let azure_workaround = self.provider.is_azure_responses_endpoint();
 
+        let model_slug = prompt
+            .model_override
+            .as_deref()
+            .unwrap_or(self.config.model.as_str());
+
         let payload = ResponsesApiRequest {
             model: &self.config.model,
             instructions: &full_instructions,
@@ -248,6 +267,9 @@ impl ModelClient {
         };
 
         let mut payload_json = serde_json::to_value(&payload)?;
+        if let Some(model_value) = payload_json.get_mut("model") {
+            *model_value = serde_json::Value::String(model_slug.to_string());
+        }
         if azure_workaround {
             attach_item_ids(&mut payload_json, &input_with_instructions);
         }
@@ -260,12 +282,16 @@ impl ModelClient {
         let endpoint = self
             .provider
             .get_full_url(&auth_manager.as_ref().and_then(|m| m.auth()));
-        trace!("POST to {}: {}", endpoint, serde_json::to_string(&payload)?);
+        trace!(
+            "POST to {}: {}",
+            endpoint,
+            serde_json::to_string(&payload_json)?
+        );
 
         // Start logging the request and get a request_id to track the response
         let request_id = if let Ok(logger) = self.debug_logger.lock() {
             logger
-                .start_request_log(&endpoint, &serde_json::to_value(&payload)?)
+                .start_request_log(&endpoint, &payload_json)
                 .unwrap_or_default()
         } else {
             String::new()
