@@ -1,7 +1,6 @@
 use base64::Engine;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use thiserror::Error;
 use tracing::Level;
 
@@ -113,15 +112,24 @@ pub fn parse_id_token(id_token: &str) -> Result<IdTokenInfo, IdTokenInfoError> {
     };
 
     let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload_b64)?;
-    let raw_claims: Value = serde_json::from_slice(&payload_bytes)?;
-    if tracing::enabled!(Level::INFO) {
-        tracing::info!(id_token_claims = %raw_claims, "decoded ChatGPT id_token claims");
+    let claims: IdClaims = serde_json::from_slice(&payload_bytes)?;
+    if tracing::enabled!(Level::DEBUG) {
+        let plan = claims
+            .auth
+            .as_ref()
+            .and_then(|a| a.chatgpt_plan_type.as_ref())
+            .map(|plan| plan.as_string());
+        tracing::debug!(
+            email = claims.email.as_deref().unwrap_or("<missing>"),
+            chatgpt_plan_type = plan.as_deref().unwrap_or("unknown"),
+            "decoded ChatGPT id_token claims"
+        );
     }
-    let claims: IdClaims = serde_json::from_value(raw_claims)?;
+    let IdClaims { email, auth } = claims;
 
     Ok(IdTokenInfo {
-        email: claims.email,
-        chatgpt_plan_type: claims.auth.and_then(|a| a.chatgpt_plan_type),
+        email,
+        chatgpt_plan_type: auth.and_then(|a| a.chatgpt_plan_type),
         raw_jwt: id_token.to_string(),
     })
 }
