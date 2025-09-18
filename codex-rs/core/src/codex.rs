@@ -1846,7 +1846,7 @@ async fn submission_loop(
                 model_reasoning_effort,
                 model_reasoning_summary,
                 model_text_verbosity,
-                user_instructions,
+                user_instructions: provided_user_instructions,
                 base_instructions,
                 approval_policy,
                 sandbox_policy,
@@ -1881,7 +1881,7 @@ async fn submission_loop(
                 updated_config.model_reasoning_effort = model_reasoning_effort;
                 updated_config.model_reasoning_summary = model_reasoning_summary;
                 updated_config.model_text_verbosity = model_text_verbosity;
-                updated_config.user_instructions = user_instructions.clone();
+                updated_config.user_instructions = provided_user_instructions.clone();
                 updated_config.base_instructions = base_instructions.clone();
                 updated_config.approval_policy = approval_policy;
                 updated_config.sandbox_policy = sandbox_policy.clone();
@@ -1920,6 +1920,12 @@ async fn submission_loop(
                     old_auto_compact,
                     new_auto_compact,
                 );
+
+                let computed_user_instructions =
+                    get_user_instructions(&updated_config).await;
+                updated_config.user_instructions = computed_user_instructions.clone();
+
+                let effective_user_instructions = computed_user_instructions.clone();
 
                 let new_config = Arc::new(updated_config);
 
@@ -1970,7 +1976,7 @@ async fn submission_loop(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
                                 codex_protocol::mcp_protocol::ConversationId(session_id),
-                                user_instructions.clone(),
+                                effective_user_instructions.clone(),
                             ),
                         )
                             .await
@@ -2065,7 +2071,7 @@ async fn submission_loop(
                     client,
                     tools_config,
                     tx_event: tx_event.clone(),
-                    user_instructions,
+                    user_instructions: effective_user_instructions.clone(),
                     base_instructions,
                     approval_policy,
                     sandbox_policy,
