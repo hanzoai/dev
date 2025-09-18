@@ -491,10 +491,62 @@ fn highlight_command_summary(command: &str) -> Vec<Span<'static>> {
 fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
     let display = select_command_display(cmd, original_command);
     let (annotation, _) = parse_read_line_annotation_with_range(&display);
-    CommandSummary {
-        display,
-        annotation,
+    let display = if annotation.is_some() {
+        strip_redundant_line_filter_pipes(&display)
+    } else {
+        display
+    };
+    CommandSummary { display, annotation }
+}
+
+// Remove formatting-only pipes (sed/head/tail) when we already provide a line-range
+// annotation alongside the command summary. Keeps the core command intact for display.
+fn strip_redundant_line_filter_pipes(cmd: &str) -> String {
+    if !cmd.contains('|') { return cmd.to_string(); }
+
+    let mut segs: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    for ch in cmd.chars() {
+        match ch {
+            '\'' if !in_double => { in_single = !in_single; cur.push(ch); }
+            '"' if !in_single => { in_double = !in_double; cur.push(ch); }
+            '|' if !in_single && !in_double => {
+                segs.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(ch),
+        }
     }
+    if !cur.is_empty() { segs.push(cur.trim().to_string()); }
+
+    let is_redundant = |s: &str| {
+        let lower = s.trim().to_lowercase();
+        if lower.is_empty() { return false; }
+        if lower.starts_with("sed ") || lower == "sed" {
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            if parts.len() >= 3 && parts[1] == "-n" {
+                let tok = parts[2].trim_matches('\'').trim_matches('"');
+                if tok.ends_with('p') {
+                    let core = &tok[..tok.len().saturating_sub(1)];
+                    if core.split_once(',').is_some() || core.chars().all(|c| c.is_ascii_digit()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if lower == "head" || lower.starts_with("head ") { return true; }
+        if lower == "tail" || lower.starts_with("tail ") { return true; }
+        false
+    };
+
+    while let Some(last) = segs.last() {
+        if is_redundant(last) { segs.pop(); } else { break; }
+    }
+
+    if segs.is_empty() { return cmd.to_string(); }
+    segs.join(" | ")
 }
 
 fn select_command_display(cmd: &str, original_command: &[String]) -> String {
@@ -2252,6 +2304,11 @@ mod tests {
             parse_read_line_annotation("head -n 100 foo.txt"),
             Some("(lines 1 to 100)".into())
         );
+        // bare head => default 10
+        assert_eq!(
+            parse_read_line_annotation("git show HEAD:file | head"),
+            Some("(lines 1 to 10)".into())
+        );
         // tail -n +K
         assert_eq!(
             parse_read_line_annotation("tail -n +20 foo.txt"),
@@ -2262,8 +2319,35 @@ mod tests {
             parse_read_line_annotation("tail -n 50 foo.txt"),
             Some("(last 50 lines)".into())
         );
+        // bare tail => default 10
+        assert_eq!(
+            parse_read_line_annotation("git show HEAD:file | tail"),
+            Some("(last 10 lines)".into())
+        );
         // Unrelated command
         assert_eq!(parse_read_line_annotation("cat foo.txt"), None);
+    }
+
+    #[test]
+    fn strip_redundant_pipes_when_annotated() {
+        let cmd = "git show upstream/main:codex-rs/core/src/codex.rs | sed -n '2160,2640p'";
+        let (ann, _) = parse_read_line_annotation_with_range(cmd);
+        assert!(ann.is_some());
+        let cleaned = strip_redundant_line_filter_pipes(cmd);
+        assert!(cleaned.starts_with("git show upstream/main:codex-rs/core/src/codex.rs"));
+        assert!(!cleaned.contains("| sed -n"));
+
+        let cmd2 = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'";
+        let (ann2, _) = parse_read_line_annotation_with_range(cmd2);
+        assert!(ann2.is_some());
+        let cleaned2 = strip_redundant_line_filter_pipes(cmd2);
+        assert_eq!(cleaned2, "nl -ba core/src/parse_command.rs");
+
+        let cmd3 = "git show HEAD:file | head";
+        let (ann3, _) = parse_read_line_annotation_with_range(cmd3);
+        assert!(ann3.is_some());
+        let cleaned3 = strip_redundant_line_filter_pipes(cmd3);
+        assert_eq!(cleaned3, "git show HEAD:file");
     }
 
     #[test]
@@ -5737,6 +5821,13 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
             }
         }
     }
+    // bare `head` => default 10 lines
+    if lower.contains("head") && !lower.contains("-n") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.iter().any(|p| *p == "head") {
+            return (Some("(lines 1 to 10)".to_string()), Some((1, 10)));
+        }
+    }
     // tail -n +K => from K to end; tail -n N => last N lines
     if lower.contains("tail") && lower.contains("-n") {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -5751,6 +5842,13 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
                     return (Some(format!("(last {} lines)", n)), None);
                 }
             }
+        }
+    }
+    // bare `tail` => default 10 lines
+    if lower.contains("tail") && !lower.contains("-n") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.iter().any(|p| *p == "tail") {
+            return (Some("(last 10 lines)".to_string()), None);
         }
     }
     (None, None)
