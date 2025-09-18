@@ -107,7 +107,7 @@ where
 
 const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
-/// Load env vars from ~/.codex/.env and `$(pwd)/.env`.
+/// Load env vars from ~/.code/.env (legacy ~/.codex/.env is still read) and `$(pwd)/.env`.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.

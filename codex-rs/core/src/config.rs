@@ -120,7 +120,8 @@ pub struct Config {
     /// appends one extra argument containing a JSON payload describing the
     /// event.
     ///
-    /// Example `~/.codex/config.toml` snippet:
+    /// Example `~/.code/config.toml` snippet (Code also reads legacy
+    /// `~/.codex/config.toml`):
     ///
     /// ```toml
     /// notify = ["notify-send", "Codex"]
@@ -156,11 +157,12 @@ pub struct Config {
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: usize,
 
-    /// Directory containing all Codex state (defaults to `~/.codex` but can be
-    /// overridden by the `CODEX_HOME` environment variable).
+    /// Directory containing all Codex state (defaults to `~/.code`; can be
+    /// overridden by the `CODE_HOME` or `CODEX_HOME` environment variables).
     pub codex_home: PathBuf,
 
-    /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+    /// Settings that govern if and what will be written to `~/.code/history.jsonl`
+    /// (Code still reads legacy `~/.codex/history.jsonl`).
     pub history: History,
 
     /// Optional URI-based file opener. If set, citations to files in the model
@@ -239,7 +241,7 @@ impl Config {
         cli_overrides: Vec<(String, TomlValue)>,
         overrides: ConfigOverrides,
     ) -> std::io::Result<Self> {
-        // Resolve the directory that stores Codex state (e.g. ~/.codex or the
+        // Resolve the directory that stores Codex state (e.g. ~/.code or the
         // value of $CODEX_HOME) so we can embed it into the resulting
         // `Config` instance.
         let codex_home = find_codex_home()?;
@@ -1112,7 +1114,7 @@ fn apply_toml_override(root: &mut TomlValue, path: &str, value: TomlValue) {
     }
 }
 
-/// Base config deserialized from ~/.codex/config.toml.
+/// Base config deserialized from ~/.code/config.toml (legacy ~/.codex/config.toml is still read).
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct ConfigToml {
     /// Optional override of model selection.
@@ -1181,7 +1183,8 @@ pub struct ConfigToml {
     #[serde(default)]
     pub profiles: HashMap<String, ConfigProfile>,
 
-    /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+    /// Settings that govern if and what will be written to `~/.code/history.jsonl`
+    /// (Code still reads legacy `~/.codex/history.jsonl`).
     #[serde(default)]
     pub history: Option<History>,
 

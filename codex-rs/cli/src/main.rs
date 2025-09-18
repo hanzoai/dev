@@ -174,9 +174,11 @@ struct GenerateTsCommand {
 
 #[derive(Debug, Parser)]
 struct OrderReplayArgs {
-    /// Path to a response.json captured under ~/.codex/debug_logs/*_response.json
+    /// Path to a response.json captured under ~/.code/debug_logs/*_response.json
+    /// (legacy ~/.codex/debug_logs/ is still read).
     response_json: std::path::PathBuf,
-    /// Path to codex-tui.log (typically ~/.codex/log/codex-tui.log)
+    /// Path to codex-tui.log (typically ~/.code/log/codex-tui.log; legacy
+    /// ~/.codex/log/codex-tui.log is still read).
     tui_log: std::path::PathBuf,
 }
 
