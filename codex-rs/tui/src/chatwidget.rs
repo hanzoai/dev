@@ -111,6 +111,7 @@ use crate::user_approval_widget::ApprovalRequest;
 use codex_ansi_escape::ansi_escape_line;
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
+use codex_core::config::resolve_codex_path_for_read;
 use codex_core::config::set_github_check_on_push;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
@@ -138,7 +139,7 @@ struct CachedConnection {
 
 async fn read_cached_connection() -> Option<(Option<u16>, Option<String>)> {
     let codex_home = find_codex_home().ok()?;
-    let path = codex_home.join("cache.json");
+    let path = resolve_codex_path_for_read(&codex_home, std::path::Path::new("cache.json"));
     let bytes = tokio::fs::read(path).await.ok()?;
     let parsed: CachedConnection = serde_json::from_slice(&bytes).ok()?;
     Some((parsed.port, parsed.ws))

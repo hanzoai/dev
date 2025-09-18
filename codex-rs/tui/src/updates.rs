@@ -7,12 +7,14 @@ use serde::Serialize;
 use std::path::Path;
 use std::path::PathBuf;
 
+use codex_core::config::resolve_codex_path_for_read;
 use codex_core::config::Config;
 use codex_core::default_client::create_client;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
-    let info = read_version_info(&version_file).ok();
+    let read_path = resolve_codex_path_for_read(&config.codex_home, Path::new(VERSION_FILENAME));
+    let info = read_version_info(&read_path).ok();
     let originator = config.responses_originator_header.clone();
 
     // Always refresh the cached latest version in the background so TUI startup
