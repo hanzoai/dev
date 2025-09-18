@@ -240,7 +240,7 @@ impl RolloutRecorder {
                         _ => None,
                     })
                     .collect();
-                (resumed.conversation_id.0, resumed.history, events)
+                (uuid::Uuid::from(resumed.conversation_id), resumed.history, events)
             }
             _ => (uuid::Uuid::new_v4(), Vec::new(), Vec::new()),
         };
