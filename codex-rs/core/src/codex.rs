@@ -1929,7 +1929,7 @@ async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                codex_protocol::mcp_protocol::ConversationId(session_id),
+                                codex_protocol::mcp_protocol::ConversationId::from(session_id),
                                 user_instructions.clone(),
                             ),
                         )
