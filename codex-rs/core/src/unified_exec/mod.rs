@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use portable_pty::CommandBuilder;
 use portable_pty::PtySize;
 use portable_pty::native_pty_system;
