@@ -4559,6 +4559,7 @@ impl ChatWidget<'_> {
         self.history_push(history_cell::new_status_output(
             &self.config,
             &self.total_token_usage,
+            &self.last_token_usage,
         ));
     }
 
