@@ -407,6 +407,10 @@ impl BottomPane<'_> {
         self.composer.is_empty()
     }
 
+    pub(crate) fn composer_text(&self) -> String {
+        self.composer.text().to_string()
+    }
+
     pub(crate) fn is_task_running(&self) -> bool {
         self.is_task_running
     }
