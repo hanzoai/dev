@@ -105,6 +105,13 @@ pub enum Op {
         items: Vec<InputItem>,
     },
 
+    /// Queue user input to be appended to the next model request without
+    /// interrupting the current turn.
+    QueueUserInput {
+        /// User input items, see `InputItem`
+        items: Vec<InputItem>,
+    },
+
     /// Approve a command execution
     ExecApproval {
         /// The id of the submission we are approving

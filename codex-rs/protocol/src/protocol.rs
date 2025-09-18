@@ -61,6 +61,13 @@ pub enum Op {
         items: Vec<InputItem>,
     },
 
+    /// Queue user input to be appended to the next model request without
+    /// interrupting the current turn.
+    QueueUserInput {
+        /// User input items, see `InputItem`
+        items: Vec<InputItem>,
+    },
+
     /// Similar to [`Op::UserInput`], but contains additional context required
     /// for a turn of a [`crate::codex_conversation::CodexConversation`].
     UserTurn {
