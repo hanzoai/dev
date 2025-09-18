@@ -19,6 +19,7 @@ use codex_protocol::mcp_protocol::AuthMode;
 
 use crate::token_data::TokenData;
 use crate::token_data::parse_id_token;
+use crate::config::resolve_codex_path_for_read;
 
 #[derive(Debug, Clone)]
 pub struct CodexAuth {
@@ -238,8 +239,9 @@ fn load_auth(
     // back to AuthMode::ApiKey using the OPENAI_API_KEY environment variable
     // (if it is set).
     let auth_file = get_auth_file(codex_home);
+    let auth_read_path = resolve_codex_path_for_read(codex_home, Path::new("auth.json"));
     let client = crate::default_client::create_client(originator);
-    let auth_dot_json = match try_read_auth_json(&auth_file) {
+    let auth_dot_json = match try_read_auth_json(&auth_read_path) {
         Ok(auth) => auth,
         // If auth.json does not exist, try to read the OPENAI_API_KEY from the
         // environment variable.

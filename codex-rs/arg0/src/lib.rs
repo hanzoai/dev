@@ -2,6 +2,7 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
+use codex_core::config::resolve_codex_path_for_read;
 use codex_core::CODEX_APPLY_PATCH_ARG1;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -106,14 +107,15 @@ where
 
 const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
-/// Load env vars from ~/.codex/.env and `$(pwd)/.env`.
+/// Load env vars from ~/.code/.env (legacy ~/.codex/.env is still read) and `$(pwd)/.env`.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.
 fn load_dotenv() {
     // 1) Load from global ~/.code/.env (or ~/.codex/.env) first.
     if let Ok(codex_home) = codex_core::config::find_codex_home() {
-        if let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env")) {
+        let global_env_path = resolve_codex_path_for_read(&codex_home, Path::new(".env"));
+        if let Ok(iter) = dotenvy::from_path_iter(global_env_path) {
             // Global env may legitimately contain provider keys for Code usage.
             set_filtered(iter);
         }
