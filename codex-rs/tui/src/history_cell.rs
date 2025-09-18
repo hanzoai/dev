@@ -1050,12 +1050,11 @@ impl HistoryCell for PlainHistoryCell {
             // Keep this in sync with the composer constants.
             let inner_w = width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into());
             let text = Text::from(self.display_lines_trimmed());
-            let content_height: u16 = Paragraph::new(text)
+            Paragraph::new(text)
                 .wrap(Wrap { trim: false })
                 .line_count(inner_w)
                 .try_into()
-                .unwrap_or(0);
-            content_height.saturating_add(1)
+                .unwrap_or(0)
         } else {
             Paragraph::new(Text::from(self.display_lines_trimmed()))
                 .wrap(Wrap { trim: false })
@@ -1083,10 +1082,7 @@ impl HistoryCell for PlainHistoryCell {
         }
 
         let lines = self.display_lines_trimmed();
-        let mut padded_lines = Vec::with_capacity(lines.len().saturating_add(1));
-        padded_lines.push(Line::from(""));
-        padded_lines.extend(lines);
-        let text = Text::from(padded_lines);
+        let text = Text::from(lines);
 
         // Add Block with padding: reserve shared columns on the right.
         let block = Block::default().style(bg_style).padding(Padding {
@@ -5602,6 +5598,7 @@ pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("user"));
+    lines.push(Line::from(String::new()));
     // Sanitize user-provided text for terminal safety and stable layout:
     // - Normalize common TTY overwrite sequences (\r, \x08, ESC[K)
     // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
@@ -5639,6 +5636,7 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
         Span::from("user "),
         Span::from("(queued)").style(Style::default().fg(crate::colors::text_dim())),
     ]));
+    lines.push(Line::from(String::new()));
     // Normalize and render body like normal user messages
     let normalized = normalize_overwrite_sequences(&message);
     let sanitized = sanitize_for_tui(
