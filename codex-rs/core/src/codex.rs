@@ -17,10 +17,12 @@ use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::maybe_parse_apply_patch_verified;
+use codex_browser::BrowserConfig as CodexBrowserConfig;
+use codex_browser::BrowserManager;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
 use codex_protocol::protocol::TurnAbortReason;
-// unused: TurnAbortedEvent
+use codex_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
 use mcp_types::CallToolResult;
 use serde::Serialize;
@@ -39,6 +41,11 @@ use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
+use codex_protocol::protocol::RolloutItem;
+
+mod compact;
+use self::compact::build_compacted_history;
+use self::compact::collect_user_messages;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
@@ -95,6 +102,27 @@ impl ConfirmGuardPatternRuntime {
             });
         format!("{header}\n\n{original_label}: {original_value}\nresend_exact_argv: {suggested}")
     }
+}
+
+trait MutexExt<T> {
+    fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> MutexExt<T> for Mutex<T> {
+    fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T> {
+        #[expect(clippy::expect_used)]
+        self.lock().expect("poisoned lock")
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TurnContext {
+    pub(crate) client: ModelClient,
+    pub(crate) cwd: PathBuf,
+    pub(crate) base_instructions: Option<String>,
+    pub(crate) user_instructions: Option<String>,
+    pub(crate) approval_policy: AskForApproval,
+    pub(crate) sandbox_policy: SandboxPolicy,
 }
 
 /// Gather ephemeral, per-turn context that should not be persisted to history.
@@ -426,6 +454,7 @@ use crate::client::ModelClient;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::environment_context::EnvironmentContext;
+use crate::user_instructions::UserInstructions;
 use crate::config::{persist_model_selection, Config};
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::conversation_history::ConversationHistory;
@@ -481,6 +510,7 @@ use crate::protocol::InputItem;
 use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
+use crate::protocol::RecordedEvent;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
@@ -601,7 +631,7 @@ impl Codex {
 #[derive(Default)]
 struct State {
     approved_commands: HashSet<Vec<String>>,
-    current_agent: Option<AgentAgent>,
+    current_task: Option<AgentTask>,
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pending_input: Vec<ResponseInputItem>,
     history: ConversationHistory,
@@ -617,6 +647,7 @@ struct State {
     /// 1-based ordinal of the current HTTP request attempt in this session.
     request_ordinal: u64,
     dry_run_guard: DryRunGuardState,
+    next_internal_sub_id: u64,
 }
 
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
@@ -798,21 +829,28 @@ impl Session {
 }
 
 impl Session {
-    pub fn set_agent(&self, agent: AgentAgent) {
+    pub fn set_task(&self, agent: AgentTask) {
         let mut state = self.state.lock().unwrap();
-        if let Some(current_agent) = state.current_agent.take() {
-            current_agent.abort(TurnAbortReason::Replaced);
+        if let Some(current_task) = state.current_task.take() {
+            current_task.abort(TurnAbortReason::Replaced);
         }
-        state.current_agent = Some(agent);
+        state.current_task = Some(agent);
     }
 
-    pub fn remove_agent(&self, sub_id: &str) {
+    pub fn remove_task(&self, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
-        if let Some(agent) = &state.current_agent {
+        if let Some(agent) = &state.current_task {
             if agent.sub_id == sub_id {
-                state.current_agent.take();
+                state.current_task.take();
             }
         }
+    }
+
+    pub(crate) fn next_internal_sub_id(&self) -> String {
+        let mut state = self.state.lock().unwrap();
+        let id = state.next_internal_sub_id;
+        state.next_internal_sub_id = state.next_internal_sub_id.saturating_add(1);
+        format!("auto-compact-{id}")
     }
 
     /// Sends the given event to the client and swallows the send error, if
@@ -823,8 +861,39 @@ impl Session {
         }
     }
 
+    /// Persist an event into the rollout log if appropriate.
+    fn persist_event(&self, event: &Event) {
+        if !crate::rollout::policy::should_persist_event_msg(&event.msg) {
+            return;
+        }
+        let Some(msg) = crate::protocol::event_msg_to_protocol(&event.msg) else {
+            return;
+        };
+        let recorder = {
+            let guard = self.rollout.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+        if let Some(rec) = recorder {
+            let order = event
+                .order
+                .as_ref()
+                .map(crate::protocol::order_meta_to_protocol);
+            let protocol_event = codex_protocol::protocol::RecordedEvent {
+                id: event.id.clone(),
+                event_seq: event.event_seq,
+                order,
+                msg,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = rec.record_events(&[protocol_event]).await {
+                    warn!("failed to persist rollout event: {e}");
+                }
+            });
+        }
+    }
+
     /// Create a stamped Event with a per-turn sequence number.
-    pub(crate) fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+    fn stamp_event(&self, sub_id: &str, msg: EventMsg) -> Event {
         let mut state = self.state.lock().unwrap();
         let seq = match msg {
             EventMsg::TaskStarted => {
@@ -847,7 +916,18 @@ impl Session {
                 *e
             }
         };
-        Event { id: sub_id.to_string(), event_seq: seq, msg, order: None }
+        Event {
+            id: sub_id.to_string(),
+            event_seq: seq,
+            msg,
+            order: None,
+        }
+    }
+
+    pub(crate) fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+        let event = self.stamp_event(sub_id, msg);
+        self.persist_event(&event);
+        event
     }
 
     /// Same as make_event but allows supplying a provider sequence_number
@@ -856,10 +936,9 @@ impl Session {
     /// and local to our runtime. Provider ordering is carried via
     /// `OrderMeta` when applicable.
     fn make_event_with_hint(&self, sub_id: &str, msg: EventMsg, _seq_hint: Option<u64>) -> Event {
-        // Preserve the monotonic invariant of event_seq by delegating to make_event.
-        // Any ordering hints from the provider should be conveyed through
-        // OrderMeta (see make_event_with_order) rather than event_seq.
-        self.make_event(sub_id, msg)
+        let event = self.stamp_event(sub_id, msg);
+        self.persist_event(&event);
+        event
     }
 
     fn make_event_with_order(
@@ -867,10 +946,11 @@ impl Session {
         sub_id: &str,
         msg: EventMsg,
         order: crate::protocol::OrderMeta,
-        seq_hint: Option<u64>,
+        _seq_hint: Option<u64>,
     ) -> Event {
-        let mut ev = self.make_event_with_hint(sub_id, msg, seq_hint);
+        let mut ev = self.stamp_event(sub_id, msg);
         ev.order = Some(order);
+        self.persist_event(&ev);
         ev
     }
 
@@ -885,6 +965,17 @@ impl Session {
     fn current_request_ordinal(&self) -> u64 {
         let state = self.state.lock().unwrap();
         state.request_ordinal
+    }
+
+    fn make_turn_context(&self) -> Arc<TurnContext> {
+        Arc::new(TurnContext {
+            client: self.client.clone(),
+            cwd: self.cwd.clone(),
+            base_instructions: self.base_instructions.clone(),
+            user_instructions: self.user_instructions.clone(),
+            approval_policy: self.approval_policy,
+            sandbox_policy: self.sandbox_policy.clone(),
+        })
     }
 
     pub async fn request_command_approval(
@@ -1104,6 +1195,18 @@ impl Session {
             if let Err(e) = rec.record_state(snapshot).await {
                 error!("failed to record rollout state: {e:#}");
             }
+            if let Err(e) = rec.record_response_items(items).await {
+                error!("failed to record rollout items: {e:#}");
+            }
+        }
+    }
+
+    pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
+        let recorder = {
+            let guard = self.rollout.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+        if let Some(rec) = recorder {
             if let Err(e) = rec.record_items(items).await {
                 error!("failed to record rollout items: {e:#}");
             }
@@ -1386,6 +1489,8 @@ impl Session {
         // Concatenate filtered history with current turn's extras (which includes current ephemeral images)
         let result = [filtered_history, extra].concat();
 
+        debug_history("turn_input_with_history", &result);
+
         // Count total images in result for debugging
         let total_images = result
             .iter()
@@ -1407,10 +1512,49 @@ impl Session {
         result
     }
 
+    pub(crate) fn build_initial_context(&self, turn_context: &TurnContext) -> Vec<ResponseItem> {
+        let mut items = Vec::new();
+        if let Some(user_instructions) = turn_context.user_instructions.as_deref() {
+            items.push(UserInstructions::new(user_instructions.to_string()).into());
+        }
+        items.push(ResponseItem::from(EnvironmentContext::new(
+            Some(turn_context.cwd.clone()),
+            Some(turn_context.approval_policy),
+            Some(turn_context.sandbox_policy.clone()),
+            Some(self.user_shell.clone()),
+        )));
+        items
+    }
+
+    pub(crate) fn reconstruct_history_from_rollout(
+        &self,
+        turn_context: &TurnContext,
+        rollout_items: &[RolloutItem],
+    ) -> Vec<ResponseItem> {
+        let mut history = self.build_initial_context(turn_context);
+        for item in rollout_items {
+            match item {
+                RolloutItem::ResponseItem(response_item) => {
+                    history.push(response_item.clone());
+                }
+                RolloutItem::Compacted(compacted) => {
+                    let user_messages = collect_user_messages(&history);
+                    history = build_compacted_history(
+                        self.build_initial_context(turn_context),
+                        &user_messages,
+                        &compacted.message,
+                    );
+                }
+                _ => {}
+            }
+        }
+        history
+    }
+
     /// Returns the input if there was no agent running to inject into
     pub fn inject_input(&self, input: Vec<InputItem>) -> Result<(), Vec<InputItem>> {
         let mut state = self.state.lock().unwrap();
-        if state.current_agent.is_some() {
+        if state.current_task.is_some() {
             state
                 .pending_input
                 .push(response_input_from_core_items(input));
@@ -1460,8 +1604,8 @@ impl Session {
         // `pending_input` by an earlier code path. Clearing it would drop the
         // user's message and prevent the next turn from ever starting.
         state.turn_scratchpad = None;
-        // Take current agent while holding the lock, then drop the lock BEFORE calling abort
-        let current = state.current_agent.take();
+        // Take current task while holding the lock, then drop the lock BEFORE calling abort
+        let current = state.current_task.take();
         drop(state);
         if let Some(agent) = current {
             agent.abort(TurnAbortReason::Interrupted);
@@ -1524,6 +1668,7 @@ impl State {
             // do not reset provider ordering mid-session.
             request_ordinal: self.request_ordinal,
             dry_run_guard: self.dry_run_guard.clone(),
+            next_internal_sub_id: self.next_internal_sub_id,
             ..Default::default()
         }
     }
@@ -1545,15 +1690,28 @@ pub(crate) struct ApplyPatchCommandContext {
 }
 
 /// A series of Turns in response to user input.
-pub(crate) struct AgentAgent {
+pub(crate) struct AgentTask {
     sess: Arc<Session>,
     sub_id: String,
     handle: AbortHandle,
 }
 
-impl AgentAgent {
-    fn spawn(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) -> Self {
-        let handle = tokio::spawn(run_agent(Arc::clone(&sess), sub_id.clone(), input)).abort_handle();
+impl AgentTask {
+    fn spawn(
+        sess: Arc<Session>,
+        turn_context: Arc<TurnContext>,
+        sub_id: String,
+        input: Vec<InputItem>,
+    ) -> Self {
+        let handle = {
+            let sess_clone = Arc::clone(&sess);
+            let tc_clone = Arc::clone(&turn_context);
+            let sub_clone = sub_id.clone();
+            tokio::spawn(async move {
+                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+            })
+            .abort_handle()
+        };
         Self {
             sess,
             sub_id,
@@ -1563,17 +1721,28 @@ impl AgentAgent {
 
     fn compact(
         sess: Arc<Session>,
+        turn_context: Arc<TurnContext>,
         sub_id: String,
         input: Vec<InputItem>,
         compact_instructions: String,
     ) -> Self {
-        let handle = tokio::spawn(run_compact_agent(
-            Arc::clone(&sess),
-            sub_id.clone(),
-            input,
-            compact_instructions,
-        ))
-        .abort_handle();
+        let handle = {
+            let sess_clone = Arc::clone(&sess);
+            let tc_clone = Arc::clone(&turn_context);
+            let sub_clone = sub_id.clone();
+            tokio::spawn(async move {
+                let _ = compact::perform_compaction(
+                    sess_clone,
+                    tc_clone,
+                    sub_clone,
+                    input,
+                    compact_instructions,
+                    true,
+                )
+                .await;
+            })
+            .abort_handle()
+        };
         Self {
             sess,
             sub_id,
@@ -1581,16 +1750,15 @@ impl AgentAgent {
         }
     }
 
-    fn abort(self, _reason: TurnAbortReason) {
-        // TOCTOU?
+    fn abort(self, reason: TurnAbortReason) {
         if !self.handle.is_finished() {
             self.handle.abort();
-            let stamped = self
+            let event = self
                 .sess
-                .make_event(&self.sub_id, EventMsg::Error(ErrorEvent { message: "Turn interrupted".to_string() }));
-            let tx_event = self.sess.tx_event.clone();
+                .make_event(&self.sub_id, EventMsg::TurnAborted(TurnAbortedEvent { reason }));
+            let sess = self.sess.clone();
             tokio::spawn(async move {
-                tx_event.send(stamped).await.ok();
+                sess.send_event(event).await;
             });
         }
     }
@@ -1731,7 +1899,8 @@ async fn submission_loop(
                 config = Arc::clone(&new_config);
 
                 // Optionally resume an existing rollout.
-                let mut restored_items: Option<Vec<ResponseItem>> = None;
+                let mut restored_items: Option<Vec<RolloutItem>> = None;
+                let mut restored_events: Option<Vec<RecordedEvent>> = None;
                 let rollout_recorder: Option<RolloutRecorder> =
                     if let Some(path) = resume_path.as_ref() {
                         match RolloutRecorder::resume(&config, path).await {
@@ -1739,6 +1908,9 @@ async fn submission_loop(
                                 session_id = saved.session_id;
                                 if !saved.items.is_empty() {
                                     restored_items = Some(saved.items);
+                                }
+                                if !saved.events.is_empty() {
+                                    restored_events = Some(saved.events);
                                 }
                                 Some(rec)
                             }
@@ -1875,12 +2047,20 @@ async fn submission_loop(
                     last_screenshot_info: Mutex::new(None),
                     confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
                 }));
+                let mut replay_history_items: Option<Vec<ResponseItem>> = None;
+
 
                 // Patch restored state into the newly created session.
                 if let Some(sess_arc) = &sess {
                     if let Some(items) = &restored_items {
-                        let mut st = sess_arc.state.lock().unwrap();
-                        st.history.record_items(items.iter());
+                        let turn_context = sess_arc.make_turn_context();
+                        let reconstructed = sess_arc.reconstruct_history_from_rollout(&turn_context, items);
+                        {
+                            let mut st = sess_arc.state.lock().unwrap();
+                            st.history = ConversationHistory::new();
+                            st.history.record_items(reconstructed.iter());
+                        }
+                        replay_history_items = Some(reconstructed);
                     }
                 }
 
@@ -1908,16 +2088,18 @@ async fn submission_loop(
                     }
                 }
                 // If we resumed from a rollout, replay the prior transcript into the UI.
-                if let Some(items) = restored_items {
+                if replay_history_items.is_some() || restored_events.is_some() {
+                    let items = replay_history_items.clone().unwrap_or_default();
+                    let events = restored_events.clone().unwrap_or_default();
                     let event = sess_arc.make_event(
                         &sub.id,
-                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }),
+                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items, events }),
                     );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
                     }
                 }
-                
+
                 // Initialize agent manager after SessionConfigured is sent
                 if !agent_manager_initialized {
                     let mut manager = AGENT_MANAGER.write().await;
@@ -1959,12 +2141,13 @@ async fn submission_loop(
                 sess.cleanup_old_status_items().await;
 
                 // Abort synchronously here to avoid a race that can kill the
-                // newly spawned agent if the async abort runs after set_agent.
+                // newly spawned agent if the async abort runs after set_task.
                 sess.abort();
 
                 // Spawn a new agent for this user input.
-                let agent = AgentAgent::spawn(Arc::clone(sess), sub.id, items);
-                sess.set_agent(agent);
+                let turn_context = sess.make_turn_context();
+                let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub.id.clone(), items);
+                sess.set_task(agent);
             }
             Op::ExecApproval { id, decision } => {
                 let sess = match sess.as_ref() {
@@ -2050,20 +2233,12 @@ async fn submission_loop(
                     }
                 };
 
-                // Create a summarization request as user input
-                const SUMMARIZATION_PROMPT: &str = include_str!("prompt_for_compact_command.md");
-
-                // Attempt to inject input into current agent
+                // Attempt to inject input into current task
                 if let Err(items) = sess.inject_input(vec![InputItem::Text {
                     text: "Start Summarization".to_string(),
                 }]) {
-                    let agent = AgentAgent::compact(
-                        sess.clone(),
-                        sub.id,
-                        items,
-                        SUMMARIZATION_PROMPT.to_string(),
-                    );
-                    sess.set_agent(agent);
+                    let turn_context = sess.make_turn_context();
+                    compact::spawn_compact_task(sess.clone(), turn_context, sub.id.clone(), items);
                 }
             }
             Op::Shutdown => {
@@ -2127,7 +2302,7 @@ async fn submission_loop(
 ///   back to the model in the next turn.
 /// - If the model sends only an assistant message, we record it in the
 ///   conversation history and consider the agent complete.
-async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
+async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: String, input: Vec<InputItem>) {
     if input.is_empty() {
         return;
     }
@@ -2176,6 +2351,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
+        let pending_input_tail = pending_input.clone();
 
         // Do not duplicate the initial input in `pending_input`.
         // It is already recorded to history above; ephemeral items are appended separately.
@@ -2191,7 +2367,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         // conversation history on each turn. The rollout file, however, should
         // only record the new items that originated in this turn so that it
         // represents an append-only log without duplicates.
-        let turn_input: Vec<ResponseItem> = sess.turn_input_with_history(pending_input);
+        let turn_input: Vec<ResponseItem> = sess.turn_input_with_history(pending_input_tail.clone());
 
         let turn_input_messages: Vec<String> = turn_input
             .iter()
@@ -2206,7 +2382,17 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                 })
             })
             .collect();
-        match run_turn(&sess, &mut turn_diff_tracker, sub_id.clone(), turn_input).await {
+        match run_turn(
+            &sess,
+            &turn_context,
+            &mut turn_diff_tracker,
+            sub_id.clone(),
+            initial_response_item.clone(),
+            pending_input_tail,
+            turn_input,
+        )
+        .await
+        {
             Ok(turn_output) => {
                 let mut items_to_record_in_conversation_history = Vec::<ResponseItem>::new();
                 let mut responses = Vec::<ResponseInputItem>::new();
@@ -2340,7 +2526,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             }
         }
     }
-    sess.remove_agent(&sub_id);
+    sess.remove_task(&sub_id);
     let event = sess.make_event(
         &sub_id,
         EventMsg::TaskComplete(TaskCompleteEvent {
@@ -2357,14 +2543,18 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
 }
 
 async fn run_turn(
-    sess: &Session,
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
-    input: Vec<ResponseItem>,
+    initial_user_item: ResponseItem,
+    pending_input_tail: Vec<ResponseItem>,
+    mut input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
     // Check if browser is enabled
     let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
-    
+
+    let tc = &**turn_context;
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
@@ -2389,18 +2579,21 @@ async fn run_turn(
 
         let prompt = Prompt {
             input: attempt_input.clone(),
-            user_instructions: sess.user_instructions.clone(),
             store: !sess.disable_response_storage,
-            tools: tools.clone(),
-            base_instructions_override: sess.base_instructions.clone(),
+            user_instructions: tc.user_instructions.clone(),
             environment_context: Some(EnvironmentContext::new(
-                Some(sess.cwd.clone()),
-                Some(sess.approval_policy),
-                Some(sess.sandbox_policy.clone()),
+                Some(tc.cwd.clone()),
+                Some(tc.approval_policy),
+                Some(tc.sandbox_policy.clone()),
                 Some(sess.user_shell.clone()),
             )),
+            tools: tools.clone(),
             status_items, // Include status items with this request
+            base_instructions_override: tc.base_instructions.clone(),
+            include_additional_instructions: true,
             text_format: None,
+            model_override: None,
+            model_family_override: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
@@ -2440,8 +2633,6 @@ async fn run_turn(
 
                         if looks_like_context_overflow {
                             did_auto_compact = true;
-
-                            // Inform UI and run a one-off compact turn inline, then retry
                             sess
                                 .notify_stream_error(
                                     &sub_id,
@@ -2450,62 +2641,34 @@ async fn run_turn(
                                 )
                                 .await;
 
-                            const SUMMARIZATION_PROMPT: &str =
-                                include_str!("prompt_for_compact_command.md");
+                            let compacted_history = compact::run_inline_auto_compact_task(
+                                Arc::clone(&sess),
+                                Arc::clone(&turn_context),
+                            )
+                            .await;
 
-                            let compact_input = response_input_from_core_items(vec![InputItem::Text {
-                                text: "Start Summarization".to_string(),
-                            }]);
-                            let compact_turn_input: Vec<ResponseItem> =
-                                sess.turn_input_with_history(vec![compact_input.clone().into()]);
+                            // Reset any partial attempt state and rebuild the request payload using the
+                            // newly compacted history plus the current user turn items.
+                            sess.clear_scratchpad();
 
-                            let compact_prompt = Prompt {
-                                input: compact_turn_input,
-                                user_instructions: None,
-                                store: !sess.disable_response_storage,
-                                tools: Vec::new(),
-                                base_instructions_override: Some(SUMMARIZATION_PROMPT.to_string()),
-                                environment_context: None,
-                                status_items: Vec::new(),
-                                text_format: None,
-                            };
-
-                            match drain_to_completed(sess, &sub_id, &compact_prompt).await {
-                                Ok(()) => {
-                                    // Keep only the summary to shrink history
-                                    {
-                                        let mut state = sess.state.lock().unwrap();
-                                        state.history.keep_last_messages(1);
-                                    }
-
-                                    // Reset any partial attempt state and retry immediately
-                                    sess.clear_scratchpad();
-                                    sess
-                                        .notify_stream_error(
-                                            &sub_id,
-                                            "/compact completed; retrying with condensed history…"
-                                                .to_string(),
-                                        )
-                                        .await;
-                                    attempt_input = input.clone();
-                                    continue;
+                            if compacted_history.is_empty() {
+                                attempt_input = input.clone();
+                            } else {
+                                let mut rebuilt = compacted_history;
+                                rebuilt.push(initial_user_item.clone());
+                                if !pending_input_tail.is_empty() {
+                                    rebuilt.extend(pending_input_tail.iter().cloned());
                                 }
-                                Err(err) => {
-                                    sess
-                                        .notify_stream_error(
-                                            &sub_id,
-                                            format!(
-                                                "/compact failed: {err}; falling back to normal retries…"
-                                            ),
-                                        )
-                                        .await;
-                                }
+                                input = rebuilt.clone();
+                                attempt_input = rebuilt;
                             }
+                            continue;
                         }
                     }
                 }
+
                 // Use the configured provider-specific stream retry budget.
-                let max_retries = sess.client.get_provider().stream_max_retries();
+                let max_retries = tc.client.get_provider().stream_max_retries();
                 if retries < max_retries {
                     retries += 1;
                     let delay = match e {
@@ -2822,102 +2985,6 @@ async fn try_run_turn(
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
     }
-}
-
-async fn run_compact_agent(
-    sess: Arc<Session>,
-    sub_id: String,
-    input: Vec<InputItem>,
-    compact_instructions: String,
-) {
-    let start_event = sess.make_event(&sub_id, EventMsg::TaskStarted);
-    if sess.tx_event.send(start_event).await.is_err() {
-        return;
-    }
-
-    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
-    let turn_input: Vec<ResponseItem> =
-        sess.turn_input_with_history(vec![initial_input_for_turn.clone().into()]);
-
-    let max_retries = sess.client.get_provider().stream_max_retries();
-    let mut retries = 0;
-
-    loop {
-        // Bump request_ordinal for this provider request attempt so
-        // downstream OrderMeta carries the correct `req` index.
-        sess.begin_http_attempt();
-        // Build status items (screenshots, system status) fresh for each attempt
-        let status_items = build_turn_status_items(&sess).await;
-
-        let prompt = Prompt {
-            input: turn_input.clone(),
-            user_instructions: None,
-            store: !sess.disable_response_storage,
-            environment_context: None,
-            tools: Vec::new(),
-            base_instructions_override: Some(compact_instructions.clone()),
-            status_items, // Include status items with this request
-            text_format: None,
-        };
-
-        let attempt_result = drain_to_completed(&sess, &sub_id, &prompt).await;
-
-        match attempt_result {
-            Ok(()) => {
-                // Record status items to conversation history after successful turn
-                if !prompt.status_items.is_empty() {
-                    sess.record_conversation_items(&prompt.status_items).await;
-                }
-                break;
-            }
-            Err(CodexErr::Interrupted) => return,
-            Err(e) => {
-                if retries < max_retries {
-                    retries += 1;
-                    let delay = backoff(retries);
-                    sess.notify_stream_error(
-                        &sub_id,
-                        format!(
-                            "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
-                        ),
-                    )
-                    .await;
-                    tokio::time::sleep(delay).await;
-                    continue;
-                } else {
-                    let event = sess.make_event(
-                        &sub_id,
-                        EventMsg::Error(ErrorEvent { message: e.to_string() }),
-                    );
-                    sess.send_event(event).await;
-                    // Ensure the UI is released from running state even on errors.
-                    let done = sess.make_event(
-                        &sub_id,
-                        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
-                    );
-                    sess.send_event(done).await;
-                    return;
-                }
-            }
-        }
-    }
-
-    sess.remove_agent(&sub_id);
-    let event = sess.make_event(
-        &sub_id,
-        EventMsg::AgentMessage(AgentMessageEvent {
-            message: "Compact agent completed".to_string(),
-        }),
-    );
-    sess.send_event(event).await;
-    let event = sess.make_event(
-        &sub_id,
-        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
-    );
-    sess.send_event(event).await;
-
-    let mut state = sess.state.lock().unwrap();
-    state.history.keep_last_messages(1);
 }
 
 async fn handle_response_item(
@@ -3238,6 +3305,193 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     };
                 }
             };
+
+            struct BrowserFetchOutcome {
+                html: String,
+                final_url: Option<String>,
+                headless: bool,
+            }
+
+            async fn fetch_html_via_headless_browser(
+                url: &str,
+                timeout: Duration,
+            ) -> Result<BrowserFetchOutcome, String> {
+                let mut config = CodexBrowserConfig::default();
+                config.enabled = true;
+                config.headless = true;
+                config.fullpage = false;
+                config.segments_max = 2;
+                config.persist_profile = false;
+                config.idle_timeout_ms = 10_000;
+
+                let manager = BrowserManager::new(config);
+                manager.set_enabled_sync(true);
+
+                const CHECK_JS: &str = r#"(function(){
+  const discuss = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]');
+  const timeline = document.querySelectorAll('.js-timeline-item');
+  const article = document.querySelectorAll('article, main');
+  return (discuss.length + timeline.length + article.length);
+})()"#;
+                const HTML_JS: &str =
+                    "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+
+                let goto_result = match tokio::time::timeout(timeout, manager.goto(url)).await {
+                    Ok(Ok(res)) => res,
+                    Ok(Err(e)) => {
+                        let _ = manager.stop().await;
+                        return Err(format!("Headless goto failed: {e}"));
+                    }
+                    Err(_) => {
+                        let _ = manager.stop().await;
+                        return Err("Headless goto timed out".to_string());
+                    }
+                };
+
+                for _ in 0..6 {
+                    match tokio::time::timeout(Duration::from_millis(1500), manager.execute_javascript(CHECK_JS)).await {
+                        Ok(Ok(val)) => {
+                            let count = val
+                                .get("value")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0);
+                            if count > 0 {
+                                break;
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            tracing::debug!("Headless readiness check failed: {}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            tracing::debug!("Headless readiness check timed out");
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                }
+
+                let html_value = match tokio::time::timeout(timeout, manager.execute_javascript(HTML_JS)).await {
+                    Ok(Ok(val)) => val,
+                    Ok(Err(e)) => {
+                        let _ = manager.stop().await;
+                        return Err(format!("Headless HTML extraction failed: {e}"));
+                    }
+                    Err(_) => {
+                        let _ = manager.stop().await;
+                        return Err("Headless HTML extraction timed out".to_string());
+                    }
+                };
+
+                let html = html_value
+                    .get("value")
+                    .and_then(|v| v.get("html"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if html.trim().is_empty() {
+                    let _ = manager.stop().await;
+                    return Err("Headless browser returned empty HTML".to_string());
+                }
+
+                let final_url = Some(goto_result.url.clone());
+                let _ = manager.stop().await;
+
+                Ok(BrowserFetchOutcome {
+                    html,
+                    final_url,
+                    headless: true,
+                })
+            }
+
+            async fn fetch_html_via_browser(
+                url: &str,
+                timeout: Duration,
+                prefer_global: bool,
+            ) -> Option<BrowserFetchOutcome> {
+                const HTML_JS: &str =
+                    "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+                const CHECK_JS: &str = r#"(function(){
+  const discuss = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]');
+  const timeline = document.querySelectorAll('.js-timeline-item');
+  const article = document.querySelectorAll('article, main');
+  return (discuss.length + timeline.length + article.length);
+})()"#;
+
+                if prefer_global {
+                    if let Some(manager) = codex_browser::global::get_browser_manager().await {
+                        if manager.is_enabled_sync() {
+                            match tokio::time::timeout(timeout, manager.goto(url)).await {
+                                Ok(Ok(res)) => {
+                                    for _ in 0..6 {
+                                        match tokio::time::timeout(Duration::from_millis(1500), manager.execute_javascript(CHECK_JS)).await {
+                                            Ok(Ok(val)) => {
+                                                let count = val
+                                                    .get("value")
+                                                    .and_then(|v| v.as_i64())
+                                                    .unwrap_or(0);
+                                                if count > 0 {
+                                                    break;
+                                                }
+                                            }
+                                            Ok(Err(e)) => {
+                                                tracing::debug!("Global browser readiness check failed: {}", e);
+                                                break;
+                                            }
+                                            Err(_) => {
+                                                tracing::debug!("Global browser readiness timed out");
+                                                break;
+                                            }
+                                        }
+                                        tokio::time::sleep(Duration::from_millis(800)).await;
+                                    }
+
+                                    match tokio::time::timeout(timeout, manager.execute_javascript(HTML_JS)).await {
+                                        Ok(Ok(val)) => {
+                                            if let Some(html) = val
+                                                .get("value")
+                                                .and_then(|v| v.get("html"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                if !html.trim().is_empty() {
+                                                    return Some(BrowserFetchOutcome {
+                                                        html: html.to_string(),
+                                                        final_url: Some(res.url.clone()),
+                                                        headless: false,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        Ok(Err(e)) => {
+                                            tracing::debug!("Global browser HTML extraction failed: {}", e);
+                                        }
+                                        Err(_) => {
+                                            tracing::debug!("Global browser HTML extraction timed out");
+                                        }
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    tracing::warn!("Global browser navigation failed: {}", e);
+                                }
+                                Err(_) => {
+                                    tracing::warn!("Global browser navigation timed out");
+                                }
+                            }
+                        } else {
+                            tracing::debug!("Global browser manager disabled; skipping UI fetch");
+                        }
+                    }
+                }
+
+                match fetch_html_via_headless_browser(url, timeout).await {
+                    Ok(outcome) => Some(outcome),
+                    Err(err) => {
+                        tracing::warn!("Headless browser fallback failed for {}: {}", url, err);
+                        None
+                    }
+                }
+            }
 
             // Helper: build a client with a specific UA and common headers.
             async fn do_request(
@@ -3688,89 +3942,33 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
             let codex_ua = crate::default_client::get_codex_user_agent(Some("web_fetch"));
 
-            // Heuristic: some domains render key content client-side. Prefer a
-            // quick browser render first so we capture comments/timelines.
-            let is_dynamic_domain = {
-                let u = params.url.to_lowercase();
-                u.contains("github.com/")
-            };
-
-            if !matches!(params.mode.as_deref(), Some("http")) && is_dynamic_domain {
-                let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                if let Ok(res) = browser_manager.goto(&params.url).await {
-                    // Poll briefly for discussion/timeline elements to appear
-                    for _ in 0..6 {
-                        let js = r#"(function(){ const sel1 = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]'); const sel2 = document.querySelectorAll('.js-timeline-item'); return (sel1.length + sel2.length); })()"#;
-                        if let Ok(val) = browser_manager.execute_javascript(js).await {
-                            let n = val.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
-                            if n > 0 { break; }
-                        }
-                        tokio::time::sleep(Duration::from_millis(800)).await;
-                    }
-                    if let Ok(val) = browser_manager.execute_javascript(r#"(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()"#).await {
-                        if let Some(html) = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()) {
-                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
-                                }
-                            };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": res.url,
-                                "content_type": "text/html",
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated,
-                                "markdown": markdown,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                        }
-                    }
-                }
-            }
-
-            // If explicit browser mode requested, try the internal browser first.
             if matches!(params.mode.as_deref(), Some("browser")) {
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    if let Ok(res) = browser_manager.goto(&params.url).await {
-                        // Allow a few short settles for JS/cookie challenges to auto-resolve
-                        let mut html: Option<String> = None;
-                        for _ in 0..4 {
-                            if let Ok(val) = browser_manager.execute_javascript("(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()").await {
-                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
-                                    break;
-                                }
-                            }
-                            tokio::time::sleep(Duration::from_millis(1200)).await;
-                        }
-                        if let Some(html) = html {
-                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput {
-                                        call_id: call_id_clone,
-                                        output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                    };
-                                }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, true).await {
+                    let (markdown, truncated) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                             };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": res.url,
-                                "content_type": "text/html",
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated,
-                                "markdown": markdown,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
                         }
-                    }
+                    };
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| params.url.clone()),
+                        "content_type": "text/html",
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated,
+                        "markdown": markdown,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
             }
             // Attempt 1: Codex UA + polite headers
@@ -3848,71 +4046,37 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 if let Some(ra) = retry_after { diag["retry_after"] = serde_json::json!(ra); }
                 if let Some(ray) = cf_ray { diag["cf_ray"] = serde_json::json!(ray); }
 
-                // Attempt a last-resort browser-based fetch if the live browser is available.
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    browser_manager.set_enabled_sync(true);
-                    // Try navigate and extract outerHTML via JS (after SPA settles per manager config)
-                    if browser_manager.goto(&params.url).await.is_ok() {
-                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
-                        if let Ok(val) = browser_manager.execute_javascript(js).await {
-                            let html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let title = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("");
-                            if !html.is_empty() && title.to_lowercase() != "just a moment..." {
-                                let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                    Ok(t) => t,
-                                    Err(e) => {
-                                        return ResponseInputItem::FunctionCallOutput {
-                                            call_id: call_id_clone,
-                                            output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                        };
-                                    }
-                                };
-                                diag["via_browser"] = serde_json::json!(true);
-                                let body = serde_json::json!({
-                                    "url": params.url,
-                                    "status": 200,
-                                    "final_url": final_url,
-                                    "content_type": content_type,
-                                    "used_browser_ua": used_browser_ua,
-                                    "truncated": truncated,
-                                    "markdown": markdown,
-                                });
-                                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                            }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, false).await {
+                    let (markdown, truncated) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
+                            };
                         }
-                
-                        // If JS extraction failed, try a CDP outerHTML of root
-                        let root = browser_manager.execute_cdp("DOM.getDocument", json!({"depth": 1})).await.ok();
-                        if let Some(root) = root {
-                            if let Some(node_id) = root.get("root").and_then(|r| r.get("nodeId")).and_then(|n| n.as_u64()) {
-                                if let Ok(outer) = browser_manager.execute_cdp("DOM.getOuterHTML", json!({"nodeId": node_id})).await {
-                                    if let Some(html) = outer.get("outerHTML").and_then(|v| v.as_str()) {
-                                        let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
-                                            Ok(t) => t,
-                                            Err(e) => {
-                                                return ResponseInputItem::FunctionCallOutput {
-                                                    call_id: call_id_clone,
-                                                    output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                                };
-                                            }
-                                        };
-                                        diag["via_browser"] = serde_json::json!(true);
-                                        let body = serde_json::json!({
-                                            "url": params.url,
-                                            "status": 200,
-                                            "final_url": final_url,
-                                            "content_type": content_type,
-                                            "used_browser_ua": used_browser_ua,
-                                            "truncated": truncated,
-                                            "markdown": markdown,
-                                        });
-                                        return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                                    }
-                                }
-                            }
-                        }
+                    };
+
+                    diag["via_browser"] = serde_json::json!(true);
+                    if browser_fetch.headless {
+                        diag["headless"] = serde_json::json!(true);
                     }
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| final_url.clone()),
+                        "content_type": content_type,
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated,
+                        "markdown": markdown,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
 
                 let (md_preview, _trunc) = match convert_html_to_markdown_trimmed(body_text, 2000) {
@@ -4005,42 +4169,32 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
             // If the rendered markdown still looks like a challenge page, attempt browser fallback (unless http-only).
             if !matches!(params.mode.as_deref(), Some("http")) && looks_like_challenge_markdown(&markdown) {
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    browser_manager.set_enabled_sync(true);
-                    if browser_manager.goto(&params.url).await.is_ok() {
-                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
-                        let mut html: Option<String> = None;
-                        for _ in 0..3 {
-                            if let Ok(val) = browser_manager.execute_javascript(js).await {
-                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
-                                    break;
-                                }
-                            }
-                            tokio::time::sleep(Duration::from_millis(1200)).await;
-                        }
-                        if let Some(html) = html {
-                            let (md2, truncated2) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
-                                }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, false).await {
+                    let (md2, truncated2) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                             };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": final_url,
-                                "content_type": content_type,
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated2,
-                                "markdown": md2,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
                         }
-                    }
+                    };
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| final_url.clone()),
+                        "content_type": content_type,
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated2,
+                        "markdown": md2,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
 
                 // If fallback not possible, return structured error rather than a useless challenge page
@@ -6062,42 +6216,6 @@ fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<St
     })
 }
 
-async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> CodexResult<()> {
-    let mut stream = sess.client.clone().stream(prompt).await?;
-    loop {
-        let maybe_event = stream.next().await;
-        let Some(event) = maybe_event else {
-            return Err(CodexErr::Stream(
-                "stream closed before response.completed".into(),
-                None,
-            ));
-        };
-        match event {
-            Ok(ResponseEvent::OutputItemDone { item, sequence_number: _, output_index: _ }) => {
-                // Record only to in-memory conversation history; avoid state snapshot.
-                let mut state = sess.state.lock().unwrap();
-                state.history.record_items(std::slice::from_ref(&item));
-            }
-            Ok(ResponseEvent::Completed {
-                response_id: _,
-                token_usage,
-            }) => {
-                // some providers don't return token usage, so we default
-                // TODO: consider approximate token usage
-                let token_usage = token_usage.unwrap_or_default();
-    sess.tx_event
-        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
-        .await
-        .ok();
-
-                return Ok(());
-            }
-            Ok(_) => continue,
-            Err(e) => return Err(e),
-        }
-    }
-}
-
 /// Capture a screenshot from the browser and store it for the next model request
 async fn capture_browser_screenshot(_sess: &Session) -> Result<(PathBuf, String), String> {
     let browser_manager = codex_browser::global::get_browser_manager()
@@ -7056,7 +7174,7 @@ async fn handle_browser_console(sess: &Session, ctx: &ToolCallCtx, arguments: St
                                         let message = log_obj.get("message")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("");
-                                        
+
                                         output.push_str(&format!("[{}] [{}] {}\n", timestamp, level.to_uppercase(), message));
                                     }
                                 }
@@ -7480,4 +7598,31 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
         },
     )
     .await
+}
+fn debug_history(label: &str, items: &[ResponseItem]) {
+    let preview: Vec<String> = items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| match item {
+            ResponseItem::Message { role, content, .. } => {
+                let text = content
+                    .iter()
+                    .filter_map(|c| match c {
+                        ContentItem::InputText { text }
+                        | ContentItem::OutputText { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let snippet: String = text.chars().take(80).collect();
+                format!("{idx}:{role}:{snippet}")
+            }
+            _ => format!("{idx}:{:?}", item),
+        })
+        .collect();
+    let rendered = preview.join(" | ");
+    if std::env::var_os("CODEX_COMPACT_TRACE").is_some() {
+        eprintln!("[compact_history] {} => [{}]", label, rendered);
+    }
+    info!(target = "codex_core::compact_history", "{} => [{}]", label, rendered);
 }
