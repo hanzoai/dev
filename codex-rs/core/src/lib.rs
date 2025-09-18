@@ -73,6 +73,7 @@ pub mod terminal;
 mod tool_apply_patch;
 pub mod turn_diff_tracker;
 pub use rollout::list::ConversationsPage;
+pub use rollout::list::Cursor;
 pub use rollout::list::find_conversation_path_by_id_str;
 pub use rollout::recorder::RolloutRecorder;
 mod user_notification;

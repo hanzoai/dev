@@ -24,7 +24,7 @@ use super::SESSIONS_SUBDIR;
 use super::list::ConversationsPage;
 use super::list::Cursor;
 use super::list::get_conversations;
-use super::policy::is_persisted_response_item;
+use super::policy::{should_persist_response_item, should_persist_rollout_item};
 use crate::config::Config;
 use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
@@ -44,6 +44,8 @@ pub struct SavedSession {
     pub session: SessionMeta,
     #[serde(default)]
     pub items: Vec<ResponseItem>,
+    #[serde(default)]
+    pub events: Vec<crate::protocol::RecordedEvent>,
     #[serde(default)]
     pub state: SessionStateSnapshot,
     pub session_id: uuid::Uuid,
@@ -166,13 +168,13 @@ impl RolloutRecorder {
         Ok(Self { tx, rollout_path })
     }
 
-    pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
+    pub(crate) async fn record_response_items(
+        &self,
+        items: &[ResponseItem],
+    ) -> std::io::Result<()> {
         let mut filtered: Vec<RolloutItem> = Vec::new();
         for item in items {
-            // Note that function calls may look a bit strange if they are
-            // "fully qualified MCP tool calls," so we could consider
-            // reformatting them in that case.
-            if super::policy::should_persist_response_item(item) {
+            if should_persist_response_item(item) {
                 filtered.push(RolloutItem::ResponseItem(item.clone()));
             }
         }
@@ -185,6 +187,24 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed to queue rollout items: {e}")))
     }
 
+    pub(crate) async fn record_events(
+        &self,
+        events: &[codex_protocol::protocol::RecordedEvent],
+    ) -> std::io::Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let filtered = events
+            .iter()
+            .cloned()
+            .map(RolloutItem::Event)
+            .collect::<Vec<_>>();
+        self.tx
+            .send(RolloutCmd::AddItems(filtered))
+            .await
+            .map_err(|e| IoError::other(format!("failed to queue rollout events: {e}")))
+    }
+
     /// No-op compatibility shim for older APIs expecting a state snapshot.
     pub async fn record_state(&self, _snapshot: SessionStateSnapshot) -> std::io::Result<()> {
         Ok(())
@@ -194,17 +214,29 @@ impl RolloutRecorder {
     pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {
         let recorder = Self::new(config, RolloutRecorderParams::Resume { path: path.to_path_buf() }).await?;
         let history = Self::get_rollout_history(path).await?;
-        let (session_id, items) = match history {
-            InitialHistory::Resumed(resumed) => (resumed.conversation_id.0, resumed
-                .history
-                .into_iter()
-                .filter_map(|ri| match ri { RolloutItem::ResponseItem(it) => Some(it), _ => None })
-                .collect::<Vec<ResponseItem>>()),
-            _ => (uuid::Uuid::new_v4(), Vec::new()),
+        let (session_id, items, events) = match history {
+            InitialHistory::Resumed(resumed) => {
+                let mut responses = Vec::new();
+                let mut recorded_events = Vec::new();
+                for entry in resumed.history {
+                    match entry {
+                        RolloutItem::ResponseItem(it) => responses.push(it),
+                        RolloutItem::Event(ev) => {
+                            if let Some(rec) = crate::protocol::recorded_event_from_protocol(ev) {
+                                recorded_events.push(rec);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                (resumed.conversation_id.0, responses, recorded_events)
+            }
+            _ => (uuid::Uuid::new_v4(), Vec::new(), Vec::new()),
         };
         let saved = SavedSession {
             session: SessionMeta::default(),
             items,
+            events,
             state: SessionStateSnapshot::default(),
             session_id,
         };
@@ -246,8 +278,8 @@ impl RolloutRecorder {
                     RolloutItem::ResponseItem(item) => {
                         items.push(RolloutItem::ResponseItem(item));
                     }
-                    RolloutItem::EventMsg(_ev) => {
-                        items.push(RolloutItem::EventMsg(_ev));
+                    RolloutItem::Event(ev) => {
+                        items.push(RolloutItem::Event(ev));
                     }
                     // Ignore variants not used by this fork when resuming.
                     RolloutItem::Compacted(_)
@@ -376,7 +408,7 @@ async fn rollout_writer(
         match cmd {
             RolloutCmd::AddItems(items) => {
                 for item in items {
-                    if is_persisted_response_item(&item) {
+                    if should_persist_rollout_item(&item) {
                         writer.write_rollout_item(item).await?;
                     }
                 }
