@@ -11922,10 +11922,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         // Anchor offset counted from the very start of the item's painted area
                         // to the first line of its content that the icon should align with.
                         let anchor_offset: u16 = match item.kind() {
-                            // Assistant and User messages render with top padding; anchor to the
-                            // first line of visible content rather than the spacer row.
+                            // Assistant messages render with one row of top padding so that
+                            // the content visually aligns; anchor to that second row.
                             crate::history_cell::HistoryCellType::Assistant => 1,
-                            crate::history_cell::HistoryCellType::User => 1,
                             _ => 0,
                         };
 
