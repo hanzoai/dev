@@ -656,6 +656,10 @@ impl ChatComposer {
         self.sync_file_search_popup();
     }
 
+    pub(crate) fn text(&self) -> &str {
+        self.textarea.text()
+    }
+
     /// Close the file-search popup if it is currently active. Returns true if closed.
     pub(crate) fn close_file_popup_if_active(&mut self) -> bool {
         match self.active_popup {
