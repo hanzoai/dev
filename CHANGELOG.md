@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.155] - 2025-09-18
+
+- Auth: fix onboarding auth prompt gating. (87a76d25)
+- CLI: add long-run calculator script. (b01e2b38)
+- TUI: add pulldown-cmark dependency to fix build. (f1718b03)
+- Docs: clarify config directories. (cc22fbd9)
+
 ## [0.2.154] - 2025-09-18
 
 - TUI/Input: fix Shift+Tab crash. (354a6faa)
