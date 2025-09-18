@@ -970,9 +970,15 @@ impl HistoryCell for ExploreAggregationCell {
                     Style::default().fg(crate::colors::text_dim()),
                 )),
                 ExploreEntryStatus::Error { exit_code } => {
-                    let msg = exit_code
-                        .map(|code| format!(" (exit {})", code))
-                        .unwrap_or_else(|| " (failed)".to_string());
+                    let msg = match (entry.action, exit_code) {
+                        (ExecAction::Search, Some(2)) => " (invalid pattern)".to_string(),
+                        (ExecAction::Search, _) => " (search error)".to_string(),
+                        (ExecAction::List, _) => " (list error)".to_string(),
+                        (ExecAction::Read, _) => " (read error)".to_string(),
+                        _ => exit_code
+                            .map(|code| format!(" (exit {})", code))
+                            .unwrap_or_else(|| " (failed)".to_string()),
+                    };
                     spans.push(Span::styled(
                         msg,
                         Style::default().fg(crate::colors::error()),

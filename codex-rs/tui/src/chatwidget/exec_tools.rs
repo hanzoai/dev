@@ -542,7 +542,11 @@ pub(super) fn handle_exec_end_now(
         let action = history_cell::action_enum_from_parsed(&parsed);
         let status = match (exit_code, action) {
             (0, _) => history_cell::ExploreEntryStatus::Success,
+            // No matches for searches
             (1, history_cell::ExecAction::Search) => history_cell::ExploreEntryStatus::NotFound,
+            // Missing file/dir for list operations (e.g., ls path)
+            (1, history_cell::ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
+            // Anything else is an error; preserve exit code
             _ => history_cell::ExploreEntryStatus::Error {
                 exit_code: Some(exit_code),
             },
@@ -570,9 +574,16 @@ pub(super) fn handle_exec_end_now(
                 history_cell::ExecAction::Read => "files read".to_string(),
                 _ => "exploration updated".to_string(),
             },
-            history_cell::ExploreEntryStatus::NotFound => "no matches found".to_string(),
+            history_cell::ExploreEntryStatus::NotFound => match action {
+                history_cell::ExecAction::List => "path not found".to_string(),
+                _ => "no matches found".to_string(),
+            },
             history_cell::ExploreEntryStatus::Error { .. } => match action {
                 history_cell::ExecAction::Read => format!("read failed (exit {exit_code})"),
+                history_cell::ExecAction::Search => {
+                    if exit_code == 2 { "invalid pattern".to_string() } else { format!("search failed (exit {exit_code})") }
+                }
+                history_cell::ExecAction::List => format!("list failed (exit {exit_code})"),
                 _ => format!("exploration failed (exit {exit_code})"),
             },
             history_cell::ExploreEntryStatus::Running => "exploring…".to_string(),
