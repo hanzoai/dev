@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.153] - 2025-09-18
+
+- Core/Config: prioritize ~/.code for legacy config reads and writes. (d268969, 2629790)
+- TUI/History: strip sed/head/tail pipes when showing line ranges. (d1880bb)
+- TUI: skip alternate scroll on Apple Terminal for smoother scrolling. (f712474)
+- Resume: restore full history replay. (6d1bfdd)
+- Core: persist GPT-5 overrides across sessions. (26e538a)
+
 ## [0.2.152] - 2025-09-17
 
 - TUI: add terminal overlay and agent install flow. (104a5f9f, c678d670)
