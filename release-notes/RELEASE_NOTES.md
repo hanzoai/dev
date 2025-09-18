@@ -1,13 +1,11 @@
-## @just-every/code v0.2.153
+## @just-every/code v0.2.154
 
-This release improves TUI reliability, restores resume history, and refines configuration defaults.
+This release fixes a Shift+Tab crash and polishes multi‑agent command UX.
 
 ### Changes
-- Core/Config: prioritize ~/.code for legacy config reads and writes.
-- TUI/History: strip sed/head/tail pipes when showing line ranges.
-- TUI: skip alternate scroll on Apple Terminal for smoother scrolling.
-- Resume: restore full history replay.
-- Core: persist GPT-5 overrides across sessions.
+- TUI/Input: fix Shift+Tab crash.
+- TUI/Agents: improve visibility for multi‑agent commands.
+- TUI/Slash: make @ shortcut work with /solve and /plan.
 
 ### Install
 ```
@@ -15,4 +13,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.152...v0.2.153
+Compare: https://github.com/just-every/code/compare/v0.2.153...v0.2.154
