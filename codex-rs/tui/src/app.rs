@@ -1752,16 +1752,14 @@ impl App<'_> {
 }
 
 fn should_show_onboarding(
-    _login_status: crate::LoginStatus,
+    login_status: crate::LoginStatus,
     _config: &Config,
     show_trust_screen: bool,
 ) -> bool {
     if show_trust_screen {
         return true;
     }
-    // Defer login screen visibility decision to onboarding screen logic.
-    // Here we only gate on trust flow.
-    false
+    matches!(login_status, crate::LoginStatus::NotAuthenticated)
 }
 
 fn should_show_login_screen(login_status: crate::LoginStatus, _config: &Config) -> bool {
