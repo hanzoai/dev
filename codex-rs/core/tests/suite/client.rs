@@ -25,6 +25,7 @@ use core_test_support::load_sse_fixture_with_id;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
 use serde_json::json;
+use std::fs;
 use std::io::Write;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -633,6 +634,104 @@ async fn includes_user_instructions_message_in_request() {
     assert_message_role(&request_body["input"][1], "user");
     assert_message_starts_with(&request_body["input"][1], "<environment_context>");
     assert_message_ends_with(&request_body["input"][1], "</environment_context>");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configure_session_refreshes_user_instructions_after_cwd_change() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_raw(sse_completed("resp1"), "text/event-stream"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let codex_home = TempDir::new().unwrap();
+    let mut config = load_default_config_for_test(&codex_home);
+    config.model_provider = ModelProviderInfo {
+        base_url: Some(format!("{}/v1", server.uri())),
+        ..built_in_model_providers()["openai"].clone()
+    };
+
+    // Prepare two workspaces with different AGENTS.md content.
+    let repo_root = TempDir::new().unwrap();
+    let cwd_one = repo_root.path().join("workspace_one");
+    let cwd_two = repo_root.path().join("workspace_two");
+    fs::create_dir_all(&cwd_one).unwrap();
+    fs::create_dir_all(&cwd_two).unwrap();
+    fs::write(cwd_one.join("AGENTS.md"), "Instruction from first cwd").unwrap();
+    fs::write(cwd_two.join("AGENTS.md"), "Instruction from second cwd").unwrap();
+
+    config.cwd = cwd_one.clone();
+    config.project_doc_max_bytes = 8 * 1024;
+
+    let provider = config.model_provider.clone();
+    let model = config.model.clone();
+    let model_reasoning_effort = config.model_reasoning_effort;
+    let model_reasoning_summary = config.model_reasoning_summary;
+    let model_text_verbosity = config.model_text_verbosity;
+    let base_instructions = config.base_instructions.clone();
+    let approval_policy = config.approval_policy;
+    let sandbox_policy = config.sandbox_policy.clone();
+    let disable_response_storage = config.disable_response_storage;
+    let notify = config.notify.clone();
+
+    let conversation_manager =
+        ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
+    let codex = conversation_manager
+        .new_conversation(config)
+        .await
+        .expect("create new conversation")
+        .conversation;
+
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::SessionConfigured(_))).await;
+
+    codex
+        .submit(Op::ConfigureSession {
+            provider,
+            model,
+            model_reasoning_effort,
+            model_reasoning_summary,
+            model_text_verbosity,
+            user_instructions: None,
+            base_instructions,
+            approval_policy,
+            sandbox_policy,
+            disable_response_storage,
+            notify,
+            cwd: cwd_two.clone(),
+            resume_path: None,
+        })
+        .await
+        .unwrap();
+
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::SessionConfigured(_))).await;
+
+    codex
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "post-branch".into(),
+            }],
+        })
+        .await
+        .unwrap();
+
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let request_body = requests[0].body_json::<serde_json::Value>().unwrap();
+
+    let instructions = request_body["input"][0]["content"][0]["text"]
+        .as_str()
+        .expect("instructions text");
+    assert!(instructions.contains("Instruction from second cwd"));
+    assert!(!instructions.contains("Instruction from first cwd"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
