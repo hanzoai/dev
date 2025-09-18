@@ -17,6 +17,7 @@ use uuid::Uuid;
 use super::SESSIONS_SUBDIR;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
+use crate::config::resolve_codex_path_for_read;
 
 /// Returned page of conversation summaries.
 #[derive(Debug, Default, PartialEq)]
@@ -90,8 +91,7 @@ pub(crate) async fn get_conversations(
     page_size: usize,
     cursor: Option<&Cursor>,
 ) -> io::Result<ConversationsPage> {
-    let mut root = codex_home.to_path_buf();
-    root.push(SESSIONS_SUBDIR);
+    let root = resolve_codex_path_for_read(codex_home, Path::new(SESSIONS_SUBDIR));
 
     if !root.exists() {
         return Ok(ConversationsPage {
