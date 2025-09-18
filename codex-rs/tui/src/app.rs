@@ -1537,7 +1537,10 @@ impl App<'_> {
                         id: "fork".to_string(),
                         event_seq: 0,
                         msg: codex_core::protocol::EventMsg::ReplayHistory(
-                            codex_core::protocol::ReplayHistoryEvent { items: prefix_items }
+                            codex_core::protocol::ReplayHistoryEvent {
+                                items: prefix_items,
+                                events: Vec::new(),
+                            }
                         ),
                         order: None,
                     };
