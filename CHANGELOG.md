@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.154] - 2025-09-18
+
+- TUI/Input: fix Shift+Tab crash. (354a6faa)
+- TUI/Agents: improve visibility for multi‑agent commands. (8add2c42)
+- TUI/Slash: make @ shortcut work with /solve and /plan. (db324a6c)
+
 ## [0.2.153] - 2025-09-18
 
 - Core/Config: prioritize ~/.code for legacy config reads and writes. (d268969, 2629790)
