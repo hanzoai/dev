@@ -43,7 +43,7 @@ pub struct SessionStateSnapshot {}
 pub struct SavedSession {
     pub session: SessionMeta,
     #[serde(default)]
-    pub items: Vec<ResponseItem>,
+    pub items: Vec<RolloutItem>,
     #[serde(default)]
     pub events: Vec<crate::protocol::RecordedEvent>,
     #[serde(default)]
@@ -172,10 +172,26 @@ impl RolloutRecorder {
         &self,
         items: &[ResponseItem],
     ) -> std::io::Result<()> {
-        let mut filtered: Vec<RolloutItem> = Vec::new();
+        if items.is_empty() {
+            return Ok(());
+        }
+        let mut rollout_items: Vec<RolloutItem> = Vec::new();
         for item in items {
             if should_persist_response_item(item) {
-                filtered.push(RolloutItem::ResponseItem(item.clone()));
+                rollout_items.push(RolloutItem::ResponseItem(item.clone()));
+            }
+        }
+        if rollout_items.is_empty() {
+            return Ok(());
+        }
+        self.record_items(&rollout_items).await
+    }
+
+    pub(crate) async fn record_items(&self, items: &[RolloutItem]) -> std::io::Result<()> {
+        let mut filtered: Vec<RolloutItem> = Vec::new();
+        for item in items {
+            if should_persist_rollout_item(item) {
+                filtered.push(item.clone());
             }
         }
         if filtered.is_empty() {
@@ -216,20 +232,15 @@ impl RolloutRecorder {
         let history = Self::get_rollout_history(path).await?;
         let (session_id, items, events) = match history {
             InitialHistory::Resumed(resumed) => {
-                let mut responses = Vec::new();
-                let mut recorded_events = Vec::new();
-                for entry in resumed.history {
-                    match entry {
-                        RolloutItem::ResponseItem(it) => responses.push(it),
-                        RolloutItem::Event(ev) => {
-                            if let Some(rec) = crate::protocol::recorded_event_from_protocol(ev) {
-                                recorded_events.push(rec);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                (resumed.conversation_id.0, responses, recorded_events)
+                let events = resumed
+                    .history
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        RolloutItem::Event(ev) => crate::protocol::recorded_event_from_protocol(ev.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                (resumed.conversation_id.0, resumed.history, events)
             }
             _ => (uuid::Uuid::new_v4(), Vec::new(), Vec::new()),
         };

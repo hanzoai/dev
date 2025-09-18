@@ -10,8 +10,8 @@ pub(crate) fn should_persist_rollout_item(item: &RolloutItem) -> bool {
         RolloutItem::Event(_) => true,
         // Always persist session meta
         RolloutItem::SessionMeta(_) => true,
-        // Do not persist variants not used by this fork.
-        RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => false,
+        // Persist compacted summaries and turn context for accurate history reconstruction.
+        RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => true,
     }
 }
 
