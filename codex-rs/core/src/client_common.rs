@@ -33,7 +33,7 @@ const USER_INSTRUCTIONS_END: &str = "\n\n</user_instructions>";
 pub const REVIEW_PROMPT: &str = include_str!("../review_prompt.md");
 
 /// API request payload for a single model turn
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Prompt {
     /// Conversation context input items.
     pub input: Vec<ResponseItem>,
@@ -59,16 +59,44 @@ pub struct Prompt {
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
 
+    /// Whether to prepend the default developer instructions block.
+    pub include_additional_instructions: bool,
+
     /// Optional `text.format` for structured outputs (used by side-channel requests).
     pub text_format: Option<TextFormat>,
+
+    /// Optional per-request model slug override.
+    pub model_override: Option<String>,
+
+    /// Optional per-request model family override matching `model_override`.
+    pub model_family_override: Option<ModelFamily>,
+}
+
+impl Default for Prompt {
+    fn default() -> Self {
+        Self {
+            input: Vec::new(),
+            store: false,
+            user_instructions: None,
+            environment_context: None,
+            tools: Vec::new(),
+            status_items: Vec::new(),
+            base_instructions_override: None,
+            include_additional_instructions: true,
+            text_format: None,
+            model_override: None,
+            model_family_override: None,
+        }
+    }
 }
 
 impl Prompt {
     pub(crate) fn get_full_instructions(&self, model: &ModelFamily) -> Cow<'_, str> {
+        let effective_model = self.model_family_override.as_ref().unwrap_or(model);
         let base = self
             .base_instructions_override
             .as_deref()
-            .unwrap_or(model.base_instructions.deref());
+            .unwrap_or(effective_model.base_instructions.deref());
         let mut sections: Vec<&str> = vec![base];
 
         // When there are no custom instructions, add apply_patch_tool_instructions if:
@@ -81,7 +109,7 @@ impl Prompt {
             _ => false,
         });
         if self.base_instructions_override.is_none()
-            && model.needs_special_apply_patch_instructions
+            && effective_model.needs_special_apply_patch_instructions
             && !is_apply_patch_tool_present
         {
             sections.push(APPLY_PATCH_TOOL_INSTRUCTIONS);
@@ -96,37 +124,55 @@ impl Prompt {
     }
 
     fn get_formatted_environment_context(&self) -> Option<String> {
-        self.environment_context
-            .as_ref()
-            .map(|ec| {
-                let ec_str = serde_json::to_string_pretty(ec).unwrap_or_else(|_| format!("{:?}", ec));
-                format!("{ENVIRONMENT_CONTEXT_START}{ec_str}{ENVIRONMENT_CONTEXT_END}")
-            })
+        self.environment_context.as_ref().map(|ec| {
+            let ec_str = serde_json::to_string_pretty(ec).unwrap_or_else(|_| format!("{:?}", ec));
+            format!("{ENVIRONMENT_CONTEXT_START}{ec_str}{ENVIRONMENT_CONTEXT_END}")
+        })
     }
 
     pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {
         let mut input_with_instructions =
             Vec::with_capacity(self.input.len() + self.status_items.len() + 3);
-        input_with_instructions.push(ResponseItem::Message {
-            id: None,
-            role: "developer".to_string(),
-            content: vec![ContentItem::InputText {
-                text: ADDITIONAL_INSTRUCTIONS.to_string(),
-            }],
-        });
-        if let Some(ec) = self.get_formatted_environment_context() {
+        if self.include_additional_instructions {
             input_with_instructions.push(ResponseItem::Message {
                 id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: ec }],
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: ADDITIONAL_INSTRUCTIONS.to_string(),
+                }],
             });
-        }
-        if let Some(ui) = self.get_formatted_user_instructions() {
-            input_with_instructions.push(ResponseItem::Message {
-                id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: ui }],
-            });
+            if let Some(ec) = self.get_formatted_environment_context() {
+                let has_environment_context = self.input.iter().any(|item| {
+                    matches!(item, ResponseItem::Message { role, content, .. }
+                        if role == "user"
+                            && content.iter().any(|c| matches!(c,
+                                ContentItem::InputText { text } if text.contains(ENVIRONMENT_CONTEXT_START.trim())
+                            )))
+                });
+                if !has_environment_context {
+                    input_with_instructions.push(ResponseItem::Message {
+                        id: None,
+                        role: "user".to_string(),
+                        content: vec![ContentItem::InputText { text: ec }],
+                    });
+                }
+            }
+            if let Some(ui) = self.get_formatted_user_instructions() {
+                let has_user_instructions = self.input.iter().any(|item| {
+                    matches!(item, ResponseItem::Message { role, content, .. }
+                        if role == "user"
+                            && content.iter().any(|c| matches!(c,
+                                ContentItem::InputText { text } if text.contains(USER_INSTRUCTIONS_START)
+                            )))
+                });
+                if !has_user_instructions {
+                    input_with_instructions.push(ResponseItem::Message {
+                        id: None,
+                        role: "user".to_string(),
+                        content: vec![ContentItem::InputText { text: ui }],
+                    });
+                }
+            }
         }
         // Deduplicate function call outputs before adding to input
         let mut seen_call_ids = std::collections::HashSet::new();
@@ -149,10 +195,10 @@ impl Prompt {
 
         // Add status items at the end so they're fresh for each request
         input_with_instructions.extend(self.status_items.clone());
-        
+
         // Limit screenshots to maximum 5 (keep first and last 4)
         limit_screenshots_in_input(&mut input_with_instructions);
-        
+
         input_with_instructions
     }
 
@@ -449,7 +495,7 @@ mod tests {
             tool_choice: "auto",
             parallel_tool_calls: false,
             reasoning: None,
-            store: true,
+            store: false,
             stream: true,
             include: vec![],
             prompt_cache_key: None,
@@ -477,7 +523,7 @@ mod tests {
             tool_choice: "auto",
             parallel_tool_calls: false,
             reasoning: None,
-            store: true,
+            store: false,
             stream: true,
             include: vec![],
             prompt_cache_key: None,

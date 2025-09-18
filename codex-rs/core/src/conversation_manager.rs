@@ -172,20 +172,13 @@ impl ConversationManager {
         .await
         .map_err(|e| CodexErr::Io(e))?;
 
-        // Extract only response items to seed the rollout file.
-        let response_items: Vec<ResponseItem> = history
-            .get_rollout_items()
-            .into_iter()
-            .filter_map(|ri| match ri {
-                codex_protocol::protocol::RolloutItem::ResponseItem(item) => Some(item),
-                _ => None,
-            })
-            .collect();
-        if !response_items.is_empty() {
+        // Persist rollout items to seed the resumed conversation.
+        let rollout_items = history.get_rollout_items();
+        if !rollout_items.is_empty() {
             recorder
-                .record_items(&response_items)
+                .record_items(&rollout_items)
                 .await
-                .map_err(|e| CodexErr::Io(e))?;
+                .map_err(CodexErr::Io)?;
         }
         // Ensure data is flushed to disk before resuming.
         recorder.shutdown().await.map_err(|e| CodexErr::Io(e))?;
