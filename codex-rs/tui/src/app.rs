@@ -185,6 +185,7 @@ impl App<'_> {
         {
             let app_event_tx = app_event_tx.clone();
             let input_running_thread = input_running.clone();
+            let drop_release_events = enhanced_keys_supported;
             std::thread::spawn(move || {
                 // Track recent typing to temporarily increase poll frequency for low latency.
                 let mut last_key_time = Instant::now();
@@ -206,8 +207,12 @@ impl App<'_> {
                         if let Ok(event) = crossterm::event::read() {
                             match event {
                                 crossterm::event::Event::Key(key_event) => {
-                                    // Forward only Press/Repeat; skip Release to avoid doubled chars on Windows.
-                                    if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                                    // Some Windows terminals (e.g., legacy conhost) only report
+                                    // `Release` events when keyboard enhancement flags are not
+                                    // supported. Preserve those events so onboarding works there.
+                                    if !drop_release_events
+                                        || matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                                    {
                                         last_key_time = Instant::now();
                                         app_event_tx.send(AppEvent::KeyEvent(key_event));
                                     }
