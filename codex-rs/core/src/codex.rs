@@ -43,7 +43,7 @@ use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::RolloutItem;
 
-mod compact;
+pub mod compact;
 use self::compact::build_compacted_history;
 use self::compact::collect_user_messages;
 
@@ -1356,17 +1356,11 @@ impl Session {
         self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
             .await;
 
-        let ExecInvokeArgs { params, sandbox_type, sandbox_policy, codex_linux_sandbox_exe, stdout_stream } = exec_args;
+        let ExecInvokeArgs { params, sandbox_type, sandbox_policy, sandbox_cwd, codex_linux_sandbox_exe, stdout_stream } = exec_args;
         let tracking_command = params.command.clone();
         let dry_run_analysis = analyze_command(&tracking_command);
 
-        let result = process_exec_tool_call(
-            params,
-            sandbox_type,
-            sandbox_policy,
-            codex_linux_sandbox_exe,
-            stdout_stream,
-        )
+        let result = process_exec_tool_call(params, sandbox_type, sandbox_policy, sandbox_cwd, codex_linux_sandbox_exe, stdout_stream)
         .await;
 
         let output_stderr;
@@ -1975,7 +1969,7 @@ async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                codex_protocol::mcp_protocol::ConversationId(session_id),
+                                codex_protocol::mcp_protocol::ConversationId::from(session_id),
                                 effective_user_instructions.clone(),
                             ),
                         )
@@ -4343,6 +4337,7 @@ pub struct ExecInvokeArgs<'a> {
     pub params: ExecParams,
     pub sandbox_type: SandboxType,
     pub sandbox_policy: &'a SandboxPolicy,
+    pub sandbox_cwd: &'a std::path::Path,
     pub codex_linux_sandbox_exe: &'a Option<PathBuf>,
     pub stdout_stream: Option<StdoutStream>,
 }
@@ -5586,13 +5581,14 @@ async fn handle_container_exec_with_params(
                         .run_exec_with_events(
                             turn_diff_tracker,
                             exec_command_context,
-                            ExecInvokeArgs {
-                                params: patch_params.clone(),
-                                sandbox_type: match safety { SafetyCheck::AutoApprove { sandbox_type } => sandbox_type, SafetyCheck::AskUser => SandboxType::None, SafetyCheck::Reject { .. } => SandboxType::None },
-                                sandbox_policy: &sess.sandbox_policy,
-                                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                                stdout_stream: None,
-                            },
+            ExecInvokeArgs {
+                params: patch_params.clone(),
+                sandbox_type: match safety { SafetyCheck::AutoApprove { sandbox_type } => sandbox_type, SafetyCheck::AskUser => SandboxType::None, SafetyCheck::Reject { .. } => SandboxType::None },
+                sandbox_policy: &sess.sandbox_policy,
+                sandbox_cwd: sess.get_cwd(),
+                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
+                stdout_stream: None,
+            },
                             seq_hint, // occupy the provided sequence range first
                             output_index,
                             attempt_req,
@@ -5961,6 +5957,7 @@ async fn handle_container_exec_with_params(
                 params: params.clone(),
                 sandbox_type,
                 sandbox_policy: &sess.sandbox_policy,
+                sandbox_cwd: sess.get_cwd(),
                 codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
                 stdout_stream: if exec_command_context.apply_patch.is_some() {
                     None
@@ -6102,6 +6099,7 @@ async fn handle_sandbox_error(
                         params,
                         sandbox_type: SandboxType::None,
                         sandbox_policy: &sess.sandbox_policy,
+                        sandbox_cwd: sess.get_cwd(),
                         codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
                         stdout_stream: if exec_command_context.apply_patch.is_some() {
                             None

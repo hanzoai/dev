@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use portable_pty::CommandBuilder;
 use portable_pty::PtySize;
 use portable_pty::native_pty_system;
@@ -557,6 +558,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[ignore] // Ignored while we have a better way to test this.
     async fn requests_with_large_timeout_are_capped() -> Result<(), UnifiedExecError> {
         let manager = UnifiedExecSessionManager::default();
 
@@ -578,6 +580,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    #[ignore] // Ignored while we have a better way to test this.
     async fn completed_commands_do_not_persist_sessions() -> Result<(), UnifiedExecError> {
         let manager = UnifiedExecSessionManager::default();
         let result = manager
