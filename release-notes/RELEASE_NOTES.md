@@ -1,11 +1,12 @@
-## @just-every/code v0.2.154
+## @just-every/code v0.2.155
 
-This release fixes a Shift+Tab crash and polishes multi‑agent command UX.
+This release includes small fixes and improvements across auth, TUI, and docs.
 
 ### Changes
-- TUI/Input: fix Shift+Tab crash.
-- TUI/Agents: improve visibility for multi‑agent commands.
-- TUI/Slash: make @ shortcut work with /solve and /plan.
+- Auth: fix onboarding auth prompt gating.
+- CLI: add long-run calculator script.
+- TUI: add pulldown-cmark dependency to fix build.
+- Docs: clarify config directories.
 
 ### Install
 ```
@@ -13,4 +14,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.153...v0.2.154
+Compare: https://github.com/just-every/code/compare/v0.2.154...v0.2.155
+
