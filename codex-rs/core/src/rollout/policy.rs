@@ -13,8 +13,8 @@ pub(crate) fn is_persisted_response_item(item: &RolloutItem) -> bool {
         }
         // Always persist session meta
         RolloutItem::SessionMeta(_) => true,
-        // Do not persist variants not used by this fork.
-        RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => false,
+        // Persist compacted summaries and turn context for accurate history reconstruction.
+        RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => true,
     }
 }
 

@@ -28,7 +28,6 @@ use super::policy::is_persisted_response_item;
 use crate::config::Config;
 use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::ResumedHistory;
 use codex_protocol::protocol::RolloutItem;
@@ -43,7 +42,7 @@ pub struct SessionStateSnapshot {}
 pub struct SavedSession {
     pub session: SessionMeta,
     #[serde(default)]
-    pub items: Vec<ResponseItem>,
+    pub items: Vec<RolloutItem>,
     #[serde(default)]
     pub state: SessionStateSnapshot,
     pub session_id: uuid::Uuid,
@@ -166,14 +165,11 @@ impl RolloutRecorder {
         Ok(Self { tx, rollout_path })
     }
 
-    pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
+    pub(crate) async fn record_items(&self, items: &[RolloutItem]) -> std::io::Result<()> {
         let mut filtered: Vec<RolloutItem> = Vec::new();
         for item in items {
-            // Note that function calls may look a bit strange if they are
-            // "fully qualified MCP tool calls," so we could consider
-            // reformatting them in that case.
-            if super::policy::should_persist_response_item(item) {
-                filtered.push(RolloutItem::ResponseItem(item.clone()));
+            if is_persisted_response_item(item) {
+                filtered.push(item.clone());
             }
         }
         if filtered.is_empty() {
@@ -195,11 +191,7 @@ impl RolloutRecorder {
         let recorder = Self::new(config, RolloutRecorderParams::Resume { path: path.to_path_buf() }).await?;
         let history = Self::get_rollout_history(path).await?;
         let (session_id, items) = match history {
-            InitialHistory::Resumed(resumed) => (resumed.conversation_id.0, resumed
-                .history
-                .into_iter()
-                .filter_map(|ri| match ri { RolloutItem::ResponseItem(it) => Some(it), _ => None })
-                .collect::<Vec<ResponseItem>>()),
+            InitialHistory::Resumed(resumed) => (resumed.conversation_id.0, resumed.history),
             _ => (uuid::Uuid::new_v4(), Vec::new()),
         };
         let saved = SavedSession {
