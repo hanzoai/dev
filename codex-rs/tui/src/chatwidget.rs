@@ -2025,6 +2025,8 @@ impl ChatWidget<'_> {
                 running_commands: HashMap::new(),
                 running_explore_agg_index: None,
                 pending_exec_ends: HashMap::new(),
+                suppressed_exec_end_call_ids: HashSet::new(),
+                suppressed_exec_end_order: VecDeque::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
@@ -2217,6 +2219,8 @@ impl ChatWidget<'_> {
                 running_commands: HashMap::new(),
                 running_explore_agg_index: None,
                 pending_exec_ends: HashMap::new(),
+                suppressed_exec_end_call_ids: HashSet::new(),
+                suppressed_exec_end_order: VecDeque::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
@@ -4249,10 +4253,12 @@ impl ChatWidget<'_> {
                 }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
-                call_id: _,
+                call_id,
                 auto_approved,
                 changes,
             }) => {
+                let exec_call_id = ExecCallId(call_id.clone());
+                self.exec.suppress_exec_end(exec_call_id);
                 // Store for session diff popup (clone before moving into history)
                 self.diffs.session_patch_sets.push(changes.clone());
                 // Capture/adjust baselines, including rename moves
@@ -14015,6 +14021,32 @@ struct ExecState {
             std::time::Instant,
         ),
     >,
+    suppressed_exec_end_call_ids: HashSet<ExecCallId>,
+    suppressed_exec_end_order: VecDeque<ExecCallId>,
+}
+
+impl ExecState {
+    fn suppress_exec_end(&mut self, call_id: ExecCallId) {
+        if self.suppressed_exec_end_call_ids.insert(call_id.clone()) {
+            self.suppressed_exec_end_order.push_back(call_id);
+            const MAX_TRACKED_SUPPRESSED_IDS: usize = 64;
+            if self.suppressed_exec_end_order.len() > MAX_TRACKED_SUPPRESSED_IDS {
+                if let Some(old) = self.suppressed_exec_end_order.pop_front() {
+                    self.suppressed_exec_end_call_ids.remove(&old);
+                }
+            }
+        }
+    }
+
+    fn unsuppress_exec_end(&mut self, call_id: &ExecCallId) {
+        if self.suppressed_exec_end_call_ids.remove(call_id) {
+            self.suppressed_exec_end_order.retain(|cid| cid != call_id);
+        }
+    }
+
+    fn should_suppress_exec_end(&self, call_id: &ExecCallId) -> bool {
+        self.suppressed_exec_end_call_ids.contains(call_id)
+    }
 }
 
 #[derive(Default)]

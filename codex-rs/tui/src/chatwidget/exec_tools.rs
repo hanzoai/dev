@@ -235,6 +235,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
     }
 
     for call_id in remove_after_finalize {
+        chat.exec.suppress_exec_end(call_id.clone());
         chat.exec.running_commands.remove(&call_id);
     }
     if agg_was_updated {
@@ -531,8 +532,14 @@ pub(super) fn handle_exec_end_now(
     ev: ExecCommandEndEvent,
     order: &OrderMeta,
 ) {
-    chat.ended_call_ids
-        .insert(super::ExecCallId(ev.call_id.clone()));
+    let call_id = super::ExecCallId(ev.call_id.clone());
+    if chat.exec.should_suppress_exec_end(&call_id) {
+        chat.exec.unsuppress_exec_end(&call_id);
+        chat.ended_call_ids.insert(call_id);
+        chat.maybe_hide_spinner();
+        return;
+    }
+    chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
     // If this call was already marked as cancelled, drop the End to avoid
     // inserting a duplicate completed cell after the user interrupt.
     if chat
