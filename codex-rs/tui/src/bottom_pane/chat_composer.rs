@@ -46,6 +46,11 @@ use std::time::Instant;
 /// placeholder in the UI.
 const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
 
+struct PostPasteSpaceGuard {
+    expires_at: Instant,
+    cursor_pos: usize,
+}
+
 /// Result returned when the user interacts with the text area.
 #[derive(Debug, PartialEq)]
 pub enum InputResult {
@@ -57,7 +62,7 @@ pub enum InputResult {
 }
 
 struct TokenUsageInfo {
-    total_token_usage: TokenUsage,
+    _total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
     model_context_window: Option<u64>,
     /// Baseline token count present in the context before the user's first
@@ -128,6 +133,7 @@ pub(crate) struct ChatComposer {
     next_down_scrolls_history: bool,
     // Detect and coalesce paste bursts for smoother UX
     paste_burst: PasteBurst,
+    post_paste_space_guard: Option<PostPasteSpaceGuard>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -176,6 +182,7 @@ impl ChatComposer {
             reasoning_shown: false,
             next_down_scrolls_history: false,
             paste_burst: PasteBurst::default(),
+            post_paste_space_guard: None,
         }
     }
 
@@ -476,7 +483,7 @@ impl ChatComposer {
             .unwrap_or_else(|| last_token_usage.cached_input_tokens.unwrap_or(0));
 
         self.token_usage_info = Some(TokenUsageInfo {
-            total_token_usage,
+            _total_token_usage: total_token_usage,
             last_token_usage,
             model_context_window,
             initial_prompt_tokens,
@@ -507,6 +514,7 @@ impl ChatComposer {
     }
 
     pub fn handle_paste(&mut self, pasted: String) -> bool {
+        self.post_paste_space_guard = None;
         let char_count = pasted.chars().count();
         // If the pasted text looks like a base64/data-URI image, decode it and insert as a path.
         if let Ok((path, info)) = try_decode_base64_image_to_temp_png(&pasted) {
@@ -557,6 +565,7 @@ impl ChatComposer {
         } else {
             self.textarea.insert_str(&pasted);
             self.typed_anything = true; // Mark that user has interacted via paste
+            self.maybe_start_post_paste_space_guard(&pasted);
         }
         self.sync_command_popup();
         if matches!(self.active_popup, ActivePopup::Command(_)) {
@@ -581,6 +590,67 @@ impl ChatComposer {
         false
     }
 
+    fn maybe_start_post_paste_space_guard(&mut self, pasted: &str) {
+        if pasted.chars().last() != Some(' ') {
+            return;
+        }
+        let cursor_pos = self.textarea.cursor();
+        // Ensure the character immediately before the cursor is a literal space.
+        if cursor_pos == 0 {
+            return;
+        }
+        if let Some(slice) = self
+            .textarea
+            .text()
+            .as_bytes()
+            .get(cursor_pos - 1)
+        {
+            if *slice == b' ' {
+                self.post_paste_space_guard = Some(PostPasteSpaceGuard {
+                    expires_at: Instant::now() + Duration::from_secs(2),
+                    cursor_pos,
+                });
+            }
+        }
+    }
+
+    fn should_suppress_post_paste_space(&mut self, event: &KeyEvent) -> bool {
+        if event.kind != KeyEventKind::Press {
+            return false;
+        }
+        if event.code != KeyCode::Char(' ') {
+            return false;
+        }
+        let unshifted_space = event.modifiers == KeyModifiers::NONE
+            || event.modifiers == KeyModifiers::SHIFT;
+        if !unshifted_space {
+            return false;
+        }
+        let Some(guard) = &self.post_paste_space_guard else {
+            return false;
+        };
+        let now = Instant::now();
+        if now > guard.expires_at {
+            self.post_paste_space_guard = None;
+            return false;
+        }
+        if self.textarea.cursor() != guard.cursor_pos {
+            self.post_paste_space_guard = None;
+            return false;
+        }
+        let text = self.textarea.text();
+        if guard.cursor_pos == 0 || guard.cursor_pos > text.len() {
+            self.post_paste_space_guard = None;
+            return false;
+        }
+        if text.as_bytes()[guard.cursor_pos - 1] != b' ' {
+            self.post_paste_space_guard = None;
+            return false;
+        }
+        self.post_paste_space_guard = None;
+        true
+    }
+
 
     /// Clear all composer input and reset transient state like pending pastes
     /// and history navigation.
@@ -588,6 +658,7 @@ impl ChatComposer {
         self.textarea.set_text("");
         self.pending_pastes.clear();
         self.history.reset_navigation();
+        self.post_paste_space_guard = None;
     }
 
     #[allow(dead_code)]
@@ -654,6 +725,10 @@ impl ChatComposer {
         self.typed_anything = true; // Mark that user has interacted via programmatic insertion
         self.sync_command_popup();
         self.sync_file_search_popup();
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        self.textarea.text()
     }
 
     /// Close the file-search popup if it is currently active. Returns true if closed.
@@ -1337,6 +1412,10 @@ impl ChatComposer {
     fn handle_input_basic(&mut self, input: KeyEvent) -> (InputResult, bool) {
         let text_before = self.textarea.text().to_string();
 
+        if self.should_suppress_post_paste_space(&input) {
+            return (InputResult::None, false);
+        }
+
         // Special handling for backspace on placeholders
         if let KeyEvent {
             code: KeyCode::Backspace,
@@ -1353,6 +1432,17 @@ impl ChatComposer {
         // Normal input handling
         self.textarea.input(input);
         let text_after = self.textarea.text();
+
+        if text_before != text_after {
+            self.post_paste_space_guard = None;
+        } else if self
+            .post_paste_space_guard
+            .as_ref()
+            .map(|guard| self.textarea.cursor() != guard.cursor_pos)
+            .unwrap_or(false)
+        {
+            self.post_paste_space_guard = None;
+        }
 
         // If text changed, reset history navigation state
         if text_before != text_after {
@@ -1628,22 +1718,22 @@ impl WidgetRef for ChatComposer {
                 // Prepare token usage spans (always shown when available)
                 let mut token_spans: Vec<Span> = Vec::new();
                 if let Some(token_usage_info) = &self.token_usage_info {
-                    let token_usage = &token_usage_info.total_token_usage;
-                    let used_str = format_with_thousands(token_usage.blended_total());
+                    let turn_usage = &token_usage_info.last_token_usage;
+                    let tokens_used = turn_usage.tokens_in_context_window();
+                    let used_str = format_with_thousands(tokens_used);
                     token_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
-                    token_spans.push(Span::from(" tokens ").style(label_style));
+                    token_spans.push(Span::from(" tokens").style(label_style));
                     if let Some(context_window) = token_usage_info.model_context_window {
-                        let last_token_usage = &token_usage_info.last_token_usage;
-                        let percent_remaining: u8 = if context_window > 0 {
-                            let percent = 100.0
-                                - (last_token_usage.tokens_in_context_window() as f32
-                                    / context_window as f32
-                                    * 100.0);
-                            percent.clamp(0.0, 100.0) as u8
-                        } else { 100 };
-                        token_spans.push(Span::from("(").style(label_style));
-                        token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
-                        token_spans.push(Span::from("% left)").style(label_style));
+                        if context_window > 0 {
+                            let percent_remaining = {
+                                let percent = 100.0
+                                    - (tokens_used as f32 / context_window as f32 * 100.0);
+                                percent.clamp(0.0, 100.0) as u8
+                            };
+                            token_spans.push(Span::from(" (").style(label_style));
+                            token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
+                            token_spans.push(Span::from("% left)").style(label_style));
+                        }
                     }
                 }
 
@@ -1810,15 +1900,16 @@ impl WidgetRef for ChatComposer {
             .textarea
             .cursor_pos_with_state(padded_textarea_rect, &self.textarea_state.borrow())
         {
-            let overlay_style = Style::default()
-                .bg(crate::theme::current_theme().cursor)
-                .fg(crate::colors::background());
+            let cursor_bg = crate::theme::current_theme().cursor;
             if cx < buf.area.width.saturating_add(buf.area.x)
                 && cy < buf.area.height.saturating_add(buf.area.y)
             {
                 let cell = &mut buf[(cx, cy)];
-                // Preserve the displayed character but apply the overlay colors
-                cell.set_style(overlay_style);
+                // Only tint the background so the foreground glyph stays intact. Some
+                // terminals (e.g. GNOME Terminal/VTE) temporarily hide the hardware
+                // cursor while processing arrow keys; preserving the foreground color
+                // keeps the caret location visible instead of flashing blank cells.
+                cell.set_bg(cursor_bg);
             }
         }
     }

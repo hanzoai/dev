@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use codex_core::environment_context::TOOL_CANDIDATES;
 use codex_core::CodexAuth;
 use codex_core::ConversationManager;
 use codex_core::ModelProviderInfo;
@@ -17,12 +18,15 @@ use codex_core::shell::default_user_shell;
 use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id;
 use core_test_support::wait_for_event;
+use os_info::Type as OsType;
+use os_info::Version;
 use tempfile::TempDir;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
+use which::which;
 
 fn text_user_input(text: String) -> serde_json::Value {
     serde_json::json!({
@@ -32,19 +36,127 @@ fn text_user_input(text: String) -> serde_json::Value {
     })
 }
 
-fn default_env_context_str(cwd: &str, shell: &Shell) -> String {
-    format!(
-        r#"<environment_context>
-  <cwd>{}</cwd>
-  <approval_policy>on-request</approval_policy>
-  <sandbox_mode>read-only</sandbox_mode>
-  <network_access>restricted</network_access>
-{}</environment_context>"#,
-        cwd,
-        match shell.name() {
-            Some(name) => format!("  <shell>{name}</shell>\n"),
-            None => String::new(),
+fn render_env_context(
+    cwd: Option<String>,
+    approval_policy: Option<&str>,
+    sandbox_mode: Option<&str>,
+    network_access: Option<&str>,
+    writable_roots: Vec<String>,
+    shell_name: Option<String>,
+) -> String {
+    let mut lines = vec!["<environment_context>".to_string()];
+    if let Some(cwd) = cwd {
+        lines.push(format!("  <cwd>{cwd}</cwd>"));
+    }
+    if let Some(approval_policy) = approval_policy {
+        lines.push(format!("  <approval_policy>{approval_policy}</approval_policy>"));
+    }
+    if let Some(sandbox_mode) = sandbox_mode {
+        lines.push(format!("  <sandbox_mode>{sandbox_mode}</sandbox_mode>"));
+    }
+    if let Some(network_access) = network_access {
+        lines.push(format!("  <network_access>{network_access}</network_access>"));
+    }
+    if !writable_roots.is_empty() {
+        lines.push("  <writable_roots>".to_string());
+        for root in writable_roots {
+            lines.push(format!("    <root>{root}</root>"));
         }
+        lines.push("  </writable_roots>".to_string());
+    }
+    if let Some(os_block) = operating_system_block() {
+        lines.push(os_block);
+    }
+    if let Some(tools_block) = common_tools_block() {
+        lines.push(tools_block);
+    }
+    if let Some(shell_name) = shell_name {
+        lines.push(format!("  <shell>{shell_name}</shell>"));
+    }
+    lines.push("</environment_context>".to_string());
+    lines.join("\n")
+}
+
+fn operating_system_block() -> Option<String> {
+    let info = os_info::get();
+    let family = match info.os_type() {
+        OsType::Unknown => None,
+        other => Some(other.to_string()),
+    };
+    let version = match info.version() {
+        Version::Unknown => None,
+        other => {
+            let text = other.to_string();
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(text)
+            }
+        }
+    };
+    let architecture = {
+        let arch = std::env::consts::ARCH;
+        if arch.is_empty() {
+            None
+        } else {
+            Some(arch.to_string())
+        }
+    };
+
+    if family.is_none() && version.is_none() && architecture.is_none() {
+        return None;
+    }
+
+    let mut lines = vec!["  <operating_system>".to_string()];
+    if let Some(family) = family {
+        lines.push(format!("    <family>{family}</family>"));
+    }
+    if let Some(version) = version {
+        lines.push(format!("    <version>{version}</version>"));
+    }
+    if let Some(architecture) = architecture {
+        lines.push(format!("    <architecture>{architecture}</architecture>"));
+    }
+    lines.push("  </operating_system>".to_string());
+    Some(lines.join("\n"))
+}
+
+fn common_tools_block() -> Option<String> {
+    let mut available = Vec::new();
+    for candidate in TOOL_CANDIDATES {
+        let detection_names = if candidate.detection_names.is_empty() {
+            &[candidate.label][..]
+        } else {
+            candidate.detection_names
+        };
+        if detection_names
+            .iter()
+            .any(|name| which(name).is_ok())
+        {
+            available.push(candidate.label);
+        }
+    }
+    if available.is_empty() {
+        return None;
+    }
+
+    let mut lines = vec!["  <common_tools>".to_string()];
+    for tool in available {
+        lines.push(format!("    <tool>{tool}</tool>"));
+    }
+    lines.push("  </common_tools>".to_string());
+    Some(lines.join("\n"))
+}
+
+fn default_env_context_str(cwd: &str, shell: &Shell) -> String {
+    let shell_name = shell.name();
+    render_env_context(
+        Some(cwd.to_string()),
+        Some("on-request"),
+        Some("read-only"),
+        Some("restricted"),
+        Vec::new(),
+        shell_name,
     )
 }
 
@@ -296,18 +408,13 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
 
     let shell = default_user_shell().await;
 
-    let expected_env_text = format!(
-        r#"<environment_context>
-  <cwd>{}</cwd>
-  <approval_policy>on-request</approval_policy>
-  <sandbox_mode>read-only</sandbox_mode>
-  <network_access>restricted</network_access>
-{}</environment_context>"#,
-        cwd.path().to_string_lossy(),
-        match shell.name() {
-            Some(name) => format!("  <shell>{name}</shell>\n"),
-            None => String::new(),
-        }
+    let expected_env_text = render_env_context(
+        Some(cwd.path().to_string_lossy().to_string()),
+        Some("on-request"),
+        Some("read-only"),
+        Some("restricted"),
+        Vec::new(),
+        shell.name(),
     );
     let expected_ui_text =
         "<user_instructions>\n\nbe consistent and helpful\n\n</user_instructions>";
@@ -456,16 +563,13 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() {
     // After overriding the turn context, the environment context should be emitted again
     // reflecting the new approval policy and sandbox settings. Omit cwd because it did
     // not change.
-    let expected_env_text_2 = format!(
-        r#"<environment_context>
-  <approval_policy>never</approval_policy>
-  <sandbox_mode>workspace-write</sandbox_mode>
-  <network_access>enabled</network_access>
-  <writable_roots>
-    <root>{}</root>
-  </writable_roots>
-</environment_context>"#,
-        writable.path().to_string_lossy()
+    let expected_env_text_2 = render_env_context(
+        None,
+        Some("never"),
+        Some("workspace-write"),
+        Some("enabled"),
+        vec![writable.path().to_string_lossy().to_string()],
+        None,
     );
     let expected_env_msg_2 = serde_json::json!({
         "type": "message",
@@ -578,18 +682,13 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() {
         "role": "user",
         "content": [ { "type": "input_text", "text": "hello 2" } ]
     });
-    let expected_env_text_2 = format!(
-        r#"<environment_context>
-  <cwd>{}</cwd>
-  <approval_policy>never</approval_policy>
-  <sandbox_mode>workspace-write</sandbox_mode>
-  <network_access>enabled</network_access>
-  <writable_roots>
-    <root>{}</root>
-  </writable_roots>
-</environment_context>"#,
-        new_cwd.path().to_string_lossy(),
-        writable.path().to_string_lossy(),
+    let expected_env_text_2 = render_env_context(
+        Some(new_cwd.path().to_string_lossy().to_string()),
+        Some("never"),
+        Some("workspace-write"),
+        Some("enabled"),
+        vec![writable.path().to_string_lossy().to_string()],
+        None,
     );
     let expected_env_msg_2 = serde_json::json!({
         "type": "message",
@@ -818,14 +917,13 @@ async fn send_user_turn_with_changes_sends_environment_context() {
     ]);
     assert_eq!(body1["input"], expected_input_1);
 
-    let expected_env_msg_2 = text_user_input(format!(
-        r#"<environment_context>
-  <cwd>{}</cwd>
-  <approval_policy>never</approval_policy>
-  <sandbox_mode>danger-full-access</sandbox_mode>
-  <network_access>enabled</network_access>
-</environment_context>"#,
-        default_cwd.to_string_lossy()
+    let expected_env_msg_2 = text_user_input(render_env_context(
+        Some(default_cwd.to_string_lossy().to_string()),
+        Some("never"),
+        Some("danger-full-access"),
+        Some("enabled"),
+        Vec::new(),
+        shell.name(),
     ));
     let expected_user_message_2 = text_user_input("hello 2".to_string());
     let expected_input_2 = serde_json::Value::Array(vec![

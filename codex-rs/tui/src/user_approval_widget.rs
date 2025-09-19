@@ -6,9 +6,8 @@
 //! UI to Rust using [`ratatui`]. The goal is feature‑parity for the keyboard
 //! driven workflow – a fully‑fledged visual match is not required.
 
+use std::path::Path;
 use std::path::PathBuf;
-use std::sync::LazyLock;
-
 use codex_core::protocol::Op;
 use codex_core::protocol::ReviewDecision;
 use crossterm::event::KeyCode;
@@ -17,18 +16,19 @@ use crossterm::event::KeyEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::*;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
+use shlex::split as shlex_split;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::exec_command::strip_bash_lc_and_escape;
+use codex_core::protocol::ApprovedCommandMatchKind;
 
 /// Request coming from the agent that needs user approval.
 pub(crate) enum ApprovalRequest {
@@ -44,62 +44,32 @@ pub(crate) enum ApprovalRequest {
     },
 }
 
-/// Options displayed in the *select* mode.
-///
-/// The `key` is matched case-insensitively.
+#[derive(Clone)]
 struct SelectOption {
-    label: Line<'static>,
-    description: &'static str,
-    key: KeyCode,
-    decision: ReviewDecision,
+    label: String,
+    description: String,
+    hotkey: KeyCode,
+    action: SelectAction,
 }
 
-static COMMAND_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
-    vec![
-        SelectOption {
-            label: Line::from(vec!["Y".underlined(), "es".into()]),
-            description: "Approve and run the command",
-            key: KeyCode::Char('y'),
-            decision: ReviewDecision::Approved,
-        },
-        SelectOption {
-            label: Line::from(vec!["A".underlined(), "lways".into()]),
-            description: "Approve the command for the remainder of this session",
-            key: KeyCode::Char('a'),
-            decision: ReviewDecision::ApprovedForSession,
-        },
-        SelectOption {
-            label: Line::from(vec!["N".underlined(), "o, provide feedback".into()]),
-            description: "Do not run the command; provide feedback",
-            key: KeyCode::Char('n'),
-            decision: ReviewDecision::Abort,
-        },
-    ]
-});
-
-static PATCH_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
-    vec![
-        SelectOption {
-            label: Line::from(vec!["Y".underlined(), "es".into()]),
-            description: "Approve and apply the changes",
-            key: KeyCode::Char('y'),
-            decision: ReviewDecision::Approved,
-        },
-        SelectOption {
-            label: Line::from(vec!["N".underlined(), "o, provide feedback".into()]),
-            description: "Do not apply the changes; provide feedback",
-            key: KeyCode::Char('n'),
-            decision: ReviewDecision::Abort,
-        },
-    ]
-});
+#[derive(Clone)]
+enum SelectAction {
+    ApproveOnce,
+    ApproveForSession {
+        command: Vec<String>,
+        match_kind: ApprovedCommandMatchKind,
+        persist: bool,
+        semantic_prefix: Option<Vec<String>>,
+    },
+    Abort,
+}
 
 /// A modal prompting the user to approve or deny the pending request.
 pub(crate) struct UserApprovalWidget<'a> {
     approval_request: ApprovalRequest,
     app_event_tx: AppEventSender,
     confirmation_prompt: Paragraph<'a>,
-    select_options: &'a Vec<SelectOption>,
+    select_options: Vec<SelectOption>,
 
     /// Currently selected index in *select* mode.
     selected_option: usize,
@@ -156,14 +126,16 @@ impl UserApprovalWidget<'_> {
             }
         };
 
+        let select_options = match &approval_request {
+            ApprovalRequest::Exec { command, .. } => build_exec_select_options(command),
+            ApprovalRequest::ApplyPatch { .. } => build_patch_select_options(),
+        };
+
         Self {
-            select_options: match &approval_request {
-                ApprovalRequest::Exec { .. } => &COMMAND_SELECT_OPTIONS,
-                ApprovalRequest::ApplyPatch { .. } => &PATCH_SELECT_OPTIONS,
-            },
             approval_request,
             app_event_tx,
             confirmation_prompt,
+            select_options,
             selected_option: 0,
             done: false,
         }
@@ -210,29 +182,39 @@ impl UserApprovalWidget<'_> {
     }
 
     fn handle_select_key(&mut self, key_event: KeyEvent) {
+        let len = self.select_options.len();
+        if len == 0 {
+            return;
+        }
         match key_event.code {
-            KeyCode::Left => {
-                self.selected_option = (self.selected_option + self.select_options.len() - 1)
-                    % self.select_options.len();
+            KeyCode::Up | KeyCode::Left => {
+                self.selected_option = if self.selected_option == 0 {
+                    len - 1
+                } else {
+                    self.selected_option - 1
+                };
             }
-            KeyCode::Right => {
-                self.selected_option = (self.selected_option + 1) % self.select_options.len();
+            KeyCode::Down | KeyCode::Right => {
+                self.selected_option = (self.selected_option + 1) % len;
             }
             KeyCode::Enter => {
-                let opt = &self.select_options[self.selected_option];
-                self.send_decision(opt.decision);
+                if let Some(option) = self.select_options.get(self.selected_option).cloned() {
+                    self.perform_action(option.action);
+                }
             }
             KeyCode::Esc => {
-                self.send_decision(ReviewDecision::Abort);
+                self.perform_action(SelectAction::Abort);
             }
             other => {
                 let normalized = Self::normalize_keycode(other);
-                if let Some(opt) = self
+                if let Some((idx, option)) = self
                     .select_options
                     .iter()
-                    .find(|opt| Self::normalize_keycode(opt.key) == normalized)
+                    .enumerate()
+                    .find(|(_, opt)| Self::normalize_keycode(opt.hotkey) == normalized)
                 {
-                    self.send_decision(opt.decision);
+                    self.selected_option = idx;
+                    self.perform_action(option.action.clone());
                 }
             }
         }
@@ -271,8 +253,20 @@ impl UserApprovalWidget<'_> {
         // If the user aborted an exec approval, immediately cancel any running task
         // so the UI reflects their intent (clear spinner/status) without waiting
         // for backend cleanup. Core still receives the Abort below.
-        if matches!((&self.approval_request, decision), (ApprovalRequest::Exec { .. }, ReviewDecision::Abort)) {
-            self.app_event_tx.send(AppEvent::CancelRunningTask);
+        match (&self.approval_request, decision) {
+            (ApprovalRequest::Exec { .. }, ReviewDecision::Abort) => {
+                self.app_event_tx.send(AppEvent::CancelRunningTask);
+            }
+            (ApprovalRequest::Exec { .. }, ReviewDecision::Denied) => {
+                self.app_event_tx.send(AppEvent::MarkTaskIdle);
+            }
+            (ApprovalRequest::ApplyPatch { .. }, ReviewDecision::Abort) => {
+                self.app_event_tx.send(AppEvent::CancelRunningTask);
+            }
+            (ApprovalRequest::ApplyPatch { .. }, ReviewDecision::Denied) => {
+                self.app_event_tx.send(AppEvent::MarkTaskIdle);
+            }
+            _ => {}
         }
 
         let op = match &self.approval_request {
@@ -290,6 +284,31 @@ impl UserApprovalWidget<'_> {
         self.done = true;
     }
 
+    fn perform_action(&mut self, action: SelectAction) {
+        match action {
+            SelectAction::ApproveOnce => {
+                self.send_decision(ReviewDecision::Approved);
+            }
+            SelectAction::ApproveForSession {
+                command,
+                match_kind,
+                persist,
+                semantic_prefix,
+            } => {
+                self.app_event_tx.send(AppEvent::RegisterApprovedCommand {
+                    command: command.clone(),
+                    match_kind: match_kind.clone(),
+                    persist,
+                    semantic_prefix: semantic_prefix.clone(),
+                });
+                self.send_decision(ReviewDecision::ApprovedForSession);
+            }
+            SelectAction::Abort => {
+                self.send_decision(ReviewDecision::Abort);
+            }
+        }
+    }
+
     /// Returns `true` once the user has made a decision and the widget no
     /// longer needs to be displayed.
     pub(crate) fn is_complete(&self) -> bool {
@@ -297,75 +316,193 @@ impl UserApprovalWidget<'_> {
     }
 
     pub(crate) fn desired_height(&self, width: u16) -> u16 {
-        // Reserve space for:
-        // - 1 title line ("Allow command?" or "Apply changes?")
-        // - 1 buttons line (options rendered horizontally on a single row)
-        // - 1 description line (context for the currently selected option)
-        self.get_confirmation_prompt_height(width) + 3
+        let prompt = self.get_confirmation_prompt_height(width);
+        let option_lines = (self.select_options.len() as u16).saturating_mul(2);
+        prompt + option_lines + 2
     }
 }
 
 impl WidgetRef for &UserApprovalWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let prompt_height = self.get_confirmation_prompt_height(area.width);
-        let [prompt_chunk, response_chunk] = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(prompt_height), Constraint::Min(0)])
-            .areas(area);
-
-        let lines: Vec<Line> = self
-            .select_options
-            .iter()
-            .enumerate()
-            .map(|(idx, opt)| {
-                let style = if idx == self.selected_option {
-                    Style::new()
-                        .bg(crate::colors::light_blue())
-                        .fg(crate::colors::background())
-                } else {
-                    Style::new().add_modifier(Modifier::DIM)
-                };
-                opt.label.clone().alignment(Alignment::Center).style(style)
-            })
-            .collect();
-
-        let [title_area, button_area, description_area] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
+        let [prompt_chunk, options_chunk] = Layout::vertical([
+            Constraint::Length(prompt_height),
             Constraint::Min(0),
         ])
-        .areas(response_chunk.inner(Margin::new(1, 0)));
-        let title = match &self.approval_request {
-            ApprovalRequest::Exec { .. } => "Allow command?",
-            ApprovalRequest::ApplyPatch { .. } => "Apply changes?",
-        };
-        Line::from(title).render(title_area, buf);
+        .areas(area);
 
         self.confirmation_prompt.clone().render(prompt_chunk, buf);
-        let areas = Layout::horizontal(
-            lines
-                .iter()
-                .map(|l| Constraint::Length(l.width() as u16 + 2)),
-        )
-        .spacing(1)
-        .split(button_area);
-        for (idx, area) in areas.iter().enumerate() {
-            let line = &lines[idx];
-            line.render(*area, buf);
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (idx, option) in self.select_options.iter().enumerate() {
+            let selected = idx == self.selected_option;
+            let indicator = if selected { "› " } else { "  " };
+            let line_style = if selected {
+                Style::default()
+                    .fg(crate::colors::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            let label = format!("{}{}{}", indicator, option.label, hotkey_suffix(option.hotkey));
+            lines.push(Line::from(Span::styled(label, line_style)));
+
+            let desc_style = Style::default()
+                .fg(crate::colors::text_dim())
+                .add_modifier(Modifier::ITALIC);
+            lines.push(Line::from(Span::styled(
+                format!("    {}", option.description),
+                desc_style,
+            )));
+            lines.push(Line::from(""));
+        }
+        if !lines.is_empty() {
+            lines.pop();
         }
 
-        Line::from(self.select_options[self.selected_option].description)
-            .style(Style::new().italic().add_modifier(Modifier::DIM))
-            .render(description_area.inner(Margin::new(1, 0)), buf);
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(options_chunk.inner(Margin::new(1, 0)), buf);
 
         Block::bordered()
             .border_type(BorderType::QuadrantOutside)
             .border_style(Style::default().fg(crate::colors::light_blue()))
             .borders(Borders::LEFT)
-            .render_ref(
-                Rect::new(0, response_chunk.y, 1, response_chunk.height),
-                buf,
-            );
+            .render_ref(Rect::new(0, options_chunk.y, 1, options_chunk.height), buf);
+    }
+}
+
+fn build_exec_select_options(command: &[String]) -> Vec<SelectOption> {
+    let mut options = Vec::new();
+
+    options.push(SelectOption {
+        label: "Yes".to_string(),
+        description: "Approve and run the command".to_string(),
+        hotkey: KeyCode::Char('y'),
+        action: SelectAction::ApproveOnce,
+    });
+
+    let full_display = strip_bash_lc_and_escape(command);
+    options.push(SelectOption {
+        label: format!("Always allow '{full_display}' for this project"),
+        description: "Approve this exact command automatically next time".to_string(),
+        hotkey: KeyCode::Char('a'),
+        action: SelectAction::ApproveForSession {
+            command: command.to_vec(),
+            match_kind: ApprovedCommandMatchKind::Exact,
+            persist: true,
+            semantic_prefix: None,
+        },
+    });
+
+    let normalized_tokens = normalized_command_tokens(command);
+    if let Some(tokens) = normalized_tokens.as_ref() {
+        if let Some(prefix) = prefix_candidate(tokens) {
+            let prefix_display = strip_bash_lc_and_escape(&prefix);
+            let prefix_with_wildcard = format!("{prefix_display} *");
+        options.push(SelectOption {
+            label: format!("Always allow '{prefix_with_wildcard}' for this project"),
+            description: "Approve any command starting with this prefix".to_string(),
+            hotkey: KeyCode::Char('p'),
+            action: SelectAction::ApproveForSession {
+                command: prefix.clone(),
+                match_kind: ApprovedCommandMatchKind::Prefix,
+                persist: true,
+                semantic_prefix: Some(prefix),
+            },
+        });
+    }
+    }
+
+    options.push(SelectOption {
+        label: "No, provide feedback".to_string(),
+        description: "Do not run the command; provide feedback".to_string(),
+        hotkey: KeyCode::Char('n'),
+        action: SelectAction::Abort,
+    });
+
+    options
+}
+
+fn build_patch_select_options() -> Vec<SelectOption> {
+    vec![
+        SelectOption {
+            label: "Yes".to_string(),
+            description: "Approve and apply the changes".to_string(),
+            hotkey: KeyCode::Char('y'),
+            action: SelectAction::ApproveOnce,
+        },
+        SelectOption {
+            label: "No, provide feedback".to_string(),
+            description: "Do not apply the changes; provide feedback".to_string(),
+            hotkey: KeyCode::Char('n'),
+            action: SelectAction::Abort,
+        },
+    ]
+}
+
+fn normalized_command_tokens(command: &[String]) -> Option<Vec<String>> {
+    if command.is_empty() {
+        return None;
+    }
+
+    if command.len() == 3 && is_shell_wrapper(&command[0], &command[1]) {
+        if let Some(script_tokens) = shlex_split(&command[2]) {
+            return Some(script_tokens);
+        }
+        return Some(vec![command[2].clone()]);
+    }
+
+    Some(command.to_vec())
+}
+
+fn prefix_candidate(tokens: &[String]) -> Option<Vec<String>> {
+    if tokens.len() < 2 {
+        return None;
+    }
+
+    let mut prefix: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == 0 {
+            prefix.push(token.clone());
+            continue;
+        }
+
+        if token.starts_with('-')
+            || token.contains('/')
+            || token.contains('.')
+            || token.contains('\\')
+        {
+            break;
+        }
+
+        prefix.push(token.clone());
+        if prefix.len() == 3 {
+            break;
+        }
+    }
+
+    if prefix.len() >= 2 && prefix.len() < tokens.len() {
+        Some(prefix)
+    } else {
+        None
+    }
+}
+
+fn is_shell_wrapper(shell: &str, flag: &str) -> bool {
+    let file_name = Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    matches!(file_name.as_str(), "bash" | "sh" | "zsh") && matches!(flag, "-lc" | "-c")
+}
+
+fn hotkey_suffix(key: KeyCode) -> String {
+    match key {
+        KeyCode::Char(c) => format!(" ({})", c.to_ascii_lowercase()),
+        _ => String::new(),
     }
 }
 
@@ -376,6 +513,7 @@ mod tests {
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
     use std::sync::mpsc::channel;
+    use codex_core::protocol::ApprovedCommandMatchKind;
 
     #[test]
     fn lowercase_shortcut_is_accepted() {
@@ -397,6 +535,92 @@ mod tests {
                 ..
             })
         )));
+    }
+
+    #[test]
+    fn always_option_registers_command() {
+        let (tx_raw, rx) = channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let req = ApprovalRequest::Exec {
+            id: "1".to_string(),
+            command: vec!["git".into(), "status".into()],
+            reason: None,
+        };
+        let mut widget = UserApprovalWidget::new(req, tx);
+        widget.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+
+        let events: Vec<AppEvent> = rx.try_iter().collect();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AppEvent::RegisterApprovedCommand {
+                command,
+                match_kind: ApprovedCommandMatchKind::Exact,
+                persist: true,
+                semantic_prefix: None,
+            } if command == &vec!["git".to_string(), "status".to_string()]
+        )));
+    }
+
+    #[test]
+    fn prefix_option_registers_prefix_command() {
+        let (tx_raw, rx) = channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let req = ApprovalRequest::Exec {
+            id: "3".to_string(),
+            command: vec![
+                "git".to_string(),
+                "checkout".to_string(),
+                "--".to_string(),
+                "README.md".to_string(),
+            ],
+            reason: None,
+        };
+        let mut widget = UserApprovalWidget::new(req, tx);
+        widget.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
+
+        let events: Vec<AppEvent> = rx.try_iter().collect();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AppEvent::RegisterApprovedCommand {
+                command,
+                match_kind: ApprovedCommandMatchKind::Prefix,
+                persist: true,
+                semantic_prefix: Some(prefix)
+            } if command == &vec!["git".to_string(), "checkout".to_string()]
+                && prefix == vec!["git".to_string(), "checkout".to_string()]
+        )));
+    }
+
+    #[test]
+    fn prefix_candidate_skips_flags_and_paths() {
+        assert_eq!(prefix_candidate(&["git".into(), "status".into()]), None);
+        assert_eq!(
+            prefix_candidate(&["git".into(), "checkout".into(), "--".into(), "file".into()]),
+            Some(vec!["git".into(), "checkout".into()])
+        );
+        assert_eq!(
+            prefix_candidate(&["aws".into(), "s3".into(), "cp".into(), "foo".into(), "bar".into()]),
+            Some(vec!["aws".into(), "s3".into(), "cp".into()])
+        );
+        assert_eq!(
+            prefix_candidate(&["docker".into(), "build".into(), "-t".into(), "image".into(), ".".into()]),
+            Some(vec!["docker".into(), "build".into()])
+        );
+        assert_eq!(
+            prefix_candidate(&["echo".into(), "hello".into(), "world".into()]),
+            None
+        );
+
+        // Shell-wrapped script
+        let normalized = normalized_command_tokens(&[
+            "bash".into(),
+            "-lc".into(),
+            "git checkout -- README.md".into(),
+        ]);
+        assert_eq!(
+            normalized.as_ref().and_then(|tokens| prefix_candidate(tokens)),
+            Some(vec!["git".into(), "checkout".into()])
+        );
     }
 
     #[test]
