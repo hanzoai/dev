@@ -29,6 +29,7 @@ Notes
   from the repository root (not inside another branch worktree).
 - `/merge`: merge the current worktree branch back into the default branch and
   remove the worktree. Run this from inside the worktree created by `/branch`.
+- `/cmd <name>`: run a project command defined for the current workspace.
 
 ## UX & Display
 
