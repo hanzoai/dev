@@ -11,6 +11,8 @@ use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
 use crate::config_types::Notifications;
+use crate::config_types::ProjectCommandConfig;
+use crate::config_types::ProjectHookConfig;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyToml;
@@ -29,6 +31,7 @@ use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
+use crate::project_features::{load_project_commands, ProjectCommand, ProjectHooks};
 use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
@@ -96,6 +99,12 @@ pub struct Config {
 
     /// Commands the user has permanently approved for this project/session.
     pub always_allow_commands: Vec<ApprovedCommandPattern>,
+
+    /// Project-level lifecycle hooks configured for the active workspace.
+    pub project_hooks: ProjectHooks,
+
+    /// Project-specific commands available in the active workspace.
+    pub project_commands: Vec<ProjectCommand>,
 
     pub shell_environment_policy: ShellEnvironmentPolicy,
     /// Patterns requiring an explicit confirm prefix before running.
@@ -1368,6 +1377,10 @@ pub struct ProjectConfig {
     pub sandbox_mode: Option<SandboxMode>,
     #[serde(default)]
     pub always_allow_commands: Option<Vec<AllowedCommand>>,
+    #[serde(default)]
+    pub hooks: Vec<ProjectHookConfig>,
+    #[serde(default)]
+    pub commands: Vec<ProjectCommandConfig>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -1652,6 +1665,13 @@ impl Config {
             }
         }
 
+        let project_hooks = project_override
+            .map(|cfg| ProjectHooks::from_configs(&cfg.hooks, &resolved_cwd))
+            .unwrap_or_default();
+        let project_commands = project_override
+            .map(|cfg| load_project_commands(&cfg.commands, &resolved_cwd))
+            .unwrap_or_default();
+
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
             .unwrap_or(false);
@@ -1752,6 +1772,8 @@ impl Config {
             approval_policy: effective_approval,
             sandbox_policy,
             always_allow_commands,
+            project_hooks,
+            project_commands,
             shell_environment_policy,
             confirm_guard,
             disable_response_storage: config_profile
@@ -2444,6 +2466,8 @@ model_verbosity = "high"
                 approval_policy: AskForApproval::Never,
                 sandbox_policy: SandboxPolicy::new_read_only_policy(),
                 always_allow_commands: Vec::new(),
+                project_hooks: ProjectHooks::default(),
+                project_commands: Vec::new(),
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
                 disable_response_storage: false,
                 auto_upgrade_enabled: false,
@@ -2510,6 +2534,8 @@ model_verbosity = "high"
             approval_policy: AskForApproval::UnlessTrusted,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             always_allow_commands: Vec::new(),
+            project_hooks: ProjectHooks::default(),
+            project_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
             auto_upgrade_enabled: false,
@@ -2591,6 +2617,8 @@ model_verbosity = "high"
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             always_allow_commands: Vec::new(),
+            project_hooks: ProjectHooks::default(),
+            project_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: true,
             auto_upgrade_enabled: false,
@@ -2657,6 +2685,9 @@ model_verbosity = "high"
             active_profile: Some("gpt5".to_string()),
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            always_allow_commands: Vec::new(),
+            project_hooks: ProjectHooks::default(),
+            project_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
             auto_upgrade_enabled: false,
