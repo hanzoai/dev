@@ -122,6 +122,12 @@ pub enum Op {
         text: String,
     },
 
+    /// Internally queue a developer-role message to be included in the next turn.
+    AddPendingInputDeveloper {
+        /// The developer message text to add to pending input.
+        text: String,
+    },
+
     /// Request a single history entry identified by `log_id` + `offset`.
     GetHistoryEntryRequest { offset: usize, log_id: u64 },
 

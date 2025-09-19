@@ -218,13 +218,13 @@ fn create_shell_tool() -> OpenAiTool {
     properties.insert(
         "timeout".to_string(),
         JsonSchema::Number {
-            description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
+            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "shell".to_string(),
-        description: "Runs a shell command and returns its output. Default timeout: 120000 ms (120s). Override via the `timeout` parameter.".to_string(),
+        description: "Runs a shell command and returns its output. Output streams live to the UI. Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks. Optional `timeout` can set a hard kill if needed.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -252,7 +252,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     properties.insert(
         "timeout_ms".to_string(),
         JsonSchema::Number {
-            description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
+            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
@@ -302,7 +302,7 @@ The shell tool is used to execute shell commands.
   - Provide the with_escalated_permissions parameter with the boolean value true
   - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter.
 
-Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#,
+Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks. Optional `timeout` can set a hard kill if needed."#,
                 roots_str,
                 if !network_access {
                     "\n    - Commands that require network access\n"
@@ -312,10 +312,10 @@ Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#,
             )
         }
         SandboxPolicy::DangerFullAccess => {
-            "Runs a shell command and returns its output.".to_string()
+            "Runs a shell command and returns its output. Output streams live to the UI. Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks.".to_string()
         }
         SandboxPolicy::ReadOnly => {
-            "Runs a shell command and returns its output.".to_string()
+            "Runs a shell command and returns its output. Output streams live to the UI. Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks.".to_string()
         }
     };
 
@@ -590,6 +590,9 @@ pub(crate) fn get_openai_tools(
     tools.push(create_wait_for_agent_tool());
     tools.push(create_list_agents_tool());
 
+    // Add general wait tool for background completions
+    tools.push(create_wait_tool());
+
     if config.web_search_request {
         let tool = match &config.web_search_allowed_domains {
             Some(domains) if !domains.is_empty() => OpenAiTool::WebSearch(WebSearchTool {
@@ -622,6 +625,37 @@ pub(crate) fn get_openai_tools(
     }
 
     tools
+}
+
+// ——————————————————————————————————————————————————————————————
+// Background waiting tool (for long-running shell calls)
+// ——————————————————————————————————————————————————————————————
+
+pub fn create_wait_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "call_id".to_string(),
+        JsonSchema::String { description: Some("Optional: specific background call_id to wait for. If omitted, waits for any background completion.".to_string()) },
+    );
+    properties.insert(
+        "timeout_ms".to_string(),
+        JsonSchema::Number {
+            description: Some(
+                "Maximum time in milliseconds to wait (default 600000 = 10 minutes, max 3600000 = 60 minutes)."
+                    .to_string(),
+            ),
+        },
+    );
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "wait".to_string(),
+        description: "Wait for background work to complete. If call_id is provided waits for that, otherwise returns when any background function completes (returns early).".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: None,
+            additional_properties: Some(false),
+        },
+    })
 }
 
 #[cfg(test)]

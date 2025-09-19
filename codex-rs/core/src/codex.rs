@@ -486,6 +486,8 @@ use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
 use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
+use std::sync::OnceLock;
+use tokio::sync::Notify;
 use crate::protocol::TurnDiffEvent;
 use crate::rollout::RolloutRecorder;
 use crate::safety::SafetyCheck;
@@ -506,6 +508,12 @@ pub struct Codex {
     tx_sub: Sender<Submission>,
     rx_event: Receiver<Event>,
 }
+
+// Allow internal components (like background exec completions) to trigger a new
+// turn without fabricating a visible user message. We enqueue an empty
+// UserInput; the model will only see queued developer/system items.
+static TX_SUB_GLOBAL: OnceLock<Sender<Submission>> = OnceLock::new();
+static ANY_BG_NOTIFY: OnceLock<std::sync::Arc<Notify>> = OnceLock::new();
 
 /// Wrapper returned by [`Codex::spawn`] containing the spawned [`Codex`],
 /// the submission id for the initial `ConfigureSession` request and the
@@ -557,6 +565,9 @@ impl Codex {
             tx_sub,
             rx_event,
         };
+        // Make a clone of tx_sub available for internal auto-turn triggers.
+        let _ = TX_SUB_GLOBAL.set(codex.tx_sub.clone());
+        let _ = ANY_BG_NOTIFY.set(std::sync::Arc::new(Notify::new()));
         let init_id = codex.submit(configure_session).await?;
 
         Ok(CodexSpawnOk {
@@ -617,6 +628,8 @@ struct State {
     /// 1-based ordinal of the current HTTP request attempt in this session.
     request_ordinal: u64,
     dry_run_guard: DryRunGuardState,
+    /// Background execs by call_id
+    background_execs: std::collections::HashMap<String, BackgroundExecState>,
 }
 
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
@@ -632,6 +645,15 @@ struct TurnScratchpad {
     partial_assistant_text: String,
     /// Last reasoning summary fragment received via deltas (not yet finalized)
     partial_reasoning_summary: String,
+}
+
+#[derive(Debug)]
+struct BackgroundExecState {
+    notify: std::sync::Arc<tokio::sync::Notify>,
+    result_cell: std::sync::Arc<std::sync::Mutex<Option<ExecToolCallOutput>>>,
+    tail_buf: Option<std::sync::Arc<std::sync::Mutex<Vec<u8>>>>,
+    cmd_display: String,
+    suppress_event: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Context for an initialized model agent
@@ -1631,6 +1653,15 @@ async fn submission_loop(
                     }
                 };
                 tokio::spawn(async move { sess.abort() });
+            }
+            Op::AddPendingInputDeveloper { text } => {
+                let sess = match sess.as_ref() { Some(s) => s.clone(), None => { send_no_session_event(sub.id).await; continue; } };
+                let dev_msg = ResponseInputItem::Message { role: "developer".to_string(), content: vec![ContentItem::InputText { text }] };
+                {
+                    let mut state = sess.state.lock().unwrap();
+                    state.pending_input.push(dev_msg);
+                }
+                // No events emitted here; a follow-up empty UserInput should be sent by the caller to trigger a turn.
             }
             Op::ConfigureSession {
                 provider,
@@ -3148,6 +3179,7 @@ async fn handle_function_call(
         "browser_cdp" => handle_browser_cdp(sess, &ctx, arguments).await,
         "browser_cleanup" => handle_browser_cleanup(sess, &ctx).await,
         "web_fetch" => handle_web_fetch(sess, &ctx, arguments).await,
+        "wait" => handle_wait(sess, &ctx, arguments).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -3203,7 +3235,16 @@ async fn handle_browser_cleanup(sess: &Session, ctx: &ToolCallCtx) -> ResponseIn
 
 async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     // Include raw params in begin event for observability
-    let params_for_event = serde_json::from_str(&arguments).ok();
+    let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
+    // If call_id is provided, include a friendly "for" string with the command we are waiting on
+    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
+        if let Some(serde_json::Value::String(cid)) = map.get("call_id") {
+            let st = sess.state.lock().unwrap();
+            if let Some(bg) = st.background_execs.get(cid) {
+                map.insert("for".to_string(), serde_json::Value::String(bg.cmd_display.clone()));
+            }
+        }
+    }
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
 
@@ -4063,6 +4104,134 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
             ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } }
         },
+    ).await
+}
+
+// Wait for a background shell execution to complete.
+// Parameters: { call_id?: string, timeout_ms?: number }
+async fn handle_wait(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+) -> ResponseInputItem {
+    use serde::Deserialize;
+    #[derive(Deserialize, Clone)]
+    struct Params { #[serde(default)] call_id: Option<String>, #[serde(default)] timeout_ms: Option<u64> }
+    let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
+    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
+        if let Some(serde_json::Value::String(cid)) = map.get("call_id") {
+            let st = sess.state.lock().unwrap();
+            if let Some(bg) = st.background_execs.get(cid) {
+                map.insert("for".to_string(), serde_json::Value::String(bg.cmd_display.clone()));
+            }
+        }
+    }
+    let arguments_clone = arguments.clone();
+    let ctx_clone = ToolCallCtx::new(ctx.sub_id.clone(), ctx.call_id.clone(), ctx.seq_hint, ctx.output_index);
+    let ctx_for_closure = ctx_clone.clone();
+    execute_custom_tool(
+        sess,
+        &ctx_clone,
+        "wait".to_string(),
+        params_for_event,
+        move || async move {
+            let ctx_inner = ctx_for_closure.clone();
+                let parsed: Params = match serde_json::from_str(&arguments_clone) {
+                    Ok(p) => p,
+                    Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: format!("Invalid wait arguments: {}", e), success: Some(false) } };
+                    }
+                };
+                let call_id = parsed.call_id.clone();
+                let max_ms: u64 = 3_600_000; // 60 minutes cap
+                let default_ms: u64 = 600_000; // 10 minutes default
+                let timeout_ms = parsed.timeout_ms.unwrap_or(default_ms).min(max_ms);
+
+            match call_id {
+                Some(cid) => {
+                    use std::sync::atomic::Ordering;
+                    let (notify_opt, done_opt, tail, suppress_flag) = {
+                        let st = sess.state.lock().unwrap();
+                        match st.background_execs.get(&cid) {
+                            Some(bg) => (
+                                Some(bg.notify.clone()),
+                                bg.result_cell.lock().unwrap().clone(),
+                                bg.tail_buf.clone(),
+                                Some(bg.suppress_event.clone()),
+                            ),
+                            None => (None, None, None, None),
+                        }
+                    };
+                    if let Some(flag) = &suppress_flag {
+                        flag.store(true, Ordering::Relaxed);
+                    }
+                    if let Some(done) = done_opt {
+                        let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(true, Ordering::Relaxed);
+                        }
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) } };
+                    }
+                    let Some(spec_notify) = notify_opt else {
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: format!("No background job found for call_id={}", cid), success: Some(false) } };
+                    };
+                    let any_notify = ANY_BG_NOTIFY.get().cloned().unwrap();
+                    let raced = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async move {
+                        tokio::select! {
+                            _ = spec_notify.notified() => (),
+                            _ = any_notify.notified() => (),
+                        }
+                    }).await;
+                    if raced.is_err() {
+                        let tail_text = tail.and_then(|arc| Some(String::from_utf8_lossy(&arc.lock().unwrap()).to_string())).unwrap_or_default();
+                        let msg = if tail_text.is_empty() { format!("Background job {} still running...", cid) } else { format!("Background job {} still running...\n\nOutput so far (tail):\n{}", cid, tail_text) };
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: msg, success: Some(false) } };
+                    }
+                    let done = {
+                        let mut st = sess.state.lock().unwrap();
+                        if let Some(bg) = st.background_execs.remove(&cid) {
+                            bg.result_cell.lock().unwrap().clone()
+                        } else {
+                            let found = st.background_execs.iter().find_map(|(k, v)| if v.result_cell.lock().unwrap().is_some() { Some(k.clone()) } else { None });
+                            found.and_then(|k| st.background_execs.remove(&k)).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+                        }
+                    };
+                    if let Some(done) = done {
+                        let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) } }
+                    } else {
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: "No completed background job found".to_string(), success: Some(false) } }
+                    }
+                }
+                None => {
+                    let any_notify = ANY_BG_NOTIFY.get().cloned().unwrap();
+                    let waited = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), any_notify.notified()).await;
+                    if waited.is_err() {
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: "Timed out waiting for background work".to_string(), success: Some(false) } };
+                    }
+                    let done = {
+                        let mut st = sess.state.lock().unwrap();
+                        let found = st.background_execs.iter().find_map(|(k, v)| if v.result_cell.lock().unwrap().is_some() { Some(k.clone()) } else { None });
+                        found.and_then(|k| st.background_execs.remove(&k)).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+                    };
+                    if let Some(done) = done {
+                        let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) } }
+                    } else {
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: "Background completed but no result recorded".to_string(), success: Some(false) } }
+                    }
+                }
+            }
+        }
     ).await
 }
 
@@ -5712,69 +5881,184 @@ async fn handle_container_exec_with_params(
         ),
     };
 
+    let display_label = exec_command_context.command_for_display.join(" ");
     let params = maybe_run_with_user_profile(params, sess);
-    let output_result = sess
-        .run_exec_with_events(
+
+    // Prepare tail buffer and background registry entry
+    let tail_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    let result_cell: std::sync::Arc<std::sync::Mutex<Option<ExecToolCallOutput>>> = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let backgrounded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let suppress_event_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut st = sess.state.lock().unwrap();
+        st.background_execs.insert(
+            call_id.clone(),
+            BackgroundExecState {
+                notify: notify.clone(),
+                result_cell: result_cell.clone(),
+                tail_buf: Some(tail_buf.clone()),
+                cmd_display: display_label.clone(),
+                suppress_event: suppress_event_flag.clone(),
+            },
+        );
+    }
+
+    // Emit BEGIN event using the normal path so the TUI shows a running cell
+    sess
+        .on_exec_command_begin(
             turn_diff_tracker,
             exec_command_context.clone(),
-            ExecInvokeArgs {
-                params: params.clone(),
-                sandbox_type,
-                sandbox_policy: &sess.sandbox_policy,
-                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                stdout_stream: if exec_command_context.apply_patch.is_some() {
-                    None
-                } else {
-                    Some(StdoutStream {
-                        sub_id: sub_id.clone(),
-                        call_id: call_id.clone(),
-                        tx_event: sess.tx_event.clone(),
-                        session: None,
-                    })
-                },
-            },
             seq_hint_for_exec,
             output_index,
             attempt_req,
         )
         .await;
 
-    match output_result {
-        Ok(output) => {
-            let ExecToolCallOutput { exit_code, .. } = &output;
+    // Spawn the runner that streams output and, on completion, emits END and records result.
+    let tx_event = sess.tx_event.clone();
+    let sub_id_for_events = sub_id.clone();
+    let call_id_for_events = call_id.clone();
+    let sandbox_policy = sess.sandbox_policy.clone();
+    let codex_linux_sandbox_exe = sess.codex_linux_sandbox_exe.clone();
+    let result_cell_for_task = result_cell.clone();
+    let order_meta_for_end = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint_for_exec.map(|h| h.saturating_add(1)) };
+    let order_meta_for_deltas = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: None };
+    let notify_task = notify.clone();
+    let tail_buf_task = tail_buf.clone();
+    let backgrounded_task = backgrounded.clone();
+    let suppress_event_flag_task = suppress_event_flag.clone();
+    let display_label_task = display_label.clone();
+    tokio::spawn(async move {
+        // Build stdout stream with tail capture. We cannot stamp via `Session` here,
+        // but deltas will be delivered with neutral ordering which the UI tolerates.
+        let stdout_stream = if exec_command_context.apply_patch.is_some() {
+            None
+        } else {
+            Some(StdoutStream {
+                sub_id: sub_id_for_events.clone(),
+                call_id: call_id_for_events.clone(),
+                tx_event: tx_event.clone(),
+                session: None,
+                tail_buf: Some(tail_buf_task.clone()),
+                order: Some(order_meta_for_deltas.clone()),
+            })
+        };
 
-            let is_success = *exit_code == 0;
-            let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &output);
-            ResponseInputItem::FunctionCallOutput {
-                call_id: call_id.clone(),
-                output: FunctionCallOutputPayload {
-                    content,
-                    success: Some(is_success),
-                },
+        let start = std::time::Instant::now();
+        let res = crate::exec::process_exec_tool_call(
+            params.clone(),
+            sandbox_type,
+            &sandbox_policy,
+            &codex_linux_sandbox_exe,
+            stdout_stream,
+        )
+        .await;
+
+        // Normalize to ExecToolCallOutput
+        let (out, exit_code) = match res {
+            Ok(o) => { let exit = o.exit_code; (o, exit) },
+            Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => (output.as_ref().clone(), 124),
+            Err(e) => {
+                let msg = get_error_message_ui(&e);
+                (
+                    ExecToolCallOutput {
+                        exit_code: -1,
+                        stdout: StreamOutput::new(String::new()),
+                        stderr: StreamOutput::new(msg.clone()),
+                        aggregated_output: StreamOutput::new(msg),
+                        duration: start.elapsed(),
+                        timed_out: false,
+                    },
+                    -1,
+                )
             }
+        };
+
+        // Emit END event directly
+        let end_msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id_for_events.clone(),
+            stdout: out.stdout.text.clone(),
+            stderr: out.stderr.text.clone(),
+            exit_code,
+            duration: out.duration,
+        });
+        let ev = Event { id: sub_id_for_events.clone(), event_seq: 0, msg: end_msg, order: Some(order_meta_for_end) };
+        let _ = tx_event.send(ev).await;
+
+        // Store result for waiters
+        {
+            let mut slot = result_cell_for_task.lock().unwrap();
+            *slot = Some(out.clone());
         }
-        Err(CodexErr::Sandbox(error)) => {
-            handle_sandbox_error(
-                turn_diff_tracker,
-                params,
-                exec_command_context,
-                error,
-                sandbox_type,
-                sess,
-                attempt_req,
-            )
-            .await
+        // Only emit background completion notifications if the command actually backgrounded
+        if backgrounded_task.load(std::sync::atomic::Ordering::Relaxed) {
+            if !suppress_event_flag_task.load(std::sync::atomic::Ordering::Relaxed) {
+                let label = display_label_task.trim();
+                let message = if label.is_empty() {
+                    format!("Background shell '{}' completed.", call_id_for_events)
+                } else {
+                    format!("{} completed in background", display_label_task.clone())
+                };
+                let bg_event = EventMsg::BackgroundEvent(BackgroundEventEvent { message });
+                let ev = Event { id: sub_id_for_events.clone(), event_seq: 0, msg: bg_event, order: None };
+                let _ = tx_event.send(ev).await;
+
+                if let Some(tx) = TX_SUB_GLOBAL.get() {
+                    let header_label = if label.is_empty() {
+                        format!("call_id={}", call_id_for_events)
+                    } else {
+                        display_label_task.clone()
+                    };
+                    let header = format!("Background shell completed ({header_label}), exit_code={}, duration={:?}.", out.exit_code, out.duration);
+                    let body = out.aggregated_output.text.clone();
+                    let dev_text = format!("{}\n\n{}", header, body);
+                    let _ = tx
+                        .send(Submission { id: uuid::Uuid::new_v4().to_string(), op: Op::AddPendingInputDeveloper { text: dev_text } })
+                        .await;
+                }
+            }
+            if let Some(n) = ANY_BG_NOTIFY.get() { n.notify_waiters(); }
         }
-        Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id: call_id.clone(),
-            output: FunctionCallOutputPayload {
-                content: format!("execution error: {e}"),
-                success: None,
-            },
-        },
+        notify_task.notify_waiters();
+    });
+
+    // Wait up to 10 seconds for completion
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
+    if waited.is_ok() {
+        // Completed within 10s – return the real output
+        let done_opt = {
+            let st = sess.state.lock().unwrap();
+            st.background_execs.get(&call_id).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+        };
+        if let Some(done) = done_opt {
+            let is_success = done.exit_code == 0;
+            let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &done);
+            return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(is_success) } };
+        } else {
+            // Fallback (should not happen): indicate completion without detail
+            let msg = format!("Command completed.");
+            return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content: msg, success: Some(true) } };
+        }
     }
+
+    // Still running: mark as backgrounded and return background notice + tail and instructions
+    backgrounded.store(true, std::sync::atomic::Ordering::Relaxed);
+    let tail = String::from_utf8_lossy(&tail_buf.lock().unwrap()).to_string();
+    let header = format!(
+        "Command running in background (call_id={}).\nTo wait: wait(call_id=\"{}\")\nYou can continue other work or wait. You'll be notified when the command completes.",
+        call_id,
+        call_id
+    );
+    let msg = if tail.is_empty() {
+        header
+    } else {
+        format!("{}\n\nOutput so far (tail):\n{}", header, tail)
+    };
+    ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content: msg, success: Some(true) } }
 }
 
+#[allow(dead_code)]
 async fn handle_sandbox_error(
     turn_diff_tracker: &mut TurnDiffTracker,
     params: ExecParams,
@@ -5871,6 +6155,8 @@ async fn handle_sandbox_error(
                                 call_id: call_id.clone(),
                                 tx_event: sess.tx_event.clone(),
                                 session: None,
+                                tail_buf: None,
+                                order: Some(crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index: None, sequence_number: None }),
                             })
                         },
                     },
