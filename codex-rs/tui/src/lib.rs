@@ -176,6 +176,15 @@ pub async fn run_main(
         }
     };
 
+    #[cfg(not(debug_assertions))]
+    let startup_footer_notice = crate::updates::auto_upgrade_if_enabled(&config)
+        .await
+        .unwrap_or(None)
+        .map(|version| format!("Upgraded to {version}"));
+
+    #[cfg(debug_assertions)]
+    let startup_footer_notice: Option<String> = None;
+
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
     let config_toml = {
@@ -279,7 +288,7 @@ pub async fn run_main(
         eprintln!("");
     }
 
-    run_ratatui_app(cli, config, should_show_trust_screen)
+    run_ratatui_app(cli, config, should_show_trust_screen, startup_footer_notice)
         .map_err(|err| std::io::Error::other(err.to_string()))
 }
 
@@ -287,6 +296,7 @@ fn run_ratatui_app(
     cli: Cli,
     config: Config,
     should_show_trust_screen: bool,
+    startup_footer_notice: Option<String>,
 ) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
     color_eyre::install()?;
 
@@ -381,6 +391,7 @@ fn run_ratatui_app(
         order,
         terminal_info,
         timing,
+        startup_footer_notice,
     );
 
     let app_result = app.run(&mut terminal);
