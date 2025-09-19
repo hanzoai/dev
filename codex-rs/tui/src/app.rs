@@ -68,6 +68,7 @@ enum AppState<'a> {
 }
 
 struct TerminalRunState {
+    command: Vec<String>,
     cancel_tx: Option<oneshot::Sender<()>>,
     running: bool,
     controller: Option<TerminalRunController>,
@@ -165,6 +166,7 @@ impl App<'_> {
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
         enable_perf: bool,
+        startup_footer_notice: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
             config.codex_home.clone(),
@@ -296,6 +298,9 @@ impl App<'_> {
             chat_widget.enable_perf(enable_perf);
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
+            if let Some(notice) = startup_footer_notice {
+                chat_widget.debug_notice(notice);
+            }
             AppState::Chat {
                 widget: Box::new(chat_widget),
             }
@@ -408,11 +413,13 @@ impl App<'_> {
             return;
         }
 
+        let stored_command = command.clone();
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let controller_clone = controller.clone();
         self.terminal_runs.insert(
             id,
             TerminalRunState {
+                command: stored_command,
                 cancel_tx: Some(cancel_tx),
                 running: true,
                 controller: controller_clone,
@@ -422,10 +429,11 @@ impl App<'_> {
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
         let controller_tx = controller.map(|c| c.tx);
+        let command_spawn = command;
         tokio::spawn(async move {
-            let mut cmd = Command::new(&command[0]);
-            if command.len() > 1 {
-                cmd.args(&command[1..]);
+            let mut cmd = Command::new(&command_spawn[0]);
+            if command_spawn.len() > 1 {
+                cmd.args(&command_spawn[1..]);
             }
             cmd.current_dir(&cwd);
             cmd.stdout(Stdio::piped());
@@ -1088,6 +1096,18 @@ impl App<'_> {
                         self.terminal_runs.remove(&id);
                     }
                 }
+                AppEvent::TerminalRerun { id } => {
+                    let command_and_controller = self
+                        .terminal_runs
+                        .get(&id)
+                        .and_then(|run| (!run.running).then(|| (run.command.clone(), run.controller.clone())));
+                    if let Some((command, controller)) = command_and_controller {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.terminal_mark_running(id);
+                        }
+                        self.start_terminal_run(id, command, controller);
+                    }
+                }
                 AppEvent::TerminalRunCommand {
                     id,
                     command,
@@ -1125,6 +1145,21 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_terminal_after(after);
                     }
+                }
+                #[cfg(not(debug_assertions))]
+                AppEvent::RunUpdateCommand { command, display, latest_version } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if let Some(launch) = widget.launch_update_command(command, display, latest_version.clone()) {
+                            self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                        }
+                    }
+                }
+                #[cfg(not(debug_assertions))]
+                AppEvent::SetAutoUpgradeEnabled(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_upgrade_enabled(enabled);
+                    }
+                    self.config.auto_upgrade_enabled = enabled;
                 }
                 AppEvent::RequestAgentInstall { name, selected_index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1244,6 +1279,11 @@ impl App<'_> {
                         SlashCommand::Status => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.add_status_output();
+                            }
+                        }
+                        SlashCommand::Update => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_update_command();
                             }
                         }
                         SlashCommand::Agents => {
