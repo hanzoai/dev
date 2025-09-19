@@ -135,6 +135,42 @@ mod tests {
     }
 
     #[test]
+    fn git_grep_simple_is_search() {
+        assert_parsed(
+            &vec_str(&["git", "grep", "needle"]),
+            vec![ParsedCommand::Search {
+                cmd: "git grep needle".to_string(),
+                query: Some("needle".to_string()),
+                path: None,
+            }],
+        );
+    }
+
+    #[test]
+    fn git_grep_with_flags_and_path() {
+        assert_parsed(
+            &vec_str(&["git", "--no-pager", "grep", "-n", "needle", "src/lib.rs"]),
+            vec![ParsedCommand::Search {
+                cmd: "git --no-pager grep -n needle src/lib.rs".to_string(),
+                query: Some("needle".to_string()),
+                path: Some("lib.rs".to_string()),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_grep_dash_dash_path() {
+        assert_parsed(
+            &vec_str(&["git", "grep", "-e", "needle", "--", "crates/app/main.rs"]),
+            vec![ParsedCommand::Search {
+                cmd: "git grep -e needle -- crates/app/main.rs".to_string(),
+                query: Some("needle".to_string()),
+                path: Some("main.rs".to_string()),
+            }],
+        );
+    }
+
+    #[test]
     fn git_add_remains_unknown() {
         assert_parsed(
             &vec_str(&["git", "add", "."]),
@@ -1278,6 +1314,79 @@ fn parse_jq_filter_and_path(args: &[String]) -> (Option<String>, Option<String>)
     (query, path)
 }
 
+fn git_grep_flag_consumes_value(flag: &str) -> bool {
+    matches!(
+        flag,
+        "-e"
+            | "-f"
+            | "-g"
+            | "-O"
+            | "-A"
+            | "-B"
+            | "-C"
+            | "--before-context"
+            | "--after-context"
+            | "--context"
+            | "--max-depth"
+            | "--threads"
+    )
+}
+
+fn parse_git_grep_query_and_path(args: &[String]) -> (Option<String>, Option<String>) {
+    let mut query: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut i = 0usize;
+    let mut after_double_dash = false;
+
+    while i < args.len() {
+        let arg = &args[i];
+        if after_double_dash {
+            if path.is_none() && !arg.is_empty() {
+                path = Some(short_display_path(arg));
+            }
+            i += 1;
+            continue;
+        }
+
+        if arg == "--" {
+            after_double_dash = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "-e" {
+            if i + 1 < args.len() && query.is_none() {
+                query = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+
+        if arg == "-f" {
+            i += 2;
+            continue;
+        }
+
+        if arg.starts_with('-') {
+            if git_grep_flag_consumes_value(arg) {
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        if query.is_none() {
+            query = Some(arg.clone());
+        } else if path.is_none() {
+            path = Some(short_display_path(arg));
+        }
+        i += 1;
+    }
+
+    (query, path)
+}
+
 fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
     let [bash, flag, script] = original else {
         return None;
@@ -1511,18 +1620,18 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
         }
         Some((head, tail)) if head == "git" => {
             let cmd = shlex_join(main_cmd);
-            let is_read = git_subcommand_index(tail)
-                .map(|idx| {
-                    let sub = tail[idx].as_str();
-                    let rest = &tail[idx + 1..];
-                    git_command_is_read_only(sub, rest)
-                })
-                .unwrap_or(false);
-            if is_read {
-                ParsedCommand::ReadCommand { cmd }
-            } else {
-                ParsedCommand::Unknown { cmd }
+            if let Some(idx) = git_subcommand_index(tail) {
+                let sub = tail[idx].as_str();
+                let rest = &tail[idx + 1..];
+                if sub == "grep" {
+                    let (query, path) = parse_git_grep_query_and_path(rest);
+                    return ParsedCommand::Search { cmd, query, path };
+                }
+                if git_command_is_read_only(sub, rest) {
+                    return ParsedCommand::ReadCommand { cmd };
+                }
             }
+            ParsedCommand::Unknown { cmd }
         }
         Some((head, tail)) if head == "rg" => {
             let args_no_connector = trim_at_connector(tail);
