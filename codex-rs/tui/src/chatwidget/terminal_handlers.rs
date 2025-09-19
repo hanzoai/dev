@@ -54,6 +54,16 @@ pub(super) fn handle_terminal_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
                 false
             }
         }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            if chat.terminal_is_running() {
+                true
+            } else if chat.terminal_prepare_rerun(id) {
+                chat.app_event_tx.send(AppEvent::TerminalRerun { id });
+                true
+            } else {
+                true
+            }
+        }
         KeyCode::Enter => {
             if let Some(action) = chat.terminal_accept_pending_command() {
                 if let PendingCommandAction::Manual(command) = action {
