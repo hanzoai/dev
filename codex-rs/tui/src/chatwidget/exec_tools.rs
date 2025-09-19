@@ -7,6 +7,8 @@ use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::Line;
 
 fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
     if chat.is_reasoning_shown() {
@@ -115,14 +117,34 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
             .collect();
         for (_k, idx) in entries {
             if idx < chat.history_cells.len() {
-                let completed = history_cell::new_completed_custom_tool_call(
-                    "custom".to_string(),
-                    None,
-                    std::time::Duration::from_millis(0),
-                    false,
-                    "Cancelled by user.".to_string(),
-                );
-                chat.history_replace_at(idx, Box::new(completed));
+                let wait_cancel_cell = Box::new(history_cell::PlainHistoryCell {
+                    lines: vec![Line::styled(
+                        "Wait cancelled",
+                        Style::default()
+                            .fg(crate::colors::error())
+                            .add_modifier(Modifier::BOLD),
+                    )],
+                    kind: history_cell::HistoryCellType::Error,
+                });
+
+                let replaced = chat.history_cells[idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::RunningToolCallCell>()
+                    .map(|cell| cell.has_title("Waiting"))
+                    .unwrap_or(false);
+
+                if replaced {
+                    chat.history_replace_at(idx, wait_cancel_cell);
+                } else {
+                    let completed = history_cell::new_completed_custom_tool_call(
+                        "custom".to_string(),
+                        None,
+                        std::time::Duration::from_millis(0),
+                        false,
+                        "Cancelled by user.".to_string(),
+                    );
+                    chat.history_replace_at(idx, Box::new(completed));
+                }
             }
         }
         chat.tools_state.running_custom_tools.clear();
@@ -183,18 +205,20 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
 }
 
 pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
-    let note = "Completed (final answer received)".to_string();
-    let stdout_empty = String::new();
     let running: Vec<(super::ExecCallId, Option<usize>, Option<(usize, usize)>)> = chat
         .exec
         .running_commands
         .iter()
         .map(|(k, v)| (k.clone(), v.history_index, v.explore_entry))
         .collect();
-    for (_call_id, maybe_idx, explore_entry) in &running {
-        if let Some(idx) = maybe_idx {
-            finalize_exec_cell_at(chat, *idx, 0, stdout_empty.clone(), note.clone());
+    let mut remove_after_finalize: Vec<super::ExecCallId> = Vec::new();
+    let mut agg_was_updated = false;
+    for (call_id, maybe_idx, explore_entry) in &running {
+        // Keep streaming Exec cells alive so background commands continue to surface output.
+        if maybe_idx.is_some() {
+            continue;
         }
+
         if let Some((agg_idx, entry_idx)) = explore_entry {
             if *agg_idx < chat.history_cells.len() {
                 if let Some(agg) = chat.history_cells[*agg_idx]
@@ -202,12 +226,17 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
                     .downcast_mut::<history_cell::ExploreAggregationCell>()
                 {
                     agg.update_status(*entry_idx, history_cell::ExploreEntryStatus::Success);
+                    agg_was_updated = true;
                 }
             }
         }
+
+        remove_after_finalize.push(call_id.clone());
     }
-    let agg_was_updated = running.iter().any(|(_, _, entry)| entry.is_some());
-    chat.exec.running_commands.clear();
+
+    for call_id in remove_after_finalize {
+        chat.exec.running_commands.remove(&call_id);
+    }
     if agg_was_updated {
         chat.exec.running_explore_agg_index = None;
         chat.invalidate_height_cache();
