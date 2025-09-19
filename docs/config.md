@@ -614,6 +614,69 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 > [!NOTE]
 > `tui.notifications` is built‑in and limited to the TUI session. For programmatic or cross‑environment notifications—or to integrate with OS‑specific notifiers—use the top‑level `notify` option to run an external program that receives event JSON. The two settings are independent and can be used together.
 
+## Project Hooks
+
+Use the `[projects]` table to scope settings to a specific workspace path. In addition to `trust_level`, `approval_policy`, and `always_allow_commands`, you can attach lifecycle hooks that run commands automatically when notable events occur.
+
+```toml
+[projects."/Users/me/src/my-app"]
+trust_level = "trusted"
+
+[[projects."/Users/me/src/my-app".hooks]]
+name = "bootstrap"
+event = "session.start"
+run = ["./scripts/bootstrap.sh"]
+timeout_ms = 60000
+
+[[projects."/Users/me/src/my-app".hooks]]
+event = "tool.after"
+run = "npm run lint -- --changed"
+```
+
+Supported hook events:
+
+- `session.start`: after the session is configured (once per launch)
+- `session.end`: before shutdown completes
+- `tool.before`: immediately before each exec/tool command runs
+- `tool.after`: once an exec/tool command finishes (regardless of exit code)
+- `file.before_write`: right before an `apply_patch` is applied
+- `file.after_write`: after an `apply_patch` completes and diffs are emitted
+
+Hook commands run inside the same sandbox mode as the session and appear in the TUI as their own exec cells. Failures are surfaced as background events but do not block the main task. Each invocation receives environment variables such as `CODE_HOOK_EVENT`, `CODE_HOOK_NAME`, `CODE_HOOK_INDEX`, `CODE_HOOK_CALL_ID`, `CODE_HOOK_PAYLOAD` (JSON describing the context), `CODE_SESSION_CWD`, and—when applicable—`CODE_HOOK_SOURCE_CALL_ID`. Hooks may also set `cwd`, provide additional `env` entries, and specify `timeout_ms`.
+
+Example `tool.after` payload:
+
+```json
+{
+  "event": "tool.after",
+  "call_id": "tool_12",
+  "cwd": "/Users/me/src/my-app",
+  "command": ["npm", "test"],
+  "exit_code": 1,
+  "duration_ms": 1832,
+  "stdout": "…output truncated…",
+  "stderr": "…",
+  "timed_out": false
+}
+```
+
+## Project Commands
+
+Define project-scoped commands under `[[projects."<path>".commands]]`. Each command needs a unique `name` and either an array (`command`) or string (`run`) describing how to invoke it. Optional fields include `description`, `cwd`, `env`, and `timeout_ms`.
+
+```toml
+[[projects."/Users/me/src/my-app".commands]]
+name = "setup"
+description = "Install dependencies"
+run = ["pnpm", "install"]
+
+[[projects."/Users/me/src/my-app".commands]]
+name = "unit"
+run = "cargo test --lib"
+```
+
+Project commands appear in the TUI via `/cmd <name>` and run through the standard execution pipeline. During execution Codex sets `CODE_PROJECT_COMMAND_NAME`, `CODE_PROJECT_COMMAND_DESCRIPTION` (when provided), and `CODE_SESSION_CWD` so scripts can tailor their behaviour.
+
 ## Config reference
 
 | Key | Type / Values | Notes |
@@ -646,6 +709,9 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 | `model_providers.<id>.stream_max_retries` | number | SSE stream retry count (default: 5). |
 | `model_providers.<id>.stream_idle_timeout_ms` | number | SSE idle timeout (ms) (default: 300000). |
 | `project_doc_max_bytes` | number | Max bytes to read from `AGENTS.md`. |
+| `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
+| `projects.<path>.hooks` | array<table> | Lifecycle hooks for that workspace (see "Project Hooks"). |
+| `projects.<path>.commands` | array<table> | Project commands exposed via `/cmd`. |
 | `profile` | string | Active profile name. |
 | `profiles.<name>.*` | various | Profile‑scoped overrides of the same keys. |
 | `history.persistence` | `save-all` \| `none` | History file persistence (default: `save-all`). |
@@ -665,6 +731,5 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 | `experimental_use_exec_command_tool` | boolean | Use experimental exec command tool. |
 | `use_experimental_reasoning_summary` | boolean | Use experimental summary for reasoning chain. |
 | `responses_originator_header_internal_override` | string | Override `originator` header value. |
-| `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
 | `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
 | `tools.web_search_allowed_domains` | array<string> | Optional allow-list for web search (filters.allowed_domains). |
