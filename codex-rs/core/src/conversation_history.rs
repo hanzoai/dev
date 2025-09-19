@@ -32,20 +32,6 @@ impl ConversationHistory {
         }
     }
 
-    // Replaced by record_items + keep_last_messages utilities.
-
-    /// Retain only the last `n` messages in the history (oldest-first order).
-    pub(crate) fn keep_last_messages(&mut self, n: usize) {
-        if n == 0 {
-            self.items.clear();
-            return;
-        }
-        let len = self.items.len();
-        if len > n {
-            let start = len - n;
-            self.items = self.items.split_off(start);
-        }
-    }
 }
 
 /// Anything that is not a system message or "reasoning" message is considered
@@ -58,8 +44,9 @@ fn is_api_message(message: &ResponseItem) -> bool {
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::Reasoning { .. } => true,
-        ResponseItem::WebSearchCall { .. } | ResponseItem::Other => false,
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::WebSearchCall { .. } => true,
+        ResponseItem::Other => false,
     }
 }
 

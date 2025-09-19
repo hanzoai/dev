@@ -24,7 +24,7 @@ use super::SESSIONS_SUBDIR;
 use super::list::ConversationsPage;
 use super::list::Cursor;
 use super::list::get_conversations;
-use super::policy::is_persisted_response_item;
+use super::policy::{should_persist_response_item, should_persist_rollout_item};
 use crate::config::Config;
 use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
@@ -43,7 +43,9 @@ pub struct SessionStateSnapshot {}
 pub struct SavedSession {
     pub session: SessionMeta,
     #[serde(default)]
-    pub items: Vec<ResponseItem>,
+    pub items: Vec<RolloutItem>,
+    #[serde(default)]
+    pub events: Vec<crate::protocol::RecordedEvent>,
     #[serde(default)]
     pub state: SessionStateSnapshot,
     pub session_id: uuid::Uuid,
@@ -55,8 +57,8 @@ pub struct SavedSession {
 /// Rollouts are recorded as JSONL and can be inspected with tools such as:
 ///
 /// ```ignore
-/// $ jq -C . ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ jq -C . ~/.code/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ fx ~/.code/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
 /// ```
 #[derive(Clone)]
 pub struct RolloutRecorder {
@@ -166,14 +168,30 @@ impl RolloutRecorder {
         Ok(Self { tx, rollout_path })
     }
 
-    pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
+    pub(crate) async fn record_response_items(
+        &self,
+        items: &[ResponseItem],
+    ) -> std::io::Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let mut rollout_items: Vec<RolloutItem> = Vec::new();
+        for item in items {
+            if should_persist_response_item(item) {
+                rollout_items.push(RolloutItem::ResponseItem(item.clone()));
+            }
+        }
+        if rollout_items.is_empty() {
+            return Ok(());
+        }
+        self.record_items(&rollout_items).await
+    }
+
+    pub(crate) async fn record_items(&self, items: &[RolloutItem]) -> std::io::Result<()> {
         let mut filtered: Vec<RolloutItem> = Vec::new();
         for item in items {
-            // Note that function calls may look a bit strange if they are
-            // "fully qualified MCP tool calls," so we could consider
-            // reformatting them in that case.
-            if super::policy::should_persist_response_item(item) {
-                filtered.push(RolloutItem::ResponseItem(item.clone()));
+            if should_persist_rollout_item(item) {
+                filtered.push(item.clone());
             }
         }
         if filtered.is_empty() {
@@ -185,6 +203,24 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed to queue rollout items: {e}")))
     }
 
+    pub(crate) async fn record_events(
+        &self,
+        events: &[codex_protocol::protocol::RecordedEvent],
+    ) -> std::io::Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let filtered = events
+            .iter()
+            .cloned()
+            .map(RolloutItem::Event)
+            .collect::<Vec<_>>();
+        self.tx
+            .send(RolloutCmd::AddItems(filtered))
+            .await
+            .map_err(|e| IoError::other(format!("failed to queue rollout events: {e}")))
+    }
+
     /// No-op compatibility shim for older APIs expecting a state snapshot.
     pub async fn record_state(&self, _snapshot: SessionStateSnapshot) -> std::io::Result<()> {
         Ok(())
@@ -194,17 +230,24 @@ impl RolloutRecorder {
     pub async fn resume(config: &Config, path: &Path) -> std::io::Result<(Self, SavedSession)> {
         let recorder = Self::new(config, RolloutRecorderParams::Resume { path: path.to_path_buf() }).await?;
         let history = Self::get_rollout_history(path).await?;
-        let (session_id, items) = match history {
-            InitialHistory::Resumed(resumed) => (resumed.conversation_id.0, resumed
-                .history
-                .into_iter()
-                .filter_map(|ri| match ri { RolloutItem::ResponseItem(it) => Some(it), _ => None })
-                .collect::<Vec<ResponseItem>>()),
-            _ => (uuid::Uuid::new_v4(), Vec::new()),
+        let (session_id, items, events) = match history {
+            InitialHistory::Resumed(resumed) => {
+                let events = resumed
+                    .history
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        RolloutItem::Event(ev) => crate::protocol::recorded_event_from_protocol(ev.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                (resumed.conversation_id.0, resumed.history, events)
+            }
+            _ => (uuid::Uuid::new_v4(), Vec::new(), Vec::new()),
         };
         let saved = SavedSession {
             session: SessionMeta::default(),
             items,
+            events,
             state: SessionStateSnapshot::default(),
             session_id,
         };
@@ -246,8 +289,8 @@ impl RolloutRecorder {
                     RolloutItem::ResponseItem(item) => {
                         items.push(RolloutItem::ResponseItem(item));
                     }
-                    RolloutItem::EventMsg(_ev) => {
-                        items.push(RolloutItem::EventMsg(_ev));
+                    RolloutItem::Event(ev) => {
+                        items.push(RolloutItem::Event(ev));
                     }
                     // Ignore variants not used by this fork when resuming.
                     RolloutItem::Compacted(_)
@@ -315,7 +358,8 @@ fn create_log_file(
     config: &Config,
     conversation_id: ConversationId,
 ) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.codex/sessions/YYYY/MM/DD and create it if missing.
+    // Resolve ~/.code/sessions/YYYY/MM/DD and create it if missing (Code still
+    // reads legacy ~/.codex/sessions/ paths).
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.codex_home.clone();
@@ -376,7 +420,7 @@ async fn rollout_writer(
         match cmd {
             RolloutCmd::AddItems(items) => {
                 for item in items {
-                    if is_persisted_response_item(&item) {
+                    if should_persist_rollout_item(&item) {
                         writer.write_rollout_item(item).await?;
                     }
                 }

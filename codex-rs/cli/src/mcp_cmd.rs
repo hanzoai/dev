@@ -20,7 +20,7 @@ use codex_core::config_types::McpServerConfig;
 /// - `serve`  — run the MCP server on stdio
 /// - `list`   — list configured servers (with `--json`)
 /// - `get`    — show a single server (with `--json`)
-/// - `add`    — add a server launcher entry to `~/.codex/config.toml`
+/// - `add`    — add a server launcher entry to `~/.code/config.toml` (Code also reads legacy `~/.codex/config.toml`)
 /// - `remove` — delete a server entry
 #[derive(Debug, clap::Parser)]
 pub struct McpCli {

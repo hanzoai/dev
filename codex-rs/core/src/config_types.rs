@@ -248,7 +248,8 @@ impl UriBasedFileOpener {
     }
 }
 
-/// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+/// Settings that govern if and what will be written to `~/.code/history.jsonl`
+/// (Code still reads legacy `~/.codex/history.jsonl`).
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct History {
     /// If true, history entries will not be written to disk.
