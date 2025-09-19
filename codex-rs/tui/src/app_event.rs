@@ -2,6 +2,7 @@ use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
+use codex_core::protocol::ApprovedCommandMatchKind;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
@@ -226,6 +227,16 @@ pub(crate) enum AppEvent {
     /// (clear spinner/status, finalize running exec/tool cells) while the core
     /// continues its own abort/cleanup in parallel.
     CancelRunningTask,
+    /// Register a command pattern as approved, optionally persisting to config.
+    RegisterApprovedCommand {
+        command: Vec<String>,
+        match_kind: ApprovedCommandMatchKind,
+        persist: bool,
+        semantic_prefix: Option<Vec<String>>,
+    },
+    /// Indicate that an approval was denied so the UI can clear transient
+    /// spinner/status state without interrupting the core task.
+    MarkTaskIdle,
     OpenTerminal(TerminalLaunch),
     TerminalChunk {
         id: u64,
