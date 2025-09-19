@@ -2718,6 +2718,7 @@ async fn run_turn(
                                 )
                                 .await;
 
+                            let previous_input_snapshot = input.clone();
                             let compacted_history = compact::run_inline_auto_compact_task(
                                 Arc::clone(&sess),
                                 Arc::clone(&turn_context),
@@ -2734,7 +2735,14 @@ async fn run_turn(
                                 let mut rebuilt = compacted_history;
                                 rebuilt.push(initial_user_item.clone());
                                 if !pending_input_tail.is_empty() {
-                                    rebuilt.extend(pending_input_tail.iter().cloned());
+                                    let (missing_calls, filtered_outputs) =
+                                        reconcile_pending_tool_outputs(&pending_input_tail, &rebuilt, &previous_input_snapshot);
+                                    if !missing_calls.is_empty() {
+                                        rebuilt.extend(missing_calls);
+                                    }
+                                    if !filtered_outputs.is_empty() {
+                                        rebuilt.extend(filtered_outputs);
+                                    }
                                 }
                                 input = rebuilt.clone();
                                 attempt_input = rebuilt;
@@ -2855,6 +2863,69 @@ async fn run_turn(
             }
         }
     }
+}
+
+fn reconcile_pending_tool_outputs(
+    pending_outputs: &[ResponseItem],
+    rebuilt_history: &[ResponseItem],
+    previous_input_snapshot: &[ResponseItem],
+) -> (Vec<ResponseItem>, Vec<ResponseItem>) {
+    let mut call_ids = collect_tool_call_ids(rebuilt_history);
+    let mut missing_calls = Vec::new();
+    let mut filtered_outputs = Vec::new();
+
+    for item in pending_outputs {
+        match item {
+            ResponseItem::FunctionCallOutput { call_id, .. }
+            | ResponseItem::CustomToolCallOutput { call_id, .. } => {
+                if call_ids.contains(call_id) {
+                    filtered_outputs.push(item.clone());
+                    continue;
+                }
+
+                if let Some(call_item) = find_call_item_by_id(previous_input_snapshot, call_id) {
+                    call_ids.insert(call_id.clone());
+                    missing_calls.push(call_item);
+                    filtered_outputs.push(item.clone());
+                } else {
+                    warn!("Skipping tool output for missing call_id={call_id} after auto-compact");
+                }
+            }
+            _ => {
+                filtered_outputs.push(item.clone());
+            }
+        }
+    }
+
+    (missing_calls, filtered_outputs)
+}
+
+fn collect_tool_call_ids(items: &[ResponseItem]) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for item in items {
+        match item {
+            ResponseItem::FunctionCall { call_id, .. } => {
+                ids.insert(call_id.clone());
+            }
+            ResponseItem::LocalShellCall { call_id: Some(call_id), .. } => {
+                ids.insert(call_id.clone());
+            }
+            ResponseItem::CustomToolCall { call_id, .. } => {
+                ids.insert(call_id.clone());
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
+fn find_call_item_by_id(items: &[ResponseItem], call_id: &str) -> Option<ResponseItem> {
+    items.iter().rev().find_map(|item| match item {
+        ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id => Some(item.clone()),
+        ResponseItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id => Some(item.clone()),
+        ResponseItem::CustomToolCall { call_id: existing, .. } if existing == call_id => Some(item.clone()),
+        _ => None,
+    })
 }
 
 /// When the model is prompted, it returns a stream of events. Some of these
