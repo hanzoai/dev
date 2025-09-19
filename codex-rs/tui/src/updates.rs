@@ -174,7 +174,7 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
         }
     };
 
-    info!("auto-upgrade: running `{display}` to install {latest_version}");
+    info!("auto-upgrade: running `{}` to install {}", display, latest_version);
     let result = run_upgrade_command(command).await;
     drop(lock);
 
