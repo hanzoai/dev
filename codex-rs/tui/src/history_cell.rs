@@ -3946,6 +3946,7 @@ pub(crate) struct RunningToolCallCell {
     start_time: Instant,
     arg_lines: Vec<Line<'static>>,
     wait_has_target: bool,
+    wait_has_call_id: bool,
     wait_cap_ms: Option<u64>,
 }
 
@@ -3963,7 +3964,11 @@ impl HistoryCell for RunningToolCallCell {
     }
     fn gutter_symbol(&self) -> Option<&'static str> {
         if self.title == "Waiting" {
-            Some(self.spinner_frame())
+            if self.wait_has_call_id {
+                Some("⚙")
+            } else {
+                Some(self.spinner_frame())
+            }
         } else {
             Some("⚙")
         }
@@ -3986,9 +3991,12 @@ impl HistoryCell for RunningToolCallCell {
                 ),
             );
             let cap_ms = self.wait_cap_ms.unwrap_or(600_000);
-            let cap_str = format_duration(Duration::from_millis(cap_ms));
+            let cap_str = Self::strip_zero_seconds_suffix(
+                format_duration(Duration::from_millis(cap_ms)),
+            );
             let suffix = if show_elapsed {
-                format!(" ({} / up to {})", format_duration(elapsed), cap_str)
+                let elapsed_str = Self::strip_zero_seconds_suffix(format_duration(elapsed));
+                format!(" ({} / up to {})", elapsed_str, cap_str)
             } else {
                 format!(" (up to {})", cap_str)
             };
@@ -4012,6 +4020,12 @@ impl HistoryCell for RunningToolCallCell {
 }
 
 impl RunningToolCallCell {
+    fn strip_zero_seconds_suffix(mut duration: String) -> String {
+        if duration.ends_with(" 00s") {
+            duration.truncate(duration.len() - 4);
+        }
+        duration
+    }
     fn spinner_frame(&self) -> &'static str {
         const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
         let idx = ((self.start_time.elapsed().as_millis() / 100) as usize) % FRAMES.len();
@@ -7838,6 +7852,7 @@ pub(crate) fn new_running_browser_tool_call(
         start_time: Instant::now(),
         arg_lines,
         wait_has_target: false,
+        wait_has_call_id: false,
         wait_cap_ms: None,
     }
 }
@@ -7876,6 +7891,7 @@ pub(crate) fn new_running_custom_tool_call(
     // Parse args JSON and format as key/value lines
     let mut arg_lines: Vec<Line<'static>> = Vec::new();
     let mut wait_has_target = false;
+    let mut wait_has_call_id = false;
     let mut wait_cap_ms = None;
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
@@ -7897,6 +7913,7 @@ pub(crate) fn new_running_custom_tool_call(
                         Span::styled("└ call_id: ", Style::default().fg(crate::colors::text_dim())),
                         Span::styled(cid.to_string(), Style::default().fg(crate::colors::text())),
                     ]));
+                    wait_has_call_id = true;
                 }
             } else {
                 arg_lines.extend(format_browser_args_line(&json));
@@ -7913,6 +7930,7 @@ pub(crate) fn new_running_custom_tool_call(
         start_time: Instant::now(),
         arg_lines,
         wait_has_target,
+        wait_has_call_id,
         wait_cap_ms,
     }
 }
@@ -7931,6 +7949,7 @@ pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCe
         start_time: Instant::now(),
         arg_lines,
         wait_has_target: false,
+        wait_has_call_id: false,
         wait_cap_ms: None,
     }
 }
@@ -7943,6 +7962,7 @@ pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToo
         start_time: Instant::now(),
         arg_lines: vec![line],
         wait_has_target: false,
+        wait_has_call_id: false,
         wait_cap_ms: None,
     }
 }
