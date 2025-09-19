@@ -79,6 +79,8 @@ mod greeting;
 // Upstream introduced a standalone status indicator widget. Our fork renders
 // status within the composer title; keep the module private unless tests need it.
 mod status_indicator_widget;
+#[cfg(target_os = "macos")]
+mod agent_install_helpers;
 
 // Internal vt100-based replay tests live as a separate source file to keep them
 // close to the widget code. Include them in unit tests.

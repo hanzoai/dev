@@ -118,6 +118,8 @@ use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
 use crate::history_cell;
 use crate::history_cell::clean_wait_command;
+#[cfg(target_os = "macos")]
+use crate::agent_install_helpers::macos_brew_formula_for_command;
 use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
@@ -5241,7 +5243,8 @@ impl ChatWidget<'_> {
 
         #[cfg(target_os = "macos")]
         {
-            let script = format!("brew install {cmd}");
+            let brew_formula = macos_brew_formula_for_command(&cmd);
+            let script = format!("brew install {brew_formula}");
             let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
             return Some((command, script));
         }
