@@ -4,12 +4,21 @@ use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fs;
+use std::io::ErrorKind;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use codex_core::config::resolve_codex_path_for_read;
 use codex_core::config::Config;
 use codex_core::default_client::create_client;
+use tokio::process::Command;
+use tracing::{info, warn};
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
@@ -36,6 +45,29 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     })
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdateCheckInfo {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+}
+
+pub async fn check_for_updates_now(config: &Config) -> anyhow::Result<UpdateCheckInfo> {
+    let version_file = version_filepath(config);
+    let originator = config.responses_originator_header.clone();
+    let info = check_for_update(&version_file, &originator).await?;
+    let current_version = codex_version::version().to_string();
+    let latest_version = if is_newer(&info.latest_version, &current_version).unwrap_or(false) {
+        Some(info.latest_version)
+    } else {
+        None
+    };
+
+    Ok(UpdateCheckInfo {
+        current_version,
+        latest_version,
+    })
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct VersionInfo {
     latest_version: String,
@@ -50,9 +82,212 @@ struct ReleaseInfo {
 
 const VERSION_FILENAME: &str = "version.json";
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/just-every/code/releases/latest";
+pub const CODE_RELEASE_URL: &str = "https://github.com/just-every/code/releases/latest";
+
+const AUTO_UPGRADE_LOCK_FILE: &str = "auto-upgrade.lock";
+const AUTO_UPGRADE_LOCK_TTL: Duration = Duration::from_secs(900); // 15 minutes
+
+#[derive(Debug, Clone)]
+pub enum UpgradeResolution {
+    Command { command: Vec<String>, display: String },
+    Manual { instructions: String },
+}
 
 fn version_filepath(config: &Config) -> PathBuf {
     config.codex_home.join(VERSION_FILENAME)
+}
+
+pub fn resolve_upgrade_resolution() -> UpgradeResolution {
+    if std::env::var_os("CODEX_MANAGED_BY_NPM").is_some() {
+        return UpgradeResolution::Command {
+            command: vec![
+                "npm".to_string(),
+                "install".to_string(),
+                "-g".to_string(),
+                "@just-every/code@latest".to_string(),
+            ],
+            display: "npm install -g @just-every/code@latest".to_string(),
+        };
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if exe_path.starts_with("/opt/homebrew") || exe_path.starts_with("/usr/local") {
+                return UpgradeResolution::Command {
+                    command: vec![
+                        "brew".to_string(),
+                        "upgrade".to_string(),
+                        "code".to_string(),
+                    ],
+                    display: "brew upgrade code".to_string(),
+                };
+            }
+        }
+    }
+
+    UpgradeResolution::Manual {
+        instructions: format!(
+            "Download the latest release from {CODE_RELEASE_URL} and replace the installed binary."
+        ),
+    }
+}
+
+pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<String>> {
+    if !config.auto_upgrade_enabled {
+        return Ok(None);
+    }
+
+    let resolution = resolve_upgrade_resolution();
+    let (command, display) = match resolution {
+        UpgradeResolution::Command { command, display } if !command.is_empty() => {
+            (command, display)
+        }
+        _ => {
+            info!("auto-upgrade enabled but no managed installer detected; skipping");
+            return Ok(None);
+        }
+    };
+
+    let info = match check_for_updates_now(config).await {
+        Ok(info) => info,
+        Err(err) => {
+            warn!("auto-upgrade: failed to check for updates: {err}");
+            return Ok(None);
+        }
+    };
+
+    let Some(latest_version) = info.latest_version.clone() else {
+        // Already up to date
+        return Ok(None);
+    };
+
+    let lock = match AutoUpgradeLock::acquire(&config.codex_home) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            info!("auto-upgrade already in progress by another instance; skipping");
+            return Ok(None);
+        }
+        Err(err) => {
+            warn!("auto-upgrade: unable to acquire lock: {err}");
+            return Ok(None);
+        }
+    };
+
+    info!("auto-upgrade: running `{display}` to install {latest_version}");
+    let result = run_upgrade_command(command).await;
+    drop(lock);
+
+    match result {
+        Ok(()) => {
+            info!("auto-upgrade: successfully installed {latest_version}");
+            Ok(Some(latest_version))
+        }
+        Err(err) => {
+            warn!("auto-upgrade: upgrade command failed: {err}");
+            Ok(None)
+        }
+    }
+}
+
+struct AutoUpgradeLock {
+    path: PathBuf,
+}
+
+impl AutoUpgradeLock {
+    fn acquire(codex_home: &Path) -> anyhow::Result<Option<Self>> {
+        let path = codex_home.join(AUTO_UPGRADE_LOCK_FILE);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                writeln!(file, "{timestamp}")?;
+                Ok(Some(Self { path }))
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                if Self::is_stale(&path)? {
+                    let _ = fs::remove_file(&path);
+                    match fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&path)
+                    {
+                        Ok(mut file) => {
+                            let timestamp = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            writeln!(file, "{timestamp}")?;
+                            Ok(Some(Self { path }))
+                        }
+                        Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(None),
+                        Err(err) => Err(err.into()),
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn is_stale(path: &Path) -> anyhow::Result<bool> {
+        match fs::read_to_string(path) {
+            Ok(contents) => {
+                if let Ok(stored) = contents.trim().parse::<u64>() {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    Ok(now.saturating_sub(stored) > AUTO_UPGRADE_LOCK_TTL.as_secs())
+                } else {
+                    Ok(true)
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(true),
+            Err(err) => {
+                warn!("auto-upgrade: failed reading lock file: {err}");
+                Ok(true)
+            }
+        }
+    }
+}
+
+impl Drop for AutoUpgradeLock {
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_file(&self.path) {
+            if err.kind() != ErrorKind::NotFound {
+                warn!("auto-upgrade: failed to remove lock file {}: {err}", self.path.display());
+            }
+        }
+    }
+}
+
+async fn run_upgrade_command(command: Vec<String>) -> anyhow::Result<()> {
+    if command.is_empty() {
+        anyhow::bail!("upgrade command is empty");
+    }
+
+    let mut cmd = Command::new(&command[0]);
+    if command.len() > 1 {
+        cmd.args(&command[1..]);
+    }
+    cmd.stdin(Stdio::null());
+
+    let status = cmd.status().await?;
+    if !status.success() {
+        anyhow::bail!(
+            "upgrade command exited with status {}",
+            status.code().map_or_else(|| "signal".to_string(), |c| c.to_string())
+        );
+    }
+    Ok(())
 }
 
 fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
@@ -60,7 +295,7 @@ fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
     Ok(serde_json::from_str(&contents)?)
 }
 
-async fn check_for_update(version_file: &Path, originator: &str) -> anyhow::Result<()> {
+async fn check_for_update(version_file: &Path, originator: &str) -> anyhow::Result<VersionInfo> {
     let ReleaseInfo {
         tag_name: latest_tag_name,
     } = create_client(originator)
@@ -100,7 +335,7 @@ async fn check_for_update(version_file: &Path, originator: &str) -> anyhow::Resu
         tokio::fs::create_dir_all(parent).await?;
     }
     tokio::fs::write(version_file, json_line).await?;
-    Ok(())
+    Ok(info)
 }
 
 fn is_newer(latest: &str, current: &str) -> Option<bool> {
