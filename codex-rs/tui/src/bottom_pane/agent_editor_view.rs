@@ -7,6 +7,8 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+#[cfg(target_os = "macos")]
+use crate::agent_install_helpers::macos_brew_formula_for_command;
 
 use super::bottom_pane_view::BottomPaneView;
 use super::form_text_field::FormTextField;
@@ -114,7 +116,10 @@ impl AgentEditorView {
 
         // OS-specific short hint
         #[cfg(target_os = "macos")]
-        { v.install_hint = format!("'{}' not found. On macOS, try Homebrew (brew install {}) or consult the agent's docs.", command, command); }
+        {
+            let brew_formula = macos_brew_formula_for_command(&command);
+            v.install_hint = format!("'{command}' not found. On macOS, try Homebrew (brew install {brew_formula}) or consult the agent's docs.");
+        }
         #[cfg(target_os = "linux")]
         { v.install_hint = format!("'{}' not found. On Linux, install via your package manager or consult the agent's docs.", command); }
         #[cfg(target_os = "windows")]

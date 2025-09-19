@@ -105,12 +105,28 @@ pub enum Op {
         items: Vec<InputItem>,
     },
 
+    /// Queue user input to be appended to the next model request without
+    /// interrupting the current turn.
+    QueueUserInput {
+        /// User input items, see `InputItem`
+        items: Vec<InputItem>,
+    },
+
     /// Approve a command execution
     ExecApproval {
         /// The id of the submission we are approving
         id: String,
         /// The user's decision in response to the request.
         decision: ReviewDecision,
+    },
+
+    /// Register a command pattern as approved for the remainder of the session.
+    RegisterApprovedCommand {
+        command: Vec<String>,
+        match_kind: ApprovedCommandMatchKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        semantic_prefix: Option<Vec<String>>,
     },
 
     /// Approve a code patch
@@ -127,6 +143,12 @@ pub enum Op {
     /// history disabled, it matches the list of "sensitive" patterns, etc.
     AddToHistory {
         /// The message text to be stored.
+        text: String,
+    },
+
+    /// Internally queue a developer-role message to be included in the next turn.
+    AddPendingInputDeveloper {
+        /// The developer message text to add to pending input.
         text: String,
     },
 
@@ -167,6 +189,13 @@ pub enum AskForApproval {
     /// Never ask the user to approve commands. Failures are immediately returned
     /// to the model, and never escalated to the user for approval.
     Never,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovedCommandMatchKind {
+    Exact,
+    Prefix,
 }
 
 /// Determines execution restrictions for model shell commands.

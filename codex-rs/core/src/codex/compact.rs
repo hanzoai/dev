@@ -1,26 +1,37 @@
 use std::sync::Arc;
 
+use super::debug_history;
 use super::get_last_assistant_message_from_turn;
+use super::response_input_from_core_items;
 use super::AgentTask;
 use super::MutexExt;
 use super::Session;
 use super::TurnContext;
+use crate::client_common::ResponseEvent;
+use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
+use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
+use crate::model_family::find_family_for_model;
 use crate::protocol::AgentMessageEvent;
+use crate::protocol::AskForApproval as AskForApprovalCore;
+use crate::protocol::ErrorEvent;
 use crate::protocol::EventMsg;
 use crate::protocol::InputItem;
+use crate::protocol::SandboxPolicy as SandboxPolicyCore;
 use crate::protocol::TaskCompleteEvent;
+use crate::util::backoff;
+use crate::Prompt;
 use askama::Template;
+use codex_protocol::config_types::ReasoningEffort as ReasoningEffortProtocol;
+use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryProtocol;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::CompactedItem;
 use codex_protocol::protocol::InputMessageKind;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::TurnContextItem;
-use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
-use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use crate::protocol::AskForApproval as AskForApprovalCore;
-use crate::protocol::SandboxPolicy as SandboxPolicyCore;
+use futures::prelude::*;
 
 pub(super) const COMPACT_TRIGGER_TEXT: &str = "Start Summarization";
 const SUMMARIZATION_PROMPT: &str = include_str!("../../templates/compact/prompt.md");
@@ -53,8 +64,10 @@ pub(super) async fn run_inline_auto_compact_task(
     turn_context: Arc<TurnContext>,
 ) -> Vec<ResponseItem> {
     let sub_id = sess.next_internal_sub_id();
-    let input = vec![InputItem::Text { text: COMPACT_TRIGGER_TEXT.to_string() }];
-    match perform_compaction(
+    let input = vec![InputItem::Text {
+        text: COMPACT_TRIGGER_TEXT.to_string(),
+    }];
+    perform_compaction(
         Arc::clone(&sess),
         Arc::clone(&turn_context),
         sub_id,
@@ -63,10 +76,6 @@ pub(super) async fn run_inline_auto_compact_task(
         false,
     )
     .await
-    {
-        Ok(history) => history,
-        Err(_) => Vec::new(),
-    }
 }
 
 #[allow(dead_code)]
@@ -77,65 +86,176 @@ pub(super) async fn run_compact_task(
     input: Vec<InputItem>,
     compact_instructions: String,
 ) {
-    let _ = perform_compaction(sess, turn_context, sub_id, input, compact_instructions, true).await;
+    let _ = perform_compaction(
+        sess,
+        turn_context,
+        sub_id,
+        input,
+        compact_instructions,
+        true,
+    )
+    .await;
 }
 
 /// Perform a compact operation and return the rebuilt conversation history.
-///
-/// This minimal implementation avoids invoking the model and instead composes
-/// a compacted history using the last assistant message as the summary.
 pub(super) async fn perform_compaction(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     sub_id: String,
-    _input: Vec<InputItem>,
-    _compact_instructions: String,
+    input: Vec<InputItem>,
+    compact_instructions: String,
     remove_task_on_completion: bool,
-) -> CodexResult<Vec<ResponseItem>> {
-    // Signal task begin
+) -> Vec<ResponseItem> {
+    sess
+        .notify_background_event(&sub_id, "Compacting conversation...")
+        .await;
     let start_event = sess.make_event(&sub_id, EventMsg::TaskStarted);
     sess.send_event(start_event).await;
 
-    // Snapshot current history
+    let initial_input_for_turn = response_input_from_core_items(input);
+    let instructions_override = compact_instructions;
+    let turn_input =
+        sess.turn_input_with_history(vec![initial_input_for_turn.clone().into()]);
+
+    let mut prompt = Prompt {
+        input: turn_input,
+        store: !sess.disable_response_storage,
+        user_instructions: None,
+        environment_context: None,
+        tools: Vec::new(),
+        status_items: Vec::new(),
+        base_instructions_override: Some(instructions_override),
+        include_additional_instructions: false,
+        text_format: None,
+        model_override: None,
+        model_family_override: None,
+    };
+
+    if turn_context.client.get_model() == "gpt-5-codex" {
+        prompt.model_override = Some("gpt-5".to_string());
+        if let Some(family) = find_family_for_model("gpt-5") {
+            prompt.model_family_override = Some(family);
+        }
+    }
+
+    let max_retries = turn_context.client.get_provider().stream_max_retries();
+    let mut retries = 0;
+
+    loop {
+        let attempt_result =
+            drain_to_completed(&sess, turn_context.as_ref(), &prompt).await;
+
+        match attempt_result {
+            Ok(()) => {
+                break;
+            }
+            Err(CodexErr::Interrupted) => {
+                return Vec::new();
+            }
+            Err(e) => {
+                if retries < max_retries {
+                    retries += 1;
+                    let delay = backoff(retries);
+                    sess
+                        .notify_stream_error(
+                            &sub_id,
+                            format!(
+                                "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
+                            ),
+                        )
+                        .await;
+                    tokio::time::sleep(delay).await;
+                    continue;
+                } else {
+                    let event = sess.make_event(
+                        &sub_id,
+                        EventMsg::Error(ErrorEvent {
+                            message: e.to_string(),
+                        }),
+                    );
+                    sess.send_event(event).await;
+                    return Vec::new();
+                }
+            }
+        }
+    }
+
+    if remove_task_on_completion {
+        sess.remove_task(&sub_id);
+    }
     let history_snapshot = {
         let state = sess.state.lock_unchecked();
         state.history.contents()
     };
-
-    // Build compacted history using the last assistant message as the summary
     let summary_text = get_last_assistant_message_from_turn(&history_snapshot).unwrap_or_default();
     let user_messages = collect_user_messages(&history_snapshot);
     let initial_context = sess.build_initial_context(turn_context.as_ref());
     let new_history = build_compacted_history(initial_context, &user_messages, &summary_text);
+    {
+        let mut state = sess.state.lock_unchecked();
+        state.history = super::ConversationHistory::new();
+    }
+    sess.record_conversation_items(&new_history).await;
+    {
+        let state = sess.state.lock_unchecked();
+        let snapshot = state.history.contents();
+        debug_history("after_compact_record", &snapshot);
+    }
 
-    // Persist rollout items for traceability
+    // Persist rollout items for traceability and UI reconstruction.
     let ctx_item = RolloutItem::TurnContext(TurnContextItem {
         cwd: turn_context.cwd.clone(),
         approval_policy: map_approval(turn_context.approval_policy),
         sandbox_policy: map_sandbox(&turn_context.sandbox_policy),
         model: turn_context.client.get_model(),
-        effort: Some(map_effort(turn_context.client.get_reasoning_effort())),
+        effort: map_effort(turn_context.client.get_reasoning_effort()),
         summary: map_summary(turn_context.client.get_reasoning_summary()),
     });
-    let compact_item = RolloutItem::Compacted(CompactedItem { message: summary_text.clone() });
+    let compact_item = RolloutItem::Compacted(CompactedItem {
+        message: summary_text.clone(),
+    });
     sess.persist_rollout_items(&[ctx_item, compact_item]).await;
 
-    if remove_task_on_completion {
-        sess.remove_task(&sub_id);
-    }
-
-    // Notify completion
-    let done_msg = sess.make_event(&sub_id, EventMsg::AgentMessage(AgentMessageEvent {
-        message: "Compact task completed".to_string(),
-    }));
-    sess.send_event(done_msg).await;
-    let complete = sess.make_event(
+    let message = if summary_text.trim().is_empty() {
+        "Compact task completed.".to_string()
+    } else {
+        summary_text.clone()
+    };
+    let event = sess.make_event(
         &sub_id,
-        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+        EventMsg::AgentMessage(AgentMessageEvent {
+            message: message.clone(),
+        }),
     );
-    sess.send_event(complete).await;
+    sess.send_event(event).await;
+    let assistant_summary = ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText { text: message }],
+    };
+    {
+        let mut state = sess.state.lock_unchecked();
+        state
+            .history
+            .record_items(std::slice::from_ref(&assistant_summary));
+        let snapshot = state.history.contents();
+        debug_history("after_compact_summary", &snapshot);
+    }
+    sess
+        .persist_rollout_items(&[RolloutItem::ResponseItem(assistant_summary.clone())])
+        .await;
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    );
+    sess.send_event(event).await;
 
-    Ok(new_history)
+    {
+        let state = sess.state.lock_unchecked();
+        state.history.contents()
+    }
 }
 
 fn map_approval(a: AskForApprovalCore) -> codex_protocol::protocol::AskForApproval {
@@ -166,22 +286,50 @@ fn map_sandbox(s: &SandboxPolicyCore) -> codex_protocol::protocol::SandboxPolicy
     }
 }
 
-fn map_effort(e: ReasoningEffortConfig) -> codex_protocol::config_types::ReasoningEffort {
-    match e {
-        ReasoningEffortConfig::Minimal => codex_protocol::config_types::ReasoningEffort::Minimal,
-        ReasoningEffortConfig::Low => codex_protocol::config_types::ReasoningEffort::Low,
-        ReasoningEffortConfig::Medium => codex_protocol::config_types::ReasoningEffort::Medium,
-        ReasoningEffortConfig::High => codex_protocol::config_types::ReasoningEffort::High,
-        ReasoningEffortConfig::None => codex_protocol::config_types::ReasoningEffort::Minimal,
+fn map_effort(effort: ReasoningEffortConfig) -> Option<ReasoningEffortProtocol> {
+    match effort {
+        ReasoningEffortConfig::Minimal => Some(ReasoningEffortProtocol::Minimal),
+        ReasoningEffortConfig::Low => Some(ReasoningEffortProtocol::Low),
+        ReasoningEffortConfig::Medium => Some(ReasoningEffortProtocol::Medium),
+        ReasoningEffortConfig::High => Some(ReasoningEffortProtocol::High),
+        ReasoningEffortConfig::None => None,
     }
 }
 
-fn map_summary(s: ReasoningSummaryConfig) -> codex_protocol::config_types::ReasoningSummary {
-    match s {
-        ReasoningSummaryConfig::Auto => codex_protocol::config_types::ReasoningSummary::Auto,
-        ReasoningSummaryConfig::Concise => codex_protocol::config_types::ReasoningSummary::Concise,
-        ReasoningSummaryConfig::Detailed => codex_protocol::config_types::ReasoningSummary::Detailed,
-        ReasoningSummaryConfig::None => codex_protocol::config_types::ReasoningSummary::None,
+fn map_summary(summary: ReasoningSummaryConfig) -> ReasoningSummaryProtocol {
+    match summary {
+        ReasoningSummaryConfig::Auto => ReasoningSummaryProtocol::Auto,
+        ReasoningSummaryConfig::Concise => ReasoningSummaryProtocol::Concise,
+        ReasoningSummaryConfig::Detailed => ReasoningSummaryProtocol::Detailed,
+        ReasoningSummaryConfig::None => ReasoningSummaryProtocol::None,
+    }
+}
+
+async fn drain_to_completed(
+    sess: &Session,
+    turn_context: &TurnContext,
+    prompt: &Prompt,
+) -> CodexResult<()> {
+    let mut stream = turn_context.client.clone().stream(prompt).await?;
+    loop {
+        let maybe_event = stream.next().await;
+        let Some(event) = maybe_event else {
+            return Err(CodexErr::Stream(
+                "stream closed before response.completed".into(),
+                None,
+            ));
+        };
+        match event {
+            Ok(ResponseEvent::OutputItemDone { item, .. }) => {
+                let mut state = sess.state.lock_unchecked();
+                state.history.record_items(std::slice::from_ref(&item));
+            }
+            Ok(ResponseEvent::Completed { .. }) => {
+                return Ok(());
+            }
+            Ok(_) => continue,
+            Err(e) => return Err(e),
+        }
     }
 }
 
@@ -253,13 +401,6 @@ pub(crate) fn build_compacted_history(
         content: vec![ContentItem::InputText { text: bridge }],
     });
     history
-}
-
-#[allow(dead_code)]
-async fn drain_to_completed() -> CodexResult<()> {
-    // Legacy streaming path is replaced by minimal compaction above.
-    // Keeping a stub to preserve upstream symbol without build warnings.
-    Ok(())
 }
 
 #[cfg(test)]

@@ -49,7 +49,17 @@ function parseArgs(args) {
 }
 
 function codexHome() {
-  return process.env.CODEX_HOME || process.env.CODE_HOME || path.join(require('os').homedir(), '.codex');
+  if (process.env.CODEX_HOME) return process.env.CODEX_HOME;
+  if (process.env.CODE_HOME) return process.env.CODE_HOME;
+
+  const home = require('os').homedir();
+  const primary = path.join(home, '.code');
+  const legacy = path.join(home, '.codex');
+
+  if (fs.existsSync(primary)) return primary;
+  if (fs.existsSync(legacy)) return legacy;
+
+  return primary;
 }
 
 function readAuthJson() {
