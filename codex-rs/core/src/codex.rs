@@ -6227,6 +6227,7 @@ async fn handle_container_exec_with_params(
     let sub_id_for_events = sub_id.clone();
     let call_id_for_events = call_id.clone();
     let sandbox_policy = sess.sandbox_policy.clone();
+    let sandbox_cwd = sess.get_cwd().to_path_buf();
     let codex_linux_sandbox_exe = sess.codex_linux_sandbox_exe.clone();
     let result_cell_for_task = result_cell.clone();
     let order_meta_for_end = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint_for_exec.map(|h| h.saturating_add(1)) };
@@ -6257,6 +6258,7 @@ async fn handle_container_exec_with_params(
             params.clone(),
             sandbox_type,
             &sandbox_policy,
+            &sandbox_cwd,
             &codex_linux_sandbox_exe,
             stdout_stream,
         )
