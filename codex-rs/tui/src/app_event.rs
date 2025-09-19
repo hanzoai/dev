@@ -15,6 +15,7 @@ use crate::slash_command::SlashCommand;
 use codex_protocol::models::ResponseItem;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::mpsc::Sender as StdSender;
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -26,11 +27,30 @@ impl<T> fmt::Debug for Redacted<T> {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct TerminalRunController {
+    pub tx: StdSender<TerminalRunEvent>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct TerminalLaunch {
     pub id: u64,
     pub title: String,
     pub command: Vec<String>,
     pub command_display: String,
+    pub controller: Option<TerminalRunController>,
+    pub auto_close_on_success: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalRunEvent {
+    Chunk { data: Vec<u8>, _is_stderr: bool },
+    Exit { exit_code: Option<i32>, _duration: Duration },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalCommandGate {
+    Run(String),
+    Cancel,
 }
 
 #[derive(Debug, Clone)]
@@ -207,11 +227,32 @@ pub(crate) enum AppEvent {
     /// continues its own abort/cleanup in parallel.
     CancelRunningTask,
     OpenTerminal(TerminalLaunch),
-    TerminalChunk { id: u64, chunk: Vec<u8>, is_stderr: bool },
-    TerminalExit { id: u64, exit_code: Option<i32>, duration: Duration },
+    TerminalChunk {
+        id: u64,
+        chunk: Vec<u8>,
+        _is_stderr: bool,
+    },
+    TerminalExit {
+        id: u64,
+        exit_code: Option<i32>,
+        _duration: Duration,
+    },
     TerminalCancel { id: u64 },
-    TerminalRerun { id: u64 },
+    TerminalRunCommand {
+        id: u64,
+        command: Vec<String>,
+        command_display: String,
+        controller: Option<TerminalRunController>,
+    },
+    TerminalUpdateMessage { id: u64, message: String },
+    TerminalForceClose { id: u64 },
     TerminalAfter(TerminalAfter),
+    TerminalSetAssistantMessage { id: u64, message: String },
+    TerminalAwaitCommand {
+        id: u64,
+        suggestion: String,
+        ack: Redacted<StdSender<TerminalCommandGate>>,
+    },
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
     /// Add or update an agent's settings (enabled, params, instructions)
