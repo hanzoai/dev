@@ -66,6 +66,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
     reasoning_started: bool,
     raw_reasoning_started: bool,
     last_message_path: Option<PathBuf>,
+    answer_bullet_filter: LeadingBulletFilter,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -94,6 +95,7 @@ impl EventProcessorWithHumanOutput {
                 reasoning_started: false,
                 raw_reasoning_started: false,
                 last_message_path,
+                answer_bullet_filter: LeadingBulletFilter::default(),
             }
         } else {
             Self {
@@ -112,6 +114,7 @@ impl EventProcessorWithHumanOutput {
                 reasoning_started: false,
                 raw_reasoning_started: false,
                 last_message_path,
+                answer_bullet_filter: LeadingBulletFilter::default(),
             }
         }
     }
@@ -124,6 +127,99 @@ struct ExecCommandBegin {
 struct PatchApplyBegin {
     start_time: Instant,
     auto_approved: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeadingBulletState {
+    Pending,
+    Removed,
+    Keep,
+}
+
+impl Default for LeadingBulletState {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+#[derive(Default)]
+struct LeadingBulletFilter {
+    state: LeadingBulletState,
+    buffer: String,
+}
+
+impl LeadingBulletFilter {
+    fn reset(&mut self) {
+        self.state = LeadingBulletState::Pending;
+        self.buffer.clear();
+    }
+
+    fn ingest_delta(&mut self, delta: &str) -> Option<String> {
+        match self.state {
+            LeadingBulletState::Pending => {
+                self.buffer.push_str(delta);
+                self.finalize_pending()
+            }
+            LeadingBulletState::Removed | LeadingBulletState::Keep => Some(delta.to_string()),
+        }
+    }
+
+    fn sanitize_full(&mut self, text: &str) -> String {
+        self.reset();
+        self.buffer.push_str(text);
+        match self.finalize_pending() {
+            Some(out) => out,
+            None => {
+                if self.buffer == "-" {
+                    self.buffer.clear();
+                    self.state = LeadingBulletState::Removed;
+                    String::new()
+                } else {
+                    self.state = LeadingBulletState::Keep;
+                    std::mem::take(&mut self.buffer)
+                }
+            }
+        }
+    }
+
+    fn finalize_pending(&mut self) -> Option<String> {
+        if self.buffer.is_empty() {
+            return Some(String::new());
+        }
+
+        let mut chars = self.buffer.char_indices();
+        let Some((_, first)) = chars.next() else {
+            return Some(String::new());
+        };
+        if first != '-' {
+            self.state = LeadingBulletState::Keep;
+            return Some(std::mem::take(&mut self.buffer));
+        }
+
+        match chars.next() {
+            Some((second_idx, second_char)) => {
+                if matches!(second_char, ' ' | '\t') {
+                    let drain_end = second_idx + second_char.len_utf8();
+                    self.buffer.drain(..drain_end);
+                    self.state = LeadingBulletState::Removed;
+                    Some(std::mem::take(&mut self.buffer))
+                } else if matches!(second_char, '\n' | '\r') {
+                    self.buffer.drain(..second_idx);
+                    self.state = LeadingBulletState::Removed;
+                    Some(std::mem::take(&mut self.buffer))
+                } else if second_char.is_whitespace() {
+                    let drain_end = second_idx + second_char.len_utf8();
+                    self.buffer.drain(..drain_end);
+                    self.state = LeadingBulletState::Removed;
+                    Some(std::mem::take(&mut self.buffer))
+                } else {
+                    self.state = LeadingBulletState::Keep;
+                    Some(std::mem::take(&mut self.buffer))
+                }
+            }
+            None => None,
+        }
+    }
 }
 
 // Timestamped println helper. The timestamp is styled with self.dimmed.
@@ -199,10 +295,15 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 if !self.answer_started {
                     ts_println!(self, "{}\n", "codex".style(self.italic).style(self.magenta));
                     self.answer_started = true;
+                    self.answer_bullet_filter.reset();
                 }
-                print!("{delta}");
-                #[expect(clippy::expect_used)]
-                std::io::stdout().flush().expect("could not flush stdout");
+                if let Some(out) = self.answer_bullet_filter.ingest_delta(&delta) {
+                    if !out.is_empty() {
+                        print!("{out}");
+                        #[expect(clippy::expect_used)]
+                        std::io::stdout().flush().expect("could not flush stdout");
+                    }
+                }
             }
             EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
                 if !self.show_agent_reasoning {
@@ -258,15 +359,18 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 // if answer_started is false, this means we haven't received any
                 // delta. Thus, we need to print the message as a new answer.
                 if !self.answer_started {
+                    let sanitized = self.answer_bullet_filter.sanitize_full(&message);
                     ts_println!(
                         self,
                         "{}\n{}",
                         "codex".style(self.italic).style(self.magenta),
-                        message,
+                        sanitized,
                     );
+                    self.answer_bullet_filter.reset();
                 } else {
                     println!();
                     self.answer_started = false;
+                    self.answer_bullet_filter.reset();
                 }
             }
             EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
@@ -301,8 +405,12 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 } else {
                     ("".to_string(), format!("exec('{call_id}')"))
                 };
-                let output = if exit_code == 0 { &stdout } else { &stderr };
-                let truncated_output = output
+                let truncated_stdout = stdout
+                    .lines()
+                    .take(MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let truncated_stderr = stderr
                     .lines()
                     .take(MAX_OUTPUT_LINES_FOR_EXEC_TOOL_CALL)
                     .collect::<Vec<_>>()
@@ -311,13 +419,23 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     0 => {
                         let title = format!("{call} succeeded{duration}:");
                         ts_println!(self, "{}", title.style(self.green));
+                        if !truncated_stdout.is_empty() {
+                            println!("{}", truncated_stdout.style(self.dimmed));
+                        }
                     }
                     _ => {
                         let title = format!("{call} exited {exit_code}{duration}:");
                         ts_println!(self, "{}", title.style(self.red));
+                        if !truncated_stdout.is_empty() {
+                            println!("{}", truncated_stdout.style(self.dimmed));
+                            println!();
+                        }
+                        println!("ERROR");
+                        if !truncated_stderr.is_empty() {
+                            println!("{}", truncated_stderr);
+                        }
                     }
                 }
-                println!("{}", truncated_output.style(self.dimmed));
             }
             EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
                 call_id: _,
@@ -362,8 +480,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id: _, .. }) => {}
             EventMsg::WebSearchComplete(WebSearchCompleteEvent { call_id: _, query }) => {
-                let q = query.unwrap_or_default();
-                ts_println!(self, "🌐 Searched: {q}");
+                if let Some(query) = query {
+                    ts_println!(self, "🌐 Search: {query}");
+                }
             }
             EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                 call_id,
@@ -480,8 +599,13 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
             }
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
-                ts_println!(self, "{}", "turn diff:".style(self.magenta));
-                println!("{unified_diff}");
+                let suppress = std::env::var("CODE_SUPPRESS_TURN_DIFF")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if !suppress {
+                    ts_println!(self, "{}", "turn diff:".style(self.magenta));
+                    println!("{unified_diff}");
+                }
             }
             EventMsg::ExecApprovalRequest(_) => {
                 // Should we exit?
@@ -518,13 +642,22 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 println!();
             }
             EventMsg::PlanUpdate(plan_update_event) => {
-                let UpdatePlanArgs { plan, .. } = plan_update_event;
+                let UpdatePlanArgs { name, plan } = plan_update_event;
+                ts_println!(self, "name: {name:?}");
                 ts_println!(self, "plan: {plan:?}");
             }
             EventMsg::GetHistoryEntryResponse(_) => {
                 // Currently ignored in exec output.
             }
-            
+            EventMsg::ReplayHistory(_) => {
+                // Replay is a TUI concern; ignore in headless output
+            }
+            EventMsg::BrowserScreenshotUpdate(_) => {
+                // Currently ignored in exec output.
+            }
+            EventMsg::AgentStatusUpdate(_) => {
+                // Currently ignored in exec output.
+            }
             EventMsg::TurnAborted(abort_reason) => match abort_reason.reason {
                 TurnAbortReason::Interrupted => {
                     ts_println!(self, "task interrupted");
@@ -536,13 +669,56 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     ts_println!(self, "task aborted: review ended");
                 }
             },
+            EventMsg::CustomToolCallBegin(event) => {
+                ts_println!(
+                    self,
+                    "{} {}",
+                    "tool".style(self.magenta),
+                    event.tool_name.style(self.bold),
+                );
+                if let Some(params) = &event.parameters {
+                    if let Ok(formatted) = serde_json::to_string_pretty(params) {
+                        for line in formatted.lines() {
+                            println!("{}", line.style(self.dimmed));
+                        }
+                    }
+                }
+            }
+            EventMsg::CustomToolCallEnd(event) => {
+                let status = if event.result.is_ok() {
+                    "success".style(self.green)
+                } else {
+                    "failed".style(self.red)
+                };
+                ts_println!(
+                    self,
+                    "{} {} {}",
+                    "tool".style(self.magenta),
+                    event.tool_name.style(self.bold),
+                    status,
+                );
+                match &event.result {
+                    Ok(content) => {
+                        if !content.is_empty() {
+                            for line in content.lines() {
+                                println!("{}", line.style(self.dimmed));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if !err.is_empty() {
+                            for line in err.lines() {
+                                println!("{}", line.style(self.red));
+                            }
+                        }
+                    }
+                }
+            }
             EventMsg::ShutdownComplete => return CodexStatus::Shutdown,
             EventMsg::ConversationPath(_) => {}
             EventMsg::UserMessage(_) => {}
             EventMsg::EnteredReviewMode(_) => {}
             EventMsg::ExitedReviewMode(_) => {}
-            // Ignore other events that are not user-visible in exec output
-            _ => {}
         }
         CodexStatus::Running
     }
@@ -580,5 +756,38 @@ fn format_mcp_invocation(invocation: &McpInvocation) -> String {
         format!("{fq_tool_name}()")
     } else {
         format!("{fq_tool_name}({args_str})")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_sanitizes_full_message() {
+        let mut filter = LeadingBulletFilter::default();
+        let sanitized = filter.sanitize_full("- Quick summary\nMore");
+        assert_eq!(sanitized, "Quick summary\nMore");
+    }
+
+    #[test]
+    fn filter_handles_multi_delta_stream() {
+        let mut filter = LeadingBulletFilter::default();
+        assert!(filter.ingest_delta("-").is_none(), "first dash should defer");
+        let out = filter
+            .ingest_delta(" Lead")
+            .expect("delta should produce output");
+        assert_eq!(out, "Lead");
+        let subsequent = filter
+            .ingest_delta("ing continues")
+            .expect("subsequent delta");
+        assert_eq!(subsequent, "ing continues");
+    }
+
+    #[test]
+    fn filter_keeps_non_bullet_prefix() {
+        let mut filter = LeadingBulletFilter::default();
+        let sanitized = filter.sanitize_full("-value remains");
+        assert_eq!(sanitized, "-value remains");
     }
 }
