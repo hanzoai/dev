@@ -28,6 +28,9 @@ use codex_login::AuthManager;
 use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
 
+#[cfg(not(debug_assertions))]
+use crate::updates::{resolve_upgrade_resolution, UpgradeResolution, CODE_RELEASE_URL};
+
 mod diff_handlers;
 mod agent_install;
 mod diff_ui;
@@ -109,6 +112,8 @@ use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
+#[cfg(not(debug_assertions))]
+use crate::bottom_pane::UpdateSharedState;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
 use crate::history_cell;
@@ -271,6 +276,9 @@ pub(crate) struct ChatWidget<'a> {
 
     // Persisted selection for Agents overview
     agents_overview_selected_index: usize,
+
+    #[cfg(not(debug_assertions))]
+    pending_upgrade_notice: Option<(u64, String)>,
 
     // Cache for expensive height calculations per cell and width
     height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
@@ -2066,6 +2074,8 @@ impl ChatWidget<'_> {
             },
             terminal: TerminalState::default(),
             agents_overview_selected_index: 0,
+            #[cfg(not(debug_assertions))]
+            pending_upgrade_notice: None,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -2254,6 +2264,8 @@ impl ChatWidget<'_> {
             },
             terminal: TerminalState::default(),
             agents_overview_selected_index: 0,
+            #[cfg(not(debug_assertions))]
+            pending_upgrade_notice: None,
             height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             height_cache_last_width: std::cell::Cell::new(0),
             height_manager: RefCell::new(HeightManager::new(
@@ -4836,6 +4848,17 @@ impl ChatWidget<'_> {
         ));
     }
 
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn handle_update_command(&mut self) {
+        self.show_update_settings_ui();
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn handle_update_command(&mut self) {
+        self.app_event_tx
+            .send_background_event("`/update` — updates are disabled in debug builds.".to_string());
+    }
+
     pub(crate) fn add_prompts_output(&mut self) {
         self.history_push(history_cell::new_prompts_output());
     }
@@ -5014,6 +5037,59 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_agents_command(&mut self, _args: String) {
         // Open the new overview combining Agents and Commands
         self.show_agents_overview_ui();
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn show_update_settings_ui(&mut self) {
+        use crate::bottom_pane::UpdateSettingsView;
+
+        let shared_state = std::sync::Arc::new(std::sync::Mutex::new(UpdateSharedState {
+            checking: true,
+            latest_version: None,
+            error: None,
+        }));
+
+        let resolution = resolve_upgrade_resolution();
+        let (command, display, instructions) = match &resolution {
+            UpgradeResolution::Command { command, display } => (
+                Some(command.clone()),
+                Some(display.clone()),
+                None,
+            ),
+            UpgradeResolution::Manual { instructions } => (None, None, Some(instructions.clone())),
+        };
+
+        let view = UpdateSettingsView::new(
+            self.app_event_tx.clone(),
+            codex_version::version().to_string(),
+            self.config.auto_upgrade_enabled,
+            command.clone(),
+            display.clone(),
+            instructions,
+            shared_state.clone(),
+        );
+
+        self.bottom_pane.show_update_settings(view);
+
+        let config = self.config.clone();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let mut state = shared_state.lock().expect("update state poisoned");
+            match crate::updates::check_for_updates_now(&config).await {
+                Ok(info) => {
+                    state.checking = false;
+                    state.latest_version = info.latest_version;
+                    state.error = None;
+                }
+                Err(err) => {
+                    state.checking = false;
+                    state.latest_version = None;
+                    state.error = Some(err.to_string());
+                }
+            }
+            drop(state);
+            tx.send(AppEvent::RequestRedraw);
+        });
     }
 
     // Legacy show_agents_settings_ui removed — overview/Direct editors replace it
@@ -5341,6 +5417,36 @@ impl ChatWidget<'_> {
         out
     }
 
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn launch_update_command(
+        &mut self,
+        command: Vec<String>,
+        display: String,
+        latest_version: Option<String>,
+    ) -> Option<TerminalLaunch> {
+        self.pending_upgrade_notice = None;
+        if command.is_empty() {
+            self.history_push(history_cell::new_error_event(
+                "`/update` — no upgrade command available for this install.".to_string(),
+            ));
+            self.request_redraw();
+            return None;
+        }
+
+        let id = self.terminal.alloc_id();
+        if let Some(version) = latest_version {
+            self.pending_upgrade_notice = Some((id, version));
+        }
+        Some(TerminalLaunch {
+            id,
+            title: "Upgrade Code".to_string(),
+            command,
+            command_display: display,
+            controller: None,
+            auto_close_on_success: false,
+        })
+    }
+
     pub(crate) fn terminal_open(&mut self, launch: &TerminalLaunch) {
         let mut overlay = TerminalOverlay::new(
             launch.id,
@@ -5595,7 +5701,40 @@ impl ChatWidget<'_> {
         if needs_redraw {
             self.request_redraw();
         }
-        if success { after } else { None }
+        if success {
+            #[cfg(not(debug_assertions))]
+            {
+                if let Some((pending_id, version)) = self.pending_upgrade_notice.take() {
+                    if pending_id == id {
+                        self.bottom_pane
+                            .flash_footer_notice(format!("Upgraded to {version}"));
+                    } else {
+                        self.pending_upgrade_notice = Some((pending_id, version));
+                    }
+                }
+            }
+            after
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn terminal_prepare_rerun(&mut self, id: u64) -> bool {
+        let mut reset = false;
+        let visible = self.terminal.last_visible_rows.get();
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id && !overlay.running {
+                overlay.reset_for_rerun();
+                overlay.visible_rows = visible;
+                overlay.clamp_scroll();
+                overlay.ensure_pending_command();
+                reset = true;
+            }
+        }
+        if reset {
+            self.request_redraw();
+        }
+        reset
     }
 
     pub(crate) fn close_terminal_overlay(&mut self) {
@@ -6647,6 +6786,37 @@ impl ChatWidget<'_> {
         // Add status message to history
         let message = format!("Text verbosity set to: {}", new_verbosity);
         self.history_push(history_cell::new_background_event(message));
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn set_auto_upgrade_enabled(&mut self, enabled: bool) {
+        if self.config.auto_upgrade_enabled == enabled {
+            return;
+        }
+        self.config.auto_upgrade_enabled = enabled;
+
+        let codex_home = self.config.codex_home.clone();
+        let profile = self.config.active_profile.clone();
+        tokio::spawn(async move {
+            let value = if enabled { "true".to_string() } else { "false".to_string() };
+            if let Err(err) = codex_core::config_edit::persist_overrides(
+                &codex_home,
+                profile.as_deref(),
+                &[(&["auto_upgrade_enabled"], value.as_str())],
+            )
+            .await
+            {
+                tracing::warn!("failed to persist auto-upgrade setting: {err}");
+            }
+        });
+
+        let notice = if enabled {
+            "Automatic upgrades enabled"
+        } else {
+            "Automatic upgrades disabled"
+        };
+        self.bottom_pane.flash_footer_notice(notice.to_string());
+        self.request_redraw();
     }
 
     /// Forward file-search results to the bottom pane.
@@ -14064,6 +14234,22 @@ impl TerminalOverlay {
         let total = self.total_render_lines();
         let max_scroll = total.saturating_sub(visible);
         self.scroll = max_scroll.min(u16::MAX as usize) as u16;
+    }
+
+    fn reset_for_rerun(&mut self) {
+        self.lines.clear();
+        self.scroll = 0;
+        self.visible_rows = 0;
+        self.running = true;
+        self.exit_code = None;
+        self.duration = None;
+        self.truncated = false;
+        self.pending_utf8.clear();
+        self.pending_line.clear();
+        self.pending_line_is_stderr = false;
+        self.pending_command = None;
+        self.last_info_message = None;
+        self.last_info_line_count = 0;
     }
 
     fn set_pending_command(&mut self, suggestion: String, ack: Sender<TerminalCommandGate>) {
