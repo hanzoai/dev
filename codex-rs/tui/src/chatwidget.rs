@@ -10662,6 +10662,60 @@ impl ChatWidget<'_> {
         });
     }
 
+    pub(crate) fn handle_project_command(&mut self, args: String) {
+        let name = args.trim();
+        if name.is_empty() {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/cmd` — provide a project command name".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        if self.config.project_commands.is_empty() {
+            self.history_push(crate::history_cell::new_error_event(
+                "No project commands configured for this workspace.".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        if let Some(cmd) = self
+            .config
+            .project_commands
+            .iter()
+            .find(|command| command.matches(name))
+            .cloned()
+        {
+            let notice = if let Some(desc) = &cmd.description {
+                format!("Running project command `{}` — {}", cmd.name, desc)
+            } else {
+                format!("Running project command `{}`", cmd.name)
+            };
+            self.insert_background_event_early(notice);
+            self.request_redraw();
+            self.submit_op(Op::RunProjectCommand { name: cmd.name });
+        } else {
+            let available: Vec<String> = self
+                .config
+                .project_commands
+                .iter()
+                .map(|cmd| cmd.name.clone())
+                .collect();
+            let suggestion = if available.is_empty() {
+                "".to_string()
+            } else {
+                format!(" Available commands: {}", available.join(", "))
+            };
+            self.history_push(crate::history_cell::new_error_event(format!(
+                "Unknown project command `{}`.{}",
+                name,
+                suggestion
+            )));
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn switch_cwd(
         &mut self,
         new_cwd: std::path::PathBuf,
