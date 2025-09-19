@@ -3965,7 +3965,7 @@ impl HistoryCell for RunningToolCallCell {
     fn gutter_symbol(&self) -> Option<&'static str> {
         if self.title == "Waiting" {
             if self.wait_has_call_id {
-                Some("⚙")
+                None
             } else {
                 Some(self.spinner_frame())
             }

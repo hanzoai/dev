@@ -139,9 +139,11 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
     }
 
     let resolution = resolve_upgrade_resolution();
-    let (command, display) = match resolution {
-        UpgradeResolution::Command { command, display } if !command.is_empty() => {
-            (command, display)
+    let (command, command_display) = match resolution {
+        UpgradeResolution::Command {
+            command,
+            display: command_display,
+        } if !command.is_empty() => (command, command_display),
         }
         _ => {
             info!("auto-upgrade enabled but no managed installer detected; skipping");
@@ -175,8 +177,8 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
     };
 
     info!(
-        command = %display,
-        latest_version = %latest_version,
+        command = command_display.as_str(),
+        latest_version = latest_version.as_str(),
         "auto-upgrade: running managed installer"
     );
     let result = run_upgrade_command(command).await;
