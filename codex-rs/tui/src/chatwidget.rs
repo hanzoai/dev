@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -39,7 +40,12 @@ mod perf;
 mod streaming;
 mod terminal_handlers;
 mod tools;
-use self::agent_install::start_agent_install_session;
+use self::agent_install::{
+    start_agent_install_session,
+    start_direct_terminal_session,
+    start_prompt_terminal_session,
+    wrap_command,
+};
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
@@ -88,7 +94,13 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
 // use image::GenericImageView;
 
-use crate::app_event::{AppEvent, TerminalAfter, TerminalLaunch, TerminalRunController};
+use crate::app_event::{
+    AppEvent,
+    TerminalAfter,
+    TerminalCommandGate,
+    TerminalLaunch,
+    TerminalRunController,
+};
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
@@ -115,9 +127,14 @@ use codex_core::config::set_github_check_on_push;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
 use ratatui::text::Text as RtText;
+use textwrap::wrap;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Clear;
@@ -2202,11 +2219,21 @@ impl ChatWidget<'_> {
         if terminal_handlers::handle_terminal_key(self, key_event) {
             return;
         }
+        if self.terminal.overlay.is_some() {
+            // Block background input while the terminal overlay is visible.
+            return;
+        }
         // Intercept keys for overlays when active (help first, then diff)
         if help_handlers::handle_help_key(self, key_event) {
             return;
         }
+        if self.help.overlay.is_some() {
+            return;
+        }
         if diff_handlers::handle_diff_key(self, key_event) {
+            return;
+        }
+        if self.diffs.overlay.is_some() {
             return;
         }
         if key_event.kind == KeyEventKind::Press {
@@ -2285,6 +2312,9 @@ impl ChatWidget<'_> {
                 // Commit pending jump-back (make trimming permanent) before submission
                 if self.pending_jump_back.is_some() {
                     self.pending_jump_back = None;
+                }
+                if self.try_handle_terminal_shortcut(&text) {
+                    return;
                 }
                 let user_message = self.parse_message_with_images(text);
                 self.submit_user_message(user_message);
@@ -4742,6 +4772,125 @@ impl ChatWidget<'_> {
         })
     }
 
+    fn try_handle_terminal_shortcut(&mut self, raw_text: &str) -> bool {
+        let trimmed = raw_text.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("$$") {
+            let prompt = rest.trim();
+            if prompt.is_empty() {
+                self.history_push(history_cell::new_error_event(
+                    "No prompt provided after '$$'.".to_string(),
+                ));
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            } else {
+                self.launch_guided_terminal_prompt(prompt);
+            }
+            return true;
+        }
+        if let Some(rest) = trimmed.strip_prefix('$') {
+            let command = rest.trim();
+            if command.is_empty() {
+                self.history_push(history_cell::new_error_event(
+                    "No command provided after '$'.".to_string(),
+                ));
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            } else {
+                self.run_terminal_command(command);
+            }
+            return true;
+        }
+        false
+    }
+
+    fn run_terminal_command(&mut self, command: &str) {
+        if wrap_command(command).is_empty() {
+            self.history_push(history_cell::new_error_event(
+                "Unable to build shell command for execution.".to_string(),
+            ));
+            self.app_event_tx.send(AppEvent::RequestRedraw);
+            return;
+        }
+
+        let id = self.terminal.alloc_id();
+        let title = Self::truncate_with_ellipsis(&format!("Shell: {command}"), 64);
+        let display = Self::truncate_with_ellipsis(command, 128);
+        let (controller_tx, controller_rx) = mpsc::channel();
+        let controller = TerminalRunController { tx: controller_tx };
+        let launch = TerminalLaunch {
+            id,
+            title,
+            command: Vec::new(),
+            command_display: display,
+            controller: Some(controller.clone()),
+            auto_close_on_success: false,
+        };
+        self.history_push(history_cell::new_background_event(format!(
+            "Terminal command: {command}"
+        )));
+        self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+        let cwd = self.config.cwd.to_string_lossy().to_string();
+        start_direct_terminal_session(
+            self.app_event_tx.clone(),
+            id,
+            command.to_string(),
+            Some(cwd),
+            controller,
+            controller_rx,
+            self.config.debug,
+        );
+    }
+
+    fn launch_guided_terminal_prompt(&mut self, prompt: &str) {
+        let id = self.terminal.alloc_id();
+        let (controller_tx, controller_rx) = mpsc::channel();
+        let controller = TerminalRunController { tx: controller_tx };
+        let cwd = self.config.cwd.to_string_lossy().to_string();
+        let title = Self::truncate_with_ellipsis(&format!("Guided: {prompt}"), 64);
+        let display = Self::truncate_with_ellipsis(prompt, 128);
+
+        let launch = TerminalLaunch {
+            id,
+            title,
+            command: Vec::new(),
+            command_display: display.clone(),
+            controller: Some(controller.clone()),
+            auto_close_on_success: false,
+        };
+
+        self.history_push(history_cell::new_background_event(format!(
+            "Guided terminal request: {prompt}"
+        )));
+        self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+        start_prompt_terminal_session(
+            self.app_event_tx.clone(),
+            id,
+            prompt.to_string(),
+            Some(cwd),
+            controller,
+            controller_rx,
+            self.config.debug,
+        );
+    }
+
+    fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+        if max_chars == 0 {
+            return String::new();
+        }
+        let total = text.chars().count();
+        if total <= max_chars {
+            return text.to_string();
+        }
+        let take = max_chars.saturating_sub(1);
+        let mut out = String::with_capacity(max_chars);
+        for (idx, ch) in text.chars().enumerate() {
+            if idx >= take {
+                break;
+            }
+            out.push(ch);
+        }
+        out.push('…');
+        out
+    }
+
     pub(crate) fn terminal_open(&mut self, launch: &TerminalLaunch) {
         let mut overlay = TerminalOverlay::new(
             launch.id,
@@ -4752,6 +4901,7 @@ impl ChatWidget<'_> {
         let visible = self.terminal.last_visible_rows.get();
         overlay.visible_rows = visible;
         overlay.clamp_scroll();
+        overlay.ensure_pending_command();
         self.terminal.overlay = Some(overlay);
         self.request_redraw();
     }
@@ -4774,17 +4924,172 @@ impl ChatWidget<'_> {
         }
     }
 
-    pub(crate) fn request_terminal_cancel(&self, id: u64) {
+    pub(crate) fn request_terminal_cancel(&mut self, id: u64) {
+        let mut needs_redraw = false;
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                overlay.push_info_message("Cancel requested…");
+                if overlay.running {
+                    overlay.running = false;
+                    needs_redraw = true;
+                }
+            }
+        }
+        if needs_redraw {
+            self.request_redraw();
+        }
         self.app_event_tx.send(AppEvent::TerminalCancel { id });
     }
 
     pub(crate) fn terminal_update_message(&mut self, id: u64, message: String) {
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
-                overlay.command_display = message;
+                overlay.push_info_message(&message);
                 self.request_redraw();
             }
         }
+    }
+
+    pub(crate) fn terminal_set_assistant_message(&mut self, id: u64, message: String) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                overlay.push_assistant_message(&message);
+                self.request_redraw();
+            }
+        }
+    }
+
+    pub(crate) fn terminal_set_command_display(&mut self, id: u64, command: String) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                overlay.command_display = command;
+                self.request_redraw();
+            }
+        }
+    }
+
+    pub(crate) fn terminal_prepare_command(
+        &mut self,
+        id: u64,
+        suggestion: String,
+        ack: Sender<TerminalCommandGate>,
+    ) {
+        let mut updated = false;
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id {
+                overlay.set_pending_command(suggestion, ack);
+                updated = true;
+            }
+        }
+        if updated {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_accept_pending_command(&mut self) -> Option<PendingCommandAction> {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.running {
+                return None;
+            }
+            if let Some(action) = overlay.accept_pending_command() {
+                match &action {
+                    PendingCommandAction::Forwarded(command)
+                    | PendingCommandAction::Manual(command) => {
+                        overlay.command_display = command.clone();
+                    }
+                }
+                self.request_redraw();
+                return Some(action);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn terminal_execute_manual_command(&mut self, id: u64, command: String) {
+        let trimmed = command.trim();
+        if trimmed.is_empty() {
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.ensure_pending_command();
+            }
+            self.request_redraw();
+            return;
+        }
+
+        let prompt = if let Some(rest) = trimmed.strip_prefix("$$") {
+            Some(rest.trim())
+        } else if let Some(rest) = trimmed.strip_prefix('$') {
+            Some(rest.trim())
+        } else {
+            None
+        };
+
+        if let Some(prompt_text) = prompt {
+            if prompt_text.is_empty() {
+                if let Some(overlay) = self.terminal.overlay_mut() {
+                    overlay.push_info_message("Provide a prompt after '$'.");
+                    overlay.ensure_pending_command();
+                }
+                self.request_redraw();
+                return;
+            }
+
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.cancel_pending_command();
+                overlay.running = true;
+                overlay.exit_code = None;
+                overlay.duration = None;
+                overlay.push_assistant_message("Preparing guided command…");
+            }
+
+            let (controller_tx, controller_rx) = mpsc::channel();
+            let controller = TerminalRunController { tx: controller_tx };
+            let cwd = self.config.cwd.to_string_lossy().to_string();
+
+            start_prompt_terminal_session(
+                self.app_event_tx.clone(),
+                id,
+                prompt_text.to_string(),
+                Some(cwd),
+                controller,
+                controller_rx,
+                self.config.debug,
+            );
+
+            self.history_push(history_cell::new_background_event(format!(
+                "Terminal prompt: {prompt_text}"
+            )));
+            return;
+        }
+
+        if wrap_command(trimmed).is_empty() {
+            self.app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+                id,
+                message: "Command could not be constructed.".to_string(),
+            });
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.ensure_pending_command();
+            }
+            self.request_redraw();
+            return;
+        }
+
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            overlay.cancel_pending_command();
+        }
+
+        let (controller_tx, controller_rx) = mpsc::channel();
+        let controller = TerminalRunController { tx: controller_tx };
+
+        let cwd = self.config.cwd.to_string_lossy().to_string();
+        start_direct_terminal_session(
+            self.app_event_tx.clone(),
+            id,
+            trimmed.to_string(),
+            Some(cwd),
+            controller,
+            controller_rx,
+            self.config.debug,
+        );
     }
 
     pub(crate) fn terminal_mark_running(&mut self, id: u64) {
@@ -4812,6 +5117,7 @@ impl ChatWidget<'_> {
         let visible = self.terminal.last_visible_rows.get();
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
+                overlay.cancel_pending_command();
                 if visible != overlay.visible_rows {
                     overlay.visible_rows = visible;
                     overlay.clamp_scroll();
@@ -4827,6 +5133,7 @@ impl ChatWidget<'_> {
                         should_close = true;
                     }
                 }
+                overlay.ensure_pending_command();
             }
         }
         if take_after {
@@ -4841,28 +5148,21 @@ impl ChatWidget<'_> {
         if success { after } else { None }
     }
 
-    pub(crate) fn terminal_prepare_rerun(&mut self, id: u64) -> bool {
-        let mut reset = false;
-        let visible = self.terminal.last_visible_rows.get();
-        if let Some(overlay) = self.terminal.overlay_mut() {
-            if overlay.id == id && !overlay.running {
-                overlay.reset_for_rerun();
-                overlay.visible_rows = visible;
-                overlay.clamp_scroll();
-                reset = true;
-            }
-        }
-        if reset {
-            self.request_redraw();
-        }
-        reset
-    }
-
     pub(crate) fn close_terminal_overlay(&mut self) {
-        if let Some(overlay) = self.terminal.overlay() {
+        let mut cancel_id = None;
+        let mut preserved_visible = None;
+        if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.running {
-                self.app_event_tx.send(AppEvent::TerminalCancel { id: overlay.id });
+                cancel_id = Some(overlay.id);
             }
+            overlay.cancel_pending_command();
+            preserved_visible = Some(overlay.visible_rows);
+        }
+        if let Some(id) = cancel_id {
+            self.app_event_tx.send(AppEvent::TerminalCancel { id });
+        }
+        if let Some(visible_rows) = preserved_visible {
+            self.terminal.last_visible_rows.set(visible_rows);
         }
         self.terminal.clear();
         self.request_redraw();
@@ -4872,8 +5172,100 @@ impl ChatWidget<'_> {
         self.terminal.overlay().map(|o| o.id)
     }
 
+    pub(crate) fn terminal_overlay_active(&self) -> bool {
+        self.terminal.overlay().is_some()
+    }
+
     pub(crate) fn terminal_is_running(&self) -> bool {
         self.terminal.overlay().map(|o| o.running).unwrap_or(false)
+    }
+
+    pub(crate) fn ctrl_c_requests_exit(&self) -> bool {
+        !self.terminal_overlay_active() && self.bottom_pane.ctrl_c_quit_hint_visible()
+    }
+
+    pub(crate) fn terminal_has_pending_command(&self) -> bool {
+        self.terminal
+            .overlay()
+            .and_then(|overlay| overlay.pending_command.as_ref())
+            .is_some()
+    }
+
+    pub(crate) fn terminal_handle_pending_key(&mut self, key_event: KeyEvent) -> bool {
+        if !self.terminal_has_pending_command() {
+            return false;
+        }
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return true;
+        }
+
+        let mut needs_redraw = false;
+        let mut handled = false;
+
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if let Some(pending) = overlay.pending_command.as_mut() {
+                match key_event.code {
+                    KeyCode::Char(ch) => {
+                        if key_event
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+                        {
+                            handled = true;
+                        } else if pending.insert_char(ch) {
+                            needs_redraw = true;
+                            handled = true;
+                        } else {
+                            handled = true;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        handled = true;
+                        if pending.backspace() {
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::Delete => {
+                        handled = true;
+                        if pending.delete() {
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::Left => {
+                        handled = true;
+                        if pending.move_left() {
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::Right => {
+                        handled = true;
+                        if pending.move_right() {
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::Home => {
+                        handled = true;
+                        if pending.move_home() {
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::End => {
+                        handled = true;
+                        if pending.move_end() {
+                            needs_redraw = true;
+                        }
+                    }
+                    KeyCode::Tab => {
+                        handled = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if needs_redraw {
+            self.request_redraw();
+        }
+        handled
     }
 
     pub(crate) fn terminal_scroll_lines(&mut self, delta: i32) {
@@ -6181,6 +6573,14 @@ impl ChatWidget<'_> {
     /// Returns CancellationEvent::Handled if the event was consumed by the UI, or
     /// CancellationEvent::Ignored if the caller should handle it (e.g. exit).
     pub(crate) fn on_ctrl_c(&mut self) -> CancellationEvent {
+        if let Some(id) = self.terminal_overlay_id() {
+            if self.terminal_is_running() {
+                self.request_terminal_cancel(id);
+            } else {
+                self.close_terminal_overlay();
+            }
+            return CancellationEvent::Handled;
+        }
         match self.bottom_pane.on_ctrl_c() {
             CancellationEvent::Handled => return CancellationEvent::Handled,
             CancellationEvent::Ignored => {}
@@ -9048,7 +9448,10 @@ impl ChatWidget<'_> {
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         // Hide the terminal cursor whenever a top‑level overlay is active so the
         // caret does not show inside the input while a modal (help/diff) is open.
-        if self.diffs.overlay.is_some() || self.help.overlay.is_some() {
+        if self.diffs.overlay.is_some()
+            || self.help.overlay.is_some()
+            || self.terminal.overlay().is_some()
+        {
             return None;
         }
         let layout_areas = self.layout_areas(area);
@@ -12105,9 +12508,18 @@ impl WidgetRef for &ChatWidget<'_> {
             StatefulWidget::render(sb, sb_area, buf, &mut sb_state);
         }
 
-        // Render the bottom pane directly without a border for now
-        // The composer has its own layout with hints at the bottom
-        (&self.bottom_pane).render(bottom_pane_area, buf);
+        if self.terminal.overlay().is_some() {
+            let bg_style = Style::default().bg(crate::colors::background());
+            for y in bottom_pane_area.y..bottom_pane_area.y + bottom_pane_area.height {
+                for x in bottom_pane_area.x..bottom_pane_area.x + bottom_pane_area.width {
+                    buf[(x, y)].set_style(bg_style).set_char(' ');
+                }
+            }
+        } else {
+            // Render the bottom pane directly without a border for now
+            // The composer has its own layout with hints at the bottom
+            (&self.bottom_pane).render(bottom_pane_area, buf);
+        }
 
         if let Some(overlay) = self.terminal.overlay() {
             let scrim_style = Style::default()
@@ -12120,11 +12532,18 @@ impl WidgetRef for &ChatWidget<'_> {
             }
 
             let padding = 1u16;
+            let footer_reserved = 1.min(bottom_pane_area.height);
+            let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height)
+                .saturating_sub(footer_reserved);
+            let overlay_height = overlay_bottom
+                .saturating_sub(history_area.y)
+                .max(1)
+                .min(area.height);
             let window_area = Rect {
                 x: history_area.x + padding,
                 y: history_area.y,
                 width: history_area.width.saturating_sub(padding * 2),
-                height: history_area.height,
+                height: overlay_height,
             };
             Clear.render(window_area, buf);
 
@@ -12132,11 +12551,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 .borders(Borders::ALL)
                 .title(ratatui::text::Line::from(vec![
                     ratatui::text::Span::styled(
-                        " ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
-                    ratatui::text::Span::styled(
-                        overlay.title.clone(),
+                        format!(" Terminal - {} ", overlay.title),
                         Style::default().fg(crate::colors::text()),
                     ),
                 ]))
@@ -12156,71 +12571,67 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
 
-            let content = inner.inner(ratatui::layout::Margin::new(1, 1));
+            let content = inner.inner(ratatui::layout::Margin::new(1, 0));
             if content.height == 0 || content.width == 0 {
                 self.terminal.last_visible_rows.set(0);
             } else {
+                let header_height = 1.min(content.height);
+                let footer_height = if content.height >= 2 { 2 } else { 0 };
+
                 let header_area = Rect {
                     x: content.x,
                     y: content.y,
                     width: content.width,
-                    height: 1.min(content.height),
+                    height: header_height,
                 };
-                let footer_area = if content.height >= 2 {
+                let footer_area = if footer_height > 0 {
                     Rect {
                         x: content.x,
-                        y: content.y + content.height.saturating_sub(1),
+                        y: content
+                            .y
+                            .saturating_add(content.height.saturating_sub(footer_height)),
                         width: content.width,
-                        height: 1,
+                        height: footer_height,
                     }
                 } else {
                     header_area
                 };
-                let body_height =
-                    content
-                        .height
-                        .saturating_sub(if content.height >= 2 { 2 } else { 1 });
+
+                // Header intentionally left blank to avoid duplicating status text.
+
+                let mut body_space = content
+                    .height
+                    .saturating_sub(header_height.saturating_add(footer_height));
+                let body_top = header_area.y.saturating_add(header_area.height);
+                let mut bottom_cursor = body_top.saturating_add(body_space);
+
+                let mut pending_visible = false;
+                let mut pending_box: Option<(Rect, Vec<RtLine<'static>>)> = None;
+                if let Some(pending) = overlay.pending_command.as_ref() {
+                    if let Some((pending_lines, pending_height)) =
+                        pending_command_box_lines(pending, content.width)
+                    {
+                        if pending_height <= body_space && pending_height > 0 {
+                            bottom_cursor = bottom_cursor.saturating_sub(pending_height);
+                            let pending_area = Rect {
+                                x: content.x,
+                                y: bottom_cursor,
+                                width: content.width,
+                                height: pending_height,
+                            };
+                            body_space = body_space.saturating_sub(pending_height);
+                            pending_box = Some((pending_area, pending_lines));
+                            pending_visible = true;
+                        }
+                    }
+                }
+
                 let body_area = Rect {
                     x: content.x,
-                    y: header_area.y.saturating_add(header_area.height),
+                    y: body_top,
                     width: content.width,
-                    height: body_height,
+                    height: body_space,
                 };
-
-                // Header content
-                let mut status_text = if overlay.running {
-                    "Running…".to_string()
-                } else if let Some(code) = overlay.exit_code {
-                    format!("Exit {code}")
-                } else {
-                    "Idle".to_string()
-                };
-                if let Some(duration) = overlay.duration {
-                    status_text.push(' ');
-                    status_text.push('(');
-                    status_text.push_str(&format_duration_short(duration));
-                    status_text.push(')');
-                }
-                let status_color = if overlay.running {
-                    crate::colors::function()
-                } else if overlay.exit_code == Some(0) {
-                    crate::colors::success()
-                } else if overlay.exit_code.is_some() {
-                    crate::colors::error()
-                } else {
-                    crate::colors::text_dim()
-                };
-                let header_line = ratatui::text::Line::from(vec![
-                    ratatui::text::Span::styled(
-                        overlay.command_display.clone(),
-                        Style::default().fg(crate::colors::text()),
-                    ),
-                    ratatui::text::Span::raw("  "),
-                    ratatui::text::Span::styled(status_text, Style::default().fg(status_color)),
-                ]);
-                Paragraph::new(RtText::from(vec![header_line]))
-                    .wrap(ratatui::widgets::Wrap { trim: true })
-                    .render(header_area, buf);
 
                 // Body content
                 self.terminal.last_visible_rows.set(body_area.height);
@@ -12248,6 +12659,16 @@ impl WidgetRef for &ChatWidget<'_> {
                     }
                 }
 
+                if let Some((pending_area, pending_lines)) = pending_box {
+                    render_text_box(
+                        pending_area,
+                        " Command ",
+                        crate::colors::function(),
+                        pending_lines,
+                        buf,
+                    );
+                }
+
                 // Footer hints
                 let mut footer_spans = vec![
                     ratatui::text::Span::styled(
@@ -12259,16 +12680,11 @@ impl WidgetRef for &ChatWidget<'_> {
                         Style::default().fg(crate::colors::text_dim()),
                     ),
                     ratatui::text::Span::styled(
-                        "PgUp/PgDn",
-                        Style::default().fg(crate::colors::function()),
+                        "Esc",
+                        Style::default().fg(crate::colors::error()),
                     ),
                     ratatui::text::Span::styled(
-                        " Page  ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
-                    ratatui::text::Span::styled("Esc", Style::default().fg(crate::colors::error())),
-                    ratatui::text::Span::styled(
-                        " Close  ",
+                        if overlay.running { " Cancel  " } else { " Close  " },
                         Style::default().fg(crate::colors::text_dim()),
                     ),
                 ];
@@ -12281,19 +12697,41 @@ impl WidgetRef for &ChatWidget<'_> {
                         " Cancel",
                         Style::default().fg(crate::colors::text_dim()),
                     ));
-                } else {
+                } else if pending_visible {
                     footer_spans.push(ratatui::text::Span::styled(
-                        "R",
+                        "Enter",
                         Style::default().fg(crate::colors::primary()),
                     ));
                     footer_spans.push(ratatui::text::Span::styled(
-                        " Rerun",
+                        " Run",
                         Style::default().fg(crate::colors::text_dim()),
                     ));
                 }
+                if footer_height > 1 {
+                    let spacer_area = Rect {
+                        x: footer_area.x,
+                        y: footer_area.y,
+                        width: footer_area.width,
+                        height: footer_area.height.saturating_sub(1),
+                    };
+                    for y in spacer_area.y..spacer_area.y + spacer_area.height {
+                        for x in spacer_area.x..spacer_area.x + spacer_area.width {
+                            buf[(x, y)].set_char(' ').set_style(inner_bg);
+                        }
+                    }
+                }
+
+                let instructions_area = Rect {
+                    x: footer_area.x,
+                    y: footer_area.y.saturating_add(footer_area.height.saturating_sub(1)),
+                    width: footer_area.width,
+                    height: 1,
+                };
+
                 Paragraph::new(RtText::from(vec![ratatui::text::Line::from(footer_spans)]))
                     .wrap(ratatui::widgets::Wrap { trim: true })
-                    .render(footer_area, buf);
+                    .alignment(ratatui::layout::Alignment::Left)
+                    .render(instructions_area, buf);
             }
 
             // Terminal overlay takes precedence over other overlays
@@ -12974,6 +13412,54 @@ struct TerminalOverlay {
     pending_line: String,
     pending_line_is_stderr: bool,
     auto_close_on_success: bool,
+    pending_command: Option<PendingCommand>,
+    last_info_message: Option<String>,
+    last_info_line_count: usize,
+}
+
+struct PendingCommand {
+    input: String,
+    cursor: usize,
+    ack: Option<Sender<TerminalCommandGate>>,
+}
+
+pub(crate) enum PendingCommandAction {
+    Forwarded(String),
+    Manual(String),
+}
+
+impl PendingCommand {
+    fn new(suggestion: String, ack: Sender<TerminalCommandGate>) -> Self {
+        let input = suggestion;
+        let cursor = input.len();
+        Self {
+            input,
+            cursor,
+            ack: Some(ack),
+        }
+    }
+
+    fn manual() -> Self {
+        Self {
+            input: String::new(),
+            cursor: 0,
+            ack: None,
+        }
+    }
+
+    fn action_after_enter(mut self) -> Option<PendingCommandAction> {
+        let command = self.input.trim().to_string();
+        if command.is_empty() {
+            return None;
+        }
+        if let Some(tx) = self.ack.take() {
+            let _ = tx.send(TerminalCommandGate::Run(command.clone()));
+            Some(PendingCommandAction::Forwarded(command))
+        } else {
+            Some(PendingCommandAction::Manual(command))
+        }
+    }
+
 }
 
 impl TerminalOverlay {
@@ -12993,6 +13479,9 @@ impl TerminalOverlay {
             pending_line: String::new(),
             pending_line_is_stderr: false,
             auto_close_on_success,
+            pending_command: None,
+            last_info_message: None,
+            last_info_line_count: 0,
         }
     }
 
@@ -13034,17 +13523,116 @@ impl TerminalOverlay {
         self.scroll = max_scroll.min(u16::MAX as usize) as u16;
     }
 
-    fn reset_for_rerun(&mut self) {
-        self.lines.clear();
-        self.scroll = 0;
-        self.visible_rows = 0;
-        self.running = true;
-        self.exit_code = None;
-        self.duration = None;
-        self.truncated = false;
-        self.pending_utf8.clear();
-        self.pending_line.clear();
-        self.pending_line_is_stderr = false;
+    fn set_pending_command(&mut self, suggestion: String, ack: Sender<TerminalCommandGate>) {
+        self.cancel_pending_command();
+        self.pending_command = Some(PendingCommand::new(suggestion, ack));
+    }
+
+    fn ensure_pending_command(&mut self) {
+        if self.pending_command.is_none() {
+            self.pending_command = Some(PendingCommand::manual());
+        }
+    }
+
+    fn accept_pending_command(&mut self) -> Option<PendingCommandAction> {
+        let pending = self.pending_command.take()?;
+        pending.action_after_enter()
+    }
+
+    fn cancel_pending_command(&mut self) {
+        if let Some(mut pending) = self.pending_command.take() {
+            if let Some(tx) = pending.ack.take() {
+                let _ = tx.send(TerminalCommandGate::Cancel);
+            }
+        }
+    }
+
+    fn push_info_message(&mut self, message: &str) {
+        self.push_info_message_with_style(message, false);
+    }
+
+    fn push_assistant_message(&mut self, message: &str) {
+        self.push_info_message_with_style(message, true);
+    }
+
+    fn push_info_message_with_style(&mut self, message: &str, emphasize: bool) {
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let was_following = self.is_following();
+
+        if self.last_info_message.as_deref() == Some(trimmed) {
+            if was_following {
+                self.scroll = self.max_scroll();
+            } else {
+                self.clamp_scroll();
+            }
+            return;
+        }
+
+        if self.last_info_line_count > 0 {
+            for _ in 0..self.last_info_line_count {
+                self.lines.pop_back();
+            }
+            self.last_info_line_count = 0;
+        }
+
+        let mut added = 0usize;
+        if !self.last_line_is_blank() {
+            self.push_line(blank_line());
+            added += 1;
+        }
+
+        let sanitized = sanitize_for_tui(
+            trimmed,
+            SanitizeMode::AnsiPreserving,
+            SanitizeOptions {
+                expand_tabs: true,
+                ..Default::default()
+            },
+        );
+        let mut line = ansi_escape_line(&sanitized);
+        line.spans.insert(
+            0,
+            ratatui::text::Span::styled(
+                "• ",
+                Style::default().fg(crate::colors::text()),
+            ),
+        );
+        if emphasize {
+            for span in line.spans.iter_mut() {
+                span.style = span.style.add_modifier(Modifier::BOLD);
+            }
+        }
+        self.push_line(line);
+        added += 1;
+        self.push_line(blank_line());
+        added += 1;
+
+        self.last_info_message = Some(trimmed.to_string());
+        self.last_info_line_count = added;
+
+        if was_following {
+            self.scroll = self.max_scroll();
+        } else {
+            self.clamp_scroll();
+        }
+    }
+
+    fn push_line(&mut self, line: RtLine<'static>) {
+        self.lines.push_back(line);
+        if self.lines.len() > TERMINAL_MAX_LINES {
+            self.lines.pop_front();
+            self.truncated = true;
+        }
+    }
+
+    fn last_line_is_blank(&self) -> bool {
+        self.lines
+            .back()
+            .map(|line| line.spans.iter().all(|span| span.content.trim().is_empty()))
+            .unwrap_or(true)
     }
 
     fn append_chunk(&mut self, chunk: &[u8], is_stderr: bool) {
@@ -13104,6 +13692,8 @@ impl TerminalOverlay {
     fn flush_pending_line(&mut self) -> bool {
         let was_following = self.is_following();
         let mut appended = false;
+        self.last_info_message = None;
+        self.last_info_line_count = 0;
         if !self.pending_utf8.is_empty() {
             if let Ok(valid) = std::str::from_utf8(&self.pending_utf8) {
                 self.pending_line.push_str(valid);
@@ -13132,6 +13722,8 @@ impl TerminalOverlay {
     }
 
     fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {
+        self.last_info_message = None;
+        self.last_info_line_count = 0;
         let mut appended = false;
         let normalized = normalize_overwrite_sequences(segment);
         for raw_line in normalized.split_inclusive('\n') {
@@ -13145,11 +13737,21 @@ impl TerminalOverlay {
                 },
             );
             let mut line = ansi_escape_line(&sanitized);
+            let is_command_line = !is_stderr && line_text.starts_with("$ ");
             if is_stderr {
                 let warn = crate::colors::warning();
                 for span in line.spans.iter_mut() {
                     if span.style.fg.is_none() {
                         span.style.fg = Some(warn);
+                    }
+                }
+            } else if is_command_line {
+                let primary = crate::colors::primary();
+                for span in line.spans.iter_mut() {
+                    if span.style.fg.is_none() {
+                        span.style.fg = Some(primary);
+                    } else {
+                        span.style.fg = Some(primary);
                     }
                 }
             }
@@ -13164,16 +13766,298 @@ impl TerminalOverlay {
     }
 }
 
-fn format_duration_short(duration: Duration) -> String {
-    if duration.as_secs() >= 60 {
-        format!("{:.1}m", duration.as_secs_f32() / 60.0)
-    } else if duration.as_secs() >= 1 {
-        format!("{:.1}s", duration.as_secs_f32())
-    } else if duration.as_millis() >= 1 {
-        format!("{}ms", duration.as_millis())
-    } else {
-        format!("{}µs", duration.as_micros())
+impl PendingCommand {
+    fn insert_char(&mut self, ch: char) -> bool {
+        if ch.is_control() {
+            return false;
+        }
+        let mut buf = [0u8; 4];
+        let encoded = ch.encode_utf8(&mut buf);
+        self.input.insert_str(self.cursor, encoded);
+        self.cursor = self.cursor.saturating_add(encoded.len());
+        true
     }
+
+    fn backspace(&mut self) -> bool {
+        let Some(prev) = self.prev_boundary() else {
+            return false;
+        };
+        self.input.drain(prev..self.cursor);
+        self.cursor = prev;
+        true
+    }
+
+    fn delete(&mut self) -> bool {
+        let Some(next) = self.next_boundary() else {
+            return false;
+        };
+        self.input.drain(self.cursor..next);
+        true
+    }
+
+    fn move_left(&mut self) -> bool {
+        let Some(prev) = self.prev_boundary() else {
+            return false;
+        };
+        self.cursor = prev;
+        true
+    }
+
+    fn move_right(&mut self) -> bool {
+        let Some(next) = self.next_boundary() else {
+            return false;
+        };
+        self.cursor = next;
+        true
+    }
+
+    fn move_home(&mut self) -> bool {
+        if self.cursor == 0 {
+            return false;
+        }
+        self.cursor = 0;
+        true
+    }
+
+    fn move_end(&mut self) -> bool {
+        let len = self.input.len();
+        if self.cursor == len {
+            return false;
+        }
+        self.cursor = len;
+        true
+    }
+
+    fn prev_boundary(&self) -> Option<usize> {
+        if self.cursor == 0 {
+            return None;
+        }
+        let mut prev: Option<usize> = None;
+        for (idx, _) in self.input.grapheme_indices(true) {
+            if idx >= self.cursor {
+                break;
+            }
+            prev = Some(idx);
+        }
+        prev
+    }
+
+    fn next_boundary(&self) -> Option<usize> {
+        if self.cursor >= self.input.len() {
+            return None;
+        }
+        for (idx, _) in self.input.grapheme_indices(true) {
+            if idx > self.cursor {
+                return Some(idx);
+            }
+        }
+        Some(self.input.len())
+    }
+}
+
+fn blank_line() -> RtLine<'static> {
+    ratatui::text::Line::from(vec![ratatui::text::Span::raw(String::new())])
+}
+
+struct CommandDisplayLine {
+    text: String,
+    start: usize,
+    end: usize,
+}
+
+fn wrap_pending_command_lines(input: &str, width: usize) -> Vec<CommandDisplayLine> {
+    if width == 0 {
+        return vec![CommandDisplayLine {
+            text: String::new(),
+            start: 0,
+            end: input.len(),
+        }];
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    let mut current_start = 0usize;
+
+    for (byte_idx, grapheme) in input.grapheme_indices(true) {
+        let g_width = UnicodeWidthStr::width(grapheme);
+        if current_width + g_width > width && !current.is_empty() {
+            lines.push(CommandDisplayLine {
+                text: current,
+                start: current_start,
+                end: byte_idx,
+            });
+            current = String::new();
+            current_width = 0;
+            current_start = byte_idx;
+        }
+        current.push_str(grapheme);
+        current_width += g_width;
+    }
+
+    let end = input.len();
+    lines.push(CommandDisplayLine {
+        text: current,
+        start: current_start,
+        end,
+    });
+
+    if lines.is_empty() {
+        lines.push(CommandDisplayLine {
+            text: String::new(),
+            start: 0,
+            end: 0,
+        });
+    }
+
+    lines
+}
+
+fn pending_command_box_lines(
+    pending: &PendingCommand,
+    width: u16,
+) -> Option<(Vec<RtLine<'static>>, u16)> {
+    if width <= 4 {
+        return None;
+    }
+    let inner_width = width.saturating_sub(2);
+    if inner_width <= 4 {
+        return None;
+    }
+
+    let padded_width = inner_width.saturating_sub(2).max(1) as usize;
+    let command_width = inner_width.saturating_sub(4).max(1) as usize;
+
+    const INSTRUCTION_TEXT: &str =
+        "Press Enter to run this command. Press Esc to cancel.";
+    let instruction_segments = wrap(INSTRUCTION_TEXT, padded_width);
+    let instruction_style = Style::default().fg(crate::colors::text_dim());
+    let mut lines: Vec<RtLine<'static>> = instruction_segments
+        .into_iter()
+        .map(|segment| {
+            ratatui::text::Line::from(vec![
+                ratatui::text::Span::raw(" "),
+                ratatui::text::Span::styled(segment.into_owned(), instruction_style),
+                ratatui::text::Span::raw(" "),
+            ])
+        })
+        .collect();
+
+    let command_lines = wrap_pending_command_lines(&pending.input, command_width);
+    let cursor_line_idx = command_line_index_for_cursor(&command_lines, pending.cursor);
+    let prefix_style = Style::default().fg(crate::colors::primary());
+    let text_style = Style::default().fg(crate::colors::text());
+    let cursor_style = Style::default()
+        .bg(crate::colors::primary())
+        .fg(crate::colors::background());
+
+    if !lines.is_empty() {
+        lines.push(ratatui::text::Line::from(vec![ratatui::text::Span::raw(String::new())]));
+    }
+
+    for (idx, line) in command_lines.iter().enumerate() {
+        let mut spans = Vec::new();
+        spans.push(ratatui::text::Span::raw(" "));
+        if idx == 0 {
+            spans.push(ratatui::text::Span::styled("$ ", prefix_style));
+        } else {
+            spans.push(ratatui::text::Span::raw("  "));
+        }
+
+        if idx == cursor_line_idx {
+            let cursor_offset = pending.cursor.saturating_sub(line.start);
+            let cursor_offset = cursor_offset.min(line.text.len());
+            let (before, cursor_span, after) = split_line_for_cursor(&line.text, cursor_offset);
+            if !before.is_empty() {
+                spans.push(ratatui::text::Span::styled(before, text_style));
+            }
+            match cursor_span {
+                Some(token) => spans.push(ratatui::text::Span::styled(token, cursor_style)),
+                None => spans.push(ratatui::text::Span::styled(" ", cursor_style)),
+            }
+            if let Some(after_text) = after {
+                if !after_text.is_empty() {
+                    spans.push(ratatui::text::Span::styled(after_text, text_style));
+                }
+            }
+        } else {
+            spans.push(ratatui::text::Span::styled(line.text.clone(), text_style));
+        }
+
+        spans.push(ratatui::text::Span::raw(" "));
+        lines.push(ratatui::text::Line::from(spans));
+    }
+
+    let height = (lines.len() as u16).saturating_add(2).max(3);
+    Some((lines, height))
+}
+
+fn command_line_index_for_cursor(lines: &[CommandDisplayLine], cursor: usize) -> usize {
+    if lines.is_empty() {
+        return 0;
+    }
+    for (idx, line) in lines.iter().enumerate() {
+        if cursor < line.end {
+            return idx;
+        }
+        if cursor == line.end {
+            return (idx + 1).min(lines.len().saturating_sub(1));
+        }
+    }
+    lines.len().saturating_sub(1)
+}
+
+fn split_line_for_cursor(text: &str, cursor_offset: usize) -> (String, Option<String>, Option<String>) {
+    if cursor_offset >= text.len() {
+        return (text.to_string(), None, None);
+    }
+
+    let (before, remainder) = text.split_at(cursor_offset);
+    let mut graphemes = remainder.graphemes(true);
+    if let Some(first) = graphemes.next() {
+        let after = graphemes.collect::<String>();
+        (
+            before.to_string(),
+            Some(first.to_string()),
+            if after.is_empty() { None } else { Some(after) },
+        )
+    } else {
+        (before.to_string(), None, None)
+    }
+}
+
+fn render_text_box(
+    area: Rect,
+    title: &str,
+    border_color: ratatui::style::Color,
+    lines: Vec<RtLine<'static>>,
+    buf: &mut Buffer,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .style(Style::default().bg(crate::colors::background()))
+        .border_style(Style::default().fg(border_color))
+        .title(ratatui::text::Span::styled(
+            title.to_string(),
+            Style::default().fg(border_color),
+        ));
+    block.render(area, buf);
+
+    let inner = area.inner(ratatui::layout::Margin::new(1, 1));
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let inner_bg = Style::default().bg(crate::colors::background());
+    for y in inner.y..inner.y + inner.height {
+        for x in inner.x..inner.x + inner.width {
+            buf[(x, y)].set_style(inner_bg);
+        }
+    }
+
+    Paragraph::new(RtText::from(lines))
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .render(inner, buf);
 }
 
 #[derive(Default)]
