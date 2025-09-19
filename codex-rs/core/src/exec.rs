@@ -22,6 +22,7 @@ use crate::error::SandboxErr;
 use crate::landlock::spawn_command_under_linux_sandbox;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
+use crate::protocol::OrderMeta;
 use crate::protocol::ExecCommandOutputDeltaEvent;
 use crate::protocol::ExecOutputStream;
 use crate::protocol::SandboxPolicy;
@@ -33,7 +34,8 @@ use serde_bytes::ByteBuf;
 // Note: legacy stream caps were removed in favor of streaming all bytes and
 // truncating at the consumer where appropriate. (CI cache test touch)
 
-const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+// Shell calls now default to NO hard timeout; long-running commands are
+// backgrounded by higher-level orchestration.
 
 // Hardcode these since it does not seem worth including the libc crate just
 // for these.
@@ -61,8 +63,10 @@ pub struct ExecParams {
 }
 
 impl ExecParams {
-    pub fn timeout_duration(&self) -> Duration {
-        Duration::from_millis(self.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS))
+    /// Optional timeout for the exec. When `None`, no timeout is enforced and
+    /// the child runs until completion or interruption.
+    pub fn maybe_timeout_duration(&self) -> Option<Duration> {
+        self.timeout_ms.map(Duration::from_millis)
     }
 }
 
@@ -83,6 +87,12 @@ pub struct StdoutStream {
     pub call_id: String,
     pub tx_event: Sender<Event>,
     pub(crate) session: Option<Arc<Session>>,
+    /// Optional tail buffer for capturing a small window of the live stream.
+    /// Used by callers that may return early and want to include "output so far".
+    pub(crate) tail_buf: Option<std::sync::Arc<std::sync::Mutex<Vec<u8>>>>,
+    /// Optional ordering metadata so UIs can associate deltas with the correct
+    /// provider attempt/output index even when `session` is not available.
+    pub(crate) order: Option<OrderMeta>,
 }
 
 pub async fn process_exec_tool_call(
@@ -94,7 +104,7 @@ pub async fn process_exec_tool_call(
 ) -> Result<ExecToolCallOutput> {
     let start = Instant::now();
 
-    let timeout_duration = params.timeout_duration();
+    let timeout_duration = params.maybe_timeout_duration();
 
     let raw_output_result: std::result::Result<RawExecToolCallOutput, CodexErr> = match sandbox_type
     {
@@ -206,7 +216,7 @@ fn is_likely_sandbox_denied(sandbox_type: SandboxType, exit_code: i32) -> bool {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StreamOutput<T> {
     pub text: T,
     pub truncated_after_lines: Option<u32>,
@@ -243,7 +253,7 @@ fn append_all(dst: &mut Vec<u8>, src: &[u8]) {
     dst.extend_from_slice(src);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExecToolCallOutput {
     pub exit_code: i32,
     pub stdout: StreamOutput<String>,
@@ -258,7 +268,7 @@ async fn exec(
     sandbox_policy: &SandboxPolicy,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<RawExecToolCallOutput> {
-    let timeout = params.timeout_duration();
+    let timeout = params.maybe_timeout_duration();
     let ExecParams {
         command, cwd, env, ..
     } = params;
@@ -287,7 +297,7 @@ async fn exec(
 /// use as the output of a `shell` tool call. Also enforces specified timeout.
 async fn consume_truncated_output(
     child: Child,
-    timeout: Duration,
+    timeout: Option<Duration>,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<RawExecToolCallOutput> {
     // Both stdout and stderr were configured with `Stdio::piped()`
@@ -322,24 +332,48 @@ async fn consume_truncated_output(
         Some(agg_tx.clone()),
     ));
 
-    let (exit_status, timed_out) = tokio::select! {
-        result = tokio::time::timeout(timeout, killer.as_mut().wait()) => {
-            match result {
-                Ok(status_result) => {
-                    let exit_status = status_result?;
-                    (exit_status, false)
+    let (exit_status, timed_out) = match timeout {
+        Some(timeout) => {
+            tokio::select! {
+                result = tokio::time::timeout(timeout, killer.as_mut().wait()) => {
+                    match result {
+                        Ok(status_result) => {
+                            let exit_status = status_result?;
+                            (exit_status, false)
+                        }
+                        Err(_) => {
+                            // timeout
+                            #[cfg(unix)]
+                            {
+                                if let Some(pid) = killer.as_mut().id() {
+                                    // Best-effort kill entire process group
+                                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+                                }
+                            }
+                            killer.as_mut().start_kill()?;
+                            // Debatable whether `child.wait().await` should be called here.
+                            (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE), true)
+                        }
+                    }
                 }
-                Err(_) => {
-                    // timeout
+                _ = tokio::signal::ctrl_c() => {
                     killer.as_mut().start_kill()?;
-                    // Debatable whether `child.wait().await` should be called here.
-                    (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + TIMEOUT_CODE), true)
+                    (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + SIGKILL_CODE), false)
                 }
             }
         }
-        _ = tokio::signal::ctrl_c() => {
-            killer.as_mut().start_kill()?;
-            (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + SIGKILL_CODE), false)
+        None => {
+            // No timeout: wait until process completes or user interrupts.
+            tokio::select! {
+                status_result = killer.as_mut().wait() => {
+                    let exit_status = status_result?;
+                    (exit_status, false)
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    killer.as_mut().start_kill()?;
+                    (synthetic_exit_status(EXIT_CODE_SIGNAL_BASE + SIGKILL_CODE), false)
+                }
+            }
         }
     };
 
@@ -347,8 +381,19 @@ async fn consume_truncated_output(
     // avoid re-sending a kill signal during Drop.
     killer.disarm();
 
-    let stdout = stdout_handle.await??;
-    let stderr = stderr_handle.await??;
+    // If we timed out, abort the readers after a short grace to prevent hanging when pipes
+    // remain open due to orphaned grandchildren.
+    let (stdout, stderr) = if timed_out {
+        // Abort reader tasks to avoid hanging if pipes remain open.
+        stdout_handle.abort();
+        stderr_handle.abort();
+        (
+            StreamOutput { text: Vec::new(), truncated_after_lines: None },
+            StreamOutput { text: Vec::new(), truncated_after_lines: None },
+        )
+    } else {
+        (stdout_handle.await??, stderr_handle.await??)
+    };
 
     drop(agg_tx);
 
@@ -403,11 +448,22 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
                 let event = if let Some(sess) = &stream.session {
                     sess.make_event(&stream.sub_id, msg)
                 } else {
-                    Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: None }
+                    Event { id: stream.sub_id.clone(), event_seq: 0, msg, order: stream.order.clone() }
                 };
                 #[allow(clippy::let_unit_value)]
                 let _ = stream.tx_event.send(event).await;
                 emitted_deltas += 1;
+
+                // Update tail buffer if present (keep last ~8 KiB)
+                if let Some(buf_arc) = &stream.tail_buf {
+                    let mut b = buf_arc.lock().unwrap();
+                    const MAX_TAIL: usize = 8 * 1024;
+                    b.extend_from_slice(&tmp[..n]);
+                    if b.len() > MAX_TAIL {
+                        let drop_len = b.len() - MAX_TAIL;
+                        b.drain(..drop_len);
+                    }
+                }
             }
         }
 

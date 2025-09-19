@@ -488,6 +488,73 @@ fn highlight_command_summary(command: &str) -> Vec<Span<'static>> {
     }
 }
 
+pub(crate) fn clean_wait_command(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Some((first_token, rest)) = split_token(trimmed) else {
+        return trimmed.to_string();
+    };
+    if !looks_like_shell(first_token) {
+        return trimmed.to_string();
+    }
+    let rest = rest.trim_start();
+    let Some((second_token, remainder)) = split_token(rest) else {
+        return trimmed.to_string();
+    };
+    if second_token != "-lc" {
+        return trimmed.to_string();
+    }
+    let mut command = remainder.trim_start();
+    if command.len() >= 2 {
+        let bytes = command.as_bytes();
+        let first_char = bytes[0] as char;
+        let last_char = bytes[bytes.len().saturating_sub(1)] as char;
+        if (first_char == '"' && last_char == '"') || (first_char == '\'' && last_char == '\'') {
+            command = &command[1..command.len().saturating_sub(1)];
+        }
+    }
+    if command.is_empty() {
+        trimmed.to_string()
+    } else {
+        command.to_string()
+    }
+}
+
+fn split_token(input: &str) -> Option<(&str, &str)> {
+    let s = input.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(idx) = s.find(char::is_whitespace) {
+        let (token, rest) = s.split_at(idx);
+        Some((token, rest))
+    } else {
+        Some((s, ""))
+    }
+}
+
+fn looks_like_shell(token: &str) -> bool {
+    let trimmed = token.trim_matches('"').trim_matches('\'');
+    let basename = trimmed
+        .rsplit('/')
+        .next()
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(
+        basename.as_str(),
+        "bash"
+            | "bash.exe"
+            | "sh"
+            | "sh.exe"
+            | "zsh"
+            | "zsh.exe"
+            | "dash"
+            | "dash.exe"
+            | "ksh"
+            | "ksh.exe"
+            | "busybox"
+    )
+}
+
 fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
     let display = select_command_display(cmd, original_command);
     let (annotation, _) = parse_read_line_annotation_with_range(&display);
@@ -3683,6 +3750,8 @@ pub(crate) struct RunningToolCallCell {
     title: String,
     start_time: Instant,
     arg_lines: Vec<Line<'static>>,
+    wait_has_target: bool,
+    wait_cap_ms: Option<u64>,
 }
 
 impl HistoryCell for RunningToolCallCell {
@@ -3697,18 +3766,50 @@ impl HistoryCell for RunningToolCallCell {
             status: ToolStatus::Running,
         }
     }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if self.title == "Waiting" {
+            Some(self.spinner_frame())
+        } else {
+            Some("⚙")
+        }
+    }
     fn is_animating(&self) -> bool {
         true
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         let elapsed = self.start_time.elapsed();
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::styled(
-            format!("{} ({})", self.title, format_duration(elapsed)),
-            Style::default()
-                .fg(crate::colors::info())
-                .add_modifier(Modifier::BOLD),
-        ));
+        if self.title == "Waiting" {
+            let show_elapsed = !self.wait_has_target;
+            let mut spans = Vec::new();
+            spans.push(
+                Span::styled(
+                    "Waiting...",
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            );
+            let cap_ms = self.wait_cap_ms.unwrap_or(600_000);
+            let cap_str = format_duration(Duration::from_millis(cap_ms));
+            let suffix = if show_elapsed {
+                format!(" ({} / up to {})", format_duration(elapsed), cap_str)
+            } else {
+                format!(" (up to {})", cap_str)
+            };
+            spans.push(Span::styled(
+                suffix,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+            lines.push(Line::from(spans));
+        } else {
+            lines.push(Line::styled(
+                format!("{} ({})", self.title, format_duration(elapsed)),
+                Style::default()
+                    .fg(crate::colors::info())
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
         lines.extend(self.arg_lines.clone());
         lines.push(Line::from(""));
         lines
@@ -3716,6 +3817,11 @@ impl HistoryCell for RunningToolCallCell {
 }
 
 impl RunningToolCallCell {
+    fn spinner_frame(&self) -> &'static str {
+        const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+        let idx = ((self.start_time.elapsed().as_millis() / 100) as usize) % FRAMES.len();
+        FRAMES[idx]
+    }
     pub(crate) fn has_title(&self, title: &str) -> bool {
         self.title == title
     }
@@ -6501,10 +6607,15 @@ pub(crate) fn new_running_browser_tool_call(
         title: browser_running_title(&tool_name).to_string(),
         start_time: Instant::now(),
         arg_lines,
+        wait_has_target: false,
+        wait_cap_ms: None,
     }
 }
 
 fn custom_tool_running_title(tool_name: &str) -> String {
+    if tool_name == "wait" {
+        return "Waiting".to_string();
+    }
     if tool_name.starts_with("agent_") {
         // Reuse agent title and append ellipsis
         format!("{}...", agent_tool_title(tool_name))
@@ -6534,11 +6645,33 @@ pub(crate) fn new_running_custom_tool_call(
 ) -> RunningToolCallCell {
     // Parse args JSON and format as key/value lines
     let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    let mut wait_has_target = false;
+    let mut wait_cap_ms = None;
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
-            arg_lines.extend(format_browser_args_line(&json));
+            if tool_name == "wait" {
+                wait_cap_ms = json.get("timeout_ms").and_then(|v| v.as_u64());
+                if let Some(for_what) = json.get("for").and_then(|v| v.as_str()) {
+                    let cleaned = clean_wait_command(for_what);
+                    let mut spans = vec![
+                        Span::styled("└ for ", Style::default().fg(crate::colors::text_dim())),
+                    ];
+                    spans.push(Span::styled(
+                        cleaned,
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                    arg_lines.push(Line::from(spans));
+                    wait_has_target = true;
+                } else if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
+                    arg_lines.push(Line::from(vec![
+                        Span::styled("└ call_id: ", Style::default().fg(crate::colors::text_dim())),
+                        Span::styled(cid.to_string(), Style::default().fg(crate::colors::text())),
+                    ]));
+                }
+            } else {
+                arg_lines.extend(format_browser_args_line(&json));
+            }
         } else {
-            // Fallback to showing raw args string
             arg_lines.push(Line::from(vec![
                 Span::styled("└ args: ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled(args_str, Style::default().fg(crate::colors::text())),
@@ -6549,6 +6682,8 @@ pub(crate) fn new_running_custom_tool_call(
         title: custom_tool_running_title(&tool_name),
         start_time: Instant::now(),
         arg_lines,
+        wait_has_target,
+        wait_cap_ms,
     }
 }
 
@@ -6565,6 +6700,8 @@ pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCe
         title: "Web Search...".to_string(),
         start_time: Instant::now(),
         arg_lines,
+        wait_has_target: false,
+        wait_cap_ms: None,
     }
 }
 
@@ -6575,6 +6712,8 @@ pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToo
         title: "Working...".to_string(),
         start_time: Instant::now(),
         arg_lines: vec![line],
+        wait_has_target: false,
+        wait_cap_ms: None,
     }
 }
 
