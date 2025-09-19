@@ -146,6 +146,11 @@ pub enum Op {
         text: String,
     },
 
+    /// Execute a project-scoped custom command defined in configuration.
+    RunProjectCommand {
+        name: String,
+    },
+
     /// Internally queue a developer-role message to be included in the next turn.
     AddPendingInputDeveloper {
         /// The developer message text to add to pending input.
