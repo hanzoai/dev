@@ -129,6 +129,22 @@ else
   CANONICAL_ENV_APPLIED=0
 fi
 
+# Optional debug symbol override for profiling sessions
+if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
+  echo "Debug symbols: forcing debuginfo=2 with split-debuginfo=packed"
+  CLEAN_RUSTFLAGS="${RUSTFLAGS:-}"
+  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//-C debuginfo=0/}"
+  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//-C debuginfo=1/}"
+  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//-C debuginfo=2/}"
+  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//  / }"
+  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS## }"
+  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS%% }"
+  export RUSTFLAGS="${CLEAN_RUSTFLAGS:+$CLEAN_RUSTFLAGS }-C debuginfo=2 -C split-debuginfo=packed"
+  # Prevent release profiles from stripping the symbols we just asked for
+  export CARGO_PROFILE_RELEASE_STRIP="none"
+  export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
+fi
+
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
 # by setting STRICT_CARGO_HOME=1 (used by Issue Triage workflow to keep caching deterministic).
