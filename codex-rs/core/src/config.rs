@@ -1,5 +1,9 @@
+use crate::codex::ApprovedCommandPattern;
+use crate::protocol::ApprovedCommandMatchKind;
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
+use crate::config_types::AllowedCommand;
+use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
@@ -38,6 +42,7 @@ use std::sync::OnceLock;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
 use toml_edit::Array as TomlArray;
+use toml_edit::ArrayOfTables as TomlArrayOfTables;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
@@ -88,6 +93,9 @@ pub struct Config {
     pub approval_policy: AskForApproval,
 
     pub sandbox_policy: SandboxPolicy,
+
+    /// Commands the user has permanently approved for this project/session.
+    pub always_allow_commands: Vec<ApprovedCommandPattern>,
 
     pub shell_environment_policy: ShellEnvironmentPolicy,
     /// Patterns requiring an explicit confirm prefix before running.
@@ -884,6 +892,101 @@ pub fn set_project_access_mode(
     Ok(())
 }
 
+/// Append a command pattern to `[projects."<path>"].always_allow_commands`.
+pub fn add_project_allowed_command(
+    codex_home: &Path,
+    project_path: &Path,
+    command: &[String],
+    match_kind: ApprovedCommandMatchKind,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    let project_key = project_path.to_string_lossy().to_string();
+    if doc
+        .as_table()
+        .get("projects")
+        .and_then(|i| i.as_table())
+        .is_none()
+    {
+        doc["projects"] = TomlItem::Table(TomlTable::new());
+    }
+
+    let Some(projects_tbl) = doc["projects"].as_table_mut() else {
+        return Err(anyhow::anyhow!("failed to prepare projects table"));
+    };
+
+    if projects_tbl
+        .get(project_key.as_str())
+        .and_then(|i| i.as_table())
+        .is_none()
+    {
+        projects_tbl.insert(project_key.as_str(), TomlItem::Table(TomlTable::new()));
+    }
+
+    let project_tbl = projects_tbl
+        .get_mut(project_key.as_str())
+        .and_then(|i| i.as_table_mut())
+        .ok_or_else(|| anyhow::anyhow!(format!("failed to create projects.{} table", project_key)))?;
+
+    let mut argv_array = TomlArray::new();
+    for arg in command {
+        argv_array.push(arg.clone());
+    }
+
+    let mut table = TomlTable::new();
+    table.insert("argv", TomlItem::Value(toml_edit::Value::Array(argv_array)));
+    let match_str = match match_kind {
+        ApprovedCommandMatchKind::Exact => "exact",
+        ApprovedCommandMatchKind::Prefix => "prefix",
+    };
+    table.insert(
+        "match_kind",
+        TomlItem::Value(toml_edit::Value::from(match_str)),
+    );
+
+    if let Some(existing) = project_tbl
+        .get_mut("always_allow_commands")
+        .and_then(|item| item.as_array_of_tables_mut())
+    {
+        let exists = existing.iter().any(|tbl| {
+            let argv_match = tbl
+                .get("argv")
+                .and_then(|item| item.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(ToString::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let match_kind = tbl
+                .get("match_kind")
+                .and_then(|item| item.as_str())
+                .unwrap_or("exact");
+            argv_match == command && match_kind.eq_ignore_ascii_case(match_str)
+        });
+        if !exists {
+            existing.push(table);
+        }
+    } else {
+        let mut arr = TomlArrayOfTables::new();
+        arr.push(table);
+        project_tbl.insert("always_allow_commands", TomlItem::ArrayOfTables(arr));
+    }
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+
+    Ok(())
+}
+
 /// List MCP servers from `CODEX_HOME/config.toml`.
 /// Returns `(enabled, disabled)` lists of `(name, McpServerConfig)`.
 pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
@@ -1254,6 +1357,8 @@ pub struct ProjectConfig {
     pub trust_level: Option<String>,
     pub approval_policy: Option<AskForApproval>,
     pub sandbox_mode: Option<SandboxMode>,
+    #[serde(default)]
+    pub always_allow_commands: Option<Vec<AllowedCommand>>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -1513,6 +1618,31 @@ impl Config {
 
         let history = cfg.history.unwrap_or_default();
 
+        let mut always_allow_commands: Vec<ApprovedCommandPattern> = Vec::new();
+        if let Some(project_cfg) = project_override {
+            if let Some(commands) = &project_cfg.always_allow_commands {
+                for cmd in commands {
+                    if cmd.argv.is_empty() {
+                        continue;
+                    }
+                    let kind = match cmd.match_kind {
+                        AllowedCommandMatchKind::Exact => ApprovedCommandMatchKind::Exact,
+                        AllowedCommandMatchKind::Prefix => ApprovedCommandMatchKind::Prefix,
+                    };
+                    let semantic = if matches!(kind, ApprovedCommandMatchKind::Prefix) {
+                        Some(cmd.argv.clone())
+                    } else {
+                        None
+                    };
+                    always_allow_commands.push(ApprovedCommandPattern::new(
+                        cmd.argv.clone(),
+                        kind,
+                        semantic,
+                    ));
+                }
+            }
+        }
+
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
             .unwrap_or(false);
@@ -1612,6 +1742,7 @@ impl Config {
             cwd: resolved_cwd,
             approval_policy: effective_approval,
             sandbox_policy,
+            always_allow_commands,
             shell_environment_policy,
             confirm_guard,
             disable_response_storage: config_profile
@@ -2302,6 +2433,7 @@ model_verbosity = "high"
                 model_provider: fixture.openai_provider.clone(),
                 approval_policy: AskForApproval::Never,
                 sandbox_policy: SandboxPolicy::new_read_only_policy(),
+                always_allow_commands: Vec::new(),
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
                 disable_response_storage: false,
                 user_instructions: None,
@@ -2366,6 +2498,7 @@ model_verbosity = "high"
             active_profile: Some("gpt3".to_string()),
             approval_policy: AskForApproval::UnlessTrusted,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            always_allow_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
             user_instructions: None,
@@ -2445,6 +2578,7 @@ model_verbosity = "high"
             active_profile: Some("zdr".to_string()),
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            always_allow_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: true,
             user_instructions: None,

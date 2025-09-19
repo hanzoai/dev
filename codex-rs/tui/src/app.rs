@@ -12,8 +12,10 @@ use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use crate::history_cell;
+use crate::exec_command::strip_bash_lc_and_escape;
 use codex_core::ConversationManager;
 use codex_login::{AuthManager, AuthMode};
+use codex_core::config::add_project_allowed_command;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
@@ -909,6 +911,37 @@ impl App<'_> {
                 AppEvent::CancelRunningTask => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.cancel_running_task_from_approval();
+                    }
+                }
+                AppEvent::RegisterApprovedCommand { command, match_kind, persist, semantic_prefix } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.register_approved_command(
+                            command.clone(),
+                            match_kind.clone(),
+                            semantic_prefix.clone(),
+                        );
+                        if persist {
+                            if let Err(err) = add_project_allowed_command(
+                                &self.config.codex_home,
+                                &self.config.cwd,
+                                &command,
+                                match_kind.clone(),
+                            ) {
+                                widget.history_push(history_cell::new_error_event(format!(
+                                    "Failed to persist always-allow command: {err:#}",
+                                )));
+                            } else {
+                                let display = strip_bash_lc_and_escape(&command);
+                                widget.history_push(history_cell::new_background_event(format!(
+                                    "Always allowing `{display}` for this project.",
+                                )));
+                            }
+                        }
+                    }
+                }
+                AppEvent::MarkTaskIdle => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.mark_task_idle_after_denied();
                     }
                 }
                 AppEvent::OpenTerminal(launch) => {

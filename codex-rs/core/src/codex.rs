@@ -38,10 +38,12 @@ use tracing::warn;
 use uuid::Uuid;
 use crate::CodexAuth;
 use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::RolloutItem;
+use shlex::split as shlex_split;
 
 pub mod compact;
 use self::compact::build_compacted_history;
@@ -627,10 +629,89 @@ impl Codex {
     }
 }
 
-/// Mutable state of the agent
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ApprovedCommandPattern {
+    argv: Vec<String>,
+    kind: ApprovedCommandMatchKind,
+    semantic_prefix: Option<Vec<String>>,
+}
+
+impl ApprovedCommandPattern {
+    pub(crate) fn new(
+        argv: Vec<String>,
+        kind: ApprovedCommandMatchKind,
+        semantic_prefix: Option<Vec<String>>,
+    ) -> Self {
+        let semantic_prefix = if matches!(kind, ApprovedCommandMatchKind::Prefix) {
+            semantic_prefix.or_else(|| Some(argv.clone()))
+        } else {
+            None
+        };
+        Self {
+            argv,
+            kind,
+            semantic_prefix,
+        }
+    }
+
+    pub(crate) fn matches(&self, command: &[String]) -> bool {
+        match self.kind {
+            ApprovedCommandMatchKind::Exact => command == self.argv.as_slice(),
+            ApprovedCommandMatchKind::Prefix => {
+                if command.starts_with(&self.argv) {
+                    return true;
+                }
+                if let (Some(pattern), Some(candidate)) = (
+                    self.semantic_prefix.as_ref(),
+                    semantic_tokens(command),
+                ) {
+                    return candidate.starts_with(pattern);
+                }
+                false
+            }
+        }
+    }
+
+    pub fn argv(&self) -> &[String] { &self.argv }
+
+    pub fn kind(&self) -> ApprovedCommandMatchKind { self.kind }
+}
+
+fn semantic_tokens(command: &[String]) -> Option<Vec<String>> {
+    if command.is_empty() {
+        return None;
+    }
+    if let Some(tokens) = shell_script_tokens(command) {
+        return Some(tokens);
+    }
+    Some(command.to_vec())
+}
+
+fn shell_script_tokens(command: &[String]) -> Option<Vec<String>> {
+    if command.len() == 3 && is_shell_wrapper(&command[0], &command[1]) {
+        if let Some(tokens) = shlex_split(&command[2]) {
+            return Some(tokens);
+        }
+        return Some(vec![command[2].clone()]);
+    }
+    None
+}
+
+fn is_shell_wrapper(shell: &str, flag: &str) -> bool {
+    let file_name = Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    matches!(
+        file_name.as_str(),
+        "bash" | "sh" | "zsh" | "ksh" | "fish" | "dash"
+    ) && matches!(flag, "-lc" | "-c")
+}
+
 #[derive(Default)]
 struct State {
-    approved_commands: HashSet<Vec<String>>,
+    approved_commands: HashSet<ApprovedCommandPattern>,
     current_task: Option<AgentTask>,
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pending_input: Vec<ResponseInputItem>,
@@ -1070,9 +1151,9 @@ impl Session {
         }
     }
 
-    pub fn add_approved_command(&self, cmd: Vec<String>) {
+    pub fn add_approved_command(&self, pattern: ApprovedCommandPattern) {
         let mut state = self.state.lock().unwrap();
-        state.approved_commands.insert(cmd);
+        state.approved_commands.insert(pattern);
     }
 
     /// Records items to both the rollout and the chat completions/ZDR
@@ -2087,6 +2168,14 @@ async fn submission_loop(
                     last_screenshot_info: Mutex::new(None),
                     confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
                 }));
+                if let Some(sess_arc) = &sess {
+                    if !config.always_allow_commands.is_empty() {
+                        let mut st = sess_arc.state.lock().unwrap();
+                        for pattern in &config.always_allow_commands {
+                            st.approved_commands.insert(pattern.clone());
+                        }
+                    }
+                }
                 let mut replay_history_items: Option<Vec<ResponseItem>> = None;
 
 
@@ -2227,6 +2316,24 @@ async fn submission_loop(
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
+                }
+            }
+            Op::RegisterApprovedCommand {
+                command,
+                match_kind,
+                semantic_prefix,
+            } => {
+                if command.is_empty() {
+                    continue;
+                }
+                if let Some(sess) = sess.as_ref() {
+                    sess.add_approved_command(ApprovedCommandPattern::new(
+                        command,
+                        match_kind,
+                        semantic_prefix,
+                    ));
+                } else {
+                    send_no_session_event(sub.id).await;
                 }
             }
             Op::PatchApproval { id, decision } => {
@@ -5372,6 +5479,31 @@ async fn handle_container_exec_with_params(
         None
     }
 
+    fn strip_leading_confirm_prefix(argv: &mut Vec<String>) -> bool {
+        if argv.is_empty() {
+            return false;
+        }
+
+        let first = argv[0].trim().to_string();
+        for prefix in ["confirm:", "CONFIRM:"] {
+            if first == prefix {
+                argv.remove(0);
+                return true;
+            }
+            if let Some(rest) = first.strip_prefix(prefix) {
+                let trimmed = rest.trim_start();
+                if trimmed.is_empty() {
+                    argv.remove(0);
+                } else {
+                    argv[0] = trimmed.to_string();
+                }
+                return true;
+            }
+        }
+
+        false
+    }
+
     fn guidance_for_sensitive_git(kind: SensitiveGitKind, original_label: &str, original_value: &str, suggested: &str) -> String {
         match kind {
             SensitiveGitKind::BranchChange => format!(
@@ -5661,6 +5793,8 @@ async fn handle_container_exec_with_params(
         }
     }
 
+    strip_leading_confirm_prefix(&mut params.command);
+
     // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
     if extract_shell_script_from_wrapper(&params.command).is_none() {
         let joined = params.command.join(" ");
@@ -5903,7 +6037,11 @@ async fn handle_container_exec_with_params(
             match rx_approve.await.unwrap_or_default() {
                 ReviewDecision::Approved => (),
                 ReviewDecision::ApprovedForSession => {
-                    sess.add_approved_command(params.command.clone());
+                    sess.add_approved_command(ApprovedCommandPattern::new(
+                        params.command.clone(),
+                        ApprovedCommandMatchKind::Exact,
+                        None,
+                    ));
                 }
                 ReviewDecision::Denied | ReviewDecision::Abort => {
                     return ResponseInputItem::FunctionCallOutput {
@@ -6082,7 +6220,11 @@ async fn handle_sandbox_error(
             // remainder of the session so future
             // executions skip the sandbox directly.
             // TODO(ragona): Isn't this a bug? It always saves the command in an | fork?
-            sess.add_approved_command(params.command.clone());
+            sess.add_approved_command(ApprovedCommandPattern::new(
+                params.command.clone(),
+                ApprovedCommandMatchKind::Exact,
+                None,
+            ));
             // Inform UI we are retrying without sandbox.
             sess.notify_background_event(&sub_id, "retrying command without sandbox")
                 .await;
