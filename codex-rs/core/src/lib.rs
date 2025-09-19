@@ -113,3 +113,5 @@ pub use codex_protocol::models::LocalShellExecAction;
 pub use codex_protocol::models::LocalShellStatus;
 pub use codex_protocol::models::ReasoningItemContent;
 pub use codex_protocol::models::ResponseItem;
+pub use environment_context::ToolCandidate;
+pub use environment_context::TOOL_CANDIDATES;
