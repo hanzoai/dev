@@ -4474,14 +4474,33 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
+                let entry_idx = self
+                    .tools_state
+                    .running_custom_tools
+                    .remove(&ToolCallId(call_id.clone()));
+
+                if tool_name == "apply_patch" && success {
+                    if let Some(idx) = entry_idx {
+                        if idx < self.history_cells.len() {
+                            let is_running_tool = self.history_cells[idx]
+                                .as_any()
+                                .downcast_ref::<history_cell::RunningToolCallCell>()
+                                .is_some();
+                            if is_running_tool {
+                                self.history_remove_at(idx);
+                            }
+                        }
+                    }
+                    self.bottom_pane
+                        .update_status_text("responding".to_string());
+                    self.maybe_hide_spinner();
+                    return;
+                }
+
                 if tool_name == "wait" && success {
                     let target = wait_target_from_params(params_string.as_ref(), &call_id);
                     let message = format!("Waited for {}", target);
-                    if let Some(idx) = self
-                        .tools_state
-                        .running_custom_tools
-                        .remove(&ToolCallId(call_id.clone()))
-                    {
+                    if let Some(idx) = entry_idx {
                         if idx < self.history_cells.len() {
                             self.history_replace_at(
                                 idx,
@@ -4516,11 +4535,7 @@ impl ChatWidget<'_> {
                         kind: HistoryCellType::Error,
                     };
 
-                    if let Some(idx) = self
-                        .tools_state
-                        .running_custom_tools
-                        .remove(&ToolCallId(call_id.clone()))
-                    {
+                    if let Some(idx) = entry_idx {
                         if idx < self.history_cells.len() {
                             self.history_replace_at(idx, Box::new(wait_cancelled_cell));
                         } else {
@@ -4550,11 +4565,7 @@ impl ChatWidget<'_> {
                         success,
                         content,
                     );
-                    if let Some(idx) = self
-                        .tools_state
-                        .running_custom_tools
-                        .remove(&ToolCallId(call_id))
-                    {
+                    if let Some(idx) = entry_idx {
                         if idx < self.history_cells.len() {
                             self.history_replace_at(idx, Box::new(completed));
                         } else {
@@ -4577,11 +4588,7 @@ impl ChatWidget<'_> {
                     success,
                     content,
                 );
-                if let Some(idx) = self
-                    .tools_state
-                    .running_custom_tools
-                    .remove(&ToolCallId(call_id))
-                {
+                if let Some(idx) = entry_idx {
                     if idx < self.history_cells.len() {
                         self.history_replace_at(idx, Box::new(completed));
                     } else {
