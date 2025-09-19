@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use mcp_types::CallToolResult;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_bytes::ByteBuf;
@@ -24,6 +25,13 @@ use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
+
+// Re-export review types from the shared protocol crate so callers can use
+// `codex_core::protocol::ReviewFinding` and friends.
+pub use codex_protocol::protocol::ReviewCodeLocation;
+pub use codex_protocol::protocol::ReviewFinding;
+pub use codex_protocol::protocol::ReviewLineRange;
+pub use codex_protocol::protocol::ReviewOutputEvent;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -398,6 +406,95 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecordedEvent {
+    pub id: String,
+    pub event_seq: u64,
+    pub order: Option<OrderMeta>,
+    pub msg: EventMsg,
+}
+
+pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<codex_protocol::protocol::EventMsg> {
+    if matches!(msg, EventMsg::ReplayHistory(_)) {
+        return None;
+    }
+    convert_value(msg)
+}
+
+
+pub fn event_msg_from_protocol(msg: &codex_protocol::protocol::EventMsg) -> Option<EventMsg> {
+    let Some(converted) = convert_value(msg) else {
+        return None;
+    };
+    if matches!(converted, EventMsg::ReplayHistory(_)) {
+        return None;
+    }
+    Some(converted)
+}
+
+
+pub fn order_meta_to_protocol(
+    order: &OrderMeta,
+) -> codex_protocol::protocol::OrderMeta {
+    codex_protocol::protocol::OrderMeta {
+        request_ordinal: order.request_ordinal,
+        output_index: order.output_index,
+        sequence_number: order.sequence_number,
+    }
+}
+
+pub fn order_meta_from_protocol(
+    order: &codex_protocol::protocol::OrderMeta,
+) -> OrderMeta {
+    OrderMeta {
+        request_ordinal: order.request_ordinal,
+        output_index: order.output_index,
+        sequence_number: order.sequence_number,
+    }
+}
+
+
+pub fn recorded_event_to_protocol(
+    event: &RecordedEvent,
+) -> Option<codex_protocol::protocol::RecordedEvent> {
+    let msg = event_msg_to_protocol(&event.msg)?;
+    let order = event
+        .order
+        .as_ref()
+        .map(order_meta_to_protocol);
+    Some(codex_protocol::protocol::RecordedEvent {
+        id: event.id.clone(),
+        event_seq: event.event_seq,
+        order,
+        msg,
+    })
+}
+
+
+pub fn recorded_event_from_protocol(
+    src: codex_protocol::protocol::RecordedEvent,
+) -> Option<RecordedEvent> {
+    let msg = event_msg_from_protocol(&src.msg)?;
+    let order = src.order.as_ref().map(order_meta_from_protocol);
+    Some(RecordedEvent {
+        id: src.id,
+        event_seq: src.event_seq,
+        order,
+        msg,
+    })
+}
+
+fn convert_value<T, U>(value: &T) -> Option<U>
+where
+    T: Serialize,
+    U: DeserializeOwned,
+{
+    let Ok(json) = serde_json::to_value(value) else {
+        return None;
+    };
+    serde_json::from_value(json).ok()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OrderMeta {
     /// 1-based ordinal of this request/turn in the session
     pub request_ordinal: u64,
@@ -581,6 +678,9 @@ pub struct ReplayHistoryEvent {
     /// Items to render in order. Front-ends should render these as static
     /// history without triggering any tool execution.
     pub items: Vec<codex_protocol::models::ResponseItem>,
+    /// Previously emitted events to replay for UI restoration.
+    #[serde(default)]
+    pub events: Vec<RecordedEvent>,
 }
 
 impl From<TokenUsage> for FinalOutput {

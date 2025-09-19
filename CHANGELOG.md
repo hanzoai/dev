@@ -3,6 +3,35 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.155] - 2025-09-18
+
+- Auth: fix onboarding auth prompt gating. (87a76d25)
+- CLI: add long-run calculator script. (b01e2b38)
+- TUI: add pulldown-cmark dependency to fix build. (f1718b03)
+- Docs: clarify config directories. (cc22fbd9)
+
+## [0.2.154] - 2025-09-18
+
+- TUI/Input: fix Shift+Tab crash. (354a6faa)
+- TUI/Agents: improve visibility for multi‑agent commands. (8add2c42)
+- TUI/Slash: make @ shortcut work with /solve and /plan. (db324a6c)
+
+## [0.2.153] - 2025-09-18
+
+- Core/Config: prioritize ~/.code for legacy config reads and writes. (d268969, 2629790)
+- TUI/History: strip sed/head/tail pipes when showing line ranges. (d1880bb)
+- TUI: skip alternate scroll on Apple Terminal for smoother scrolling. (f712474)
+- Resume: restore full history replay. (6d1bfdd)
+- Core: persist GPT-5 overrides across sessions. (26e538a)
+
+## [0.2.152] - 2025-09-17
+
+- TUI: add terminal overlay and agent install flow. (104a5f9f, c678d670)
+- TUI/Explore: enrich run summaries with pipeline context; polish explore labels. (e25f8faa, d7ce1345)
+- Core/Exec: enforce dry-run guard for formatter commands. (360fbf94)
+- Explore: support read-only git commands. (b6b9fc41)
+- TUI: add plan names and sync terminal title. (29eda799)
+
 ## [0.2.151] - 2025-09-16
 
 - TUI/History: append merge completion banner for clearer post-merge status. (736293a9)
