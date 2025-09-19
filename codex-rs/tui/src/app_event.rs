@@ -48,6 +48,12 @@ pub(crate) enum TerminalRunEvent {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum TerminalCommandGate {
+    Run(String),
+    Cancel,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum TerminalAfter {
     RefreshAgentsAndClose { selected_index: usize },
 }
@@ -229,7 +235,6 @@ pub(crate) enum AppEvent {
         _duration: Duration,
     },
     TerminalCancel { id: u64 },
-    TerminalRerun { id: u64 },
     TerminalRunCommand {
         id: u64,
         command: Vec<String>,
@@ -239,6 +244,12 @@ pub(crate) enum AppEvent {
     TerminalUpdateMessage { id: u64, message: String },
     TerminalForceClose { id: u64 },
     TerminalAfter(TerminalAfter),
+    TerminalSetAssistantMessage { id: u64, message: String },
+    TerminalAwaitCommand {
+        id: u64,
+        suggestion: String,
+        ack: Redacted<StdSender<TerminalCommandGate>>,
+    },
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
     /// Add or update an agent's settings (enabled, params, instructions)

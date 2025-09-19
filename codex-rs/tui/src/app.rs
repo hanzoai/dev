@@ -19,6 +19,7 @@ use codex_core::protocol::Event;
 use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
 use color_eyre::eyre::Result;
+use futures::FutureExt;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -65,7 +66,6 @@ enum AppState<'a> {
 }
 
 struct TerminalRunState {
-    command: Vec<String>,
     cancel_tx: Option<oneshot::Sender<()>>,
     running: bool,
     controller: Option<TerminalRunController>,
@@ -390,7 +390,6 @@ impl App<'_> {
         self.terminal_runs.insert(
             id,
             TerminalRunState {
-                command: command.clone(),
                 cancel_tx: Some(cancel_tx),
                 running: true,
                 controller: controller_clone,
@@ -525,7 +524,8 @@ impl App<'_> {
                 }));
             }
 
-            let mut cancel_rx = cancel_rx;
+            let cancel_rx = cancel_rx.fuse();
+            tokio::pin!(cancel_rx);
             let mut cancel_triggered = false;
             let wait_status = loop {
                 tokio::select! {
@@ -849,11 +849,14 @@ impl App<'_> {
                             ..
                         } => match &mut self.app_state {
                             AppState::Chat { widget } => {
-                                // Exit immediately on the second Ctrl+C instead of
-                                // waiting for the backend ShutdownComplete (which
-                                // can be delayed behind streaming events).
-                                let handled = matches!(widget.on_ctrl_c(), crate::bottom_pane::CancellationEvent::Handled);
-                                if handled { self.app_event_tx.send(AppEvent::ExitRequest); }
+                                match widget.on_ctrl_c() {
+                                    crate::bottom_pane::CancellationEvent::Handled => {
+                                        if widget.ctrl_c_requests_exit() {
+                                            self.app_event_tx.send(AppEvent::ExitRequest);
+                                        }
+                                    }
+                                    crate::bottom_pane::CancellationEvent::Ignored => {}
+                                }
                             }
                             AppState::Onboarding { .. } => { self.app_event_tx.send(AppEvent::ExitRequest); }
                         },
@@ -1031,18 +1034,6 @@ impl App<'_> {
                         self.terminal_runs.remove(&id);
                     }
                 }
-                AppEvent::TerminalRerun { id } => {
-                    let restart = self
-                        .terminal_runs
-                        .get(&id)
-                        .and_then(|run| {
-                            (!run.running)
-                                .then(|| (run.command.clone(), run.controller.clone()))
-                        });
-                    if let Some((command, controller)) = restart {
-                        self.start_terminal_run(id, command, controller);
-                    }
-                }
                 AppEvent::TerminalRunCommand {
                     id,
                     command,
@@ -1050,7 +1041,7 @@ impl App<'_> {
                     controller,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.terminal_update_message(id, command_display);
+                        widget.terminal_set_command_display(id, command_display.clone());
                         widget.terminal_mark_running(id);
                     }
                     self.start_terminal_run(id, command, controller);
@@ -1058,6 +1049,16 @@ impl App<'_> {
                 AppEvent::TerminalUpdateMessage { id, message } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.terminal_update_message(id, message);
+                    }
+                }
+                AppEvent::TerminalSetAssistantMessage { id, message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_set_assistant_message(id, message);
+                    }
+                }
+                AppEvent::TerminalAwaitCommand { id, suggestion, ack } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_prepare_command(id, suggestion, ack.0);
                     }
                 }
                 AppEvent::TerminalForceClose { id } => {

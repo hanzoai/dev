@@ -1,4 +1,4 @@
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
@@ -15,11 +15,28 @@ use serde_json::{self, json, Value};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::app_event::{AppEvent, TerminalAfter, TerminalRunController, TerminalRunEvent};
+use crate::app_event::{
+    AppEvent,
+    Redacted,
+    TerminalAfter,
+    TerminalCommandGate,
+    TerminalRunController,
+    TerminalRunEvent,
+};
 use crate::app_event_sender::AppEventSender;
 
 const MAX_OUTPUT_CHARS: usize = 8_000;
 const MAX_STEPS: usize = 6;
+
+enum GuidedTerminalMode {
+    AgentInstall {
+        agent_name: String,
+        default_command: String,
+        selected_index: usize,
+    },
+    Prompt { user_prompt: String },
+    DirectCommand { command: String },
+}
 
 #[derive(Debug, Deserialize)]
 struct InstallDecision {
@@ -36,8 +53,72 @@ pub(super) fn start_agent_install_session(
     default_command: String,
     cwd: Option<String>,
     controller: TerminalRunController,
-    mut controller_rx: Receiver<TerminalRunEvent>,
+    controller_rx: Receiver<TerminalRunEvent>,
     selected_index: usize,
+    debug_enabled: bool,
+) {
+    start_guided_terminal_session(
+        app_event_tx,
+        terminal_id,
+        GuidedTerminalMode::AgentInstall {
+            agent_name,
+            default_command,
+            selected_index,
+        },
+        cwd,
+        controller,
+        controller_rx,
+        debug_enabled,
+    );
+}
+
+pub(super) fn start_prompt_terminal_session(
+    app_event_tx: AppEventSender,
+    terminal_id: u64,
+    user_prompt: String,
+    cwd: Option<String>,
+    controller: TerminalRunController,
+    controller_rx: Receiver<TerminalRunEvent>,
+    debug_enabled: bool,
+) {
+    start_guided_terminal_session(
+        app_event_tx,
+        terminal_id,
+        GuidedTerminalMode::Prompt { user_prompt },
+        cwd,
+        controller,
+        controller_rx,
+        debug_enabled,
+    );
+}
+
+pub(super) fn start_direct_terminal_session(
+    app_event_tx: AppEventSender,
+    terminal_id: u64,
+    command: String,
+    cwd: Option<String>,
+    controller: TerminalRunController,
+    controller_rx: Receiver<TerminalRunEvent>,
+    debug_enabled: bool,
+) {
+    start_guided_terminal_session(
+        app_event_tx,
+        terminal_id,
+        GuidedTerminalMode::DirectCommand { command },
+        cwd,
+        controller,
+        controller_rx,
+        debug_enabled,
+    );
+}
+
+fn start_guided_terminal_session(
+    app_event_tx: AppEventSender,
+    terminal_id: u64,
+    mode: GuidedTerminalMode,
+    cwd: Option<String>,
+    controller: TerminalRunController,
+    controller_rx: Receiver<TerminalRunEvent>,
     debug_enabled: bool,
 ) {
     std::thread::spawn(move || {
@@ -47,7 +128,13 @@ pub(super) fn start_agent_install_session(
         {
             Ok(rt) => rt,
             Err(err) => {
-                let msg = format!("Failed to start install helper runtime: {err}");
+                let helper = match &mode {
+                    GuidedTerminalMode::AgentInstall { .. } => "Install helper",
+                    GuidedTerminalMode::Prompt { .. } | GuidedTerminalMode::DirectCommand { .. } => {
+                        "Terminal helper"
+                    }
+                };
+                let msg = format!("Failed to start {helper} runtime: {err}");
                 app_event_tx.send(AppEvent::TerminalChunk {
                     id: terminal_id,
                     chunk: format!("{msg}\n").into_bytes(),
@@ -61,22 +148,27 @@ pub(super) fn start_agent_install_session(
             }
         };
 
-        if let Err(err) = run_install_loop(
+        let mut controller_rx = controller_rx;
+        if let Err(err) = run_guided_loop(
             &runtime,
             &app_event_tx,
             terminal_id,
-            &agent_name,
-            &default_command,
+            &mode,
             cwd.as_deref(),
             controller,
             &mut controller_rx,
-            selected_index,
             debug_enabled,
         ) {
+            let helper = match &mode {
+                GuidedTerminalMode::AgentInstall { .. } => "Install helper",
+                GuidedTerminalMode::Prompt { .. } | GuidedTerminalMode::DirectCommand { .. } => {
+                    "Terminal helper"
+                }
+            };
             let msg = if debug_enabled {
-                format!("Install helper error: {err:#}")
+                format!("{helper} error: {err:#}")
             } else {
-                format!("Install helper error: {err}")
+                format!("{helper} error: {err}")
             };
             app_event_tx.send(AppEvent::TerminalChunk {
                 id: terminal_id,
@@ -91,16 +183,14 @@ pub(super) fn start_agent_install_session(
     });
 }
 
-fn run_install_loop(
+fn run_guided_loop(
     runtime: &tokio::runtime::Runtime,
     app_event_tx: &AppEventSender,
     terminal_id: u64,
-    agent_name: &str,
-    default_command: &str,
+    mode: &GuidedTerminalMode,
     cwd: Option<&str>,
     controller: TerminalRunController,
     controller_rx: &mut Receiver<TerminalRunEvent>,
-    selected_index: usize,
     debug_enabled: bool,
 ) -> Result<()> {
     let cfg = Config::load_with_cli_overrides(vec![], ConfigOverrides::default())
@@ -137,20 +227,96 @@ fn run_install_loop(
     };
     let cwd_text = cwd.unwrap_or("unknown");
 
+    let (helper_label, developer_intro, initial_user, schema_name) = match mode {
+        GuidedTerminalMode::AgentInstall {
+            agent_name,
+            default_command,
+            ..
+        } => (
+            "Install helper",
+            format!(
+                "You are coordinating shell commands to install the agent named \"{agent_name}\"."
+            ),
+            format!(
+                "Install target: {agent_name}.\nPlatform: {platform}.\nSandbox: {sandbox}.\nWorking directory: {cwd_text}.\nSuggested starting command: {default_command}.\nPlease propose the first command to run."
+            ),
+            "agent_install_flow",
+        ),
+        GuidedTerminalMode::Prompt { user_prompt } => (
+            "Terminal helper",
+            format!(
+                "You are coordinating shell commands to satisfy the user's request:\n\"{user_prompt}\"."
+            ),
+            format!(
+                "User request: {user_prompt}.\nPlatform: {platform}.\nSandbox: {sandbox}.\nWorking directory: {cwd_text}.\nPlease propose the first command to run."
+            ),
+            "guided_terminal_flow",
+        ),
+        GuidedTerminalMode::DirectCommand { command } => (
+            "Terminal helper",
+            format!(
+                "You are assisting the user with shell commands. They manually executed the first command `{command}`."
+            ),
+            format!(
+                "Initial user command: {command}.\nPlatform: {platform}.\nSandbox: {sandbox}.\nWorking directory: {cwd_text}.\nReview the provided command output and suggest any follow-up command if helpful."
+            ),
+            "direct_terminal_flow",
+        ),
+    };
+
     if debug_enabled {
-        debug!(
-            target: "agent_install",
-            "Starting guided install session: agent={agent_name} default_command={default_command} platform={platform} sandbox={sandbox} cwd={cwd}",
-            agent_name = agent_name,
-            default_command = default_command,
-            platform = platform,
-            sandbox = sandbox,
-            cwd = cwd_text,
-        );
+        match mode {
+            GuidedTerminalMode::AgentInstall {
+                agent_name,
+                default_command,
+                ..
+            } => {
+                debug!(
+                    "[{}] Starting guided install session: agent={} default_command={} platform={} sandbox={} cwd={}",
+                    helper_label,
+                    agent_name,
+                    default_command,
+                    platform,
+                    sandbox,
+                    cwd_text,
+                );
+            }
+            GuidedTerminalMode::Prompt { user_prompt } => {
+                debug!(
+                    "[{}] Starting guided terminal session: prompt={} platform={} sandbox={} cwd={}",
+                    helper_label,
+                    user_prompt,
+                    platform,
+                    sandbox,
+                    cwd_text,
+                );
+            }
+            GuidedTerminalMode::DirectCommand { command } => {
+                debug!(
+                    "[{}] Starting direct terminal session: command={} platform={} sandbox={} cwd={}",
+                    helper_label,
+                    command,
+                    platform,
+                    sandbox,
+                    cwd_text,
+                );
+            }
+        }
     }
 
     let developer = format!(
-        "You are coordinating shell commands to install the agent named \"{agent_name}\".\n\nRules:\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another shell command is required.\n  * Use `finish_success` when installation completed successfully.\n  * Use `finish_failed` when installation cannot continue or needs manual intervention.\n- `message`: short status (<= 160 characters) describing what happened or what to do next.\n- `command`: exact shell command to run next. Supply a single non-interactive command when `finish_status` is `continue`; set to null otherwise.\n- The provided command will be executed and its output returned to you. Prefer non-destructive diagnostics (search, list, install alternative package) when handling errors.\n- Always inspect the latest command output before choosing the next action. Suggest follow-up steps (e.g. alternate packages, additional instructions) when a command fails.\n- Respect the detected platform: use Homebrew on macOS, apt/dnf/pacman on Linux, winget/choco/powershell on Windows.",
+        "{developer_intro}
+
+    Rules:
+    - `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.
+      * Use `continue` when another shell command is required.
+      * Use `finish_success` when the task completed successfully.
+      * Use `finish_failed` when the task cannot continue or needs manual intervention.
+    - `message`: short status (<= 160 characters) describing what happened or what to do next.
+    - `command`: exact shell command to run next. Supply a single non-interactive command when `finish_status` is `continue`; set to null otherwise. Do not repeat the user's wording—return a valid executable shell command.
+    - The provided command will be executed and its output returned to you. Prefer non-destructive diagnostics (search, list, install alternative package) when handling errors.
+    - Always inspect the latest command output before choosing the next action. Suggest follow-up steps (e.g. alternate packages, additional instructions) when a command fails.
+    - Respect the detected platform: use Homebrew on macOS, apt/dnf/pacman on Linux, winget/choco/powershell on Windows.",
     );
 
     let schema = json!({
@@ -174,25 +340,79 @@ fn run_install_loop(
 
     let developer_msg = make_message("developer", developer);
     let mut conversation: Vec<ResponseItem> = Vec::new();
-    let initial_user = format!(
-        "Install target: {agent_name}.\nPlatform: {platform}.\nSandbox: {sandbox}.\nWorking directory: {cwd_text}.\nSuggested starting command: {default_command}.\nPlease propose the first command to run.",
-    );
     conversation.push(make_message("user", initial_user));
 
-    let mut steps = 0usize;
+    let mut steps = match mode {
+        GuidedTerminalMode::DirectCommand { .. } => 1,
+        _ => 0,
+    };
+
+    if let GuidedTerminalMode::DirectCommand { command } = mode {
+        let wrapped = wrap_command(command);
+        if wrapped.is_empty() {
+            app_event_tx.send(AppEvent::TerminalChunk {
+                id: terminal_id,
+                chunk: b"Unable to build shell command for execution.\n".to_vec(),
+                _is_stderr: true,
+            });
+            app_event_tx.send(AppEvent::TerminalUpdateMessage {
+                id: terminal_id,
+                message: "Command could not be constructed.".to_string(),
+            });
+            return Ok(());
+        }
+        app_event_tx.send(AppEvent::TerminalChunk {
+            id: terminal_id,
+            chunk: format!("$ {command}\n").into_bytes(),
+            _is_stderr: false,
+        });
+        app_event_tx.send(AppEvent::TerminalRunCommand {
+            id: terminal_id,
+            command: wrapped,
+            command_display: command.clone(),
+            controller: Some(controller.clone()),
+        });
+
+        let Some((output, exit_code)) = collect_command_output(controller_rx)
+            .context("collecting initial command output")?
+        else {
+            if debug_enabled {
+                debug!("[Terminal helper] Initial command cancelled by user");
+            }
+            return Ok(());
+        };
+
+        let truncated = tail_chars(&output, MAX_OUTPUT_CHARS);
+        let summary = format!(
+            "Command: {command}\nExit code: {}\nOutput (last {} chars):\n{}",
+            exit_code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            truncated.chars().count(),
+            truncated
+        );
+        conversation.push(make_message("user", summary));
+        app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+            id: terminal_id,
+            message: "Analyzing output…".to_string(),
+        });
+    }
+
     loop {
         steps += 1;
         if steps > MAX_STEPS {
-            return Err(anyhow!("hit step limit without completing install"));
+            return Err(anyhow!("hit step limit without completing guided session"));
         }
 
         if debug_enabled {
-            debug!(target: "agent_install", step = steps, "Requesting next install command");
+            debug!("[{}] Requesting next command (step={})", helper_label, steps);
         }
-        app_event_tx.send(AppEvent::TerminalUpdateMessage {
-            id: terminal_id,
-            message: format!("Planning step {steps}…"),
-        });
+        if steps == 1 {
+                app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+                    id: terminal_id,
+                    message: "Starting analysis…".to_string(),
+                });
+        }
 
         let mut prompt = Prompt::default();
         prompt.input.push(developer_msg.clone());
@@ -200,7 +420,7 @@ fn run_install_loop(
         prompt.store = true;
         prompt.text_format = Some(TextFormat {
             r#type: "json_schema".to_string(),
-            name: Some("agent_install_flow".to_string()),
+            name: Some(schema_name.to_string()),
             strict: Some(true),
             schema: Some(schema.clone()),
         });
@@ -209,21 +429,16 @@ fn run_install_loop(
         let (decision, raw_value) = parse_decision(&raw)?;
         if debug_enabled {
             debug!(
-                target: "agent_install",
-                step = steps,
-                "Model decision: message={message:?} command={command:?} raw={raw:?}",
-                message = decision.message,
-                command = decision.command.as_deref().unwrap_or("<none>"),
-                raw = &raw_value,
+                "[{}] Model decision: message={:?} command={:?} raw={}",
+                helper_label,
+                decision.message,
+                decision.command.as_deref().unwrap_or("<none>"),
+                raw_value,
             );
         }
         conversation.push(make_message("assistant", raw.clone()));
 
-        app_event_tx.send_background_event_late(format!(
-            "Install helper: {}",
-            decision.message
-        ));
-        app_event_tx.send(AppEvent::TerminalUpdateMessage {
+        app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
             id: terminal_id,
             message: decision.message.clone(),
         });
@@ -231,22 +446,53 @@ fn run_install_loop(
         let finish_status = decision.finish_status.as_str();
         match finish_status {
             "continue" => {
-                let command = decision
+                let suggested_raw = decision
                     .command
                     .as_deref()
                     .map(str::trim)
                     .filter(|c| !c.is_empty())
                     .ok_or_else(|| anyhow!("model response missing command for next step"))?;
+                let suggested = simplify_command(suggested_raw).to_string();
+
+                let require_confirmation = match mode {
+                    GuidedTerminalMode::AgentInstall { .. } => steps > 1,
+                    GuidedTerminalMode::Prompt { .. } => steps > 1,
+                    GuidedTerminalMode::DirectCommand { .. } => true,
+                };
+                let final_command = if require_confirmation {
+                    let (gate_tx, gate_rx) = channel();
+                    app_event_tx.send(AppEvent::TerminalAwaitCommand {
+                        id: terminal_id,
+                        suggestion: suggested.clone(),
+                        ack: Redacted(gate_tx),
+                    });
+                    match gate_rx.recv() {
+                        Ok(TerminalCommandGate::Run(cmd)) => cmd,
+                        Ok(TerminalCommandGate::Cancel) | Err(_) => {
+                            if debug_enabled {
+                                debug!("[{}] Command run cancelled by user", helper_label);
+                            }
+                            break;
+                        }
+                    }
+                } else {
+                    suggested
+                };
+
+                let final_command = final_command.trim().to_string();
+                if final_command.is_empty() {
+                    return Err(anyhow!("next command was empty after confirmation"));
+                }
 
                 app_event_tx.send(AppEvent::TerminalChunk {
                     id: terminal_id,
-                    chunk: format!("$ {}\n", command).into_bytes(),
+                    chunk: format!("$ {final_command}\n").into_bytes(),
                     _is_stderr: false,
                 });
                 app_event_tx.send(AppEvent::TerminalRunCommand {
                     id: terminal_id,
-                    command: wrap_command(command),
-                    command_display: command.to_string(),
+                    command: wrap_command(&final_command),
+                    command_display: final_command.clone(),
                     controller: Some(controller.clone()),
                 });
 
@@ -254,21 +500,22 @@ fn run_install_loop(
                     .context("collecting command output")?
                 else {
                     if debug_enabled {
-                        debug!(target: "agent_install", "Command collection cancelled by user");
+                        debug!("[{}] Command collection cancelled by user", helper_label);
                     }
-                    app_event_tx.send_background_event_late("Install cancelled by user".to_string());
                     break;
                 };
                 if debug_enabled {
                     debug!(
-                        target: "agent_install",
-                        "Command finished: command={command} exit_code={exit_code:?}"
+                        "[{}] Command finished: command={} exit_code={:?}",
+                        helper_label,
+                        final_command,
+                        exit_code,
                     );
                 }
 
                 let truncated = tail_chars(&output, MAX_OUTPUT_CHARS);
                 let summary = format!(
-                    "Command: {command}\nExit code: {}\nOutput (last {} chars):\n{}",
+                    "Command: {final_command}\nExit code: {}\nOutput (last {} chars):\n{}",
                     exit_code
                         .map(|c| c.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
@@ -277,14 +524,9 @@ fn run_install_loop(
                 );
                 conversation.push(make_message("user", summary));
 
-                let status = if let Some(code) = exit_code {
-                    format!("Command exited {code}. Analyzing…")
-                } else {
-                    "Command ended (exit code unknown). Analyzing…".to_string()
-                };
-                app_event_tx.send(AppEvent::TerminalUpdateMessage {
+                app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
                     id: terminal_id,
-                    message: status,
+                    message: "Analyzing output…".to_string(),
                 });
             }
             "finish_success" => {
@@ -297,14 +539,18 @@ fn run_install_loop(
                 {
                     return Err(anyhow!("finish_success must set command to null"));
                 }
-                app_event_tx.send_background_event_late(format!(
-                    "✅ Agent {agent_name} install: {}",
-                    decision.message
-                ));
-                app_event_tx.send(AppEvent::TerminalForceClose { id: terminal_id });
-                app_event_tx.send(AppEvent::TerminalAfter(
-                    TerminalAfter::RefreshAgentsAndClose { selected_index },
-                ));
+                if let GuidedTerminalMode::AgentInstall {
+                    selected_index,
+                    ..
+                } = mode
+                {
+                    app_event_tx.send(AppEvent::TerminalForceClose { id: terminal_id });
+                    app_event_tx.send(AppEvent::TerminalAfter(
+                        TerminalAfter::RefreshAgentsAndClose {
+                            selected_index: *selected_index,
+                        },
+                    ));
+                }
                 break;
             }
             "finish_failed" => {
@@ -317,11 +563,6 @@ fn run_install_loop(
                 {
                     return Err(anyhow!("finish_failed must set command to null"));
                 }
-                app_event_tx.send_background_event_late(format!(
-                    "❌ Agent {agent_name} install failed: {}",
-                    decision.message
-                ));
-                // keep terminal open for inspection
                 break;
             }
             other => {
@@ -332,6 +573,7 @@ fn run_install_loop(
 
     Ok(())
 }
+
 
 fn request_decision(
     runtime: &tokio::runtime::Runtime,
@@ -392,8 +634,19 @@ fn collect_command_output(
     Ok(Some((text, exit_code)))
 }
 
-fn wrap_command(raw: &str) -> Vec<String> {
-    if raw.is_empty() {
+pub(crate) fn simplify_command(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("bash -lc ") {
+        let original = &trimmed[trimmed.len() - rest.len()..];
+        return original.trim_matches(|c| c == '\'' || c == '"').trim();
+    }
+    trimmed
+}
+
+pub(crate) fn wrap_command(raw: &str) -> Vec<String> {
+    let simplified = simplify_command(raw);
+    if simplified.is_empty() {
         return Vec::new();
     }
     if cfg!(target_os = "windows") {
@@ -403,10 +656,10 @@ fn wrap_command(raw: &str) -> Vec<String> {
             "-ExecutionPolicy".to_string(),
             "Bypass".to_string(),
             "-Command".to_string(),
-            raw.to_string(),
+            simplified.to_string(),
         ]
     } else {
-        vec!["/bin/bash".to_string(), "-lc".to_string(), raw.to_string()]
+        vec!["/bin/bash".to_string(), "-lc".to_string(), simplified.to_string()]
     }
 }
 
