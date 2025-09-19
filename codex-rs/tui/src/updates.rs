@@ -175,8 +175,8 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
     };
 
     info!(
-        command = %display,
-        latest_version = %latest_version,
+        command = display.as_str(),
+        latest_version = latest_version.as_str(),
         "auto-upgrade: running managed installer"
     );
     let result = run_upgrade_command(command).await;
