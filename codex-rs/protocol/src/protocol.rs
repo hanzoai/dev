@@ -405,12 +405,40 @@ pub enum InputItem {
 }
 
 /// Event Queue Entry - events from agent
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct Event {
     /// Submission `id` that this event is correlated with.
     pub id: String,
+    /// Monotonic, per-turn sequence for ordering within a submission id.
+    /// Resets to 0 at TaskStarted and increments for each subsequent event.
+    pub event_seq: u64,
     /// Payload
     pub msg: EventMsg,
+    /// Optional model-provided ordering metadata (when applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<OrderMeta>,
+}
+
+/// Lightweight representation of an event suitable for persistence and replay.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct RecordedEvent {
+    pub id: String,
+    pub event_seq: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<OrderMeta>,
+    pub msg: EventMsg,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct OrderMeta {
+    /// 1-based ordinal of this request/turn in the session
+    pub request_ordinal: u64,
+    /// Model-provided output_index for the top-level item
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_index: Option<u32>,
+    /// Model-provided sequence_number within the output_index stream
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence_number: Option<u64>,
 }
 
 /// Response event from the agent
@@ -589,6 +617,14 @@ impl TokenUsageInfo {
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
+}
+
+/// Payload for `ReplayHistory` containing prior `ResponseItem`s and optional events.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+pub struct ReplayHistoryEvent {
+    pub items: Vec<crate::models::ResponseItem>,
+    #[serde(default)]
+    pub events: Vec<RecordedEvent>,
 }
 
 // Includes prompts, tools and space to call compact.
@@ -878,7 +914,7 @@ impl InitialHistory {
                     .history
                     .iter()
                     .filter_map(|ri| match ri {
-                        RolloutItem::EventMsg(ev) => Some(ev.clone()),
+                        RolloutItem::Event(ev) => Some(ev.msg.clone()),
                         _ => None,
                     })
                     .collect(),
@@ -887,7 +923,7 @@ impl InitialHistory {
                 items
                     .iter()
                     .filter_map(|ri| match ri {
-                        RolloutItem::EventMsg(ev) => Some(ev.clone()),
+                        RolloutItem::Event(ev) => Some(ev.msg.clone()),
                         _ => None,
                     })
                     .collect(),
@@ -921,7 +957,7 @@ pub enum RolloutItem {
     ResponseItem(ResponseItem),
     Compacted(CompactedItem),
     TurnContext(TurnContextItem),
-    EventMsg(EventMsg),
+    Event(RecordedEvent),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS)]
@@ -1256,6 +1292,7 @@ mod tests {
         let rollout_file = NamedTempFile::new().unwrap();
         let event = Event {
             id: "1234".to_string(),
+            event_seq: 1,
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id: conversation_id,
                 model: "codex-mini-latest".to_string(),
@@ -1265,6 +1302,7 @@ mod tests {
                 initial_messages: None,
                 rollout_path: rollout_file.path().to_path_buf(),
             }),
+            order: None,
         };
 
         let expected = json!({

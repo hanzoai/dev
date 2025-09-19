@@ -32,6 +32,7 @@ use ratatui::widgets::Padding;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
+use shlex::Shlex;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Component;
@@ -558,10 +559,62 @@ fn looks_like_shell(token: &str) -> bool {
 fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
     let display = select_command_display(cmd, original_command);
     let (annotation, _) = parse_read_line_annotation_with_range(&display);
-    CommandSummary {
-        display,
-        annotation,
+    let display = if annotation.is_some() {
+        strip_redundant_line_filter_pipes(&display)
+    } else {
+        display
+    };
+    CommandSummary { display, annotation }
+}
+
+// Remove formatting-only pipes (sed/head/tail) when we already provide a line-range
+// annotation alongside the command summary. Keeps the core command intact for display.
+fn strip_redundant_line_filter_pipes(cmd: &str) -> String {
+    if !cmd.contains('|') { return cmd.to_string(); }
+
+    let mut segs: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    for ch in cmd.chars() {
+        match ch {
+            '\'' if !in_double => { in_single = !in_single; cur.push(ch); }
+            '"' if !in_single => { in_double = !in_double; cur.push(ch); }
+            '|' if !in_single && !in_double => {
+                segs.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(ch),
+        }
     }
+    if !cur.is_empty() { segs.push(cur.trim().to_string()); }
+
+    let is_redundant = |s: &str| {
+        let lower = s.trim().to_lowercase();
+        if lower.is_empty() { return false; }
+        if lower.starts_with("sed ") || lower == "sed" {
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            if parts.len() >= 3 && parts[1] == "-n" {
+                let tok = parts[2].trim_matches('\'').trim_matches('"');
+                if tok.ends_with('p') {
+                    let core = &tok[..tok.len().saturating_sub(1)];
+                    if core.split_once(',').is_some() || core.chars().all(|c| c.is_ascii_digit()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if lower == "head" || lower.starts_with("head ") { return true; }
+        if lower == "tail" || lower.starts_with("tail ") { return true; }
+        false
+    };
+
+    while let Some(last) = segs.last() {
+        if is_redundant(last) { segs.pop(); } else { break; }
+    }
+
+    if segs.is_empty() { return cmd.to_string(); }
+    segs.join(" | ")
 }
 
 fn select_command_display(cmd: &str, original_command: &[String]) -> String {
@@ -985,9 +1038,15 @@ impl HistoryCell for ExploreAggregationCell {
                     Style::default().fg(crate::colors::text_dim()),
                 )),
                 ExploreEntryStatus::Error { exit_code } => {
-                    let msg = exit_code
-                        .map(|code| format!(" (exit {})", code))
-                        .unwrap_or_else(|| " (failed)".to_string());
+                    let msg = match (entry.action, exit_code) {
+                        (ExecAction::Search, Some(2)) => " (invalid pattern)".to_string(),
+                        (ExecAction::Search, _) => " (search error)".to_string(),
+                        (ExecAction::List, _) => " (list error)".to_string(),
+                        (ExecAction::Read, _) => " (read error)".to_string(),
+                        _ => exit_code
+                            .map(|code| format!(" (exit {})", code))
+                            .unwrap_or_else(|| " (failed)".to_string()),
+                    };
                     spans.push(Span::styled(
                         msg,
                         Style::default().fg(crate::colors::error()),
@@ -2274,6 +2333,108 @@ mod tests {
     }
 
     #[test]
+    fn format_inline_python_breaks_semicolons() {
+        let command = vec![
+            "python".to_string(),
+            "-c".to_string(),
+            "import os; print('hi')".to_string(),
+        ];
+        let escaped = strip_bash_lc_and_escape(&command);
+        let formatted = format_inline_python_for_display(&escaped);
+        assert!(formatted.contains("python -c '\n"));
+        assert!(formatted.contains("    import os"));
+        assert!(formatted.contains("    print('hi')"));
+    }
+
+    #[test]
+    fn format_inline_python_preserves_simple_snippet() {
+        let command = vec![
+            "python".to_string(),
+            "-c".to_string(),
+            "print('hi')".to_string(),
+        ];
+        let escaped = strip_bash_lc_and_escape(&command);
+        let formatted = format_inline_python_for_display(&escaped);
+        assert_eq!(formatted, escaped);
+    }
+
+    #[test]
+    fn inspect_python_heredoc_strip() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "python3 - <<'PY'\nimport os\nroot = '/tmp'\nprint(root)\nPY".to_string(),
+        ];
+        let escaped = strip_bash_lc_and_escape(&command);
+        assert!(escaped.contains("\n"));
+        assert!(escaped.contains("<<'PY'"));
+    }
+
+    #[test]
+    fn format_inline_python_formats_heredoc() {
+        let sanitized = "python3 - <<'PY' from pathlib import Path root = Path(.) candidates = [] for path in root.rglob(*.py): try: size = path.stat().st_size except (PermissionError, FileNotFoundError): continue candidates.append((size, path)) candidates.sort(reverse=True) for size, path in candidates[:10]: print(f{size:>9} bytes - {path}) PY";
+        let formatted = format_inline_python_for_display(sanitized);
+        assert!(formatted.contains("'<<PY'\n"));
+        assert!(formatted.contains("from pathlib import Path"));
+        assert!(formatted.contains("root = Path(.)"));
+        assert!(formatted.contains("    candidates = []"));
+        assert!(formatted.contains("    for path in root.rglob(*.py):"));
+        assert!(formatted.contains("        try:"));
+        assert!(formatted.contains("            size = path.stat().st_size"));
+        assert!(formatted.contains(
+            "        except (PermissionError, FileNotFoundError):"
+        ));
+        assert!(formatted.contains("            continue"));
+        assert!(formatted.contains("    candidates.append((size, path))"));
+        assert!(formatted.contains("    candidates.sort(reverse=True)"));
+        assert!(formatted.contains("    for size, path in candidates[:10]:"));
+        assert!(formatted.contains(
+            "        print(f{size:>9} bytes - {path})"
+        ));
+        assert!(formatted.trim_end().ends_with("PY"));
+    }
+
+    #[test]
+    fn format_inline_python_splits_chained_assignments() {
+        let sanitized = "python3 - <<'PY' import os py_count = 0 total_size = 0 for root, _, files in os.walk(.): for name in files: if name.endswith(.py): py_count += 1 total_size += os.path.getsize(os.path.join(root, name)) print(Total Python files:, py_count) print(Approx total size (KB):, round(total_size / 1024, 1)) PY";
+        let formatted = format_inline_python_for_display(sanitized);
+        assert!(formatted.contains("    py_count = 0"));
+        assert!(formatted.contains("    total_size = 0"));
+        assert!(formatted.contains("            py_count += 1"));
+        assert!(formatted.contains(
+            "            total_size += os.path.getsize(os.path.join(root, name))"
+        ));
+        assert!(formatted.contains("        print(Total Python files:, py_count)"));
+        assert!(formatted.contains(
+            "        print(Approx total size (KB):, round(total_size / 1024, 1))"
+        ));
+    }
+
+    #[test]
+    fn format_inline_node_script_indents_blocks() {
+        let sanitized = "node -e 'const fs = require(\'fs\'); let count = 0; [\'a.js\', \'b.js\'].forEach(file => { count += 1; console.log(file); }); if (count > 0) { console.log(`Total: ${count}`); }'";
+        let formatted = format_inline_script_for_display(sanitized);
+        assert!(formatted.contains("node -e '\n"));
+        assert!(formatted.contains("    const fs = require(fs);"));
+        assert!(formatted.contains("    let count = 0;"));
+        assert!(formatted.contains("    [a.js, b.js].forEach(file => { count += 1; console.log(file); });"));
+        assert!(formatted.contains("    if (count > 0) { console.log(`Total: ${count}`); }"));
+    }
+
+    #[test]
+    fn format_inline_shell_script_breaks_on_semicolons() {
+        let sanitized = "bash -c 'set -e; echo start; for f in *.rs; do echo $f; done'";
+        let formatted = format_inline_script_for_display(sanitized);
+        assert!(formatted.contains("bash -c '\n"));
+        assert!(formatted.contains("    set -e;"));
+        assert!(formatted.contains("    echo start;"));
+        assert!(formatted.contains("    for f in *.rs"));
+        assert!(formatted.contains("    do echo $f;"));
+        assert!(formatted.contains("    done"));
+        assert!(formatted.trim_end().ends_with("'"));
+    }
+
+    #[test]
     fn merged_exec_cell_push_and_kind() {
         // Build two completed ExecCell instances for Read
         let parsed = vec![ParsedCommand::Read {
@@ -2319,6 +2480,11 @@ mod tests {
             parse_read_line_annotation("head -n 100 foo.txt"),
             Some("(lines 1 to 100)".into())
         );
+        // bare head => default 10
+        assert_eq!(
+            parse_read_line_annotation("git show HEAD:file | head"),
+            Some("(lines 1 to 10)".into())
+        );
         // tail -n +K
         assert_eq!(
             parse_read_line_annotation("tail -n +20 foo.txt"),
@@ -2329,8 +2495,35 @@ mod tests {
             parse_read_line_annotation("tail -n 50 foo.txt"),
             Some("(last 50 lines)".into())
         );
+        // bare tail => default 10
+        assert_eq!(
+            parse_read_line_annotation("git show HEAD:file | tail"),
+            Some("(last 10 lines)".into())
+        );
         // Unrelated command
         assert_eq!(parse_read_line_annotation("cat foo.txt"), None);
+    }
+
+    #[test]
+    fn strip_redundant_pipes_when_annotated() {
+        let cmd = "git show upstream/main:codex-rs/core/src/codex.rs | sed -n '2160,2640p'";
+        let (ann, _) = parse_read_line_annotation_with_range(cmd);
+        assert!(ann.is_some());
+        let cleaned = strip_redundant_line_filter_pipes(cmd);
+        assert!(cleaned.starts_with("git show upstream/main:codex-rs/core/src/codex.rs"));
+        assert!(!cleaned.contains("| sed -n"));
+
+        let cmd2 = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'";
+        let (ann2, _) = parse_read_line_annotation_with_range(cmd2);
+        assert!(ann2.is_some());
+        let cleaned2 = strip_redundant_line_filter_pipes(cmd2);
+        assert_eq!(cleaned2, "nl -ba core/src/parse_command.rs");
+
+        let cmd3 = "git show HEAD:file | head";
+        let (ann3, _) = parse_read_line_annotation_with_range(cmd3);
+        assert!(ann3.is_some());
+        let cleaned3 = strip_redundant_line_filter_pipes(cmd3);
+        assert_eq!(cleaned3, "git show HEAD:file");
     }
 
     #[test]
@@ -2819,7 +3012,8 @@ fn exec_render_parts_generic(
 ) {
     let mut pre: Vec<Line<'static>> = Vec::new();
     let command_escaped = strip_bash_lc_and_escape(command);
-    let normalized = normalize_shell_command_display(&command_escaped);
+    let formatted = format_inline_script_for_display(&command_escaped);
+    let normalized = normalize_shell_command_display(&formatted);
     let command_display = insert_line_breaks_after_double_ampersand(&normalized);
     // Highlight the full command as a bash snippet; we will append
     // the running duration (when applicable) to the first visual line.
@@ -3109,7 +3303,7 @@ fn exec_render_parts_parsed(
                 if lower.starts_with("echo") && lower.contains("---") {
                     (String::new(), String::new()) // drop from preamble
                 } else {
-                    ("Run".to_string(), cmd.clone())
+                    ("Run".to_string(), format_inline_script_for_display(cmd))
                 }
             } // Noop variant not present in our core parser
               // ParsedCommand::Noop { .. } => continue,
@@ -5843,6 +6037,13 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
             }
         }
     }
+    // bare `head` => default 10 lines
+    if lower.contains("head") && !lower.contains("-n") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.iter().any(|p| *p == "head") {
+            return (Some("(lines 1 to 10)".to_string()), Some((1, 10)));
+        }
+    }
     // tail -n +K => from K to end; tail -n N => last N lines
     if lower.contains("tail") && lower.contains("-n") {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
@@ -5857,6 +6058,13 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
                     return (Some(format!("(last {} lines)", n)), None);
                 }
             }
+        }
+    }
+    // bare `tail` => default 10 lines
+    if lower.contains("tail") && !lower.contains("-n") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.iter().any(|p| *p == "tail") {
+            return (Some("(last 10 lines)".to_string()), None);
         }
     }
     (None, None)
@@ -6013,6 +6221,1027 @@ fn emphasize_shell_command_name(line: &mut Line<'static>) {
     } else if !rebuilt.is_empty() {
         line.spans = rebuilt;
     }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn format_inline_python_for_display(command_escaped: &str) -> String {
+    try_format_inline_python(command_escaped).unwrap_or_else(|| command_escaped.to_string())
+}
+
+fn format_inline_script_for_display(command_escaped: &str) -> String {
+    if let Some(formatted) = try_format_inline_python(command_escaped) {
+        return formatted;
+    }
+    if let Some(formatted) = format_inline_node_for_display(command_escaped) {
+        return formatted;
+    }
+    if let Some(formatted) = format_inline_shell_for_display(command_escaped) {
+        return formatted;
+    }
+    command_escaped.to_string()
+}
+
+fn try_format_inline_python(command_escaped: &str) -> Option<String> {
+    if let Some(formatted) = format_python_dash_c(command_escaped) {
+        return Some(formatted);
+    }
+    if let Some(formatted) = format_python_heredoc(command_escaped) {
+        return Some(formatted);
+    }
+    None
+}
+
+fn format_python_dash_c(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let python_idx = tokens
+        .iter()
+        .position(|token| is_python_invocation_token(token))?;
+
+    let c_idx = tokens
+        .iter()
+        .enumerate()
+        .skip(python_idx + 1)
+        .find_map(|(idx, token)| if token == "-c" { Some(idx) } else { None })?;
+
+    let script_idx = c_idx + 1;
+    if script_idx >= tokens.len() {
+        return None;
+    }
+
+    let script_raw = tokens[script_idx].as_str();
+    if script_raw.is_empty() {
+        return None;
+    }
+
+    let script_block = build_python_script_block(script_raw)?;
+
+    let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == script_idx {
+            parts.push(script_block.clone());
+        } else {
+            parts.push(escape_token_for_display(token));
+        }
+    }
+
+    Some(parts.join(" "))
+}
+
+fn build_python_script_block(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let lines: Vec<String> = if normalized.contains('\n') {
+        normalized
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect()
+    } else if script_has_semicolon_outside_quotes(&normalized) {
+        split_semicolon_statements(&normalized)
+    } else {
+        return None;
+    };
+
+    let meaningful: Vec<String> = merge_from_import_lines(lines)
+        .into_iter()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    if meaningful.len() <= 1 {
+        return None;
+    }
+
+    let indented = indent_python_lines(meaningful);
+
+    let mut block = String::from("'\n");
+    for line in indented {
+        block.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
+        block.push('\n');
+    }
+    block.push('\'');
+    Some(block)
+}
+
+fn format_python_heredoc(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let python_idx = tokens
+        .iter()
+        .position(|token| is_python_invocation_token(token))?;
+
+    let heredoc_idx = tokens
+        .iter()
+        .enumerate()
+        .skip(python_idx + 1)
+        .find_map(|(idx, token)| heredoc_delimiter(token).map(|delim| (idx, delim)))?;
+
+    let (marker_idx, terminator) = heredoc_idx;
+    let closing_idx = tokens
+        .iter()
+        .enumerate()
+        .skip(marker_idx + 1)
+        .rev()
+        .find_map(|(idx, token)| (token == &terminator).then_some(idx))?;
+
+    if closing_idx <= marker_idx + 1 {
+        return None;
+    }
+
+    let script_tokens = &tokens[marker_idx + 1..closing_idx];
+    if script_tokens.is_empty() {
+        return None;
+    }
+
+    let script_lines = split_heredoc_script_lines(script_tokens);
+    if script_lines.is_empty() {
+        return None;
+    }
+
+    let script_lines = indent_python_lines(merge_from_import_lines(script_lines));
+
+    let header_tokens: Vec<String> = tokens[..=marker_idx]
+        .iter()
+        .map(|t| escape_token_for_display(t))
+        .collect();
+
+    let mut result = header_tokens.join(" ");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+
+    for line in script_lines {
+        result.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.trim_end());
+        result.push_str(escaped.as_str());
+        result.push('\n');
+    }
+
+    result.push_str(&escape_token_for_display(&tokens[closing_idx]));
+
+    if closing_idx + 1 < tokens.len() {
+        let tail: Vec<String> = tokens[closing_idx + 1..]
+            .iter()
+            .map(|t| escape_token_for_display(t))
+            .collect();
+        if !tail.is_empty() {
+            result.push(' ');
+            result.push_str(&tail.join(" "));
+        }
+    }
+
+    Some(result)
+}
+
+fn heredoc_delimiter(token: &str) -> Option<String> {
+    if !token.starts_with("<<") {
+        return None;
+    }
+    let mut delim = token.trim_start_matches("<<").to_string();
+    if delim.is_empty() {
+        return None;
+    }
+    if delim.starts_with('"') && delim.ends_with('"') && delim.len() >= 2 {
+        delim = delim[1..delim.len() - 1].to_string();
+    } else if delim.starts_with('\'') && delim.ends_with('\'') && delim.len() >= 2 {
+        delim = delim[1..delim.len() - 1].to_string();
+    }
+    if delim.is_empty() {
+        None
+    } else {
+        Some(delim)
+    }
+}
+
+fn split_heredoc_script_lines(script_tokens: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut current_has_assignment = false;
+
+    for (idx, token) in script_tokens.iter().enumerate() {
+        if !current.is_empty()
+            && paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+        {
+            let token_lower = token.to_ascii_lowercase();
+            let current_first = current.first().map(|s| s.to_ascii_lowercase());
+            let should_flush_before = is_statement_boundary_token(token)
+                && !(token_lower == "import"
+                    && current_first.as_deref() == Some("from"));
+            if should_flush_before {
+                let line = current.join(" ");
+                lines.push(line.trim().to_string());
+                current.clear();
+                current_has_assignment = false;
+            }
+        }
+
+        current.push(token.clone());
+        adjust_bracket_depth(token, &mut paren_depth, &mut bracket_depth, &mut brace_depth);
+
+        if is_assignment_operator(token) {
+            current_has_assignment = true;
+        }
+
+        let next = script_tokens.get(idx + 1);
+        let mut should_break = false;
+        let mut break_here = false;
+
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            if next.is_none() {
+                should_break = true;
+            } else {
+                let next_token = next.unwrap();
+                if is_statement_boundary_token(next_token) {
+                    should_break = true;
+                } else if current
+                    .first()
+                    .map(|s| s.as_str() == "import" || s.as_str() == "from")
+                    .unwrap_or(false)
+                {
+                    if current.len() > 1 && next_token != "as" && next_token != "," {
+                        should_break = true;
+                    }
+                } else if current_has_assignment
+                    && !is_assignment_operator(token)
+                    && next_token
+                        .chars()
+                        .next()
+                        .map(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                        .unwrap_or(false)
+                    && !next_token.contains('(')
+                {
+                    should_break = true;
+                }
+
+                let token_trimmed = token.trim_matches(|c| c == ')' || c == ']' || c == '}');
+                if token_trimmed.ends_with(':') {
+                    break_here = true;
+                }
+
+                let lowered = token.trim().to_ascii_lowercase();
+                if matches!(lowered.as_str(), "return" | "break" | "continue" | "pass") {
+                    break_here = true;
+                }
+
+                if let Some(next_token) = next {
+                    let next_str = next_token.as_str();
+                    if token.ends_with(')')
+                        && (next_str.contains('.')
+                            || next_str.contains('=')
+                            || next_str.starts_with("print"))
+                    {
+                        break_here = true;
+                    }
+                }
+            }
+        }
+
+        if break_here {
+            let line = current.join(" ");
+            lines.push(line.trim().to_string());
+            current.clear();
+            current_has_assignment = false;
+            continue;
+        }
+
+        if should_break {
+            let line = current.join(" ");
+            lines.push(line.trim().to_string());
+            current.clear();
+            current_has_assignment = false;
+        }
+    }
+
+    if !current.is_empty() {
+        let line = current.join(" ");
+        lines.push(line.trim().to_string());
+    }
+
+    lines.into_iter().filter(|line| !line.is_empty()).collect()
+}
+
+fn is_statement_boundary_token(token: &str) -> bool {
+    matches!(
+        token,
+        "import"
+            | "from"
+            | "def"
+            | "class"
+            | "if"
+            | "elif"
+            | "else"
+            | "for"
+            | "while"
+            | "try"
+            | "except"
+            | "with"
+            | "return"
+            | "raise"
+            | "pass"
+            | "continue"
+            | "break"
+    ) || token.starts_with("print")
+}
+
+fn indent_python_lines(lines: Vec<String>) -> Vec<String> {
+    let mut indented: Vec<String> = Vec::with_capacity(lines.len());
+    let mut indent_level: usize = 0;
+    let mut pending_dedent_after_flow = false;
+
+    for raw in lines {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            indented.push(String::new());
+            continue;
+        }
+
+        let lowered_first = trimmed
+            .split_whitespace()
+            .next()
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        if pending_dedent_after_flow
+            && !matches!(
+                lowered_first.as_str(),
+                "elif" | "else" | "except" | "finally"
+            )
+        {
+            if indent_level > 0 {
+                indent_level -= 1;
+            }
+        }
+        pending_dedent_after_flow = false;
+
+        if matches!(
+            lowered_first.as_str(),
+            "elif" | "else" | "except" | "finally"
+        ) {
+            if indent_level > 0 {
+                indent_level -= 1;
+            }
+        }
+
+        let mut line = String::with_capacity(trimmed.len() + indent_level * 4);
+        for _ in 0..indent_level {
+            line.push_str("    ");
+        }
+        line.push_str(trimmed);
+        indented.push(line);
+
+        if trimmed.ends_with(':')
+            && !matches!(
+                lowered_first.as_str(),
+                "return" | "break" | "continue" | "pass" | "raise"
+            )
+        {
+            indent_level += 1;
+        } else if matches!(
+            lowered_first.as_str(),
+            "return" | "break" | "continue" | "pass" | "raise"
+        ) {
+            pending_dedent_after_flow = true;
+        }
+    }
+
+    indented
+}
+
+fn merge_from_import_lines(lines: Vec<String>) -> Vec<String> {
+    let mut merged: Vec<String> = Vec::with_capacity(lines.len());
+    let mut idx = 0;
+    while idx < lines.len() {
+        let line = lines[idx].trim().to_string();
+        if line.starts_with("from ")
+            && idx + 1 < lines.len()
+            && lines[idx + 1].trim_start().starts_with("import ")
+        {
+            let combined = format!(
+                "{} {}",
+                line.trim_end(),
+                lines[idx + 1].trim_start()
+            );
+            merged.push(combined);
+            idx += 2;
+        } else {
+            merged.push(line);
+            idx += 1;
+        }
+    }
+    merged
+}
+
+fn is_assignment_operator(token: &str) -> bool {
+    matches!(
+        token,
+        "="
+            | "+="
+            | "-="
+            | "*="
+            | "/="
+            | "//="
+            | "%="
+            | "^="
+            | "|="
+            | "&="
+            | "**="
+            | "<<="
+            | ">>="
+    )
+}
+
+fn is_shell_executable(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
+    let lowered = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(
+        lowered.as_str(),
+        "bash"
+            | "bash.exe"
+            | "sh"
+            | "sh.exe"
+            | "dash"
+            | "dash.exe"
+            | "zsh"
+            | "zsh.exe"
+            | "ksh"
+            | "ksh.exe"
+            | "busybox"
+    )
+}
+
+fn escape_single_quotes_for_shell(s: &str) -> String {
+    if !s.contains('\'') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut iter = s.split('\'');
+    if let Some(first) = iter.next() {
+        out.push_str(first);
+    }
+    for segment in iter {
+        out.push_str("'\\''");
+        out.push_str(segment);
+    }
+    out
+}
+
+fn is_node_invocation_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
+    let base = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(base.as_str(), "node" | "node.exe" | "nodejs" | "nodejs.exe")
+}
+
+fn format_node_script(tokens: &[String], script_idx: usize, script: &str) -> Option<String> {
+    let block = build_js_script_block(script)?;
+    let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == script_idx {
+            parts.push(block.clone());
+        } else {
+            parts.push(escape_token_for_display(token));
+        }
+    }
+    Some(parts.join(" "))
+}
+
+fn build_js_script_block(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let lines: Vec<String> = if normalized.contains('\n') {
+        normalized
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect()
+    } else {
+        split_js_statements(&normalized)
+    };
+
+    let meaningful: Vec<String> = lines
+        .into_iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    if meaningful.len() <= 1 {
+        return None;
+    }
+
+    let indented = indent_js_lines(meaningful);
+    let mut block = String::from("'\n");
+    for line in indented {
+        block.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
+        block.push('\n');
+    }
+    block.push('\'');
+    Some(block)
+}
+
+fn split_js_statements(script: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut escape = false;
+    let mut paren_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut bracket_depth = 0i32;
+
+    for ch in script.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_single || in_double || in_backtick => {
+                escape = true;
+                current.push(ch);
+                continue;
+            }
+            '\'' if !in_double && !in_backtick => {
+                in_single = !in_single;
+                current.push(ch);
+                continue;
+            }
+            '"' if !in_single && !in_backtick => {
+                in_double = !in_double;
+                current.push(ch);
+                continue;
+            }
+            '`' if !in_single && !in_double => {
+                in_backtick = !in_backtick;
+                current.push(ch);
+                continue;
+            }
+            _ => {}
+        }
+
+        if !(in_single || in_double || in_backtick) {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => {
+                    if brace_depth > 0 {
+                        brace_depth -= 1;
+                    }
+                }
+                '(' => paren_depth += 1,
+                ')' => {
+                    if paren_depth > 0 {
+                        paren_depth -= 1;
+                    }
+                }
+                '[' => bracket_depth += 1,
+                ']' => {
+                    if bracket_depth > 0 {
+                        bracket_depth -= 1;
+                    }
+                }
+                ';' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                    current.push(ch);
+                    let seg = current.trim().to_string();
+                    if !seg.is_empty() {
+                        segments.push(seg);
+                    }
+                    current.clear();
+                    continue;
+                }
+                '\n' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                    let seg = current.trim().to_string();
+                    if !seg.is_empty() {
+                        segments.push(seg);
+                    }
+                    current.clear();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        current.push(ch);
+    }
+
+    let seg = current.trim().to_string();
+    if !seg.is_empty() {
+        segments.push(seg);
+    }
+    segments
+}
+
+fn indent_js_lines(lines: Vec<String>) -> Vec<String> {
+    let mut indented: Vec<String> = Vec::with_capacity(lines.len());
+    let mut indent_level: usize = 0;
+
+    for raw in lines {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            indented.push(String::new());
+            continue;
+        }
+
+        let mut leading_closers = 0usize;
+        let mut cut = trimmed.len();
+        for (idx, ch) in trimmed.char_indices() {
+            match ch {
+                '}' | ']' => {
+                    leading_closers += 1;
+                    cut = idx + ch.len_utf8();
+                    continue;
+                }
+                _ => {
+                    cut = idx;
+                    break;
+                }
+            }
+        }
+
+        if leading_closers > 0 && cut >= trimmed.len() {
+            cut = trimmed.len();
+        }
+
+        if leading_closers > 0 {
+            indent_level = indent_level.saturating_sub(leading_closers);
+        }
+
+        let remainder = trimmed[cut..].trim_start();
+        let mut line = String::with_capacity(remainder.len() + indent_level * 4);
+        for _ in 0..indent_level {
+            line.push_str("    ");
+        }
+        if remainder.is_empty() && cut < trimmed.len() {
+            line.push_str(trimmed);
+        } else {
+            line.push_str(remainder);
+        }
+        indented.push(line);
+
+        let (opens, closes) = js_brace_deltas(trimmed);
+        indent_level = indent_level + opens;
+        indent_level = indent_level.saturating_sub(closes);
+    }
+
+    indented
+}
+
+fn js_brace_deltas(line: &str) -> (usize, usize) {
+    let mut opens = 0usize;
+    let mut closes = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut escape = false;
+
+    for ch in line.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double || in_backtick => {
+                escape = true;
+            }
+            '\'' if !in_double && !in_backtick => in_single = !in_single,
+            '"' if !in_single && !in_backtick => in_double = !in_double,
+            '`' if !in_single && !in_double => in_backtick = !in_backtick,
+            '{' if !(in_single || in_double || in_backtick) => opens += 1,
+            '}' if !(in_single || in_double || in_backtick) => closes += 1,
+            _ => {}
+        }
+    }
+
+    (opens, closes)
+}
+
+fn is_shell_invocation_token(token: &str) -> bool {
+    is_shell_executable(token)
+}
+
+fn format_shell_script(tokens: &[String], script_idx: usize, script: &str) -> Option<String> {
+    let block = build_shell_script_block(script)?;
+    let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == script_idx {
+            parts.push(block.clone());
+        } else {
+            parts.push(escape_token_for_display(token));
+        }
+    }
+    Some(parts.join(" "))
+}
+
+fn build_shell_script_block(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let segments = split_shell_statements(&normalized);
+    let meaningful: Vec<String> = segments
+        .into_iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if meaningful.len() <= 1 {
+        return None;
+    }
+    let indented = indent_shell_lines(meaningful);
+    let mut block = String::from("'\n");
+    for line in indented {
+        block.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
+        block.push('\n');
+    }
+    block.push('\'');
+    Some(block)
+}
+
+fn split_shell_statements(script: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    let chars: Vec<char> = script.chars().collect();
+    let mut idx = 0;
+    while idx < chars.len() {
+        let ch = chars[idx];
+        if escape {
+            current.push(ch);
+            escape = false;
+            idx += 1;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double => {
+                escape = true;
+                current.push(ch);
+                idx += 1;
+                continue;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+                idx += 1;
+                continue;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+                idx += 1;
+                continue;
+            }
+            ';' if !(in_single || in_double) => {
+                current.push(ch);
+                segments.push(current.trim().to_string());
+                current.clear();
+                idx += 1;
+                continue;
+            }
+            '&' | '|' if !(in_single || in_double) => {
+                let current_op = ch;
+                if idx + 1 < chars.len() && chars[idx + 1] == current_op {
+                    if !current.trim().is_empty() {
+                        segments.push(current.trim().to_string());
+                    }
+                    segments.push(format!("{}{}", current_op, current_op));
+                    current.clear();
+                    idx += 2;
+                    continue;
+                }
+            }
+            '\n' if !(in_single || in_double) => {
+                segments.push(current.trim().to_string());
+                current.clear();
+                idx += 1;
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+        idx += 1;
+    }
+
+    if !current.trim().is_empty() {
+        segments.push(current.trim().to_string());
+    }
+
+    segments
+}
+
+fn indent_shell_lines(lines: Vec<String>) -> Vec<String> {
+    let mut indented: Vec<String> = Vec::with_capacity(lines.len());
+    let mut indent_level: usize = 0;
+
+    for raw in lines {
+        if raw == "&&" || raw == "||" {
+            let mut line = String::new();
+            for _ in 0..indent_level {
+                line.push_str("    ");
+            }
+            line.push_str(raw.as_str());
+            indented.push(line);
+            continue;
+        }
+
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            indented.push(String::new());
+            continue;
+        }
+
+        if trimmed.starts_with("fi") || trimmed.starts_with("done") || trimmed.starts_with("esac") {
+            indent_level = indent_level.saturating_sub(1);
+        }
+
+        let mut line = String::new();
+        for _ in 0..indent_level {
+            line.push_str("    ");
+        }
+        line.push_str(trimmed);
+        indented.push(line);
+
+        if trimmed.ends_with("do")
+            || trimmed.ends_with("then")
+            || trimmed.ends_with("{")
+            || trimmed.starts_with("case ")
+        {
+            indent_level += 1;
+        }
+    }
+
+    indented
+}
+
+fn adjust_bracket_depth(token: &str, paren: &mut i32, bracket: &mut i32, brace: &mut i32) {
+    for ch in token.chars() {
+        match ch {
+            '(' => *paren += 1,
+            ')' => *paren -= 1,
+            '[' => *bracket += 1,
+            ']' => *bracket -= 1,
+            '{' => *brace += 1,
+            '}' => *brace -= 1,
+            _ => {}
+        }
+    }
+    *paren = (*paren).max(0);
+    *bracket = (*bracket).max(0);
+    *brace = (*brace).max(0);
+}
+
+fn is_python_invocation_token(token: &str) -> bool {
+    if token.is_empty() || token.contains('=') {
+        return false;
+    }
+
+    let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
+    let base = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+
+    if !base.starts_with("python") {
+        return false;
+    }
+
+    let suffix = &base["python".len()..];
+    suffix.is_empty()
+        || suffix
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == 'w')
+}
+
+fn escape_token_for_display(token: &str) -> String {
+    if is_shell_word(token) {
+        token.to_string()
+    } else {
+        let mut escaped = String::from("'");
+        for ch in token.chars() {
+            if ch == '\'' {
+                escaped.push_str("'\\''");
+            } else {
+                escaped.push(ch);
+            }
+        }
+        escaped.push('\'');
+        escaped
+    }
+}
+
+fn is_shell_word(token: &str) -> bool {
+    token.chars().all(|ch| matches!(
+        ch,
+        'a'..='z'
+            | 'A'..='Z'
+            | '0'..='9'
+            | '_'
+            | '-'
+            | '.'
+            | '/'
+            | ':'
+            | ','
+            | '@'
+            | '%'
+            | '+'
+            | '='
+            | '['
+            | ']'
+    ))
+}
+
+fn script_has_semicolon_outside_quotes(script: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    for ch in script.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double => {
+                escape = true;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
+            ';' if !in_single && !in_double => return true,
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn split_semicolon_statements(script: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    for ch in script.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_single || in_double => {
+                escape = true;
+                current.push(ch);
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+            }
+            ';' if !in_single && !in_double => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    segments.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        segments.push(trimmed.to_string());
+    }
+
+    segments
 }
 
 fn running_status_line(message: String) -> Line<'static> {
@@ -6251,7 +7480,7 @@ fn new_parsed_command(
                 if lower.starts_with("echo") && lower.contains("---") {
                     (String::new(), String::new())
                 } else {
-                    ("Run".to_string(), cmd.clone())
+                    ("Run".to_string(), format_inline_script_for_display(cmd))
                 }
             } // ParsedCommand::Noop { .. } => continue,
         };
@@ -8350,4 +9579,59 @@ pub(crate) fn retint_lines_in_place(
         }
         line.spans = new_spans;
     }
+}
+fn format_inline_node_for_display(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 2 {
+        return None;
+    }
+
+    let node_idx = tokens
+        .iter()
+        .position(|token| is_node_invocation_token(token))?;
+
+    let mut idx = node_idx + 1;
+    while idx < tokens.len() {
+        match tokens[idx].as_str() {
+            "-e" | "--eval" | "-p" | "--print" => {
+                let script_idx = idx + 1;
+                if script_idx >= tokens.len() {
+                    return None;
+                }
+                return format_node_script(&tokens, script_idx, tokens[script_idx].as_str());
+            }
+            "--" => break,
+            _ => idx += 1,
+        }
+    }
+
+    None
+}
+
+fn format_inline_shell_for_display(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let shell_idx = tokens
+        .iter()
+        .position(|t| is_shell_invocation_token(t))?;
+
+    let flag_idx = shell_idx + 1;
+    if flag_idx >= tokens.len() {
+        return None;
+    }
+
+    let flag = tokens[flag_idx].as_str();
+    if flag != "-c" && flag != "-lc" {
+        return None;
+    }
+
+    let script_idx = flag_idx + 1;
+    if script_idx >= tokens.len() {
+        return None;
+    }
+
+    format_shell_script(&tokens, script_idx, tokens[script_idx].as_str())
 }

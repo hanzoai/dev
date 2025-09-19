@@ -1,10 +1,12 @@
-## @just-every/code v0.2.151
+## @just-every/code v0.2.155
 
-This release refines TUI history messaging and improves parameter input robustness.
+This release includes small fixes and improvements across auth, TUI, and docs.
 
 ### Changes
-- TUI/History: append merge completion banner for clearer post-merge status.
-- TUI: add intersection checks for parameter inputs in AgentEditorView.
+- Auth: fix onboarding auth prompt gating.
+- CLI: add long-run calculator script.
+- TUI: add pulldown-cmark dependency to fix build.
+- Docs: clarify config directories.
 
 ### Install
 ```
@@ -12,4 +14,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.150...v0.2.151
+Compare: https://github.com/just-every/code/compare/v0.2.154...v0.2.155
+

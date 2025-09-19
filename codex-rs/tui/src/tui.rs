@@ -1,3 +1,4 @@
+use std::env;
 use std::io::Result;
 use std::io::Stdout;
 use std::io::stdout;
@@ -317,6 +318,9 @@ pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui:
 }
 
 fn enable_alternate_scroll_mode() -> Result<()> {
+    if !should_enable_alternate_scroll_mode() {
+        return Ok(());
+    }
     let mut handle = stdout();
     handle.write_all(b"\x1b[?1007h")?;
     handle.flush()?;
@@ -324,10 +328,19 @@ fn enable_alternate_scroll_mode() -> Result<()> {
 }
 
 fn disable_alternate_scroll_mode() -> Result<()> {
+    if !should_enable_alternate_scroll_mode() {
+        return Ok(());
+    }
     let mut handle = stdout();
     handle.write_all(b"\x1b[?1007l")?;
     handle.flush()?;
     Ok(())
+}
+
+fn should_enable_alternate_scroll_mode() -> bool {
+    // macOS Terminal hijacks scrolling when 1007h is set without also enabling
+    // mouse reporting, so skip the escape in that environment.
+    !matches!(env::var("TERM_PROGRAM"), Ok(value) if value.eq_ignore_ascii_case("Apple_Terminal"))
 }
 
 /// Clear the current screen (normal buffer) with the theme background and reset cursor.
