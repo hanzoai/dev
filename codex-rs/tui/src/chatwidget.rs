@@ -49,6 +49,7 @@ use self::agent_install::{
 };
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
+use codex_core::protocol::ApprovedCommandMatchKind;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
 use codex_core::protocol::AgentReasoningEvent;
@@ -6774,20 +6775,6 @@ impl ChatWidget<'_> {
                     network_access: false,
                     ..
                 },
-                AskForApproval::OnRequest,
-            )
-            | (
-                SandboxPolicy::WorkspaceWrite {
-                    network_access: false,
-                    ..
-                },
-                AskForApproval::OnFailure,
-            )
-            | (
-                SandboxPolicy::WorkspaceWrite {
-                    network_access: false,
-                    ..
-                },
                 AskForApproval::UnlessTrusted,
             ) => Some("Write with Approval".to_string()),
             _ => None,
@@ -6809,24 +6796,10 @@ impl ChatWidget<'_> {
                     network_access: false,
                     ..
                 },
-                AskForApproval::OnRequest,
-            )
-            | (
-                SandboxPolicy::WorkspaceWrite {
-                    network_access: false,
-                    ..
-                },
-                AskForApproval::OnFailure,
-            )
-            | (
-                SandboxPolicy::WorkspaceWrite {
-                    network_access: false,
-                    ..
-                },
                 AskForApproval::UnlessTrusted,
             ) => 1,
             (SandboxPolicy::DangerFullAccess, AskForApproval::Never) => 2,
-            _ => 1,
+            _ => 0,
         };
         let next = (idx + 1) % 3;
 
@@ -6839,7 +6812,7 @@ impl ChatWidget<'_> {
             ),
             1 => (
                 "Write with Approval",
-                AskForApproval::OnRequest,
+                AskForApproval::UnlessTrusted,
                 SandboxPolicy::new_workspace_write_policy(),
             ),
             _ => (
@@ -7192,6 +7165,42 @@ impl ChatWidget<'_> {
     /// as pressing Ctrl-C/Esc while a task is running.
     pub(crate) fn cancel_running_task_from_approval(&mut self) {
         self.interrupt_running_task();
+    }
+
+    pub(crate) fn register_approved_command(
+        &self,
+        command: Vec<String>,
+        match_kind: ApprovedCommandMatchKind,
+        semantic_prefix: Option<Vec<String>>,
+    ) {
+        if command.is_empty() {
+            return;
+        }
+        let op = Op::RegisterApprovedCommand {
+            command,
+            match_kind,
+            semantic_prefix,
+        };
+        self.submit_op(op);
+    }
+
+    /// Clear transient spinner/status after a denial without interrupting core
+    /// execution. Only hide the spinner when there is no remaining activity so
+    /// we avoid masking in-flight work (e.g. follow-up reasoning).
+    pub(crate) fn mark_task_idle_after_denied(&mut self) {
+        let any_tools_running = !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty();
+        let any_streaming = self.stream.is_write_cycle_active();
+        let any_agents_active = self.agents_are_actively_running();
+        let any_tasks_active = !self.active_task_ids.is_empty();
+
+        if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
+            self.bottom_pane.set_task_running(false);
+            self.bottom_pane.update_status_text(String::new());
+            self.bottom_pane.clear_ctrl_c_quit_hint();
+            self.mark_needs_redraw();
+        }
     }
 
     pub(crate) fn insert_history_lines(&mut self, lines: Vec<ratatui::text::Line<'static>>) {
