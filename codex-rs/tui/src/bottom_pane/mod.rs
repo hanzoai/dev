@@ -38,6 +38,8 @@ mod textarea;
 pub mod form_text_field;
 mod theme_selection_view;
 mod verbosity_selection_view;
+#[cfg(not(debug_assertions))]
+mod update_settings_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -47,6 +49,9 @@ pub(crate) enum CancellationEvent {
 
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
+
+#[cfg(not(debug_assertions))]
+pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 
 use codex_core::protocol::Op;
 use approval_modal_view::ApprovalModalView;
@@ -125,6 +130,13 @@ impl BottomPane<'_> {
     ) {
         use agents_overview_view::AgentsOverviewView;
         let view = AgentsOverviewView::new(agents, commands, selected_index, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn show_update_settings(&mut self, view: update_settings_view::UpdateSettingsView) {
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();

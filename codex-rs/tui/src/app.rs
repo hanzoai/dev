@@ -162,6 +162,7 @@ impl App<'_> {
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
         enable_perf: bool,
+        startup_footer_notice: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
             config.codex_home.clone(),
@@ -293,6 +294,9 @@ impl App<'_> {
             chat_widget.enable_perf(enable_perf);
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
+            if let Some(notice) = startup_footer_notice {
+                chat_widget.debug_notice(notice);
+            }
             AppState::Chat {
                 widget: Box::new(chat_widget),
             }
@@ -971,6 +975,21 @@ impl App<'_> {
                         widget.handle_terminal_after(after);
                     }
                 }
+                #[cfg(not(debug_assertions))]
+                AppEvent::RunUpdateCommand { command, display, latest_version } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if let Some(launch) = widget.launch_update_command(command, display, latest_version.clone()) {
+                            self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                        }
+                    }
+                }
+                #[cfg(not(debug_assertions))]
+                AppEvent::SetAutoUpgradeEnabled(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_upgrade_enabled(enabled);
+                    }
+                    self.config.auto_upgrade_enabled = enabled;
+                }
                 AppEvent::RequestAgentInstall { name, selected_index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(launch) = widget.launch_agent_install(name, selected_index) {
@@ -1089,6 +1108,11 @@ impl App<'_> {
                         SlashCommand::Status => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.add_status_output();
+                            }
+                        }
+                        SlashCommand::Update => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_update_command();
                             }
                         }
                         SlashCommand::Agents => {
