@@ -115,6 +115,12 @@ pub struct Config {
     /// who have opted into Zero Data Retention (ZDR).
     pub disable_response_storage: bool,
 
+    /// When true, Code will silently install updates on startup whenever a newer
+    /// release is available. Upgrades are performed using the package manager
+    /// that originally installed the CLI (Homebrew or npm). Manual installs are
+    /// never upgraded automatically.
+    pub auto_upgrade_enabled: bool,
+
     /// User-provided instructions from AGENTS.md.
     pub user_instructions: Option<String>,
 
@@ -1257,6 +1263,9 @@ pub struct ConfigToml {
     /// who have opted into Zero Data Retention (ZDR).
     pub disable_response_storage: Option<bool>,
 
+    /// Enable silent upgrades during startup when a newer release is available.
+    pub auto_upgrade_enabled: Option<bool>,
+
     /// Optional external command to spawn for end-user notifications.
     #[serde(default)]
     pub notify: Option<Vec<String>>,
@@ -1750,6 +1759,7 @@ impl Config {
                 .or(cfg.disable_response_storage)
                 .or(disable_response_storage)
                 .unwrap_or(false),
+            auto_upgrade_enabled: cfg.auto_upgrade_enabled.unwrap_or(false),
             notify: cfg.notify,
             user_instructions,
             base_instructions,
@@ -2436,6 +2446,7 @@ model_verbosity = "high"
                 always_allow_commands: Vec::new(),
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
                 disable_response_storage: false,
+                auto_upgrade_enabled: false,
                 user_instructions: None,
                 notify: None,
                 cwd: fixture.cwd(),
@@ -2501,6 +2512,7 @@ model_verbosity = "high"
             always_allow_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
+            auto_upgrade_enabled: false,
             user_instructions: None,
             notify: None,
             cwd: fixture.cwd(),
@@ -2581,6 +2593,7 @@ model_verbosity = "high"
             always_allow_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: true,
+            auto_upgrade_enabled: false,
             user_instructions: None,
             notify: None,
             cwd: fixture.cwd(),
@@ -2646,6 +2659,7 @@ model_verbosity = "high"
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
+            auto_upgrade_enabled: false,
             user_instructions: None,
             notify: None,
             cwd: fixture.cwd(),

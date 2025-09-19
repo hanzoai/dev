@@ -255,6 +255,7 @@ pub(crate) enum AppEvent {
         command_display: String,
         controller: Option<TerminalRunController>,
     },
+    TerminalRerun { id: u64 },
     TerminalUpdateMessage { id: u64, message: String },
     TerminalForceClose { id: u64 },
     TerminalAfter(TerminalAfter),
@@ -264,6 +265,14 @@ pub(crate) enum AppEvent {
         suggestion: String,
         ack: Redacted<StdSender<TerminalCommandGate>>,
     },
+    #[cfg(not(debug_assertions))]
+    RunUpdateCommand {
+        command: Vec<String>,
+        display: String,
+        latest_version: Option<String>,
+    },
+    #[cfg(not(debug_assertions))]
+    SetAutoUpgradeEnabled(bool),
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
     /// Add or update an agent's settings (enabled, params, instructions)
