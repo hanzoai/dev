@@ -76,9 +76,9 @@ In the transcript preview, the footer shows an `Esc edit prev` hint while editin
 Generate shell completion scripts via:
 
 ```shell
-codex completion bash
-codex completion zsh
-codex completion fish
+code completion bash
+code completion zsh
+code completion fish
 ```
 
 #### `--cd`/`-C` flag
