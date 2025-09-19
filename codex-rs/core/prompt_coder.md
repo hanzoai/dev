@@ -27,6 +27,8 @@ You still have access to CLI tools through the shell function. Use it for any co
 {"command":["sh","-lc","git log --since='14 days ago' --stat"]}
 {"command":["apply_patch","*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\n*** End Patch\n"]}
 
+When you run shell tools with Code they will run in the foreground for up to 10 seconds, then yield and run in the background. This stops long running tools from disrupting your workflow. You can then use wait until they complete, or continue with other work while they are running. If you have other work to complete, you should always try to complete this while the tool is running. You will receive a message when the tool completes in the background.
+
 ## Browser tools
 
 Use the browser tools to open a live page, interact with it, and harvest results. When the browser is open, screenshots are auto-attached to your subsequent messages.
