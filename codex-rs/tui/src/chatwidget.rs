@@ -98,9 +98,12 @@ use crate::bottom_pane::InputResult;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
 use crate::history_cell;
+use crate::history_cell::clean_wait_command;
 use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
+use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::normalize_overwrite_sequences;
 use crate::live_wrap::RowBuilder;
 use crate::sanitize::Mode as SanitizeMode;
@@ -442,6 +445,31 @@ impl From<&str> for ExecCallId {
     fn from(s: &str) -> Self {
         ExecCallId(s.to_string())
     }
+}
+
+fn wait_target_from_params(params: Option<&String>, call_id: &str) -> String {
+    if let Some(raw) = params {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(raw) {
+            if let Some(for_value) = json.get("for").and_then(|v| v.as_str()) {
+                let cleaned = clean_wait_command(for_value);
+                if !cleaned.is_empty() {
+                    return cleaned;
+                }
+            }
+            if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
+                return format!("call {}", cid);
+            }
+        }
+    }
+    format!("call {}", call_id)
+}
+
+fn line_text(line: &Line<'static>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.clone().into_owned())
+        .collect::<Vec<_>>()
+        .join("")
 }
 impl std::fmt::Display for ExecCallId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -955,6 +983,26 @@ impl ChatWidget<'_> {
             self.bottom_pane.set_task_running(false);
         }
     }
+
+
+    fn remove_background_completion_message(&mut self, call_id: &str) {
+        if let Some(idx) = self.history_cells.iter().rposition(|cell| {
+            matches!(cell.kind(), HistoryCellType::BackgroundEvent)
+                && cell
+                    .as_any()
+                    .downcast_ref::<PlainHistoryCell>()
+                    .map(|plain| {
+                        plain
+                            .lines
+                            .iter()
+                            .any(|line| line_text(line).contains(call_id))
+                    })
+                    .unwrap_or(false)
+        }) {
+            self.history_remove_at(idx);
+        }
+    }
+
 
     /// Flush any ExecEnd events that arrived before their matching ExecBegin.
     /// We briefly stash such ends to allow natural pairing when the Begin shows up
@@ -1747,6 +1795,18 @@ impl ChatWidget<'_> {
 
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
+            let mut has_wait_running = false;
+            for (_, idx) in self.tools_state.running_custom_tools.iter() {
+                if let Some(cell) = self.history_cells.get(*idx).and_then(|c| c
+                    .as_any()
+                    .downcast_ref::<history_cell::RunningToolCallCell>())
+                {
+                    if cell.has_title("Waiting") {
+                        has_wait_running = true;
+                        break;
+                    }
+                }
+            }
             self.active_exec_cell = None;
             // Finalize any visible running indicators as interrupted (Exec/Web/Custom)
             self.finalize_all_running_as_interrupted();
@@ -1756,13 +1816,15 @@ impl ChatWidget<'_> {
             self.stream_state.drop_streaming = true;
             // Surface an explicit notice in history so users see confirmation.
             // We add a lightweight background event (not an error) to match prior UX.
-            let key = self.next_internal_key();
-            let _ = self.history_insert_with_key_global(
-                Box::new(crate::history_cell::new_background_event(
-                    "Cancelled by user.".to_string(),
-                )),
-                key,
-            );
+            if !has_wait_running {
+                let key = self.next_internal_key();
+                let _ = self.history_insert_with_key_global(
+                    Box::new(crate::history_cell::new_background_event(
+                        "Cancelled by user.".to_string(),
+                    )),
+                    key,
+                );
+            }
             self.submit_op(Op::Interrupt);
             // Immediately drop the running status so the next message can be typed/run,
             // even if backend cleanup (and Error event) arrives slightly later.
@@ -4381,6 +4443,73 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
+                if tool_name == "wait" && success {
+                    let target = wait_target_from_params(params_string.as_ref(), &call_id);
+                    let message = format!("Waited for {}", target);
+                    if let Some(idx) = self
+                        .tools_state
+                        .running_custom_tools
+                        .remove(&ToolCallId(call_id.clone()))
+                    {
+                        if idx < self.history_cells.len() {
+                            self.history_replace_at(
+                                idx,
+                                Box::new(history_cell::new_background_event(message.clone())),
+                            );
+                        } else {
+                            let _ = self.history_insert_with_key_global(
+                                Box::new(history_cell::new_background_event(message.clone())),
+                                ok,
+                            );
+                        }
+                    } else {
+                        let _ = self.history_insert_with_key_global(
+                            Box::new(history_cell::new_background_event(message.clone())),
+                            ok,
+                        );
+                    }
+                    self.remove_background_completion_message(&call_id);
+                    self.bottom_pane
+                        .update_status_text("responding".to_string());
+                    self.maybe_hide_spinner();
+                    return;
+                }
+                if tool_name == "wait" && !success && content.trim() == "Cancelled by user." {
+                    let wait_cancelled_cell = PlainHistoryCell {
+                        lines: vec![Line::styled(
+                            "Wait cancelled",
+                            Style::default()
+                                .fg(crate::colors::error())
+                                .add_modifier(Modifier::BOLD),
+                        )],
+                        kind: HistoryCellType::Error,
+                    };
+
+                    if let Some(idx) = self
+                        .tools_state
+                        .running_custom_tools
+                        .remove(&ToolCallId(call_id.clone()))
+                    {
+                        if idx < self.history_cells.len() {
+                            self.history_replace_at(idx, Box::new(wait_cancelled_cell));
+                        } else {
+                            let _ = self.history_insert_with_key_global(
+                                Box::new(wait_cancelled_cell),
+                                ok,
+                            );
+                        }
+                    } else {
+                        let _ = self.history_insert_with_key_global(
+                            Box::new(wait_cancelled_cell),
+                            ok,
+                        );
+                    }
+
+                    self.bottom_pane
+                        .update_status_text("responding".to_string());
+                    self.maybe_hide_spinner();
+                    return;
+                }
                 // Special-case web_fetch to render returned markdown nicely.
                 if tool_name == "web_fetch" {
                     let completed = history_cell::new_completed_web_fetch_tool_call(
@@ -12218,6 +12347,13 @@ impl WidgetRef for &ChatWidget<'_> {
                             } => crate::colors::error(),
                             _ => crate::colors::primary(),
                         }
+                    } else if matches!(symbol, "◐" | "◓" | "◑" | "◒")
+                        && item
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
+                            .map_or(false, |cell| cell.has_title("Waiting"))
+                    {
+                        crate::colors::text_bright()
                     } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
                         if let Some(plan_cell) = item
                             .as_any()
