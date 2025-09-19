@@ -1,4 +1,4 @@
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::ChatWidget;
 use crate::file_search::FileSearchManager;
@@ -12,13 +12,16 @@ use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use crate::history_cell;
+use crate::exec_command::strip_bash_lc_and_escape;
 use codex_core::ConversationManager;
 use codex_login::{AuthManager, AuthMode};
+use codex_core::config::add_project_allowed_command;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
 use color_eyre::eyre::Result;
+use futures::FutureExt;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -68,6 +71,7 @@ struct TerminalRunState {
     command: Vec<String>,
     cancel_tx: Option<oneshot::Sender<()>>,
     running: bool,
+    controller: Option<TerminalRunController>,
 }
 
 pub(crate) struct App<'a> {
@@ -162,6 +166,7 @@ impl App<'_> {
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
         enable_perf: bool,
+        startup_footer_notice: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
             config.codex_home.clone(),
@@ -185,6 +190,7 @@ impl App<'_> {
         {
             let app_event_tx = app_event_tx.clone();
             let input_running_thread = input_running.clone();
+            let drop_release_events = enhanced_keys_supported;
             std::thread::spawn(move || {
                 // Track recent typing to temporarily increase poll frequency for low latency.
                 let mut last_key_time = Instant::now();
@@ -206,8 +212,12 @@ impl App<'_> {
                         if let Ok(event) = crossterm::event::read() {
                             match event {
                                 crossterm::event::Event::Key(key_event) => {
-                                    // Forward only Press/Repeat; skip Release to avoid doubled chars on Windows.
-                                    if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                                    // Some Windows terminals (e.g., legacy conhost) only report
+                                    // `Release` events when keyboard enhancement flags are not
+                                    // supported. Preserve those events so onboarding works there.
+                                    if !drop_release_events
+                                        || matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                                    {
                                         last_key_time = Instant::now();
                                         app_event_tx.send(AppEvent::KeyEvent(key_event));
                                     }
@@ -288,6 +298,9 @@ impl App<'_> {
             chat_widget.enable_perf(enable_perf);
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
+            if let Some(notice) = startup_footer_notice {
+                chat_widget.debug_notice(notice);
+            }
             AppState::Chat {
                 widget: Box::new(chat_widget),
             }
@@ -380,43 +393,54 @@ impl App<'_> {
         });
     }
 
-    fn start_terminal_run(&mut self, id: u64, command: Vec<String>) {
+    fn start_terminal_run(
+        &mut self,
+        id: u64,
+        command: Vec<String>,
+        controller: Option<TerminalRunController>,
+    ) {
         if command.is_empty() {
             self.app_event_tx.send(AppEvent::TerminalChunk {
                 id,
                 chunk: b"Install command not resolved".to_vec(),
-                is_stderr: true,
+                _is_stderr: true,
             });
             self.app_event_tx.send(AppEvent::TerminalExit {
                 id,
                 exit_code: Some(1),
-                duration: Duration::from_millis(0),
+                _duration: Duration::from_millis(0),
             });
             return;
         }
 
+        let stored_command = command.clone();
         let (cancel_tx, cancel_rx) = oneshot::channel();
+        let controller_clone = controller.clone();
         self.terminal_runs.insert(
             id,
             TerminalRunState {
-                command: command.clone(),
+                command: stored_command,
                 cancel_tx: Some(cancel_tx),
                 running: true,
+                controller: controller_clone,
             },
         );
 
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
+        let controller_tx = controller.map(|c| c.tx);
+        let command_spawn = command;
         tokio::spawn(async move {
-            let mut cmd = Command::new(&command[0]);
-            if command.len() > 1 {
-                cmd.args(&command[1..]);
+            let mut cmd = Command::new(&command_spawn[0]);
+            if command_spawn.len() > 1 {
+                cmd.args(&command_spawn[1..]);
             }
             cmd.current_dir(&cwd);
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::piped());
 
             let start_time = Instant::now();
+            let controller_tx_spawn = controller_tx.clone();
             let mut child = match cmd.spawn() {
                 Ok(child) => child,
                 Err(err) => {
@@ -424,18 +448,29 @@ impl App<'_> {
                     tx.send(AppEvent::TerminalChunk {
                         id,
                         chunk: msg.into_bytes(),
-                        is_stderr: true,
+                        _is_stderr: true,
                     });
+                    if let Some(ref ctrl) = controller_tx_spawn {
+                        let _ = ctrl.send(TerminalRunEvent::Chunk {
+                            data: format!("Failed to spawn command: {err}\n").into_bytes(),
+                            _is_stderr: true,
+                        });
+                        let _ = ctrl.send(TerminalRunEvent::Exit {
+                            exit_code: Some(1),
+                            _duration: Duration::from_millis(0),
+                        });
+                    }
                     tx.send(AppEvent::TerminalExit {
                         id,
                         exit_code: Some(1),
-                        duration: Duration::from_millis(0),
+                        _duration: Duration::from_millis(0),
                     });
                     return;
                 }
             };
 
             let mut stdout_task = None;
+            let controller_tx_stdout = controller_tx.clone();
             if let Some(stdout) = child.stdout.take() {
                 let mut reader = BufReader::new(stdout);
                 let tx_stdout = tx.clone();
@@ -444,17 +479,32 @@ impl App<'_> {
                     loop {
                         match reader.read(&mut buf).await {
                             Ok(0) => break,
-                            Ok(n) => tx_stdout.send(AppEvent::TerminalChunk {
-                                id,
-                                chunk: buf[..n].to_vec(),
-                                is_stderr: false,
-                            }),
+                            Ok(n) => {
+                                let chunk = buf[..n].to_vec();
+                                tx_stdout.send(AppEvent::TerminalChunk {
+                                    id,
+                                    chunk: chunk.clone(),
+                                    _is_stderr: false,
+                                });
+                                if let Some(ref ctrl) = controller_tx_stdout {
+                                    let _ = ctrl.send(TerminalRunEvent::Chunk {
+                                        data: chunk,
+                                        _is_stderr: false,
+                                    });
+                                }
+                            }
                             Err(err) => {
                                 tx_stdout.send(AppEvent::TerminalChunk {
                                     id,
                                     chunk: format!("Error reading stdout: {err}\n").into_bytes(),
-                                    is_stderr: true,
+                                    _is_stderr: true,
                                 });
+                                if let Some(ref ctrl) = controller_tx_stdout {
+                                    let _ = ctrl.send(TerminalRunEvent::Chunk {
+                                        data: format!("Error reading stdout: {err}\n").into_bytes(),
+                                        _is_stderr: true,
+                                    });
+                                }
                                 break;
                             }
                         }
@@ -463,6 +513,7 @@ impl App<'_> {
             }
 
             let mut stderr_task = None;
+            let controller_tx_stderr = controller_tx.clone();
             if let Some(stderr) = child.stderr.take() {
                 let mut reader = BufReader::new(stderr);
                 let tx_stderr = tx.clone();
@@ -471,17 +522,32 @@ impl App<'_> {
                     loop {
                         match reader.read(&mut buf).await {
                             Ok(0) => break,
-                            Ok(n) => tx_stderr.send(AppEvent::TerminalChunk {
-                                id,
-                                chunk: buf[..n].to_vec(),
-                                is_stderr: true,
-                            }),
+                            Ok(n) => {
+                                let chunk = buf[..n].to_vec();
+                                tx_stderr.send(AppEvent::TerminalChunk {
+                                    id,
+                                    chunk: chunk.clone(),
+                                    _is_stderr: true,
+                                });
+                                if let Some(ref ctrl) = controller_tx_stderr {
+                                    let _ = ctrl.send(TerminalRunEvent::Chunk {
+                                        data: chunk,
+                                        _is_stderr: true,
+                                    });
+                                }
+                            }
                             Err(err) => {
                                 tx_stderr.send(AppEvent::TerminalChunk {
                                     id,
                                     chunk: format!("Error reading stderr: {err}\n").into_bytes(),
-                                    is_stderr: true,
+                                    _is_stderr: true,
                                 });
+                                if let Some(ref ctrl) = controller_tx_stderr {
+                                    let _ = ctrl.send(TerminalRunEvent::Chunk {
+                                        data: format!("Error reading stderr: {err}\n").into_bytes(),
+                                        _is_stderr: true,
+                                    });
+                                }
                                 break;
                             }
                         }
@@ -489,7 +555,8 @@ impl App<'_> {
                 }));
             }
 
-            let mut cancel_rx = cancel_rx;
+            let cancel_rx = cancel_rx.fuse();
+            tokio::pin!(cancel_rx);
             let mut cancel_triggered = false;
             let wait_status = loop {
                 tokio::select! {
@@ -516,13 +583,29 @@ impl App<'_> {
                     tx.send(AppEvent::TerminalChunk {
                         id,
                         chunk: format!("Process wait failed: {err}\n").into_bytes(),
-                        is_stderr: true,
+                        _is_stderr: true,
                     });
+                    if let Some(ref ctrl) = controller_tx {
+                        let _ = ctrl.send(TerminalRunEvent::Chunk {
+                            data: format!("Process wait failed: {err}\n").into_bytes(),
+                            _is_stderr: true,
+                        });
+                    }
                     (None, start_time.elapsed())
                 }
             };
 
-            tx.send(AppEvent::TerminalExit { id, exit_code, duration });
+            if let Some(ref ctrl) = controller_tx {
+                let _ = ctrl.send(TerminalRunEvent::Exit {
+                    exit_code,
+                    _duration: duration,
+                });
+            }
+            tx.send(AppEvent::TerminalExit {
+                id,
+                exit_code,
+                _duration: duration,
+            });
         });
     }
 
@@ -797,11 +880,14 @@ impl App<'_> {
                             ..
                         } => match &mut self.app_state {
                             AppState::Chat { widget } => {
-                                // Exit immediately on the second Ctrl+C instead of
-                                // waiting for the backend ShutdownComplete (which
-                                // can be delayed behind streaming events).
-                                let handled = matches!(widget.on_ctrl_c(), crate::bottom_pane::CancellationEvent::Handled);
-                                if handled { self.app_event_tx.send(AppEvent::ExitRequest); }
+                                match widget.on_ctrl_c() {
+                                    crate::bottom_pane::CancellationEvent::Handled => {
+                                        if widget.ctrl_c_requests_exit() {
+                                            self.app_event_tx.send(AppEvent::ExitRequest);
+                                        }
+                                    }
+                                    crate::bottom_pane::CancellationEvent::Ignored => {}
+                                }
                             }
                             AppState::Onboarding { .. } => { self.app_event_tx.send(AppEvent::ExitRequest); }
                         },
@@ -906,6 +992,37 @@ impl App<'_> {
                         widget.cancel_running_task_from_approval();
                     }
                 }
+                AppEvent::RegisterApprovedCommand { command, match_kind, persist, semantic_prefix } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.register_approved_command(
+                            command.clone(),
+                            match_kind.clone(),
+                            semantic_prefix.clone(),
+                        );
+                        if persist {
+                            if let Err(err) = add_project_allowed_command(
+                                &self.config.codex_home,
+                                &self.config.cwd,
+                                &command,
+                                match_kind.clone(),
+                            ) {
+                                widget.history_push(history_cell::new_error_event(format!(
+                                    "Failed to persist always-allow command: {err:#}",
+                                )));
+                            } else {
+                                let display = strip_bash_lc_and_escape(&command);
+                                widget.history_push(history_cell::new_background_event(format!(
+                                    "Always allowing `{display}` for this project.",
+                                )));
+                            }
+                        }
+                    }
+                }
+                AppEvent::MarkTaskIdle => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.mark_task_idle_after_denied();
+                    }
+                }
                 AppEvent::OpenTerminal(launch) => {
                     let mut spawn = None;
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -916,29 +1033,46 @@ impl App<'_> {
                             widget.show_agents_overview_ui();
                         } else {
                             widget.terminal_open(&launch);
-                            spawn = Some((launch.id, launch.command.clone()));
+                            if !launch.command.is_empty() {
+                                spawn = Some((
+                                    launch.id,
+                                    launch.command.clone(),
+                                    launch.controller.clone(),
+                                ));
+                            }
                         }
                     }
-                    if let Some((id, command)) = spawn {
-                        self.start_terminal_run(id, command);
+                    if let Some((id, command, controller)) = spawn {
+                        self.start_terminal_run(id, command, controller);
                     }
                 }
-                AppEvent::TerminalChunk { id, chunk, is_stderr } => {
+                AppEvent::TerminalChunk {
+                    id,
+                    chunk,
+                    _is_stderr: is_stderr,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.terminal_append_chunk(id, &chunk, is_stderr);
                     }
                 }
-                AppEvent::TerminalExit { id, exit_code, duration } => {
+                AppEvent::TerminalExit {
+                    id,
+                    exit_code,
+                    _duration: duration,
+                } => {
                     let after = if let AppState::Chat { widget } = &mut self.app_state {
                         widget.terminal_finalize(id, exit_code, duration)
                     } else {
                         None
                     };
-                    if let Some(run) = self.terminal_runs.get_mut(&id) {
+                    let controller_present = if let Some(run) = self.terminal_runs.get_mut(&id) {
                         run.running = false;
                         run.cancel_tx = None;
-                    }
-                    if exit_code == Some(0) {
+                        run.controller.is_some()
+                    } else {
+                        false
+                    };
+                    if exit_code == Some(0) && !controller_present {
                         self.terminal_runs.remove(&id);
                     }
                     if let Some(after) = after {
@@ -946,25 +1080,86 @@ impl App<'_> {
                     }
                 }
                 AppEvent::TerminalCancel { id } => {
+                    let mut remove_entry = false;
                     if let Some(run) = self.terminal_runs.get_mut(&id) {
+                        let had_controller = run.controller.is_some();
                         if let Some(tx) = run.cancel_tx.take() {
-                            let _ = tx.send(());
+                            if !tx.is_closed() {
+                                let _ = tx.send(());
+                            }
                         }
+                        run.running = false;
+                        run.controller = None;
+                        remove_entry = had_controller;
+                    }
+                    if remove_entry {
+                        self.terminal_runs.remove(&id);
                     }
                 }
                 AppEvent::TerminalRerun { id } => {
-                    let command = self
+                    let command_and_controller = self
                         .terminal_runs
                         .get(&id)
-                        .and_then(|run| (!run.running).then(|| run.command.clone()));
-                    if let Some(command) = command {
-                        self.start_terminal_run(id, command);
+                        .and_then(|run| (!run.running).then(|| (run.command.clone(), run.controller.clone())));
+                    if let Some((command, controller)) = command_and_controller {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.terminal_mark_running(id);
+                        }
+                        self.start_terminal_run(id, command, controller);
                     }
+                }
+                AppEvent::TerminalRunCommand {
+                    id,
+                    command,
+                    command_display,
+                    controller,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_set_command_display(id, command_display.clone());
+                        widget.terminal_mark_running(id);
+                    }
+                    self.start_terminal_run(id, command, controller);
+                }
+                AppEvent::TerminalUpdateMessage { id, message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_update_message(id, message);
+                    }
+                }
+                AppEvent::TerminalSetAssistantMessage { id, message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_set_assistant_message(id, message);
+                    }
+                }
+                AppEvent::TerminalAwaitCommand { id, suggestion, ack } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_prepare_command(id, suggestion, ack.0);
+                    }
+                }
+                AppEvent::TerminalForceClose { id } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.close_terminal_overlay();
+                    }
+                    self.terminal_runs.remove(&id);
                 }
                 AppEvent::TerminalAfter(after) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_terminal_after(after);
                     }
+                }
+                #[cfg(not(debug_assertions))]
+                AppEvent::RunUpdateCommand { command, display, latest_version } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if let Some(launch) = widget.launch_update_command(command, display, latest_version.clone()) {
+                            self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                        }
+                    }
+                }
+                #[cfg(not(debug_assertions))]
+                AppEvent::SetAutoUpgradeEnabled(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_auto_upgrade_enabled(enabled);
+                    }
+                    self.config.auto_upgrade_enabled = enabled;
                 }
                 AppEvent::RequestAgentInstall { name, selected_index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1084,6 +1279,11 @@ impl App<'_> {
                         SlashCommand::Status => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.add_status_output();
+                            }
+                        }
+                        SlashCommand::Update => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_update_command();
                             }
                         }
                         SlashCommand::Agents => {

@@ -100,6 +100,25 @@ fn default_confirm_guard_patterns() -> Vec<ConfirmGuardPattern> {
     ]
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AllowedCommandMatchKind {
+    Exact,
+    Prefix,
+}
+
+impl Default for AllowedCommandMatchKind {
+    fn default() -> Self { Self::Exact }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AllowedCommand {
+    #[serde(default)]
+    pub argv: Vec<String>,
+    #[serde(default)]
+    pub match_kind: AllowedCommandMatchKind,
+}
+
 /// Configuration for a subagent slash command (e.g., plan/solve/code or custom)
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
