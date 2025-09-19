@@ -1276,6 +1276,11 @@ impl App<'_> {
                                 widget.insert_str("@");
                             }
                         }
+                        SlashCommand::Cmd => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_project_command(command_args);
+                            }
+                        }
                         SlashCommand::Status => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.add_status_output();
