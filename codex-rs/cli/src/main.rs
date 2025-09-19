@@ -412,7 +412,7 @@ fn merge_resume_cli_flags(interactive: &mut TuiCli, resume_cli: TuiCli) {
 
 fn print_completion(cmd: CompletionCommand) {
     let mut app = MultitoolCli::command();
-    let name = "codex";
+    let name = "code";
     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
 }
 
