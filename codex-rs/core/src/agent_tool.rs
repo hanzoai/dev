@@ -260,6 +260,12 @@ impl AgentManager {
             .collect()
     }
 
+    pub fn has_active_agents(&self) -> bool {
+        self.agents
+            .values()
+            .any(|agent| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+    }
+
     pub async fn cancel_agent(&mut self, agent_id: &str) -> bool {
         if let Some(handle) = self.handles.remove(agent_id) {
             handle.abort();
@@ -891,7 +897,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent_run".to_string(),
-        description: "Start a complex AI task asynchronously. Returns a agent ID immediately to check status and retrieve results.".to_string(),
+        description: "Start a complex AI task asynchronously. Returns an agent ID immediately to check status and retrieve results. Once an agent is running, enables: agent_check, agent_result, agent_cancel, agent_wait, agent_list.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
