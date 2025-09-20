@@ -36,6 +36,7 @@ mod agent_install;
 mod diff_ui;
 mod exec_tools;
 mod gh_actions;
+mod history_render;
 mod help_handlers;
 mod interrupts;
 mod layout_scroll;
@@ -50,6 +51,7 @@ use self::agent_install::{
     start_prompt_terminal_session,
     wrap_command,
 };
+use self::history_render::HistoryRenderState;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::ApprovedCommandMatchKind;
@@ -208,6 +210,7 @@ pub(crate) struct ChatWidget<'a> {
     bottom_pane: BottomPane<'a>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
+    history_render: HistoryRenderState,
     config: Config,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -282,10 +285,6 @@ pub(crate) struct ChatWidget<'a> {
     #[cfg(not(debug_assertions))]
     pending_upgrade_notice: Option<(u64, String)>,
 
-    // Cache for expensive height calculations per cell and width
-    height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
-    // Track last width used to opportunistically clear cache when layout changes
-    height_cache_last_width: std::cell::Cell<u16>,
     // Cached visible rows for the diff overlay body to clamp scrolling (kept within diffs)
 
     // Centralized height manager (always enabled)
@@ -296,13 +295,6 @@ pub(crate) struct ChatWidget<'a> {
 
     // True when connected to external Chrome via CDP; affects HUD titles
     browser_is_external: bool,
-
-    // Prefix sums of content heights (including spacing) for fast scroll range
-    prefix_sums: std::cell::RefCell<Vec<u16>>,
-    // Cache key for prefix_sums to avoid rebuilding on pure scroll frames
-    last_prefix_width: std::cell::Cell<u16>,
-    last_prefix_count: std::cell::Cell<usize>,
-    prefix_valid: std::cell::Cell<bool>,
 
     // Most recent theme snapshot used to retint pre-rendered lines
     last_theme: crate::theme::Theme,
@@ -1473,9 +1465,7 @@ impl ChatWidget<'_> {
 
     /// Clear memoized cell heights (called when history/content changes)
     fn invalidate_height_cache(&mut self) {
-        self.height_cache.borrow_mut().clear();
-        self.prefix_sums.borrow_mut().clear();
-        self.prefix_valid.set(false);
+        self.history_render.invalidate_height_cache();
     }
 
     /// Handle exec approval request immediately
@@ -2080,8 +2070,7 @@ impl ChatWidget<'_> {
             agents_overview_selected_index: 0,
             #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
-            height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
-            height_cache_last_width: std::cell::Cell::new(0),
+            history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2098,10 +2087,6 @@ impl ChatWidget<'_> {
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
-            prefix_sums: std::cell::RefCell::new(Vec::new()),
-            last_prefix_width: std::cell::Cell::new(0),
-            last_prefix_count: std::cell::Cell::new(0),
-            prefix_valid: std::cell::Cell::new(false),
             last_theme: crate::theme::current_theme(),
             perf_state: PerfState {
                 enabled: false,
@@ -2272,8 +2257,7 @@ impl ChatWidget<'_> {
             agents_overview_selected_index: 0,
             #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
-            height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
-            height_cache_last_width: std::cell::Cell::new(0),
+            history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2290,10 +2274,6 @@ impl ChatWidget<'_> {
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
-            prefix_sums: std::cell::RefCell::new(Vec::new()),
-            last_prefix_width: std::cell::Cell::new(0),
-            last_prefix_count: std::cell::Cell::new(0),
-            prefix_valid: std::cell::Cell::new(false),
             last_theme: crate::theme::current_theme(),
             perf_state: PerfState {
                 enabled: false,
@@ -12547,12 +12527,8 @@ impl WidgetRef for &ChatWidget<'_> {
         const GUTTER_WIDTH: u16 = 2; // Same as in render loop
 
         // Opportunistically clear height cache if width changed
-        if self.height_cache_last_width.get() != content_area.width {
-            self.height_cache.borrow_mut().clear();
-            self.prefix_sums.borrow_mut().clear();
-            self.prefix_valid.set(false);
-            self.height_cache_last_width.set(content_area.width);
-        }
+        self.history_render
+            .handle_width_change(content_area.width);
 
         // Perf: count a frame
         if self.perf_state.enabled {
@@ -12562,9 +12538,9 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Detect dynamic content that requires per-frame recomputation
         let has_active_animation_early = self.history_cells.iter().any(|cell| cell.is_animating());
-        let must_rebuild_prefix = !self.prefix_valid.get()
-            || self.last_prefix_width.get() != content_area.width
-            || self.last_prefix_count.get() != all_content.len()
+        let must_rebuild_prefix = !self.history_render.prefix_valid.get()
+            || self.history_render.last_prefix_width.get() != content_area.width
+            || self.history_render.last_prefix_count.get() != all_content.len()
             || streaming_cell.is_some()
             || has_active_animation_early;
 
@@ -12575,7 +12551,7 @@ impl WidgetRef for &ChatWidget<'_> {
             } else {
                 None
             };
-            let mut ps = self.prefix_sums.borrow_mut();
+            let mut ps = self.history_render.prefix_sums.borrow_mut();
             ps.clear();
             ps.push(0);
             let mut acc = 0u16;
@@ -12609,7 +12585,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     let key = (idx, content_width);
                     // Take an immutable borrow in a small scope to avoid overlapping with the later mutable borrow
                     let cached_val = {
-                        let cache_ref = self.height_cache.borrow();
+                        let cache_ref = self.history_render.height_cache.borrow();
                         cache_ref.get(&key).copied()
                     };
                     if let Some(cached) = cached_val {
@@ -12644,7 +12620,10 @@ impl WidgetRef for &ChatWidget<'_> {
                             );
                         }
                         // Now take a mutable borrow to insert
-                        self.height_cache.borrow_mut().insert(key, computed);
+                        self.history_render
+                            .height_cache
+                            .borrow_mut()
+                            .insert(key, computed);
                         computed
                     }
                 } else {
@@ -12687,13 +12666,22 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
             // Update cache keys
-            self.last_prefix_width.set(content_area.width);
-            self.last_prefix_count.set(all_content.len());
-            self.prefix_valid.set(true);
+            self.history_render
+                .last_prefix_width
+                .set(content_area.width);
+            self.history_render
+                .last_prefix_count
+                .set(all_content.len());
+            self.history_render.prefix_valid.set(true);
             total
         } else {
             // Use cached prefix sums
-            *self.prefix_sums.borrow().last().unwrap_or(&0)
+            *self
+                .history_render
+                .prefix_sums
+                .borrow()
+                .last()
+                .unwrap_or(&0)
         };
 
         // Check for active animations using the trait method
@@ -12815,7 +12803,7 @@ impl WidgetRef for &ChatWidget<'_> {
         let mut screen_y = start_y; // Position on screen
         let spacing = 1u16; // Spacing between cells
         let viewport_bottom = scroll_pos.saturating_add(content_area.height);
-        let ps = self.prefix_sums.borrow();
+        let ps = self.history_render.prefix_sums.borrow();
         let mut start_idx = match ps.binary_search(&scroll_pos) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
@@ -12854,7 +12842,13 @@ impl WidgetRef for &ChatWidget<'_> {
                 && !is_streaming;
             let item_height = if is_cacheable {
                 let key = (idx, content_width);
-                if let Some(cached) = self.height_cache.borrow().get(&key).copied() {
+                if let Some(cached) = self
+                    .history_render
+                    .height_cache
+                    .borrow()
+                    .get(&key)
+                    .copied()
+                {
                     if self.perf_state.enabled {
                         let mut p = self.perf_state.stats.borrow_mut();
                         p.height_hits_render = p.height_hits_render.saturating_add(1);
@@ -12885,7 +12879,10 @@ impl WidgetRef for &ChatWidget<'_> {
                             dt,
                         );
                     }
-                    self.height_cache.borrow_mut().insert(key, computed);
+                    self.history_render
+                        .height_cache
+                        .borrow_mut()
+                        .insert(key, computed);
                     computed
                 }
             } else {
