@@ -55,6 +55,7 @@ use self::history_render::HistoryRenderState;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::ApprovedCommandMatchKind;
+use codex_core::protocol::SandboxPolicy;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
 use codex_core::protocol::AgentReasoningEvent;
@@ -279,6 +280,7 @@ pub(crate) struct ChatWidget<'a> {
 
     // Terminal overlay state
     terminal: TerminalState,
+    pending_manual_terminal: HashMap<u64, PendingManualTerminal>,
 
     // Persisted selection for Agents overview
     agents_overview_selected_index: usize,
@@ -2070,6 +2072,7 @@ impl ChatWidget<'_> {
                 body_visible_rows: std::cell::Cell::new(0),
             },
             terminal: TerminalState::default(),
+            pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
@@ -2258,6 +2261,7 @@ impl ChatWidget<'_> {
                 body_visible_rows: std::cell::Cell::new(0),
             },
             terminal: TerminalState::default(),
+            pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
@@ -5627,14 +5631,45 @@ impl ChatWidget<'_> {
             overlay.cancel_pending_command();
         }
 
+        if !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess) {
+            self.pending_manual_terminal.insert(
+                id,
+                PendingManualTerminal {
+                    command: trimmed.to_string(),
+                },
+            );
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.push_assistant_message("Awaiting approval to run this command…");
+                overlay.running = false;
+            }
+            self.bottom_pane.push_approval_request(ApprovalRequest::TerminalCommand {
+                id,
+                command: trimmed.to_string(),
+            });
+            self.request_redraw();
+            return;
+        }
+
+        self.start_manual_terminal_session(id, trimmed.to_string());
+    }
+
+    fn start_manual_terminal_session(&mut self, id: u64, command: String) {
+        if command.is_empty() {
+            return;
+        }
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            overlay.cancel_pending_command();
+            overlay.running = true;
+            overlay.exit_code = None;
+            overlay.duration = None;
+        }
         let (controller_tx, controller_rx) = mpsc::channel();
         let controller = TerminalRunController { tx: controller_tx };
-
         let cwd = self.config.cwd.to_string_lossy().to_string();
         start_direct_terminal_session(
             self.app_event_tx.clone(),
             id,
-            trimmed.to_string(),
+            command,
             Some(cwd),
             controller,
             controller_rx,
@@ -5731,10 +5766,44 @@ impl ChatWidget<'_> {
         reset
     }
 
+    pub(crate) fn handle_terminal_approval_decision(&mut self, id: u64, approved: bool) {
+        let pending = self.pending_manual_terminal.remove(&id);
+        if approved {
+            if let Some(entry) = pending {
+                if self
+                    .terminal
+                    .overlay()
+                    .map(|overlay| overlay.id == id)
+                    .unwrap_or(false)
+                {
+                    if let Some(overlay) = self.terminal.overlay_mut() {
+                        overlay.push_assistant_message("Approval granted. Running command…");
+                    }
+                    self.start_manual_terminal_session(id, entry.command);
+                    self.request_redraw();
+                }
+            }
+            return;
+        }
+
+        if let Some(entry) = pending {
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.push_info_message("Command was not approved. You can edit it and try again.");
+                overlay.running = false;
+                overlay.exit_code = None;
+                overlay.duration = None;
+                overlay.pending_command = Some(PendingCommand::manual_with_input(entry.command));
+            }
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn close_terminal_overlay(&mut self) {
         let mut cancel_id = None;
         let mut preserved_visible = None;
+        let mut overlay_id = None;
         if let Some(overlay) = self.terminal.overlay_mut() {
+            overlay_id = Some(overlay.id);
             if overlay.running {
                 cancel_id = Some(overlay.id);
             }
@@ -5743,6 +5812,9 @@ impl ChatWidget<'_> {
         }
         if let Some(id) = cancel_id {
             self.app_event_tx.send(AppEvent::TerminalCancel { id });
+        }
+        if let Some(id) = overlay_id {
+            self.pending_manual_terminal.remove(&id);
         }
         if let Some(visible_rows) = preserved_visible {
             self.terminal.last_visible_rows.set(visible_rows);
@@ -14164,6 +14236,10 @@ impl TerminalState {
 
 const TERMINAL_MAX_LINES: usize = 10_000;
 
+struct PendingManualTerminal {
+    command: String,
+}
+
 struct TerminalOverlay {
     id: u64,
     title: String,
@@ -14210,6 +14286,14 @@ impl PendingCommand {
         Self {
             input: String::new(),
             cursor: 0,
+            ack: None,
+        }
+    }
+
+    fn manual_with_input(input: String) -> Self {
+        Self {
+            cursor: input.len(),
+            input,
             ack: None,
         }
     }
