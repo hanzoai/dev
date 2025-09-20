@@ -4043,6 +4043,69 @@ impl HistoryCell for RunningToolCallCell {
     }
 }
 
+// ==================== WaitStatusCell (completed wait) ====================
+
+pub(crate) struct WaitStatusCell {
+    lines: Vec<Line<'static>>,
+}
+
+impl WaitStatusCell {
+    pub(crate) fn retint(&mut self, old: &crate::theme::Theme, new: &crate::theme::Theme) {
+        retint_lines_in_place(&mut self.lines, old, new);
+    }
+}
+
+impl HistoryCell for WaitStatusCell {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Plain
+    }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.lines.clone()
+    }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        Some("◓")
+    }
+}
+
+pub(crate) fn new_completed_wait_tool_call(target: String, duration: Duration) -> WaitStatusCell {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut duration_str = format_duration(duration);
+    if duration_str.ends_with(" 00s") {
+        duration_str.truncate(duration_str.len() - 4);
+    }
+    let mut header_spans = Vec::new();
+    header_spans.push(
+        Span::styled(
+            "Waited",
+            Style::default()
+                .fg(crate::colors::success())
+                .add_modifier(Modifier::BOLD),
+        ),
+    );
+    header_spans.push(Span::styled(
+        format!(" ({duration_str})"),
+        Style::default().fg(crate::colors::text_dim()),
+    ));
+    lines.push(Line::from(header_spans));
+
+    if !target.is_empty() {
+        lines.push(Line::styled(
+            format!("for {target}"),
+            Style::default().fg(crate::colors::text_dim()),
+        ));
+    }
+
+    lines.push(Line::from(""));
+
+    WaitStatusCell { lines }
+}
+
 impl RunningToolCallCell {
     fn strip_zero_seconds_suffix(mut duration: String) -> String {
         if duration.ends_with(" 00s") {
@@ -7893,11 +7956,17 @@ pub(crate) fn new_running_custom_tool_call(
                     ));
                     arg_lines.push(Line::from(spans));
                     wait_has_target = true;
-                } else if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
-                    arg_lines.push(Line::from(vec![
-                        Span::styled("└ call_id: ", Style::default().fg(crate::colors::text_dim())),
-                        Span::styled(cid.to_string(), Style::default().fg(crate::colors::text())),
-                    ]));
+                }
+                if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
+                    if !wait_has_target {
+                        arg_lines.push(Line::from(vec![
+                            Span::styled(
+                                "└ call_id: ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            Span::styled(cid.to_string(), Style::default().fg(crate::colors::text())),
+                        ]));
+                    }
                     wait_has_call_id = true;
                 }
             } else {
