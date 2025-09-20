@@ -2,6 +2,7 @@
 use std::io::Result;
 
 use crate::insert_history;
+use crate::util::buffer::fill_rect;
 use crate::tui;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -154,11 +155,7 @@ impl TranscriptApp {
         let clear_style = Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
-        for y in content_area.y..content_area.y.saturating_add(content_area.height) {
-            for x in content_area.x..content_area.x.saturating_add(content_area.width) {
-                buf[(x, y)].set_char(' ').set_style(clear_style);
-            }
-        }
+        fill_rect(buf, content_area, Some(' '), clear_style);
 
         // Clamp scroll offset to valid range
         self.scroll_offset = self

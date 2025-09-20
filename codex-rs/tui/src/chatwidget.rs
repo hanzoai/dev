@@ -134,6 +134,7 @@ use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
+use crate::util::buffer::fill_rect;
 use crate::user_approval_widget::ApprovalRequest;
 use codex_ansi_escape::ansi_escape_line;
 use codex_browser::BrowserManager;
@@ -1242,10 +1243,7 @@ impl ChatWidget<'_> {
                     crate::markdown::append_markdown(text, &mut lines, &self.config);
                     let key = self.next_internal_key();
                     let _ = self.history_insert_with_key_global(
-                        Box::new(PlainHistoryCell {
-                            lines,
-                            kind: HistoryCellType::Assistant,
-                        }),
+                        Box::new(PlainHistoryCell::new(lines, HistoryCellType::Assistant)),
                         key,
                     );
                 }
@@ -1614,6 +1612,7 @@ impl ChatWidget<'_> {
                     plain.kind = history_cell::HistoryCellType::Patch {
                         kind: history_cell::PatchKind::ApplySuccess,
                     };
+                    plain.invalidate_layout_cache();
                     self.request_redraw();
                     return;
                 }
@@ -3012,10 +3011,10 @@ impl ChatWidget<'_> {
         combined.extend(body);
         self.history_replace_at(
             idx - 1,
-            Box::new(crate::history_cell::PlainHistoryCell {
-                lines: combined,
-                kind: crate::history_cell::HistoryCellType::Plain,
-            }),
+            Box::new(crate::history_cell::PlainHistoryCell::new(
+                combined,
+                crate::history_cell::HistoryCellType::Plain,
+            )),
         );
         self.history_remove_at(idx);
     }
@@ -3193,10 +3192,10 @@ impl ChatWidget<'_> {
                         "command: {}",
                         original_text.trim()
                     )));
-                    self.history_push(crate::history_cell::PlainHistoryCell {
-                        lines: ack,
-                        kind: crate::history_cell::HistoryCellType::Notice,
-                    });
+                    self.history_push(crate::history_cell::PlainHistoryCell::new(
+                        ack,
+                        crate::history_cell::HistoryCellType::Notice,
+                    ));
 
                     message
                         .ordered_items
@@ -3248,10 +3247,10 @@ impl ChatWidget<'_> {
                         }
                     )));
                     lines.push(Line::from(format!("command: {}", original_text.trim())));
-                    self.history_push(crate::history_cell::PlainHistoryCell {
+                    self.history_push(crate::history_cell::PlainHistoryCell::new(
                         lines,
-                        kind: crate::history_cell::HistoryCellType::Notice,
-                    });
+                        crate::history_cell::HistoryCellType::Notice,
+                    ));
 
                     // Replace the message with the resolved prompt
                     message
@@ -4526,15 +4525,15 @@ impl ChatWidget<'_> {
                     return;
                 }
                 if tool_name == "wait" && !success && content.trim() == "Cancelled by user." {
-                    let wait_cancelled_cell = PlainHistoryCell {
-                        lines: vec![Line::styled(
+                    let wait_cancelled_cell = PlainHistoryCell::new(
+                        vec![Line::styled(
                             "Wait cancelled",
                             Style::default()
                                 .fg(crate::colors::error())
                                 .add_modifier(Modifier::BOLD),
                         )],
-                        kind: HistoryCellType::Error,
-                    };
+                        HistoryCellType::Error,
+                    );
 
                     if let Some(idx) = entry_idx {
                         if idx < self.history_cells.len() {
@@ -4818,10 +4817,10 @@ impl ChatWidget<'_> {
         for l in text.lines() {
             lines.push(ratatui::text::Line::from(l.to_string()))
         }
-        self.history_push(crate::history_cell::PlainHistoryCell {
+        self.history_push(crate::history_cell::PlainHistoryCell::new(
             lines,
-            kind: crate::history_cell::HistoryCellType::Notice,
-        });
+            crate::history_cell::HistoryCellType::Notice,
+        ));
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
@@ -5015,10 +5014,10 @@ impl ChatWidget<'_> {
             }
         }
 
-        self.history_push(crate::history_cell::PlainHistoryCell {
+        self.history_push(crate::history_cell::PlainHistoryCell::new(
             lines,
-            kind: crate::history_cell::HistoryCellType::Notice,
-        });
+            crate::history_cell::HistoryCellType::Notice,
+        ));
         self.request_redraw();
     }
 
@@ -7091,6 +7090,7 @@ impl ChatWidget<'_> {
                 .downcast_mut::<history_cell::PlainHistoryCell>()
             {
                 history_cell::retint_lines_in_place(&mut plain.lines, &old, &new);
+                plain.invalidate_layout_cache();
             } else if let Some(tool) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::ToolCallCell>()
@@ -8184,10 +8184,10 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell {
-            lines: vec![Line::from("✅ Chrome launched with user profile")],
-            kind: history_cell::HistoryCellType::BackgroundEvent,
-        });
+        self.history_push(history_cell::PlainHistoryCell::new(
+            vec![Line::from("✅ Chrome launched with user profile")],
+            history_cell::HistoryCellType::BackgroundEvent,
+        ));
         // Show browsing state in input border after launch
         self.bottom_pane
             .update_status_text("using browser".to_string());
@@ -8809,13 +8809,13 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell {
-            lines: vec![Line::from(format!(
+        self.history_push(history_cell::PlainHistoryCell::new(
+            vec![Line::from(format!(
                 "✅ Chrome launched with temporary profile at {}",
                 profile_dir.display()
             ))],
-            kind: history_cell::HistoryCellType::BackgroundEvent,
-        });
+            history_cell::HistoryCellType::BackgroundEvent,
+        ));
     }
 
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
@@ -8918,10 +8918,10 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.history_push(history_cell::PlainHistoryCell {
-                    lines: vec![Line::from(status_msg)],
-                    kind: history_cell::HistoryCellType::BackgroundEvent,
-                });
+                self.history_push(history_cell::PlainHistoryCell::new(
+                    vec![Line::from(status_msg)],
+                    history_cell::HistoryCellType::BackgroundEvent,
+                ));
                 // Also reflect browsing activity in the input border
                 self.bottom_pane
                     .update_status_text("using browser".to_string());
@@ -9316,10 +9316,10 @@ impl ChatWidget<'_> {
             .lines()
             .map(|line| Line::from(line.to_string()))
             .collect();
-        self.history_push(history_cell::PlainHistoryCell {
+        self.history_push(history_cell::PlainHistoryCell::new(
             lines,
-            kind: history_cell::HistoryCellType::BackgroundEvent,
-        });
+            history_cell::HistoryCellType::BackgroundEvent,
+        ));
     }
 
     /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
@@ -9816,10 +9816,10 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.history_push(history_cell::PlainHistoryCell {
+            self.history_push(history_cell::PlainHistoryCell::new(
                 lines,
-                kind: history_cell::HistoryCellType::BackgroundEvent,
-            });
+                history_cell::HistoryCellType::BackgroundEvent,
+            ));
             return;
         }
 
@@ -12764,31 +12764,22 @@ impl WidgetRef for &ChatWidget<'_> {
             .saturating_add(history_area.width)
             .saturating_sub(right_pad_start);
         if left_pad_w > 0 {
-            for y in history_area.y..history_area.y.saturating_add(history_area.height) {
-                for x in history_area.x..history_area.x.saturating_add(left_pad_w) {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
-            }
+            let left_rect = Rect::new(history_area.x, history_area.y, left_pad_w, history_area.height);
+            fill_rect(buf, left_rect, Some(' '), clear_style);
             cleared_cells =
                 cleared_cells.saturating_add((left_pad_w as u64) * (history_area.height as u64));
         }
         if right_pad_w > 0 {
-            for y in history_area.y..history_area.y.saturating_add(history_area.height) {
-                for x in right_pad_start..right_pad_start.saturating_add(right_pad_w) {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
-            }
+            let right_rect = Rect::new(right_pad_start, history_area.y, right_pad_w, history_area.height);
+            fill_rect(buf, right_rect, Some(' '), clear_style);
             cleared_cells =
                 cleared_cells.saturating_add((right_pad_w as u64) * (history_area.height as u64));
         }
         // Top gap inside content area when content is bottom-aligned
         if start_y > content_area.y {
             let gap_h = start_y.saturating_sub(content_area.y);
-            for y in content_area.y..content_area.y.saturating_add(gap_h) {
-                for x in content_area.x..content_area.x.saturating_add(content_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
-            }
+            let gap_rect = Rect::new(content_area.x, content_area.y, content_area.width, gap_h);
+            fill_rect(buf, gap_rect, Some(' '), clear_style);
             cleared_cells =
                 cleared_cells.saturating_add((gap_h as u64) * (content_area.width as u64));
         }
@@ -12964,13 +12955,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         None
                     };
                     let style = Style::default().bg(gutter_bg);
-                    for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
-                        // Only the first column (symbol column) needs tint; the second is spacing to content
-                        // but tint both for visual continuity with the assistant block.
-                        for x in gutter_area.x..gutter_area.x.saturating_add(gutter_area.width) {
-                            buf[(x, y)].set_char(' ').set_style(style);
-                        }
-                    }
+                    fill_rect(buf, gutter_area, Some(' '), style);
                     // Also tint the single left padding column so the assistant
                     // gutter visually reaches the outer edge. The content area
                     // is inset by a uniform padding; when present, paint that
@@ -12978,9 +12963,8 @@ impl WidgetRef for &ChatWidget<'_> {
                     // vertical span of this item.
                     if content_area.x > history_area.x {
                         let left_col_x = content_area.x.saturating_sub(1);
-                        for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
-                            buf[(left_col_x, y)].set_char(' ').set_style(style);
-                        }
+                        let left_rect = Rect::new(left_col_x, gutter_area.y, 1, gutter_area.height);
+                        fill_rect(buf, left_rect, Some(' '), style);
                     }
                     // Also tint one column immediately to the right of the content area
                     // so the assistant block is visually bookended. This column lives in the
@@ -12989,9 +12973,8 @@ impl WidgetRef for &ChatWidget<'_> {
                     let right_col_x = content_area.x.saturating_add(content_area.width);
                     let history_right = history_area.x.saturating_add(history_area.width);
                     if right_col_x < history_right {
-                        for y in item_area.y..item_area.y.saturating_add(item_area.height) {
-                            buf[(right_col_x, y)].set_char(' ').set_style(style);
-                        }
+                        let right_rect = Rect::new(right_col_x, item_area.y, 1, item_area.height);
+                        fill_rect(buf, right_rect, Some(' '), style);
                     }
                     if let Some(t0) = _perf_gutter_start {
                         let dt = t0.elapsed().as_nanos();
@@ -13218,10 +13201,10 @@ impl WidgetRef for &ChatWidget<'_> {
             } else {
                 None
             };
-            for y in screen_y..content_area.y + content_area.height {
-                for x in content_area.x..content_area.x + content_area.width {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
+            let gap_height = (content_area.y + content_area.height).saturating_sub(screen_y);
+            if gap_height > 0 {
+                let gap_rect = Rect::new(content_area.x, screen_y, content_area.width, gap_height);
+                fill_rect(buf, gap_rect, Some(' '), clear_style);
             }
             if let Some(t0) = _perf_hist_clear2 {
                 let dt = t0.elapsed().as_nanos();
@@ -13284,11 +13267,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
         if self.terminal.overlay().is_some() {
             let bg_style = Style::default().bg(crate::colors::background());
-            for y in bottom_pane_area.y..bottom_pane_area.y + bottom_pane_area.height {
-                for x in bottom_pane_area.x..bottom_pane_area.x + bottom_pane_area.width {
-                    buf[(x, y)].set_style(bg_style).set_char(' ');
-                }
-            }
+            fill_rect(buf, bottom_pane_area, Some(' '), bg_style);
         } else {
             // Render the bottom pane directly without a border for now
             // The composer has its own layout with hints at the bottom
@@ -13299,11 +13278,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let scrim_style = Style::default()
                 .bg(crate::colors::overlay_scrim())
                 .fg(crate::colors::text_dim());
-            for y in area.y..area.y + area.height {
-                for x in area.x..area.x + area.width {
-                    buf[(x, y)].set_style(scrim_style);
-                }
-            }
+            fill_rect(buf, area, None, scrim_style);
 
             let padding = 1u16;
             let footer_reserved = 1.min(bottom_pane_area.height);
@@ -13488,11 +13463,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         width: footer_area.width,
                         height: footer_area.height.saturating_sub(1),
                     };
-                    for y in spacer_area.y..spacer_area.y + spacer_area.height {
-                        for x in spacer_area.x..spacer_area.x + spacer_area.width {
-                            buf[(x, y)].set_char(' ').set_style(inner_bg);
-                        }
-                    }
+                    fill_rect(buf, spacer_area, Some(' '), inner_bg);
                 }
 
                 let instructions_area = Rect {
@@ -13529,13 +13500,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 } else {
                     None
                 };
-                for y in area.y..area.y + area.height {
-                    for x in area.x..area.x + area.width {
-                        // Overwrite with a dimmed style; we don't Clear so existing glyphs remain,
-                        // but foreground is muted to reduce visual competition.
-                        buf[(x, y)].set_style(scrim_bg);
-                    }
-                }
+                fill_rect(buf, area, None, scrim_bg);
                 if let Some(t0) = _perf_scrim_start {
                     let dt = t0.elapsed().as_nanos();
                     let mut p = self.perf_state.stats.borrow_mut();
@@ -13560,11 +13525,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 } else {
                     None
                 };
-                for y in area.y..area.y + area.height {
-                    for x in area.x..area.x + area.width {
-                        buf[(x, y)].set_style(bg_style);
-                    }
-                }
+                fill_rect(buf, area, None, bg_style);
                 if let Some(t0) = _perf_overlay_area_bg_start {
                     let dt = t0.elapsed().as_nanos();
                     let mut p = self.perf_state.stats.borrow_mut();
