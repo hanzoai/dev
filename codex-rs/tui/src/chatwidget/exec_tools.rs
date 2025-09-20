@@ -109,41 +109,43 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
     }
 
     if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(super::ToolCallId, usize)> = chat
+        let entries: Vec<(super::ToolCallId, super::RunningToolEntry)> = chat
             .tools_state
             .running_custom_tools
             .iter()
-            .map(|(k, i)| (k.clone(), *i))
+            .map(|(k, entry)| (k.clone(), *entry))
             .collect();
-        for (_k, idx) in entries {
-            if idx < chat.history_cells.len() {
-                let wait_cancel_cell = Box::new(history_cell::PlainHistoryCell {
-                    lines: vec![Line::styled(
-                        "Wait cancelled",
-                        Style::default()
-                            .fg(crate::colors::error())
-                            .add_modifier(Modifier::BOLD),
-                    )],
-                    kind: history_cell::HistoryCellType::Error,
-                });
+        for (_k, entry) in entries {
+            if let Some(idx) = chat.resolve_running_tool_index(&entry) {
+                if idx < chat.history_cells.len() {
+                    let wait_cancel_cell = Box::new(history_cell::PlainHistoryCell::new(
+                        vec![Line::styled(
+                            "Wait cancelled",
+                            Style::default()
+                                .fg(crate::colors::error())
+                                .add_modifier(Modifier::BOLD),
+                        )],
+                        history_cell::HistoryCellType::Error,
+                    ));
 
-                let replaced = chat.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                    .map(|cell| cell.has_title("Waiting"))
-                    .unwrap_or(false);
+                    let replaced = chat.history_cells[idx]
+                        .as_any()
+                        .downcast_ref::<history_cell::RunningToolCallCell>()
+                        .map(|cell| cell.has_title("Waiting"))
+                        .unwrap_or(false);
 
-                if replaced {
-                    chat.history_replace_at(idx, wait_cancel_cell);
-                } else {
-                    let completed = history_cell::new_completed_custom_tool_call(
-                        "custom".to_string(),
-                        None,
-                        std::time::Duration::from_millis(0),
-                        false,
-                        "Cancelled by user.".to_string(),
-                    );
-                    chat.history_replace_at(idx, Box::new(completed));
+                    if replaced {
+                        chat.history_replace_at(idx, wait_cancel_cell);
+                    } else {
+                        let completed = history_cell::new_completed_custom_tool_call(
+                            "custom".to_string(),
+                            None,
+                            std::time::Duration::from_millis(0),
+                            false,
+                            "Cancelled by user.".to_string(),
+                        );
+                        chat.history_replace_at(idx, Box::new(completed));
+                    }
                 }
             }
         }
@@ -245,22 +247,24 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
     }
 
     if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(super::ToolCallId, usize)> = chat
+        let entries: Vec<(super::ToolCallId, super::RunningToolEntry)> = chat
             .tools_state
             .running_custom_tools
             .iter()
-            .map(|(k, i)| (k.clone(), *i))
+            .map(|(k, entry)| (k.clone(), *entry))
             .collect();
-        for (_k, idx) in entries {
-            if idx < chat.history_cells.len() {
-                let completed = history_cell::new_completed_custom_tool_call(
-                    "custom".to_string(),
-                    None,
-                    std::time::Duration::from_millis(0),
-                    true,
-                    "Final answer received".to_string(),
-                );
-                chat.history_replace_at(idx, Box::new(completed));
+        for (_k, entry) in entries {
+            if let Some(idx) = chat.resolve_running_tool_index(&entry) {
+                if idx < chat.history_cells.len() {
+                    let completed = history_cell::new_completed_custom_tool_call(
+                        "custom".to_string(),
+                        None,
+                        std::time::Duration::from_millis(0),
+                        true,
+                        "Final answer received".to_string(),
+                    );
+                    chat.history_replace_at(idx, Box::new(completed));
+                }
             }
         }
         chat.tools_state.running_custom_tools.clear();
