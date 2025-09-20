@@ -37,26 +37,6 @@ fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
     None
 }
 
-fn remove_fallback_exec_cell(chat: &mut ChatWidget<'_>, call_id: &super::ExecCallId) {
-    if let Some((idx, _)) = chat.history_cells.iter().enumerate().find(|(_, cell)| {
-        cell.as_any()
-            .downcast_ref::<history_cell::ExecCell>()
-            .map(|exec| {
-                exec.command.len() == 1
-                    && exec
-                        .command
-                        .first()
-                        .map(|cmd| cmd == call_id.as_ref())
-                        .unwrap_or(false)
-            })
-            .unwrap_or(false)
-    }) {
-        chat.history_remove_at(idx);
-        chat.invalidate_height_cache();
-        chat.request_redraw();
-    }
-}
-
 pub(super) fn finalize_exec_cell_at(
     chat: &mut ChatWidget<'_>,
     idx: usize,
@@ -129,41 +109,43 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
     }
 
     if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(super::ToolCallId, usize)> = chat
+        let entries: Vec<(super::ToolCallId, super::RunningToolEntry)> = chat
             .tools_state
             .running_custom_tools
             .iter()
-            .map(|(k, i)| (k.clone(), *i))
+            .map(|(k, entry)| (k.clone(), *entry))
             .collect();
-        for (_k, idx) in entries {
-            if idx < chat.history_cells.len() {
-                let wait_cancel_cell = Box::new(history_cell::PlainHistoryCell::new(
-                    vec![Line::styled(
-                        "Wait cancelled",
-                        Style::default()
-                            .fg(crate::colors::error())
-                            .add_modifier(Modifier::BOLD),
-                    )],
-                    history_cell::HistoryCellType::Error,
-                ));
+        for (_k, entry) in entries {
+            if let Some(idx) = chat.resolve_running_tool_index(&entry) {
+                if idx < chat.history_cells.len() {
+                    let wait_cancel_cell = Box::new(history_cell::PlainHistoryCell::new(
+                        vec![Line::styled(
+                            "Wait cancelled",
+                            Style::default()
+                                .fg(crate::colors::error())
+                                .add_modifier(Modifier::BOLD),
+                        )],
+                        history_cell::HistoryCellType::Error,
+                    ));
 
-                let replaced = chat.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                    .map(|cell| cell.has_title("Waiting"))
-                    .unwrap_or(false);
+                    let replaced = chat.history_cells[idx]
+                        .as_any()
+                        .downcast_ref::<history_cell::RunningToolCallCell>()
+                        .map(|cell| cell.has_title("Waiting"))
+                        .unwrap_or(false);
 
-                if replaced {
-                    chat.history_replace_at(idx, wait_cancel_cell);
-                } else {
-                    let completed = history_cell::new_completed_custom_tool_call(
-                        "custom".to_string(),
-                        None,
-                        std::time::Duration::from_millis(0),
-                        false,
-                        "Cancelled by user.".to_string(),
-                    );
-                    chat.history_replace_at(idx, Box::new(completed));
+                    if replaced {
+                        chat.history_replace_at(idx, wait_cancel_cell);
+                    } else {
+                        let completed = history_cell::new_completed_custom_tool_call(
+                            "custom".to_string(),
+                            None,
+                            std::time::Duration::from_millis(0),
+                            false,
+                            "Cancelled by user.".to_string(),
+                        );
+                        chat.history_replace_at(idx, Box::new(completed));
+                    }
                 }
             }
         }
@@ -265,22 +247,24 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
     }
 
     if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(super::ToolCallId, usize)> = chat
+        let entries: Vec<(super::ToolCallId, super::RunningToolEntry)> = chat
             .tools_state
             .running_custom_tools
             .iter()
-            .map(|(k, i)| (k.clone(), *i))
+            .map(|(k, entry)| (k.clone(), *entry))
             .collect();
-        for (_k, idx) in entries {
-            if idx < chat.history_cells.len() {
-                let completed = history_cell::new_completed_custom_tool_call(
-                    "custom".to_string(),
-                    None,
-                    std::time::Duration::from_millis(0),
-                    true,
-                    "Final answer received".to_string(),
-                );
-                chat.history_replace_at(idx, Box::new(completed));
+        for (_k, entry) in entries {
+            if let Some(idx) = chat.resolve_running_tool_index(&entry) {
+                if idx < chat.history_cells.len() {
+                    let completed = history_cell::new_completed_custom_tool_call(
+                        "custom".to_string(),
+                        None,
+                        std::time::Duration::from_millis(0),
+                        true,
+                        "Final answer received".to_string(),
+                    );
+                    chat.history_replace_at(idx, Box::new(completed));
+                }
             }
         }
         chat.tools_state.running_custom_tools.clear();
@@ -415,9 +399,12 @@ pub(super) fn handle_exec_begin_now(
     ev: ExecCommandBeginEvent,
     order: &OrderMeta,
 ) {
-    let call_id = super::ExecCallId(ev.call_id.clone());
-    let mut orphaned_exec_end = chat.exec.orphaned_exec_ends.remove(&call_id);
-    chat.ended_call_ids.remove(&call_id);
+    if chat
+        .ended_call_ids
+        .contains(&super::ExecCallId(ev.call_id.clone()))
+    {
+        return;
+    }
     for cell in &chat.history_cells {
         cell.trigger_fade();
     }
@@ -482,7 +469,7 @@ pub(super) fn handle_exec_begin_now(
             if let Some(entry_idx) = entry_idx {
                 chat.exec.running_explore_agg_index = Some(idx);
                 chat.exec.running_commands.insert(
-                    call_id.clone(),
+                    super::ExecCallId(ev.call_id.clone()),
                     super::RunningCommand {
                         command: ev.command.clone(),
                         parsed: parsed_command.clone(),
@@ -501,10 +488,6 @@ pub(super) fn handle_exec_begin_now(
                     _ => "exploring…",
                 };
                 chat.bottom_pane.update_status_text(status_text.to_string());
-                if let Some((stored_end, stored_order)) = orphaned_exec_end.take() {
-                    remove_fallback_exec_cell(chat, &call_id);
-                    handle_exec_end_now(chat, stored_end, &stored_order);
-                }
                 return;
             } else if created_new {
                 chat.history_remove_at(idx);
@@ -517,7 +500,7 @@ pub(super) fn handle_exec_begin_now(
     let key = ChatWidget::order_key_from_order_meta(order);
     let idx = chat.history_insert_with_key_global(Box::new(cell), key);
     chat.exec.running_commands.insert(
-        call_id.clone(),
+        super::ExecCallId(ev.call_id.clone()),
         super::RunningCommand {
             command: ev.command.clone(),
             parsed: parsed_command,
@@ -533,7 +516,7 @@ pub(super) fn handle_exec_begin_now(
         let preview = chat
             .exec
             .running_commands
-            .get(&call_id)
+            .get(&super::ExecCallId(ev.call_id.clone()))
             .map(|rc| rc.command.join(" "))
             .unwrap_or_else(|| "command".to_string());
         let preview_short = if preview.chars().count() > 40 {
@@ -546,11 +529,6 @@ pub(super) fn handle_exec_begin_now(
         chat.bottom_pane
             .update_status_text(format!("running command: {}", preview_short));
     }
-
-    if let Some((stored_end, stored_order)) = orphaned_exec_end {
-        remove_fallback_exec_cell(chat, &call_id);
-        handle_exec_end_now(chat, stored_end, &stored_order);
-    }
 }
 
 pub(super) fn handle_exec_end_now(
@@ -558,21 +536,19 @@ pub(super) fn handle_exec_end_now(
     ev: ExecCommandEndEvent,
     order: &OrderMeta,
 ) {
-    let stored_event = ev.clone();
-    let stored_order = order.clone();
-    let exec_call_id = super::ExecCallId(ev.call_id.clone());
-    if chat.exec.should_suppress_exec_end(&exec_call_id) {
-        chat.exec.unsuppress_exec_end(&exec_call_id);
-        chat.ended_call_ids.insert(exec_call_id);
+    let call_id = super::ExecCallId(ev.call_id.clone());
+    if chat.exec.should_suppress_exec_end(&call_id) {
+        chat.exec.unsuppress_exec_end(&call_id);
+        chat.ended_call_ids.insert(call_id);
         chat.maybe_hide_spinner();
         return;
     }
-    chat.ended_call_ids.insert(exec_call_id.clone());
+    chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
     // If this call was already marked as cancelled, drop the End to avoid
     // inserting a duplicate completed cell after the user interrupt.
     if chat
         .canceled_exec_call_ids
-        .remove(&exec_call_id)
+        .remove(&super::ExecCallId(ev.call_id.clone()))
     {
         chat.maybe_hide_spinner();
         return;
@@ -587,11 +563,10 @@ pub(super) fn handle_exec_end_now(
     let cmd = chat
         .exec
         .running_commands
-        .remove(&exec_call_id);
+        .remove(&super::ExecCallId(call_id.clone()));
     chat.height_manager
         .borrow_mut()
         .record_event(HeightEvent::RunEnd);
-    let fallback = cmd.is_none();
     let (command, parsed, history_index, explore_entry) = match cmd {
         Some(super::RunningCommand {
             command,
@@ -602,15 +577,6 @@ pub(super) fn handle_exec_end_now(
         }) => (command, parsed, history_index, explore_entry),
         None => (vec![call_id.clone()], vec![], None, None),
     };
-
-    if fallback {
-        chat
-            .exec
-            .orphaned_exec_ends
-            .insert(exec_call_id.clone(), (stored_event, stored_order));
-    } else {
-        chat.exec.orphaned_exec_ends.remove(&exec_call_id);
-    }
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
         let action = history_cell::action_enum_from_parsed(&parsed);

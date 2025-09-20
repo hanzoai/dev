@@ -66,17 +66,19 @@ pub(super) fn mcp_begin(chat: &mut ChatWidget<'_>, ev: McpToolCallBeginEvent, ke
     let idx = chat.history_insert_with_key_global(Box::new(cell), key);
     chat.tools_state
         .running_custom_tools
-        .insert(super::ToolCallId(call_id), idx);
+        .insert(super::ToolCallId(call_id), super::RunningToolEntry::new(key, idx));
 }
 
 pub(super) fn mcp_end(chat: &mut ChatWidget<'_>, ev: McpToolCallEndEvent, key: OrderKey) {
     let McpToolCallEndEvent { call_id, duration, invocation, result } = ev;
     let success = !result.as_ref().map(|r| r.is_error.unwrap_or(false)).unwrap_or(false);
     let completed = history_cell::new_completed_mcp_tool_call(80, invocation, duration, success, result);
-    if let Some(idx) = chat.tools_state.running_custom_tools.remove(&super::ToolCallId(call_id)) {
-        if idx < chat.history_cells.len() {
-            chat.history_replace_at(idx, completed);
-            return;
+    if let Some(entry) = chat.tools_state.running_custom_tools.remove(&super::ToolCallId(call_id)) {
+        if let Some(idx) = chat.resolve_running_tool_index(&entry) {
+            if idx < chat.history_cells.len() {
+                chat.history_replace_at(idx, completed);
+                return;
+            }
         }
     }
     let _ = chat.history_insert_with_key_global(Box::new(completed), key);
