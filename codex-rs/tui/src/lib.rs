@@ -66,6 +66,7 @@ mod text_formatting;
 mod text_processing;
 mod theme;
 mod util {
+    pub mod buffer;
     pub mod list_window;
 }
 mod spinner;

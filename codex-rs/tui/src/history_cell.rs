@@ -4,6 +4,7 @@ use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::slash_command::SlashCommand;
+use crate::util::buffer::fill_rect;
 use crate::text_formatting::format_json_compact;
 use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
@@ -190,11 +191,7 @@ pub(crate) trait HistoryCell {
             _ => crate::colors::background(),
         };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Ensure the entire allocated area is painted with the theme background
         // by attaching a background-styled Block to the Paragraph as well.
@@ -1079,6 +1076,51 @@ impl HistoryCell for ExploreAggregationCell {
 pub(crate) struct PlainHistoryCell {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) kind: HistoryCellType,
+    cached_wrap: std::cell::RefCell<Option<PlainWrapCache>>,
+}
+
+#[derive(Clone, Copy)]
+struct PlainWrapCache {
+    requested_width: u16,
+    effective_width: u16,
+    height: u16,
+}
+
+impl PlainHistoryCell {
+    pub(crate) fn new(lines: Vec<Line<'static>>, kind: HistoryCellType) -> Self {
+        Self {
+            lines,
+            kind,
+            cached_wrap: std::cell::RefCell::new(None),
+        }
+    }
+
+    pub(crate) fn invalidate_layout_cache(&self) {
+        self.cached_wrap.borrow_mut().take();
+    }
+
+    fn cache_desired_height(&self, requested_width: u16, effective_width: u16, height: u16) {
+        *self.cached_wrap.borrow_mut() = Some(PlainWrapCache {
+            requested_width,
+            effective_width,
+            height,
+        });
+    }
+
+    fn try_cached_height(&self, requested_width: u16, effective_width: u16) -> Option<u16> {
+        self.cached_wrap
+            .borrow()
+            .as_ref()
+            .and_then(|cache| {
+                if cache.requested_width == requested_width
+                    && cache.effective_width == effective_width
+                {
+                    Some(cache.height)
+                } else {
+                    None
+                }
+            })
+    }
 }
 
 impl HistoryCell for PlainHistoryCell {
@@ -1114,23 +1156,31 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        if matches!(self.kind, HistoryCellType::User) {
+        let effective_width = if matches!(self.kind, HistoryCellType::User) {
             // Match input composer wrapping by reserving shared right padding.
             // Keep this in sync with the composer constants.
-            let inner_w = width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into());
-            let text = Text::from(self.display_lines_trimmed());
-            Paragraph::new(text)
-                .wrap(Wrap { trim: false })
-                .line_count(inner_w)
-                .try_into()
-                .unwrap_or(0)
+            width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
         } else {
-            Paragraph::new(Text::from(self.display_lines_trimmed()))
-                .wrap(Wrap { trim: false })
-                .line_count(width)
-                .try_into()
-                .unwrap_or(0)
+            width
+        };
+
+        if let Some(height) = self.try_cached_height(width, effective_width) {
+            return height;
         }
+
+        if effective_width == 0 {
+            self.cache_desired_height(width, effective_width, 0);
+            return 0;
+        }
+
+        let text = Text::from(self.display_lines_trimmed());
+        let height: u16 = Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .line_count(effective_width)
+            .try_into()
+            .unwrap_or(0);
+        self.cache_desired_height(width, effective_width, height);
+        height
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
@@ -1144,11 +1194,7 @@ impl HistoryCell for PlainHistoryCell {
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
 
         // Clear area
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         let lines = self.display_lines_trimmed();
         let text = Text::from(lines);
@@ -1434,11 +1480,7 @@ impl HistoryCell for AssistantMarkdownCell {
         let bg_style = Style::default().bg(cell_bg);
 
         // Clear full area with assistant background
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Build or reuse cached segments for this width
         let plan = self.ensure_layout(area.width);
@@ -1786,11 +1828,7 @@ impl HistoryCell for ExecCell {
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text());
-            for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
-                for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            fill_rect(buf, pre_area, Some(' '), bg_style);
             let pre_block =
                 Block::default().style(Style::default().bg(crate::colors::background()));
             Paragraph::new(pre_text)
@@ -1813,11 +1851,7 @@ impl HistoryCell for ExecCell {
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text_dim());
-            for y in out_area.y..out_area.y.saturating_add(out_area.height) {
-                for x in out_area.x..out_area.x.saturating_add(out_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            fill_rect(buf, out_area, Some(' '), bg_style);
             let block = Block::default()
                 .borders(Borders::LEFT)
                 .border_style(
@@ -1858,9 +1892,7 @@ impl HistoryCell for ExecCell {
                     height: status_height,
                 };
                 let bg_style = Style::default().bg(crate::colors::background());
-                for x in status_area.x..status_area.x.saturating_add(status_area.width) {
-                    buf[(x, status_area.y)].set_char(' ').set_style(bg_style);
-                }
+                fill_rect(buf, status_area, Some(' '), bg_style);
                 Paragraph::new(Text::from(vec![line]))
                     .wrap(Wrap { trim: false })
                     .style(bg_style)
@@ -2041,11 +2073,7 @@ impl HistoryCell for DiffCell {
         // Hard clear the entire area: write spaces + background so any
         // previously longer content does not bleed into shorter frames.
         let bg = Style::default().bg(crate::colors::background());
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg);
 
         // Center the sign in the two-column gutter by leaving one leading
         // space and drawing the sign in the second column.
@@ -2698,11 +2726,7 @@ impl HistoryCell for MergedExecCell {
             .bg(crate::colors::background())
             .fg(crate::colors::text());
         // Hard clear area first
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg);
 
         // Build one header line based on exec kind
         let header_line = match self.kind {
@@ -4448,11 +4472,7 @@ impl HistoryCell for CollapsibleReasoningCell {
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text());
-            for y in area.y..area.y.saturating_add(area.height) {
-                for x in area.x..area.x.saturating_add(area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            fill_rect(buf, area, Some(' '), bg_style);
             let lines = self.display_lines_trimmed();
             Paragraph::new(Text::from(lines))
                 .block(Block::default().style(Style::default().bg(crate::colors::background())))
@@ -4481,11 +4501,7 @@ impl HistoryCell for CollapsibleReasoningCell {
         // Clear area
         let bg = crate::colors::background();
         let bg_style = Style::default().bg(bg).fg(dim);
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Left border like exec output: 1px border + 1px left padding
         let block = Block::default()
@@ -4556,11 +4572,7 @@ impl HistoryCell for StreamingContentCell {
         let bg_style = Style::default().bg(cell_bg);
 
         // Hard clear area with assistant background
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Build or reuse cached segments for this width
         let plan = self.ensure_stream_layout(area.width);
@@ -5673,10 +5685,7 @@ pub(crate) fn new_background_event(message: String) -> PlainHistoryCell {
     let msg_norm = normalize_overwrite_sequences(&message);
     lines.extend(msg_norm.lines().map(|line| ansi_escape_line(line).dim()));
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::BackgroundEvent,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::BackgroundEvent)
 }
 
 pub(crate) fn new_session_info(
@@ -5696,15 +5705,9 @@ pub(crate) fn new_session_info(
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("notice".dim()));
         lines.extend(popular_commands_lines());
-        PlainHistoryCell {
-            lines,
-            kind: HistoryCellType::Notice,
-        }
+        PlainHistoryCell::new(lines, HistoryCellType::Notice)
     } else if config.model == model {
-        PlainHistoryCell {
-            lines: Vec::new(),
-            kind: HistoryCellType::Notice,
-        }
+        PlainHistoryCell::new(Vec::new(), HistoryCellType::Notice)
     } else {
         let lines = vec![
             Line::from("model changed:")
@@ -5714,10 +5717,7 @@ pub(crate) fn new_session_info(
             Line::from(format!("used: {model}")),
             // No empty line at end - trimming and spacing handled by renderer
         ];
-        PlainHistoryCell {
-            lines,
-            kind: HistoryCellType::Notice,
-        }
+        PlainHistoryCell::new(lines, HistoryCellType::Notice)
     }
 }
 
@@ -5795,10 +5795,7 @@ pub(crate) fn new_popular_commands_notice(_connecting_mcp: bool) -> PlainHistory
     lines.extend(popular_commands_lines());
     // Connecting status is now rendered as a separate BackgroundEvent cell
     // with its own gutter icon and spacing. Keep this notice focused.
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 /// Background status cell shown during startup while external MCP servers
@@ -5814,10 +5811,7 @@ pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
         "Connecting MCP servers…",
         Style::default().fg(crate::colors::text_dim()),
     )));
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::BackgroundEvent,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::BackgroundEvent)
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
@@ -5842,10 +5836,7 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     let content = trim_empty_lines(content);
     lines.extend(content);
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::User,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::User)
 }
 
 /// Render a queued user message that will be sent in the next turn.
@@ -5874,10 +5865,7 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
     let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
     lines.extend(content);
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::User,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::User)
 }
 
 /// Expand horizontal tabs to spaces using a fixed tab stop.
@@ -5888,10 +5876,7 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
 
 #[allow(dead_code)]
 pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
-    PlainHistoryCell {
-        lines: vec![line],
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(vec![line], HistoryCellType::Notice)
 }
 
 pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
@@ -8276,11 +8261,7 @@ impl HistoryCell for WebFetchToolCell {
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text());
-            for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
-                for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            fill_rect(buf, pre_area, Some(' '), bg_style);
             let pre_block =
                 Block::default().style(Style::default().bg(crate::colors::background()));
             Paragraph::new(pre_text)
@@ -8302,11 +8283,7 @@ impl HistoryCell for WebFetchToolCell {
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text_dim());
-            for y in body_area.y..body_area.y.saturating_add(body_area.height) {
-                for x in body_area.x..body_area.x.saturating_add(body_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            fill_rect(buf, body_area, Some(' '), bg_style);
             let block = Block::default()
                 .borders(Borders::LEFT)
                 .border_style(
@@ -8948,10 +8925,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
             .map(|line| ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))),
     );
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Error,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Error)
 }
 
 pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
@@ -8980,10 +8954,7 @@ pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainH
             .bold(),
         Line::from(format!("Value: {}", reasoning_effort)),
     ];
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 pub(crate) fn new_model_output(model: &str, effort: ReasoningEffort) -> PlainHistoryCell {
@@ -8995,10 +8966,7 @@ pub(crate) fn new_model_output(model: &str, effort: ReasoningEffort) -> PlainHis
         Line::from(format!("Model: {}", model)),
         Line::from(format!("Reasoning Effort: {}", effort)),
     ];
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 // Continue with more factory functions...
@@ -9196,10 +9164,7 @@ pub(crate) fn new_status_output(
         }
     }
 
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {
@@ -9214,10 +9179,7 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
         Line::from(" 6. Improve documentation in @filename"),
         Line::from(""),
     ];
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 fn plan_progress_icon(total: usize, completed: usize) -> &'static str {
@@ -9378,12 +9340,12 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     }
 
     lines.push(Line::from(""));
-    PlainHistoryCell {
+    PlainHistoryCell::new(
         lines,
-        kind: HistoryCellType::Patch {
+        HistoryCellType::Patch {
             kind: PatchKind::ApplyFailure,
         },
-    }
+    )
 }
 
 // ==================== PatchSummaryCell ====================

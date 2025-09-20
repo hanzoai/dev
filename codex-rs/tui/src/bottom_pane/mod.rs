@@ -4,6 +4,7 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::user_approval_widget::ApprovalRequest;
 use bottom_pane_view::BottomPaneView;
+use crate::util::buffer::fill_rect;
 use codex_core::protocol::TokenUsage;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
@@ -716,11 +717,7 @@ impl WidgetRef for &BottomPane<'_> {
         let base_style = ratatui::style::Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(base_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), base_style);
 
         let mut y_offset = 0u16;
         if let Some(ring) = &self.live_ring {
@@ -767,11 +764,7 @@ impl WidgetRef for &BottomPane<'_> {
                     };
                     // Ensure view background is painted under its content
                     let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
-                    for y in view_rect.y..view_rect.y.saturating_add(view_rect.height) {
-                        for x in view_rect.x..view_rect.x.saturating_add(view_rect.width) {
-                            buf[(x, y)].set_style(view_bg);
-                        }
-                    }
+                    fill_rect(buf, view_rect, None, view_bg);
                     view.render(view_rect, buf);
                 }
                 return;
@@ -784,22 +777,18 @@ impl WidgetRef for &BottomPane<'_> {
 
             // Add horizontal padding (2 chars on each side) for Message input
             let horizontal_padding = 1u16;
-            let composer_rect = Rect {
-                x: area.x + horizontal_padding,
-                y: area.y + y_offset,
-                width: area.width.saturating_sub(horizontal_padding * 2),
-                // Reserve bottom padding
-                height: (area.height - y_offset)
-                    - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1)),
-            };
-            // Paint the composer area background before rendering widgets
-            let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
-            for y in composer_rect.y..composer_rect.y.saturating_add(composer_rect.height) {
-                for x in composer_rect.x..composer_rect.x.saturating_add(composer_rect.width) {
-                    buf[(x, y)].set_style(comp_bg);
-                }
-            }
-            (&self.composer).render_ref(composer_rect, buf);
+        let composer_rect = Rect {
+            x: area.x + horizontal_padding,
+            y: area.y + y_offset,
+            width: area.width.saturating_sub(horizontal_padding * 2),
+            // Reserve bottom padding
+            height: (area.height - y_offset)
+                - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1)),
+        };
+        // Paint the composer area background before rendering widgets
+        let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
+        fill_rect(buf, composer_rect, None, comp_bg);
+        (&self.composer).render_ref(composer_rect, buf);
         }
     }
 }
