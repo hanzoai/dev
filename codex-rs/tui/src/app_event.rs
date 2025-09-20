@@ -265,6 +265,7 @@ pub(crate) enum AppEvent {
         suggestion: String,
         ack: Redacted<StdSender<TerminalCommandGate>>,
     },
+    TerminalApprovalDecision { id: u64, approved: bool },
     #[cfg(not(debug_assertions))]
     RunUpdateCommand {
         command: Vec<String>,

@@ -42,6 +42,10 @@ pub(crate) enum ApprovalRequest {
         reason: Option<String>,
         grant_root: Option<PathBuf>,
     },
+    TerminalCommand {
+        id: u64,
+        command: String,
+    },
 }
 
 #[derive(Clone)]
@@ -124,11 +128,27 @@ impl UserApprovalWidget<'_> {
 
                 Paragraph::new(contents).wrap(Wrap { trim: false })
             }
+            ApprovalRequest::TerminalCommand { command, .. } => {
+                let mut cmd_span: Span = format!("$ {command}").into();
+                cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
+                let contents = vec![
+                    Line::from(""),
+                    Line::from(vec![
+                        "? ".fg(crate::colors::info()),
+                        "Run shell command ".bold(),
+                        cmd_span,
+                        " now?".into(),
+                    ]),
+                    Line::from(""),
+                ];
+                Paragraph::new(contents).wrap(Wrap { trim: false })
+            }
         };
 
         let select_options = match &approval_request {
             ApprovalRequest::Exec { command, .. } => build_exec_select_options(command),
             ApprovalRequest::ApplyPatch { .. } => build_patch_select_options(),
+            ApprovalRequest::TerminalCommand { .. } => build_terminal_select_options(),
         };
 
         Self {
@@ -225,6 +245,14 @@ impl UserApprovalWidget<'_> {
     }
 
     fn send_decision_with_feedback(&mut self, decision: ReviewDecision, feedback: String) {
+        if let ApprovalRequest::TerminalCommand { id, .. } = &self.approval_request {
+            let approved = matches!(decision, ReviewDecision::Approved | ReviewDecision::ApprovedForSession);
+            self.app_event_tx
+                .send(AppEvent::TerminalApprovalDecision { id: *id, approved });
+            self.done = true;
+            return;
+        }
+
         // Emit a background event instead of an assistant message.
         let message = match &self.approval_request {
             ApprovalRequest::Exec { command, .. } => {
@@ -239,6 +267,7 @@ impl UserApprovalWidget<'_> {
             ApprovalRequest::ApplyPatch { .. } => {
                 format!("patch approval decision: {:?}", decision)
             }
+            ApprovalRequest::TerminalCommand { .. } => unreachable!("terminal approvals handled earlier"),
         };
         let message = if feedback.trim().is_empty() {
             message
@@ -278,6 +307,7 @@ impl UserApprovalWidget<'_> {
                 id: id.clone(),
                 decision,
             },
+            ApprovalRequest::TerminalCommand { .. } => unreachable!("terminal approvals handled earlier"),
         };
 
         self.app_event_tx.send(AppEvent::CodexOp(op));
@@ -436,6 +466,23 @@ fn build_patch_select_options() -> Vec<SelectOption> {
         SelectOption {
             label: "No, provide feedback".to_string(),
             description: "Do not apply the changes; provide feedback".to_string(),
+            hotkey: KeyCode::Char('n'),
+            action: SelectAction::Abort,
+        },
+    ]
+}
+
+fn build_terminal_select_options() -> Vec<SelectOption> {
+    vec![
+        SelectOption {
+            label: "Yes".to_string(),
+            description: "Approve and run the command".to_string(),
+            hotkey: KeyCode::Char('y'),
+            action: SelectAction::ApproveOnce,
+        },
+        SelectOption {
+            label: "No".to_string(),
+            description: "Dismiss without running the command".to_string(),
             hotkey: KeyCode::Char('n'),
             action: SelectAction::Abort,
         },
