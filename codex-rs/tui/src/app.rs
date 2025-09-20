@@ -1025,15 +1025,17 @@ impl App<'_> {
                 }
                 AppEvent::OpenTerminal(launch) => {
                     let mut spawn = None;
+                    let requires_immediate_command = !launch.command.is_empty();
+                    let restricted = !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess);
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        if !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess) {
+                        if restricted && requires_immediate_command {
                             widget.history_push(history_cell::new_error_event(
-                                "Terminal requires danger-full-access sandbox to run install commands.".to_string(),
+                                "Terminal requires Full Access to auto-run install commands.".to_string(),
                             ));
                             widget.show_agents_overview_ui();
                         } else {
                             widget.terminal_open(&launch);
-                            if !launch.command.is_empty() {
+                            if requires_immediate_command {
                                 spawn = Some((
                                     launch.id,
                                     launch.command.clone(),
@@ -1140,6 +1142,11 @@ impl App<'_> {
                         widget.close_terminal_overlay();
                     }
                     self.terminal_runs.remove(&id);
+                }
+                AppEvent::TerminalApprovalDecision { id, approved } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_terminal_approval_decision(id, approved);
+                    }
                 }
                 AppEvent::TerminalAfter(after) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
