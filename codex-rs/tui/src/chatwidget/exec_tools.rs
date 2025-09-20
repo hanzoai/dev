@@ -394,6 +394,34 @@ pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize)
     }
 }
 
+fn try_upgrade_fallback_exec_cell(
+    chat: &mut ChatWidget<'_>,
+    ev: &ExecCommandBeginEvent,
+) -> bool {
+    for i in (0..chat.history_cells.len()).rev() {
+        if let Some(exec) = chat.history_cells[i]
+            .as_any_mut()
+            .downcast_mut::<history_cell::ExecCell>()
+        {
+            let looks_like_fallback = exec.output.is_some()
+                && exec.parsed.is_empty()
+                && exec.command.len() == 1
+                && exec.command
+                    .first()
+                    .map(|cmd| cmd == &ev.call_id)
+                    .unwrap_or(false);
+            if looks_like_fallback {
+                exec.replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
+                try_merge_completed_exec_at(chat, i);
+                chat.invalidate_height_cache();
+                chat.request_redraw();
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub(super) fn handle_exec_begin_now(
     chat: &mut ChatWidget<'_>,
     ev: ExecCommandBeginEvent,
@@ -403,6 +431,9 @@ pub(super) fn handle_exec_begin_now(
         .ended_call_ids
         .contains(&super::ExecCallId(ev.call_id.clone()))
     {
+        if try_upgrade_fallback_exec_cell(chat, &ev) {
+            return;
+        }
         return;
     }
     for cell in &chat.history_cells {
