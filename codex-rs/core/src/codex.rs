@@ -3248,10 +3248,16 @@ async fn run_turn(
     let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
 
     let tc = &**turn_context;
+    let agents_active = {
+        let manager = AGENT_MANAGER.read().await;
+        manager.has_active_agents()
+    };
+
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
         browser_enabled,
+        agents_active,
     );
 
     let mut retries = 0;
