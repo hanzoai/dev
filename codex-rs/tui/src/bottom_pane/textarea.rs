@@ -1,3 +1,4 @@
+use crate::util::buffer::fill_rect;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -923,17 +924,18 @@ impl TextArea {
     ) {
         let bg = crate::colors::background();
         let fg = crate::colors::text();
+        let line_style = Style::default().bg(bg).fg(fg);
         for (row, idx) in range.enumerate() {
             let r = &lines[idx];
             let y = area.y + row as u16;
-            // Fill the entire row area with theme background to avoid terminal default leaking through.
-            let line_bg = Style::default().bg(bg).fg(fg);
-            for x in area.x..area.x + area.width {
-                buf[(x, y)].set_style(line_bg);
-            }
+            // Paint the row background in one pass to avoid per-cell index math.
+            fill_rect(buf, Rect::new(area.x, y, area.width, 1), None, line_style);
+
             // Draw the text on top using theme foreground + background to preserve consistent look.
-            let line_range = r.start..r.end - 1;
-            buf.set_string(area.x, y, &self.text[line_range.clone()], line_bg);
+            if r.end > r.start {
+                let line_range = r.start..r.end - 1;
+                buf.set_string(area.x, y, &self.text[line_range], line_style);
+            }
         }
     }
 }
