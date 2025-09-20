@@ -1076,14 +1076,14 @@ impl HistoryCell for ExploreAggregationCell {
 pub(crate) struct PlainHistoryCell {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) kind: HistoryCellType,
-    cached_wrap: std::cell::RefCell<Option<PlainWrapCache>>,
+    cached_layout: std::cell::RefCell<Option<PlainLayoutCache>>,
 }
 
-#[derive(Clone, Copy)]
-struct PlainWrapCache {
+struct PlainLayoutCache {
     requested_width: u16,
     effective_width: u16,
     height: u16,
+    buffer: Option<Buffer>,
 }
 
 impl PlainHistoryCell {
@@ -1091,35 +1091,94 @@ impl PlainHistoryCell {
         Self {
             lines,
             kind,
-            cached_wrap: std::cell::RefCell::new(None),
+            cached_layout: std::cell::RefCell::new(None),
         }
     }
 
     pub(crate) fn invalidate_layout_cache(&self) {
-        self.cached_wrap.borrow_mut().take();
+        self.cached_layout.borrow_mut().take();
     }
 
-    fn cache_desired_height(&self, requested_width: u16, effective_width: u16, height: u16) {
-        *self.cached_wrap.borrow_mut() = Some(PlainWrapCache {
+    fn ensure_layout(&self, requested_width: u16, effective_width: u16) {
+        let mut cache = self.cached_layout.borrow_mut();
+        let needs_rebuild = cache
+            .as_ref()
+            .map_or(true, |cached| {
+                cached.requested_width != requested_width
+                    || cached.effective_width != effective_width
+            });
+        if needs_rebuild {
+            *cache = Some(self.build_layout(requested_width, effective_width));
+        }
+    }
+
+    fn build_layout(&self, requested_width: u16, effective_width: u16) -> PlainLayoutCache {
+        if requested_width == 0 || effective_width == 0 {
+            return PlainLayoutCache {
+                requested_width,
+                effective_width,
+                height: 0,
+                buffer: None,
+            };
+        }
+
+        let cell_bg = match self.kind {
+            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ => crate::colors::background(),
+        };
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+
+        let trimmed_lines = self.display_lines_trimmed();
+        let text = Text::from(trimmed_lines.clone());
+        let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+        let height: u16 = paragraph
+            .line_count(effective_width)
+            .try_into()
+            .unwrap_or(0);
+
+        if height == 0 {
+            return PlainLayoutCache {
+                requested_width,
+                effective_width,
+                height,
+                buffer: None,
+            };
+        }
+
+        let render_height = height.max(1);
+        let render_area = Rect::new(0, 0, requested_width, render_height);
+        let mut buffer = Buffer::empty(render_area);
+        fill_rect(&mut buffer, render_area, Some(' '), bg_style);
+
+        if matches!(self.kind, HistoryCellType::User) {
+            let block = Block::default()
+                .style(bg_style)
+                .padding(Padding {
+                    left: 0,
+                    right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
+                    top: 0,
+                    bottom: 0,
+                });
+            Paragraph::new(Text::from(trimmed_lines))
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .style(bg_style)
+                .render(render_area, &mut buffer);
+        } else {
+            let block = Block::default().style(Style::default().bg(cell_bg));
+            Paragraph::new(Text::from(trimmed_lines))
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().bg(cell_bg))
+                .render(render_area, &mut buffer);
+        }
+
+        PlainLayoutCache {
             requested_width,
             effective_width,
             height,
-        });
-    }
-
-    fn try_cached_height(&self, requested_width: u16, effective_width: u16) -> Option<u16> {
-        self.cached_wrap
-            .borrow()
-            .as_ref()
-            .and_then(|cache| {
-                if cache.requested_width == requested_width
-                    && cache.effective_width == effective_width
-                {
-                    Some(cache.height)
-                } else {
-                    None
-                }
-            })
+            buffer: Some(buffer),
+        }
     }
 }
 
@@ -1164,55 +1223,64 @@ impl HistoryCell for PlainHistoryCell {
             width
         };
 
-        if let Some(height) = self.try_cached_height(width, effective_width) {
-            return height;
-        }
-
-        if effective_width == 0 {
-            self.cache_desired_height(width, effective_width, 0);
-            return 0;
-        }
-
-        let text = Text::from(self.display_lines_trimmed());
-        let height: u16 = Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .line_count(effective_width)
-            .try_into()
-            .unwrap_or(0);
-        self.cache_desired_height(width, effective_width, height);
-        height
+        self.ensure_layout(width, effective_width);
+        self.cached_layout
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.height)
+            .unwrap_or(0)
     }
 
-    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if !matches!(self.kind, HistoryCellType::User) {
-            // Fallback to default behavior for non-user cells
-            return HistoryCell::custom_render_with_skip(self, area, buf, skip_rows);
-        }
+    fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        let requested_width = area.width;
+        let effective_width = if matches!(self.kind, HistoryCellType::User) {
+            requested_width
+                .saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
+        } else {
+            requested_width
+        };
 
-        // Render User cells with extra right padding to mirror the composer input padding.
-        let cell_bg = crate::colors::background();
+        let cell_bg = match self.kind {
+            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ => crate::colors::background(),
+        };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-
-        // Clear area
         fill_rect(buf, area, Some(' '), bg_style);
 
-        let lines = self.display_lines_trimmed();
-        let text = Text::from(lines);
+        if requested_width == 0 || effective_width == 0 {
+            return;
+        }
 
-        // Add Block with padding: reserve shared columns on the right.
-        let block = Block::default().style(bg_style).padding(Padding {
-            left: 0,
-            right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
-            top: 0,
-            bottom: 0,
-        });
+        self.ensure_layout(requested_width, effective_width);
+        let cache_ref = self.cached_layout.borrow();
+        let Some(cache) = cache_ref.as_ref() else {
+            return;
+        };
+        let Some(src_buffer) = cache.buffer.as_ref() else {
+            return;
+        };
 
-        Paragraph::new(text)
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((skip_rows, 0))
-            .style(bg_style)
-            .render(area, buf);
+        let content_height = cache.height as usize;
+        if content_height == 0 || skip_rows as usize >= content_height {
+            return;
+        }
+
+        let src_area = src_buffer.area();
+        let copy_width = usize::from(src_area.width.min(area.width));
+        let max_rows = usize::from(area.height);
+
+        for row_offset in 0..max_rows {
+            let src_y = skip_rows as usize + row_offset;
+            if src_y >= content_height || src_y >= usize::from(src_area.height) {
+                break;
+            }
+            let dest_y = area.y + row_offset as u16;
+            for col_offset in 0..copy_width {
+                let dest_x = area.x + col_offset as u16;
+                let src_cell = &src_buffer[(col_offset as u16, src_y as u16)];
+                buf[(dest_x, dest_y)] = src_cell.clone();
+            }
+        }
     }
 }
 
@@ -1906,6 +1974,21 @@ impl ExecCell {
     #[cfg(test)]
     fn has_bold_command(&self) -> bool {
         self.has_bold_command
+    }
+
+    pub(crate) fn replace_command_metadata(
+        &mut self,
+        command: Vec<String>,
+        parsed: Vec<ParsedCommand>,
+    ) {
+        self.command = command;
+        self.parsed = parsed;
+        self.has_bold_command = command_has_bold_token(&self.command);
+        self.cached_display_lines.borrow_mut().take();
+        self.cached_pre_lines.borrow_mut().take();
+        self.cached_out_lines.borrow_mut().take();
+        self.cached_wrap.borrow_mut().take();
+        self.stream_status_line.borrow_mut().take();
     }
     /// Compute wrapped row totals for the preamble and the output at the given width.
     /// Uses an ASCII fast path when all spans are ASCII; caches totals for finalized execs.
