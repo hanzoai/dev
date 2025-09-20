@@ -1042,9 +1042,6 @@ impl ChatWidget<'_> {
             }
         }
         for key in &ready {
-            if self.interrupts.has_exec_begin_for(key.as_ref()) {
-                continue;
-            }
             if let Some((ev, order, _t0)) = self.exec.pending_exec_ends.remove(&key) {
                 // Regardless of whether a Begin has arrived by now, handle the End;
                 // handle_exec_end_now pairs with a running Exec if present, or falls back.
@@ -1817,14 +1814,16 @@ impl ChatWidget<'_> {
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
             let mut has_wait_running = false;
-            for (_, idx) in self.tools_state.running_custom_tools.iter() {
-                if let Some(cell) = self.history_cells.get(*idx).and_then(|c| c
+            for entry in self.tools_state.running_custom_tools.values() {
+                if let Some(idx) = self.resolve_running_tool_index(entry) {
+                    if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
                     .as_any()
                     .downcast_ref::<history_cell::RunningToolCallCell>())
-                {
-                    if cell.has_title("Waiting") {
-                        has_wait_running = true;
-                        break;
+                    {
+                        if cell.has_title("Waiting") {
+                            has_wait_running = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -2021,7 +2020,6 @@ impl ChatWidget<'_> {
                 pending_exec_ends: HashMap::new(),
                 suppressed_exec_end_call_ids: HashSet::new(),
                 suppressed_exec_end_order: VecDeque::new(),
-                orphaned_exec_ends: HashMap::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
@@ -2211,7 +2209,6 @@ impl ChatWidget<'_> {
                 pending_exec_ends: HashMap::new(),
                 suppressed_exec_end_call_ids: HashSet::new(),
                 suppressed_exec_end_order: VecDeque::new(),
-                orphaned_exec_ends: HashMap::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
@@ -2936,6 +2933,20 @@ impl ChatWidget<'_> {
             self.refresh_explore_trailing_flags();
             // Keep debug info for this cell index as-is.
         }
+    }
+
+    fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
+        if let Some(pos) = self
+            .cell_order_seq
+            .iter()
+            .position(|key| *key == entry.order_key)
+        {
+            return Some(pos);
+        }
+        if entry.fallback_index < self.history_cells.len() {
+            return Some(entry.fallback_index);
+        }
+        None
     }
 
     fn history_remove_at(&mut self, idx: usize) {
@@ -4435,7 +4446,7 @@ impl ChatWidget<'_> {
                 if idx < self.history_cells.len() {
                     self.tools_state
                         .running_custom_tools
-                        .insert(ToolCallId(call_id.clone()), idx);
+                        .insert(ToolCallId(call_id.clone()), RunningToolEntry::new(ok, idx));
                 }
 
                 // Update border status based on tool
@@ -4479,13 +4490,16 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
-                let entry_idx = self
+                let running_entry = self
                     .tools_state
                     .running_custom_tools
                     .remove(&ToolCallId(call_id.clone()));
+                let resolved_idx = running_entry
+                    .as_ref()
+                    .and_then(|entry| self.resolve_running_tool_index(entry));
 
                 if tool_name == "apply_patch" && success {
-                    if let Some(idx) = entry_idx {
+                    if let Some(idx) = resolved_idx {
                         if idx < self.history_cells.len() {
                             let is_running_tool = self.history_cells[idx]
                                 .as_any()
@@ -4504,22 +4518,12 @@ impl ChatWidget<'_> {
 
                 if tool_name == "wait" && success {
                     let target = wait_target_from_params(params_string.as_ref(), &call_id);
-                    let message = format!("Waited for {}", target);
-                    if let Some(idx) = entry_idx {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(
-                                idx,
-                                Box::new(history_cell::new_background_event(message.clone())),
-                            );
-                        } else {
-                            let _ = self.history_insert_with_key_global(
-                                Box::new(history_cell::new_background_event(message.clone())),
-                                ok,
-                            );
-                        }
+                    let wait_cell = history_cell::new_completed_wait_tool_call(target, duration);
+                    if let Some(idx) = resolved_idx {
+                        self.history_replace_at(idx, Box::new(wait_cell));
                     } else {
                         let _ = self.history_insert_with_key_global(
-                            Box::new(history_cell::new_background_event(message.clone())),
+                            Box::new(wait_cell),
                             ok,
                         );
                     }
@@ -4540,15 +4544,8 @@ impl ChatWidget<'_> {
                         HistoryCellType::Error,
                     );
 
-                    if let Some(idx) = entry_idx {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(idx, Box::new(wait_cancelled_cell));
-                        } else {
-                            let _ = self.history_insert_with_key_global(
-                                Box::new(wait_cancelled_cell),
-                                ok,
-                            );
-                        }
+                    if let Some(idx) = resolved_idx {
+                        self.history_replace_at(idx, Box::new(wait_cancelled_cell));
                     } else {
                         let _ = self.history_insert_with_key_global(
                             Box::new(wait_cancelled_cell),
@@ -4570,12 +4567,8 @@ impl ChatWidget<'_> {
                         success,
                         content,
                     );
-                    if let Some(idx) = entry_idx {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(idx, Box::new(completed));
-                        } else {
-                            let _ = self.history_insert_with_key_global(Box::new(completed), ok);
-                        }
+                    if let Some(idx) = resolved_idx {
+                        self.history_replace_at(idx, Box::new(completed));
                     } else {
                         let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                     }
@@ -4593,12 +4586,8 @@ impl ChatWidget<'_> {
                     success,
                     content,
                 );
-                if let Some(idx) = entry_idx {
-                    if idx < self.history_cells.len() {
-                        self.history_replace_at(idx, Box::new(completed));
-                    } else {
-                        let _ = self.history_insert_with_key_global(Box::new(completed), ok);
-                    }
+                if let Some(idx) = resolved_idx {
+                    self.history_replace_at(idx, Box::new(completed));
                 } else {
                     let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                 }
@@ -7111,6 +7100,11 @@ impl ChatWidget<'_> {
                 .downcast_mut::<history_cell::StreamingContentCell>()
             {
                 stream.retint(&old, &new);
+            } else if let Some(wait) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::WaitStatusCell>()
+            {
+                wait.retint(&old, &new);
             } else if let Some(assist) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::AssistantMarkdownCell>()
@@ -14044,7 +14038,6 @@ struct ExecState {
     >,
     suppressed_exec_end_call_ids: HashSet<ExecCallId>,
     suppressed_exec_end_order: VecDeque<ExecCallId>,
-    orphaned_exec_ends: HashMap<ExecCallId, (ExecCommandEndEvent, codex_core::protocol::OrderMeta)>,
 }
 
 impl ExecState {
@@ -14071,9 +14064,24 @@ impl ExecState {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RunningToolEntry {
+    order_key: OrderKey,
+    fallback_index: usize,
+}
+
+impl RunningToolEntry {
+    fn new(order_key: OrderKey, fallback_index: usize) -> Self {
+        Self {
+            order_key,
+            fallback_index,
+        }
+    }
+}
+
 #[derive(Default)]
 struct ToolState {
-    running_custom_tools: HashMap<ToolCallId, usize>,
+    running_custom_tools: HashMap<ToolCallId, RunningToolEntry>,
     running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
 }
 #[derive(Default)]
