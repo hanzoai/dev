@@ -1042,6 +1042,9 @@ impl ChatWidget<'_> {
             }
         }
         for key in &ready {
+            if self.interrupts.has_exec_begin_for(key.as_ref()) {
+                continue;
+            }
             if let Some((ev, order, _t0)) = self.exec.pending_exec_ends.remove(&key) {
                 // Regardless of whether a Begin has arrived by now, handle the End;
                 // handle_exec_end_now pairs with a running Exec if present, or falls back.
@@ -2018,6 +2021,7 @@ impl ChatWidget<'_> {
                 pending_exec_ends: HashMap::new(),
                 suppressed_exec_end_call_ids: HashSet::new(),
                 suppressed_exec_end_order: VecDeque::new(),
+                orphaned_exec_ends: HashMap::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
@@ -2207,6 +2211,7 @@ impl ChatWidget<'_> {
                 pending_exec_ends: HashMap::new(),
                 suppressed_exec_end_call_ids: HashSet::new(),
                 suppressed_exec_end_order: VecDeque::new(),
+                orphaned_exec_ends: HashMap::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
             tools_state: ToolState {
@@ -14039,6 +14044,7 @@ struct ExecState {
     >,
     suppressed_exec_end_call_ids: HashSet<ExecCallId>,
     suppressed_exec_end_order: VecDeque<ExecCallId>,
+    orphaned_exec_ends: HashMap<ExecCallId, (ExecCommandEndEvent, codex_core::protocol::OrderMeta)>,
 }
 
 impl ExecState {

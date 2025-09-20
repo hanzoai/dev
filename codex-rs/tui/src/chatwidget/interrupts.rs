@@ -70,6 +70,13 @@ impl InterruptManager {
 
     // Plan updates are inserted near-time immediately; no interrupt queue entry needed.
 
+    pub(crate) fn has_exec_begin_for(&self, call_id: &str) -> bool {
+        self.queue.iter().any(|q| match q {
+            QueuedInterrupt::ExecBegin { ev, .. } => ev.call_id == call_id,
+            _ => false,
+        })
+    }
+
     pub(crate) fn flush_all(&mut self, chat: &mut ChatWidget<'_>) {
         // Ensure stable order
         self.queue.sort_by(|a, b| seq_of(a).cmp(&seq_of(b)));
