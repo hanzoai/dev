@@ -4,7 +4,8 @@ use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::slash_command::SlashCommand;
-use crate::util::buffer::fill_rect;
+use crate::util::buffer::{fill_rect, write_line};
+use crate::insert_history::word_wrap_lines;
 use crate::text_formatting::format_json_compact;
 use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
@@ -1424,7 +1425,9 @@ impl AssistantMarkdownCell {
         while let Some(line) = iter.next() {
             if crate::render::line_utils::is_code_block_painted(&line) {
                 if !text_buf.is_empty() {
-                    segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+                    let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+                    segs.push(AssistantSeg::Text(wrapped));
+                    text_buf.clear();
                 }
                 let mut chunk = vec![line];
                 while let Some(n) = iter.peek() {
@@ -1458,7 +1461,9 @@ impl AssistantMarkdownCell {
             }
             if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
                 if !text_buf.is_empty() {
-                    segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+                    let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+                    segs.push(AssistantSeg::Text(wrapped));
+                    text_buf.clear();
                 }
                 let hr = Line::from(Span::styled(
                     std::iter::repeat('─')
@@ -1472,7 +1477,9 @@ impl AssistantMarkdownCell {
             if text_wrap_width > 4 {
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
                     if !text_buf.is_empty() {
-                        segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+                        let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+                        segs.push(AssistantSeg::Text(wrapped));
+                        text_buf.clear();
                     }
                     segs.push(AssistantSeg::Bullet(wrap_bullet_line(
                         line,
@@ -1486,7 +1493,9 @@ impl AssistantMarkdownCell {
             text_buf.push(line);
         }
         if !text_buf.is_empty() {
-            segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf)));
+            let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+            segs.push(AssistantSeg::Text(wrapped));
+            text_buf.clear();
         }
 
         // Precompute rows per segment and total with top/bottom padding
@@ -1495,11 +1504,7 @@ impl AssistantMarkdownCell {
         for seg in &segs {
             let rows = match seg {
                 AssistantSeg::Bullet(lines) => lines.len() as u16,
-                AssistantSeg::Text(lines) => Paragraph::new(Text::from(lines.clone()))
-                    .wrap(Wrap { trim: false })
-                    .line_count(text_wrap_width)
-                    .try_into()
-                    .unwrap_or(0),
+                AssistantSeg::Text(lines) => lines.len() as u16,
                 AssistantSeg::Code(lines) => lines.len() as u16 + 2,
             };
             seg_rows.push(rows);
@@ -1554,7 +1559,7 @@ impl HistoryCell for AssistantMarkdownCell {
         let plan = self.ensure_layout(area.width);
         let segs = &plan.segs;
         let seg_rows = &plan.seg_rows;
-        let text_wrap_width = area.width;
+        let _text_wrap_width = area.width;
 
         // Streaming-style top padding row for the entire assistant cell
         let mut remaining_skip = skip_rows;
@@ -1580,72 +1585,28 @@ impl HistoryCell for AssistantMarkdownCell {
                 return;
             }
             match seg {
-                Seg::Text(lines) => {
-                    // Measure height with wrap
-                    let txt = Text::from(lines.clone());
-                    let total: u16 = Paragraph::new(txt.clone())
-                        .wrap(Wrap { trim: false })
-                        .line_count(text_wrap_width)
-                        .try_into()
-                        .unwrap_or(0);
-                    if *skip >= total {
-                        *skip -= total;
-                        return;
-                    }
-                    // Visible height in remaining space
-                    let avail = end_y.saturating_sub(*y);
-                    let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 {
-                        return;
-                    }
-                    let rect = Rect {
-                        x: area.x,
-                        y: *y,
-                        width: area.width,
-                        height: draw_h,
-                    };
-                    Paragraph::new(txt)
-                        .block(Block::default().style(bg_style))
-                        .wrap(Wrap { trim: false })
-                        .scroll((*skip, 0))
-                        .style(bg_style)
-                        .render(rect, buf);
-                    *y = y.saturating_add(draw_h);
-                    *skip = 0;
-                }
-                Seg::Bullet(lines) => {
+                Seg::Text(lines) | Seg::Bullet(lines) => {
                     let total = lines.len() as u16;
                     if *skip >= total {
                         *skip -= total;
                         return;
                     }
-                    let avail = end_y.saturating_sub(*y);
-                    let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 {
-                        return;
-                    }
-                    let rect = Rect {
-                        x: area.x,
-                        y: *y,
-                        width: area.width,
-                        height: draw_h,
-                    };
-                    let txt = Text::from(lines.clone());
-                    Paragraph::new(txt)
-                        .block(Block::default().style(bg_style))
-                        .scroll((*skip, 0))
-                        .style(bg_style)
-                        .render(rect, buf);
-                    *y = y.saturating_add(draw_h);
+                    let start = (*skip) as usize;
                     *skip = 0;
+                    for line in lines.iter().skip(start) {
+                        if *y >= end_y {
+                            break;
+                        }
+                        write_line(buf, area.x, *y, area.width, line, bg_style);
+                        *y = y.saturating_add(1);
+                    }
                 }
                 Seg::Code(lines_in) => {
                     if lines_in.is_empty() {
                         return;
                     }
-                    // Extract language sentinel and drop it from visible lines
                     let mut lang_label: Option<String> = None;
-                    let mut lines = lines_in.clone();
+                    let mut lines = lines_in.to_vec();
                     if let Some(first) = lines.first() {
                         let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                         if let Some(s) = flat.strip_prefix("⟦LANG:") {
@@ -1658,12 +1619,10 @@ impl HistoryCell for AssistantMarkdownCell {
                     if lines.is_empty() {
                         return;
                     }
-                    // Determine target width for the code card (content width) and add borders (2) + inner pads (left/right = 2 each)
                     let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
                     let inner_w = max_w.max(1);
-                    // Borders (2) + inner horizontal padding (2 left, 2 right) => +6
                     let card_w = inner_w.saturating_add(6).min(area.width.max(6));
-                    let total = lines.len() as u16 + 2; // top/bottom border only
+                    let total = lines.len() as u16 + 2;
                     if *skip >= total {
                         *skip -= total;
                         return;
@@ -1672,7 +1631,6 @@ impl HistoryCell for AssistantMarkdownCell {
                     if avail == 0 {
                         return;
                     }
-                    // Compute visible slice (accounting for top/bottom border + inner padding rows)
                     let mut local_skip = *skip;
                     let mut top_border = 1u16;
                     if local_skip > 0 {
@@ -1687,19 +1645,13 @@ impl HistoryCell for AssistantMarkdownCell {
                         let drop = local_skip.min(bottom_border);
                         bottom_border -= drop;
                     }
-                    // Compute drawable height in this pass
                     let visible = top_border + (lines.len() as u16 - code_skip) + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 {
                         return;
                     }
-                    // No outer horizontal padding; align card to content area.
-                    let content_x = area.x;
-                    let _content_w = area.width;
-                    let rect_x = content_x;
-                    // Draw bordered block for visible rows
                     let rect = Rect {
-                        x: rect_x,
+                        x: area.x,
                         y: *y,
                         width: card_w,
                         height: draw_h,
@@ -1721,22 +1673,27 @@ impl HistoryCell for AssistantMarkdownCell {
                             Style::default().fg(crate::colors::text_dim()),
                         ));
                     }
-                    // Clone before render so we can compute inner rect after drawing borders
                     let blk_for_inner = blk.clone();
                     blk.render(rect, buf);
-                    // Inner paragraph area (exclude borders)
                     let inner_rect = blk_for_inner.inner(rect);
-                    let inner_h = inner_rect.height.min(rect.height);
-                    if inner_h > 0 {
+                    if inner_rect.height > 0 {
                         let slice_start = code_skip as usize;
                         let slice_end = lines.len();
-                        let txt = Text::from(lines[slice_start..slice_end].to_vec());
-                        Paragraph::new(txt)
-                            .style(Style::default().bg(code_bg))
-                            .block(Block::default().style(Style::default().bg(code_bg)))
-                            .render(inner_rect, buf);
+                        for (idx, line) in lines[slice_start..slice_end].iter().enumerate() {
+                            let inner_y = inner_rect.y.saturating_add(idx as u16);
+                            if inner_y >= inner_rect.y.saturating_add(inner_rect.height) {
+                                break;
+                            }
+                            write_line(
+                                buf,
+                                inner_rect.x,
+                                inner_y,
+                                inner_rect.width,
+                                line,
+                                Style::default().bg(code_bg),
+                            );
+                        }
                     }
-                    // No outside padding stripes.
                     *y = y.saturating_add(draw_h);
                     *skip = 0;
                 }
@@ -1747,8 +1704,6 @@ impl HistoryCell for AssistantMarkdownCell {
             if cur_y >= end_y {
                 break;
             }
-            // Clamp skip to precomputed rows for this segment to avoid extra measure work
-            let _before = remaining_skip;
             let rows = seg_rows.get(seg_idx).copied().unwrap_or(0);
             if remaining_skip >= rows {
                 remaining_skip -= rows;
@@ -4738,17 +4693,13 @@ impl HistoryCell for StreamingContentCell {
                 % FRAMES.len();
             let frame = FRAMES[frame_idx];
 
-            segs.push(AssistantSeg::Text(vec![Line::styled(
+            let ellipsis_line = Line::styled(
                 frame.to_string(),
                 Style::default().fg(crate::colors::text_dim()),
-            )]));
-            seg_rows.push(
-                Paragraph::new(Text::from(vec![Line::from(frame)]))
-                    .wrap(Wrap { trim: false })
-                    .line_count(text_wrap_width)
-                    .try_into()
-                    .unwrap_or(1),
             );
+            let wrapped = word_wrap_lines(&[ellipsis_line], text_wrap_width);
+            seg_rows.push(wrapped.len() as u16);
+            segs.push(AssistantSeg::Text(wrapped));
         }
 
         // Streaming-style top padding row
