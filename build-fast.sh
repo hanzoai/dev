@@ -20,12 +20,52 @@ Examples:
   TRACE_BUILD=1 ./build-fast.sh
   DETERMINISTIC=1 DETERMINISTIC_FORCE_RELEASE=0 ./build-fast.sh
   DETERMINISTIC=1 DETERMINISTIC_NO_UUID=1 ./build-fast.sh
+  ./build-fast.sh run
+  ./build-fast.sh perf
+  ./build-fast.sh perf run
 USAGE
+}
+
+resolve_bin_path() {
+  case "$PROFILE" in
+    dev-fast)
+      BIN_PATH="./target/dev-fast/code"
+      ;;
+    dev)
+      BIN_PATH="./target/debug/code"
+      ;;
+    *)
+      BIN_PATH="./target/${PROFILE}/code"
+      ;;
+  esac
 }
 
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
+
+RUN_AFTER_BUILD=0
+ARG_PROFILE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    run)
+      RUN_AFTER_BUILD=1
+      ;;
+    *)
+      if [ -n "$ARG_PROFILE" ]; then
+        echo "Error: Multiple profile arguments provided ('${ARG_PROFILE}' and '$1')." >&2
+        usage
+        exit 1
+      fi
+      ARG_PROFILE="$1"
+      ;;
+  esac
+  shift
+done
+
+if [ "$ARG_PROFILE" = "pref" ]; then
+  ARG_PROFILE="perf"
+fi
 
 # Resolve repository paths relative to this script so absolute invocation works
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -42,18 +82,26 @@ REPO_ROOT="${SCRIPT_DIR}"
 # Default to preserving caller environment unless explicitly disabled
 KEEP_ENV="${KEEP_ENV:-1}"
 
-# Use dev-fast profile by default for quick iteration
-# Can override with: PROFILE=release ./build-fast.sh
-PROFILE="${PROFILE:-dev-fast}"
-
-# Determine the correct binary path based on profile
-if [ "$PROFILE" = "dev-fast" ]; then
-    BIN_PATH="./target/dev-fast/code"
-elif [ "$PROFILE" = "dev" ]; then
-    BIN_PATH="./target/debug/code"
+# Track whether the caller explicitly set PROFILE (env or CLI)
+PROFILE_ENV_SUPPLIED=0
+if [ -n "${PROFILE+x}" ]; then
+  PROFILE_ENV_SUPPLIED=1
+  PROFILE_VALUE="$PROFILE"
 else
-    BIN_PATH="./target/${PROFILE}/code"
+  PROFILE_VALUE="dev-fast"
 fi
+
+if [ -n "$ARG_PROFILE" ]; then
+  PROFILE_VALUE="$ARG_PROFILE"
+fi
+
+PROFILE_EXPLICIT=0
+if [ "$PROFILE_ENV_SUPPLIED" -eq 1 ] || [ -n "$ARG_PROFILE" ]; then
+  PROFILE_EXPLICIT=1
+fi
+
+PROFILE="$PROFILE_VALUE"
+resolve_bin_path
 
 # Optional deterministic mode: aim for more stable hashes by removing
 # UUIDs on macOS, disabling debuginfo, and preferring a single-codegen
@@ -63,7 +111,7 @@ if [ "${DETERMINISTIC:-}" = "1" ]; then
     DET_FORCE_REL="${DETERMINISTIC_FORCE_RELEASE:-1}"
     if [ "$PROFILE" = "dev-fast" ] && [ "$DET_FORCE_REL" = "1" ]; then
         PROFILE="release-prod"
-        BIN_PATH="./target/${PROFILE}/code"
+        resolve_bin_path
         echo "Deterministic build: switching profile to ${PROFILE}"
     elif [ "$PROFILE" = "dev-fast" ]; then
         echo "Deterministic build: keeping profile ${PROFILE} (DETERMINISTIC_FORCE_RELEASE=0)"
@@ -76,8 +124,6 @@ if [ "${DETERMINISTIC:-}" = "1" ]; then
     # since some proc-macro dylibs require LC_UUID and will fail to load.
     export RUSTFLAGS="${RUSTFLAGS:-} -C debuginfo=0"
 fi
-
-echo "Building code binary (${PROFILE} mode)..."
 
 # Select the cargo/rustc toolchain to match deploy
 # Prefer rustup with the toolchain pinned in rust-toolchain.toml or $RUSTUP_TOOLCHAIN
@@ -131,19 +177,37 @@ fi
 
 # Optional debug symbol override for profiling sessions
 if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
-  echo "Debug symbols: forcing debuginfo=2 with split-debuginfo=packed"
-  CLEAN_RUSTFLAGS="${RUSTFLAGS:-}"
-  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//-C debuginfo=0/}"
-  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//-C debuginfo=1/}"
-  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//-C debuginfo=2/}"
-  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//  / }"
-  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS## }"
-  CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS%% }"
-  export RUSTFLAGS="${CLEAN_RUSTFLAGS:+$CLEAN_RUSTFLAGS }-C debuginfo=2 -C split-debuginfo=packed"
-  # Prevent release profiles from stripping the symbols we just asked for
+  if [ "$PROFILE" = "perf" ]; then
+    echo "Debug symbols: profile 'perf' already preserves debuginfo"
+  elif [ "$PROFILE_EXPLICIT" -eq 0 ] && [ "$PROFILE" = "dev-fast" ]; then
+    echo "Debug symbols requested: switching profile to perf"
+    PROFILE="perf"
+    resolve_bin_path
+  else
+    PROFILE_ENV_KEY="$(printf "%s" "$PROFILE" | tr '[:lower:]-' '[:upper:]_')"
+    DEBUG_VAR="CARGO_PROFILE_${PROFILE_ENV_KEY}_DEBUG"
+    STRIP_VAR="CARGO_PROFILE_${PROFILE_ENV_KEY}_STRIP"
+    SPLIT_VAR="CARGO_PROFILE_${PROFILE_ENV_KEY}_SPLIT_DEBUGINFO"
+    printf -v "$DEBUG_VAR" '%s' '2'
+    printf -v "$STRIP_VAR" '%s' 'none'
+    printf -v "$SPLIT_VAR" '%s' 'packed'
+    export "$DEBUG_VAR" "$STRIP_VAR" "$SPLIT_VAR"
+    echo "Debug symbols: forcing debuginfo for profile ${PROFILE}"
+  fi
+
+  if [ -n "${RUSTFLAGS:-}" ]; then
+    CLEAN_RUSTFLAGS="${RUSTFLAGS//-C debuginfo=0/}"
+    CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS//  / }"
+    CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS## }"
+    CLEAN_RUSTFLAGS="${CLEAN_RUSTFLAGS%% }"
+    export RUSTFLAGS="${CLEAN_RUSTFLAGS}"
+  fi
+
   export CARGO_PROFILE_RELEASE_STRIP="none"
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
+
+echo "Building code binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
@@ -362,7 +426,17 @@ if [ $? -eq 0 ]; then
     else
       echo "Binary Size: $(du -h "${ABS_BIN_PATH}" | cut -f1)"
     fi
-    
+
+    if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
+      echo "Running ${BIN_PATH}..."
+      "${BIN_PATH}"
+      RUN_STATUS=$?
+      if [ $RUN_STATUS -ne 0 ]; then
+        echo "❌ Run failed with status ${RUN_STATUS}"
+        exit $RUN_STATUS
+      fi
+    fi
+
     if [ "${TRACE_BUILD:-}" = "1" ] && [ -n "$BIN_SHA" ]; then
       echo "--- TRACE_BUILD artifact ---"
       echo "ABS_BIN_PATH: ${ABS_BIN_PATH}"

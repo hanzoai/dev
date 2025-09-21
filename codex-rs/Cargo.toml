@@ -59,6 +59,16 @@ lto = "thin"  # Changed from "fat" to "thin" for faster builds (still good optim
 # remove everything to make the binary as small as possible.
 strip = "symbols"
 
+# Performance profiling profile: optimized but retains debug info
+[profile.perf]
+inherits = "release"
+incremental = false
+codegen-units = 16
+lto = "thin"
+debug = 2
+strip = "none"
+split-debuginfo = "packed"
+
 # Production release profile (for CI/distribution)
 [profile.release-prod]
 inherits = "release"
