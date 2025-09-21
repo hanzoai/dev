@@ -5237,7 +5237,7 @@ impl ChatWidget<'_> {
                 }
             }
             drop(state);
-            tx.send(AppEvent::RequestRedraw);
+            let _ = tx.send(AppEvent::RequestRedraw);
         });
     }
 
