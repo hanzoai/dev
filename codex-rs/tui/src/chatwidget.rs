@@ -11436,6 +11436,83 @@ mod tests {
         ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term, false)
     }
 
+    #[test]
+    fn terminal_overlay_sanitizes_terminal_output() {
+        use std::time::Duration;
+
+        let mut overlay = TerminalOverlay::new(
+            42,
+            "Test".to_string(),
+            "$ example".to_string(),
+            false,
+        );
+
+        overlay.append_chunk(b"col1\tcol2\tcol3\n", false);
+        overlay.append_chunk(b"\x1b]0;ignored title\x07\n", false);
+        overlay.append_chunk(b"plain \x1b[31mred\x1b[0m text\n", false);
+        overlay.append_chunk(b"stderr line\x07 with control\n", true);
+        overlay.finalize(Some(0), Duration::from_millis(0));
+
+        let mut saw_colored_stdout = false;
+        let mut saw_tinted_stderr = false;
+
+        for line in overlay.lines.iter() {
+            let text: String = line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            assert!(
+                !text.chars().any(|ch| (ch < ' ' && ch != ' ')),
+                "line still has control characters: {:?}",
+                text
+            );
+            assert!(!text.contains('\t'), "line still contains a tab: {:?}", text);
+            assert!(
+                !text.contains('\u{001B}'),
+                "line still includes a raw escape sequence: {:?}",
+                text
+            );
+            assert!(
+                !text.contains('\u{0007}'),
+                "line still includes BEL/OSC terminators: {:?}",
+                text
+            );
+
+            if text.contains("col1") {
+                assert!(
+                    text.contains("col1    col2    col3"),
+                    "tabs were not expanded as expected: {:?}",
+                    text
+                );
+            }
+
+            if text.contains("red") {
+                if line
+                    .spans
+                    .iter()
+                    .any(|span| span.content.contains("red") && span.style.fg.is_some())
+                {
+                    saw_colored_stdout = true;
+                }
+            }
+
+            if text.contains("stderr line with control") {
+                if line
+                    .spans
+                    .iter()
+                    .all(|span| span.style.fg == Some(crate::colors::warning()))
+                {
+                    saw_tinted_stderr = true;
+                }
+            }
+        }
+
+        assert!(saw_colored_stdout, "expected ANSI-colored stdout to be preserved");
+        assert!(saw_tinted_stderr, "expected stderr output to retain warning tint");
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn exec_end_before_begin_yields_completed_cell_once() {
         let mut chat = make_widget();
