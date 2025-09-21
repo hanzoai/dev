@@ -56,6 +56,7 @@ mod render;
 mod session_log;
 mod shimmer;
 mod slash_command;
+mod rate_limits_view;
 mod resume;
 mod streaming;
 mod sanitize;

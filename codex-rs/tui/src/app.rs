@@ -1300,6 +1300,11 @@ impl App<'_> {
                                 widget.add_status_output();
                             }
                         }
+                        SlashCommand::Limits => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.add_limits_output();
+                            }
+                        }
                         SlashCommand::Update => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_update_command();
