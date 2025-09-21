@@ -119,6 +119,10 @@ pub(crate) enum AppEvent {
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
+    /// Update validation harness master toggle
+    UpdateValidationPatchHarness(bool),
+    /// Enable/disable a specific validation tool
+    UpdateValidationTool { name: String, enable: bool },
 
     /// Enable/disable a specific MCP server
     UpdateMcpServer { name: String, enable: bool },

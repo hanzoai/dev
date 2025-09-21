@@ -7,6 +7,7 @@ use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
+use crate::config_types::ValidationConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
@@ -242,6 +243,9 @@ pub struct Config {
 
     /// GitHub integration configuration.
     pub github: GithubConfig,
+
+    /// Validation harness configuration.
+    pub validation: ValidationConfig,
 
     /// Resolved subagent command configurations (including custom ones).
     /// If a command with name `plan|solve|code` exists here, it overrides
@@ -826,6 +830,70 @@ pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Res
     Ok(())
 }
 
+/// Persist `github.actionlint_on_patch = <enabled>`.
+pub fn set_github_actionlint_on_patch(
+    codex_home: &Path,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["github"]["actionlint_on_patch"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
+/// Persist `[validation].patch_harness = <enabled>`.
+pub fn set_validation_patch_harness(codex_home: &Path, enabled: bool) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["validation"]["patch_harness"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
+/// Persist `[validation.tools.<tool>] = <enabled>`.
+pub fn set_validation_tool_enabled(
+    codex_home: &Path,
+    tool: &str,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["validation"]["tools"][tool] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
 /// Persist per-project access mode under `[projects."<path>"]` with
 /// `approval_policy` and `sandbox_mode`.
 pub fn set_project_access_mode(
@@ -1363,6 +1431,9 @@ pub struct ConfigToml {
     /// GitHub integration configuration.
     pub github: Option<GithubConfig>,
 
+    /// Validation harness configuration.
+    pub validation: Option<ValidationConfig>,
+
     /// Configuration for subagent commands (built-ins and custom).
     #[serde(default)]
     pub subagents: Option<crate::config_types::SubagentsToml>,
@@ -1832,6 +1903,7 @@ impl Config {
             // Already computed before moving codex_home
             using_chatgpt_auth,
             github: cfg.github.unwrap_or_default(),
+            validation: cfg.validation.unwrap_or_default(),
             subagent_commands: cfg
                 .subagents
                 .map(|s| s.commands)
@@ -2499,6 +2571,7 @@ model_verbosity = "high"
                 debug: false,
                 using_chatgpt_auth: false,
                 github: GithubConfig::default(),
+                validation: ValidationConfig::default(),
                 experimental_resume: None,
                 tui_notifications: Default::default(),
             },
@@ -2567,6 +2640,7 @@ model_verbosity = "high"
             debug: false,
             using_chatgpt_auth: false,
             github: GithubConfig::default(),
+            validation: ValidationConfig::default(),
             experimental_resume: None,
             tui_notifications: Default::default(),
         };
