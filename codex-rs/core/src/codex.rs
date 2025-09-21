@@ -518,6 +518,9 @@ use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
 use crate::protocol::RecordedEvent;
+use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::TokenCountEvent;
+use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
@@ -748,6 +751,8 @@ struct State {
     /// Background execs by call_id
     background_execs: std::collections::HashMap<String, BackgroundExecState>,
     next_internal_sub_id: u64,
+    token_usage_info: Option<TokenUsageInfo>,
+    latest_rate_limits: Option<RateLimitSnapshotEvent>,
 }
 
 #[derive(Clone)]
@@ -3790,9 +3795,29 @@ async fn try_run_turn(
                 response_id: _,
                 token_usage,
             } => {
-                if let Some(token_usage) = token_usage {
+                let (new_info, rate_limits, should_emit);
+                {
+                    let mut state = sess.state.lock().unwrap();
+                    let info = TokenUsageInfo::new_or_append(
+                        &state.token_usage_info,
+                        &token_usage,
+                        sess.client.get_model_context_window(),
+                    );
+                    let limits = state.latest_rate_limits.clone();
+                    let emit = info.is_some() || limits.is_some();
+                    state.token_usage_info = info.clone();
+                    new_info = info;
+                    rate_limits = limits;
+                    should_emit = emit;
+                }
+
+                if should_emit {
+                    let payload = TokenCountEvent {
+                        info: new_info,
+                        rate_limits,
+                    };
                     sess.tx_event
-                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
+                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(payload)))
                         .await
                         .ok();
                 }
@@ -3850,8 +3875,15 @@ async fn try_run_turn(
                     sess.tx_event.send(stamped).await.ok();
                 }
             }
-            ResponseEvent::RateLimits(_rl) => {
-                // Upstream emits periodic rate limit snapshots. No-op for now.
+            ResponseEvent::RateLimits(snapshot) => {
+                let mut state = sess.state.lock().unwrap();
+                state.latest_rate_limits = Some(RateLimitSnapshotEvent {
+                    primary_used_percent: snapshot.primary_used_percent,
+                    weekly_used_percent: snapshot.weekly_used_percent,
+                    primary_to_weekly_ratio_percent: snapshot.primary_to_weekly_ratio_percent,
+                    primary_window_minutes: snapshot.primary_window_minutes,
+                    weekly_window_minutes: snapshot.weekly_window_minutes,
+                });
             }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }

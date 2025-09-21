@@ -551,6 +551,11 @@ impl ModelClient {
         self.config.model_family.clone()
     }
 
+    #[allow(dead_code)]
+    pub fn get_model_context_window(&self) -> Option<u64> {
+        self.config.model_context_window
+    }
+
     // duplicate of earlier helpers removed during merge cleanup
 
     #[allow(dead_code)]
@@ -599,9 +604,15 @@ impl From<ResponseCompletedUsage> for TokenUsage {
     fn from(val: ResponseCompletedUsage) -> Self {
         TokenUsage {
             input_tokens: val.input_tokens,
-            cached_input_tokens: val.input_tokens_details.map(|d| d.cached_tokens),
+            cached_input_tokens: val
+                .input_tokens_details
+                .map(|d| d.cached_tokens)
+                .unwrap_or(0),
             output_tokens: val.output_tokens,
-            reasoning_output_tokens: val.output_tokens_details.map(|d| d.reasoning_tokens),
+            reasoning_output_tokens: val
+                .output_tokens_details
+                .map(|d| d.reasoning_tokens)
+                .unwrap_or(0),
             total_tokens: val.total_tokens,
         }
     }
