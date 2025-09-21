@@ -215,6 +215,47 @@ struct RunningCommand {
     wait_notes: Vec<(String, bool)>,
 }
 
+const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
+
+#[derive(Default)]
+struct RateLimitWarningState {
+    weekly_index: usize,
+    hourly_index: usize,
+}
+
+impl RateLimitWarningState {
+    fn take_warnings(&mut self, weekly_used_percent: f64, hourly_used_percent: f64) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && weekly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            warnings.push(format!(
+                "Weekly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+            ));
+            self.weekly_index += 1;
+        }
+
+        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && hourly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            warnings.push(format!(
+                "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+            ));
+            self.hourly_index += 1;
+        }
+
+        warnings
+    }
+
+    fn reset(&mut self) {
+        self.weekly_index = 0;
+        self.hourly_index = 0;
+    }
+}
+
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
@@ -226,7 +267,8 @@ pub(crate) struct ChatWidget<'a> {
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
-    latest_rate_limits: Option<RateLimitSnapshotEvent>,
+    rate_limit_snapshot: Option<RateLimitSnapshotEvent>,
+    rate_limit_warnings: RateLimitWarningState,
     content_buffer: String,
     // Buffer for streaming assistant answer text; we do not surface partial
     // We wait for the final AgentMessage event and then emit the full text
@@ -2030,7 +2072,8 @@ impl ChatWidget<'_> {
             ),
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
-            latest_rate_limits: None,
+            rate_limit_snapshot: None,
+            rate_limit_warnings: RateLimitWarningState::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2222,7 +2265,8 @@ impl ChatWidget<'_> {
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
-            latest_rate_limits: None,
+            rate_limit_snapshot: None,
+            rate_limit_warnings: RateLimitWarningState::default(),
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -4142,7 +4186,16 @@ impl ChatWidget<'_> {
                     self.last_token_usage = info.last_token_usage.clone();
                 }
                 if let Some(snapshot) = event.rate_limits {
-                    self.latest_rate_limits = Some(snapshot);
+                    let warnings = self
+                        .rate_limit_warnings
+                        .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
+                    self.rate_limit_snapshot = Some(snapshot);
+                    if !warnings.is_empty() {
+                        for warning in warnings {
+                            self.history_push(history_cell::new_warning_event(warning));
+                        }
+                        self.request_redraw();
+                    }
                 }
                 self.bottom_pane.set_token_usage(
                     self.total_token_usage.clone(),
@@ -5003,6 +5056,14 @@ impl ChatWidget<'_> {
             &self.total_token_usage,
             &self.last_token_usage,
         ));
+    }
+
+    pub(crate) fn add_limits_output(&mut self) {
+        if let Some(snapshot) = &self.rate_limit_snapshot {
+            self.history_push(history_cell::new_limits_output(snapshot));
+        } else {
+            self.history_push(history_cell::new_limits_unavailable());
+        }
     }
 
     #[cfg(not(debug_assertions))]
@@ -10483,6 +10544,8 @@ impl ChatWidget<'_> {
 
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
+        self.rate_limit_snapshot = None;
+        self.rate_limit_warnings.reset();
         self.bottom_pane.set_token_usage(
             self.total_token_usage.clone(),
             self.last_token_usage.clone(),
