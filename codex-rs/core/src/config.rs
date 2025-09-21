@@ -2615,8 +2615,6 @@ model_verbosity = "high"
             using_chatgpt_auth: false,
             github: GithubConfig::default(),
             validation: ValidationConfig::default(),
-            validation: ValidationConfig::default(),
-            validation: ValidationConfig::default(),
             experimental_resume: None,
             tui_notifications: Default::default(),
         };
