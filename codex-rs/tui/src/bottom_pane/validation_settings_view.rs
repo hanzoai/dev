@@ -14,6 +14,7 @@ use super::BottomPane;
 #[derive(Clone, Debug)]
 pub(crate) struct ToolStatus {
     pub name: &'static str,
+    pub description: &'static str,
     pub installed: bool,
     pub install_hint: String,
 }
@@ -49,6 +50,9 @@ impl ValidationSettingsView {
 
     fn toggle_tool(&mut self, idx: usize) {
         if let Some((status, enabled)) = self.tools.get_mut(idx) {
+            if !status.installed {
+                return;
+            }
             let new_value = !*enabled;
             *enabled = new_value;
             self.app_event_tx.send(AppEvent::UpdateValidationTool {
@@ -88,10 +92,26 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
                 } else if self.selected_row == max_row {
                     self.is_complete = true;
                 } else if let Some((status, _)) = self.tools.get(self.selected_row - 1) {
-                    if !status.installed && !status.install_hint.is_empty() {
-                        pane.flash_footer_notice(format!("Prefilled install command for {}", status.name));
-                        self.app_event_tx
-                            .send(AppEvent::PrefillComposer(status.install_hint.clone()));
+                    if !status.installed {
+                        let command = status.install_hint.trim();
+                        if command.is_empty() {
+                            pane.flash_footer_notice(format!(
+                                "No install command available for {}",
+                                status.name
+                            ));
+                        } else {
+                            pane.flash_footer_notice(format!(
+                                "Opening terminal to install {}",
+                                status.name
+                            ));
+                            self.is_complete = true;
+                            self.app_event_tx.send(AppEvent::RequestValidationToolInstall {
+                                name: status.name.to_string(),
+                                command: command.to_string(),
+                            });
+                        }
+                    } else {
+                        self.toggle_tool(self.selected_row - 1);
                     }
                 }
             }
@@ -114,7 +134,8 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
-        (8 + self.tools.len() as u16).min(20)
+        let rows = 9 + (self.tools.len() as u16 * 2);
+        rows.min(24)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -140,13 +161,21 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
         if self.selected_row == 0 {
             status_style = status_style.bg(crate::colors::selection()).add_modifier(Modifier::BOLD);
         }
-        lines.push(Line::from(vec![
+        let mut header_spans = vec![
             Span::styled("Validate New Code: ", Style::default().fg(crate::colors::text_dim())),
             Span::styled(
                 if self.patch_harness { "Enabled" } else { "Disabled" },
                 status_style,
             ),
-        ]));
+        ];
+        if self.selected_row == 0 {
+            header_spans.push(Span::styled("  ", Style::default().bg(crate::colors::selection())));
+            header_spans.push(Span::styled(
+                if self.patch_harness { "(press Enter to disable)" } else { "(press Enter to enable)" },
+                Style::default().fg(crate::colors::text_dim()).bg(crate::colors::selection()),
+            ));
+        }
+        lines.push(Line::from(header_spans));
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Tools:", Style::default().fg(crate::colors::text_dim()))));
@@ -160,18 +189,49 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
             if selected {
                 name_style = name_style.bg(crate::colors::selection()).add_modifier(Modifier::BOLD);
             }
-            let extra = if status.installed {
-                ""
-            } else {
-                "  • missing (Enter: copy install command)"
-            };
-            lines.push(Line::from(vec![
+            let mut state_style = Style::default().fg(crate::colors::dim());
+            if selected {
+                state_style = state_style.bg(crate::colors::selection()).add_modifier(Modifier::BOLD);
+            }
+            let mut missing_style = Style::default().fg(crate::colors::warning());
+            if selected {
+                missing_style = missing_style.bg(crate::colors::selection()).add_modifier(Modifier::BOLD);
+            }
+            let mut main_spans = vec![
                 Span::raw("• "),
                 Span::styled(status.name, name_style),
                 Span::raw(" — "),
-                Span::styled(if *enabled { "on" } else { "off" }, Style::default().fg(crate::colors::dim())),
-                Span::raw(extra),
+                Span::styled(if *enabled { "enabled" } else { "disabled" }, state_style),
+            ];
+            if !status.installed {
+                main_spans.push(Span::raw("  "));
+                main_spans.push(Span::styled("not installed", missing_style));
+            }
+            if selected {
+                main_spans.push(Span::styled("  ", Style::default().bg(crate::colors::selection())));
+                let hint = if !status.installed {
+                    "(press Enter to install)"
+                } else if *enabled {
+                    "(press Enter to disable)"
+                } else {
+                    "(press Enter to enable)"
+                };
+                main_spans.push(Span::styled(
+                    hint,
+                    Style::default().fg(crate::colors::text_dim()).bg(crate::colors::selection()),
+                ));
+            }
+            lines.push(Line::from(main_spans));
+
+            let mut desc_style = Style::default().fg(crate::colors::text_dim());
+            if selected {
+                desc_style = desc_style.bg(crate::colors::selection());
+            }
+            lines.push(Line::from(vec![
+                Span::styled("   ", desc_style),
+                Span::styled(status.description, desc_style),
             ]));
+            lines.push(Line::from(""));
         }
 
         lines.push(Line::from(""));
@@ -193,7 +253,7 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
             Span::styled("←→/Space", Style::default().fg(crate::colors::success())),
             Span::raw(" Toggle  "),
             Span::styled("Enter", Style::default().fg(crate::colors::success())),
-            Span::raw(" Toggle / Copy install  "),
+            Span::raw(" Toggle / Install  "),
             Span::styled("Esc", Style::default().fg(crate::colors::error())),
             Span::raw(" Close"),
         ]));
@@ -214,26 +274,56 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
 }
 
 pub(crate) fn detect_tools() -> Vec<ToolStatus> {
-    let mut result = Vec::new();
-    let tools = [
-        ("actionlint", actionlint_hint()),
-        ("shellcheck", shellcheck_hint()),
-        ("markdownlint", markdownlint_hint()),
-        ("hadolint", hadolint_hint()),
-        ("yamllint", yamllint_hint()),
-        ("cargo-check", cargo_check_hint()),
-        ("shfmt", shfmt_hint()),
-        ("prettier", prettier_hint()),
-    ];
-    for (name, hint) in tools.into_iter() {
-        let installed = if name == "cargo-check" {
-            has("cargo")
-        } else {
-            which(name).is_some()
-        };
-        result.push(ToolStatus { name, installed, install_hint: hint });
-    }
-    result
+    vec![
+        ToolStatus {
+            name: "actionlint",
+            description: "Lint GitHub Actions workflows for syntax and logic issues.",
+            installed: has("actionlint"),
+            install_hint: actionlint_hint(),
+        },
+        ToolStatus {
+            name: "shellcheck",
+            description: "Analyze shell scripts for bugs and common pitfalls.",
+            installed: has("shellcheck"),
+            install_hint: shellcheck_hint(),
+        },
+        ToolStatus {
+            name: "markdownlint",
+            description: "Lint Markdown content for style and formatting problems.",
+            installed: has("markdownlint"),
+            install_hint: markdownlint_hint(),
+        },
+        ToolStatus {
+            name: "hadolint",
+            description: "Lint Dockerfiles for best practices and mistakes.",
+            installed: has("hadolint"),
+            install_hint: hadolint_hint(),
+        },
+        ToolStatus {
+            name: "yamllint",
+            description: "Validate YAML files for syntax and style issues.",
+            installed: has("yamllint"),
+            install_hint: yamllint_hint(),
+        },
+        ToolStatus {
+            name: "cargo-check",
+            description: "Run `cargo check` to catch Rust compilation errors quickly.",
+            installed: has("cargo"),
+            install_hint: cargo_check_hint(),
+        },
+        ToolStatus {
+            name: "shfmt",
+            description: "Format shell scripts consistently with shfmt.",
+            installed: has("shfmt"),
+            install_hint: shfmt_hint(),
+        },
+        ToolStatus {
+            name: "prettier",
+            description: "Format web assets (JS/TS/JSON/MD) with Prettier.",
+            installed: has("prettier"),
+            install_hint: prettier_hint(),
+        },
+    ]
 }
 
 fn which(exe: &str) -> Option<std::path::PathBuf> {

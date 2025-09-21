@@ -123,6 +123,8 @@ pub(crate) enum AppEvent {
     UpdateValidationPatchHarness(bool),
     /// Enable/disable a specific validation tool
     UpdateValidationTool { name: String, enable: bool },
+    /// Start installing a validation tool through the terminal overlay
+    RequestValidationToolInstall { name: String, command: String },
 
     /// Enable/disable a specific MCP server
     UpdateMcpServer { name: String, enable: bool },
