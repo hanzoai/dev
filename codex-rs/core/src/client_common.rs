@@ -5,6 +5,7 @@ use crate::environment_context::EnvironmentContext;
 use crate::error::Result;
 use crate::model_family::ModelFamily;
 use crate::openai_tools::OpenAiTool;
+use codex_protocol::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
 use codex_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use codex_protocol::models::ContentItem;
@@ -251,6 +252,7 @@ pub enum ResponseEvent {
         call_id: String,
         query: Option<String>,
     },
+    RateLimits(RateLimitSnapshotEvent),
 }
 
 #[derive(Debug, Serialize)]

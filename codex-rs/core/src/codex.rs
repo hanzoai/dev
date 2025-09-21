@@ -3268,6 +3268,9 @@ async fn try_run_turn(
                     sess.tx_event.send(stamped).await.ok();
                 }
             }
+            ResponseEvent::RateLimits(_rl) => {
+                // Upstream emits periodic rate limit snapshots. No-op for now.
+            }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
     }
