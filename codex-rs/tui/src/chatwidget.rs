@@ -12579,6 +12579,9 @@ impl WidgetRef for &ChatWidget<'_> {
             all_content.push(cell);
         }
 
+        let mut assistant_layouts: Vec<Option<crate::history_cell::AssistantLayoutCache>> =
+            vec![None; all_content.len()];
+
         // Append any queued user messages as sticky preview cells at the very
         // end so they always render at the bottom until they are dispatched.
         let mut queued_preview_cells: Vec<crate::history_cell::PlainHistoryCell> = Vec::new();
@@ -12591,6 +12594,10 @@ impl WidgetRef for &ChatWidget<'_> {
             for c in &queued_preview_cells {
                 all_content.push(c as &dyn HistoryCell);
             }
+        }
+
+        if assistant_layouts.len() < all_content.len() {
+            assistant_layouts.resize(all_content.len(), None);
         }
 
         // Calculate total content height using prefix sums; build if needed
@@ -12632,29 +12639,24 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             for (idx, item) in all_content.iter().enumerate() {
                 let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-                // Cache heights for most items. Also allow caching for ExecCell once completed
-                // (custom_render but stable), to avoid repeated wrapping/measure.
                 let is_stable_exec = item
                     .as_any()
                     .downcast_ref::<crate::history_cell::ExecCell>()
                     .map(|e| e.output.is_some())
                     .unwrap_or(false);
-                // Assistant markdown cells are static once built; cache their heights
-                let is_assistant_static = item
+                let maybe_assistant = item
                     .as_any()
-                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
-                    .is_some();
+                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
                 let is_streaming = item
                     .as_any()
                     .downcast_ref::<crate::history_cell::StreamingContentCell>()
                     .is_some();
                 let is_cacheable =
-                    ((!item.has_custom_render()) || is_stable_exec || is_assistant_static)
+                    (maybe_assistant.is_some() || !item.has_custom_render() || is_stable_exec)
                         && !item.is_animating()
                         && !is_streaming;
+                let key = (idx, content_width);
                 let h = if is_cacheable {
-                    let key = (idx, content_width);
-                    // Take an immutable borrow in a small scope to avoid overlapping with the later mutable borrow
                     let cached_val = {
                         let cache_ref = self.history_render.height_cache.borrow();
                         cache_ref.get(&key).copied()
@@ -12663,6 +12665,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         if perf_enabled {
                             let mut p = self.perf_state.stats.borrow_mut();
                             p.height_hits_total = p.height_hits_total.saturating_add(1);
+                        }
+                        if let Some(assistant) = maybe_assistant {
+                            assistant_layouts[idx] = Some(assistant.ensure_layout(content_width));
                         }
                         cached
                     } else {
@@ -12680,7 +12685,14 @@ impl WidgetRef for &ChatWidget<'_> {
                         } else {
                             None
                         };
-                        let computed = item.desired_height(content_width);
+                        let computed = if let Some(assistant) = maybe_assistant {
+                            let plan = assistant.ensure_layout(content_width);
+                            let rows = plan.total_rows();
+                            assistant_layouts[idx] = Some(plan);
+                            rows
+                        } else {
+                            item.desired_height(content_width)
+                        };
                         if let (true, Some(start)) = (perf_enabled, t0) {
                             let dt = start.elapsed().as_nanos();
                             let mut p = self.perf_state.stats.borrow_mut();
@@ -12690,7 +12702,6 @@ impl WidgetRef for &ChatWidget<'_> {
                                 dt,
                             );
                         }
-                        // Now take a mutable borrow to insert
                         self.history_render
                             .height_cache
                             .borrow_mut()
@@ -12701,8 +12712,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     item.desired_height(content_width)
                 };
                 acc = acc.saturating_add(h);
-                // Spacing rule must mirror the render path: no spacer between
-                // adjacent collapsed reasoning cells.
                 let mut should_add_spacing = idx < all_content.len() - 1 && h > 0;
                 if should_add_spacing {
                     let this_is_collapsed_reasoning = item
@@ -12728,6 +12737,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
                 ps.push(acc);
             }
+
             let total = *ps.last().unwrap_or(&0);
             if let Some(start) = total_start {
                 if self.perf_state.enabled {
@@ -13182,7 +13192,29 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
 
                 // Render the cell content first
-                item.render_with_skip(item_area, buf, skip_rows);
+                let mut handled_assistant = false;
+                if let Some(assistant) = item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                {
+                    let plan_ref = if let Some(plan) = assistant_layouts[idx].as_ref() {
+                        plan
+                    } else {
+                        let new_plan = assistant.ensure_layout(content_width);
+                        assistant_layouts[idx] = Some(new_plan);
+                        assistant_layouts[idx].as_ref().unwrap()
+                    };
+                    if skip_rows >= plan_ref.total_rows() || item_area.height == 0 {
+                        handled_assistant = true;
+                    } else {
+                        assistant.render_with_layout(plan_ref, item_area, buf, skip_rows);
+                        handled_assistant = true;
+                    }
+                }
+
+                if !handled_assistant {
+                    item.render_with_skip(item_area, buf, skip_rows);
+                }
 
                 // Debug: overlay order info on the spacing row below (or above if needed).
                 if self.show_order_overlay {
