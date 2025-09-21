@@ -9408,10 +9408,14 @@ pub(crate) fn new_status_output(
         "  • Input: ".into(),
         format_with_separators(last_usage.non_cached_input()).into(),
     ];
-    if let Some(cached) = last_usage.cached_input_tokens {
-        if cached > 0 {
-            input_line_spans.push(format!(" (+ {} cached)", format_with_separators(cached)).into());
-        }
+    if last_usage.cached_input_tokens > 0 {
+        input_line_spans.push(
+            format!(
+                " (+ {} cached)",
+                format_with_separators(last_usage.cached_input_tokens)
+            )
+            .into(),
+        );
     }
     lines.push(Line::from(input_line_spans));
     // Output: <output>
