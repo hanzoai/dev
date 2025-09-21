@@ -137,6 +137,17 @@ pub enum Op {
         decision: ReviewDecision,
     },
 
+    /// Update the validation harness toggle in the running session.
+    UpdateValidationPatchHarness {
+        enabled: bool,
+    },
+
+    /// Update a specific validation tool toggle for the session.
+    UpdateValidationTool {
+        name: String,
+        enable: bool,
+    },
+
     /// Append an entry to the persistent cross-session message history.
     ///
     /// Note the entry is not guaranteed to be logged if the user has

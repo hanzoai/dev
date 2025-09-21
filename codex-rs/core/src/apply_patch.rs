@@ -1,4 +1,5 @@
 use crate::codex::Session;
+use crate::patch_harness::run_patch_harness;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
 use crate::protocol::FileChange;
@@ -7,6 +8,7 @@ use crate::safety::SafetyCheck;
 use crate::safety::assess_patch_safety;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::ApplyPatchFileChange;
+use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,6 +33,7 @@ pub(crate) enum InternalApplyPatchInvocation {
 pub(crate) struct ApplyPatchExec {
     pub(crate) action: ApplyPatchAction,
     pub(crate) user_explicitly_approved_this_action: bool,
+    pub(crate) harness_summary_json: Option<String>,
 }
 
 impl From<ResponseInputItem> for InternalApplyPatchInvocation {
@@ -45,6 +48,100 @@ pub(crate) async fn apply_patch(
     call_id: &str,
     action: ApplyPatchAction,
 ) -> InternalApplyPatchInvocation {
+    // Run the validation harness before assessing safety so we can surface a
+    // concise status message and capture structured findings for the model.
+    let (harness_summary_json, harness_status_message) = {
+        let mut summary_json: Option<String> = None;
+        let mut status_message: Option<String> = None;
+        let validation_cfg = sess.validation_config();
+        let github_cfg = sess.get_github_config();
+        if let (Ok(validation_cfg), Ok(github_cfg)) = (validation_cfg.read(), github_cfg.read()) {
+            if let Some((mut findings, mut ran_checks)) = run_patch_harness(
+                &action,
+                sess.get_cwd(),
+                &*validation_cfg,
+                &*github_cfg,
+            ) {
+                const MAX_ISSUES: usize = 12;
+                let total_issues = findings.len();
+                let truncated = total_issues > MAX_ISSUES;
+                if truncated {
+                    findings.truncate(MAX_ISSUES);
+                }
+                findings.retain(|finding| {
+                    finding.tool.trim().len() <= 120 && finding.message.trim().len() <= 800
+                });
+                let issues_json: Vec<serde_json::Value> = findings
+                    .iter()
+                    .map(|finding| {
+                        let relative_file = finding
+                            .file
+                            .as_ref()
+                            .and_then(|path| path.strip_prefix(sess.get_cwd()).ok())
+                            .map(|path| path.display().to_string());
+                        json!({
+                            "tool": finding.tool,
+                            "file": relative_file,
+                            "msg": finding.message,
+                        })
+                    })
+                    .collect();
+                summary_json = Some(
+                    json!({
+                        "validation": {
+                            "issues": issues_json,
+                            "checks": ran_checks,
+                            "issue_count": total_issues,
+                            "truncated": truncated,
+                        }
+                    })
+                    .to_string(),
+                );
+
+                let mut lines: Vec<String> = Vec::new();
+                if total_issues == 0 {
+                    lines.push("✅ Validate New Code: no issues".to_string());
+                } else {
+                    lines.push(format!("❌ Validate New Code: {total_issues} issue(s)"));
+                    for finding in findings.iter() {
+                        let mut parts = vec![finding.tool.clone()];
+                        if let Some(rel) = finding
+                            .file
+                            .as_ref()
+                            .and_then(|p| p.strip_prefix(sess.get_cwd()).ok())
+                            .map(|p| p.display().to_string())
+                        {
+                            parts.push(rel);
+                        }
+                        let mut msg = finding.message.clone();
+                        if msg.len() > 160 {
+                            msg.truncate(157);
+                            msg.push_str("…");
+                        }
+                        parts.push(msg);
+                        lines.push(format!("• {}", parts.join(" — ")));
+                    }
+                    if truncated {
+                        let remaining = total_issues - findings.len();
+                        lines.push(format!("… plus {remaining} more issue(s)"));
+                    }
+                }
+                if ran_checks.is_empty() {
+                    lines.push("Checks run: none".to_string());
+                } else {
+                    ran_checks.sort();
+                    lines.push(format!("Checks run: {}", ran_checks.join(", ")));
+                }
+                status_message = Some(lines.join("\n"));
+            }
+        }
+        (summary_json, status_message)
+    };
+
+    if let Some(message) = harness_status_message.as_ref() {
+        sess.notify_background_event(sub_id, message.clone()).await;
+    }
+
     match assess_patch_safety(
         &action,
         sess.get_approval_policy(),
@@ -55,6 +152,7 @@ pub(crate) async fn apply_patch(
             InternalApplyPatchInvocation::DelegateToExec(ApplyPatchExec {
                 action,
                 user_explicitly_approved_this_action: false,
+                harness_summary_json: harness_summary_json.clone(),
             })
         }
         SafetyCheck::AskUser => {
@@ -73,6 +171,7 @@ pub(crate) async fn apply_patch(
                     InternalApplyPatchInvocation::DelegateToExec(ApplyPatchExec {
                         action,
                         user_explicitly_approved_this_action: true,
+                        harness_summary_json,
                     })
                 }
                 ReviewDecision::Denied | ReviewDecision::Abort => {

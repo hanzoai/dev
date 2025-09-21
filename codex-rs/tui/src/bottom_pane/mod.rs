@@ -38,6 +38,7 @@ mod textarea;
 pub mod form_text_field;
 mod theme_selection_view;
 mod verbosity_selection_view;
+pub(crate) mod validation_settings_view;
 #[cfg(not(debug_assertions))]
 mod update_settings_view;
 
@@ -557,6 +558,19 @@ impl BottomPane<'_> {
     pub fn show_mcp_settings(&mut self, rows: crate::bottom_pane::mcp_settings_view::McpServerRows) {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    /// Show validation harness settings (master toggle + per-tool toggles).
+    pub fn show_validation_settings(
+        &mut self,
+        patch_harness: bool,
+        tools: Vec<(validation_settings_view::ToolStatus, bool)>,
+    ) {
+        use validation_settings_view::ValidationSettingsView;
+        let view = ValidationSettingsView::new(patch_harness, tools, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();
