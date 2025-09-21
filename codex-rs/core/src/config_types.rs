@@ -220,6 +220,59 @@ pub struct GithubConfig {
     /// `[github]` with `check_workflows_on_push = false`.
     #[serde(default = "default_true")]
     pub check_workflows_on_push: bool,
+
+    /// When true, run `actionlint` on modified workflows during apply_patch.
+    #[serde(default)]
+    pub actionlint_on_patch: bool,
+
+    /// Optional explicit executable path for actionlint.
+    #[serde(default)]
+    pub actionlint_path: Option<PathBuf>,
+
+    /// Treat actionlint findings as blocking when composing approval text.
+    #[serde(default)]
+    pub actionlint_strict: bool,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ValidationConfig {
+    /// Master toggle for the patch validation harness.
+    #[serde(default = "default_true")]
+    pub patch_harness: bool,
+
+    /// Optional allowlist restricting which external tools may run.
+    #[serde(default)]
+    pub tools_allowlist: Option<Vec<String>>,
+
+    /// Timeout (seconds) for each external tool invocation.
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+
+    /// Per-tool enable flags (unset implies enabled).
+    #[serde(default)]
+    pub tools: ValidationTools,
+}
+
+impl Default for ValidationConfig {
+    fn default() -> Self {
+        Self {
+            patch_harness: true,
+            tools_allowlist: None,
+            timeout_seconds: None,
+            tools: ValidationTools::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct ValidationTools {
+    pub shellcheck: Option<bool>,
+    pub markdownlint: Option<bool>,
+    pub hadolint: Option<bool>,
+    pub yamllint: Option<bool>,
+    pub rustfmt: Option<bool>,
+    pub shfmt: Option<bool>,
+    pub prettier: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]

@@ -36,6 +36,7 @@ pub enum SlashCommand {
     Branch,
     Merge,
     Github,
+    Validation,
     Mcp,
     Resume,
     // Prompt-expanding commands
@@ -78,6 +79,7 @@ impl SlashCommand {
             }
             SlashCommand::Merge => "merge current worktree branch back to default",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
+            SlashCommand::Validation => "control validation harness (status/on/off)",
             SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Logout => "log out of Code",
