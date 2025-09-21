@@ -1322,6 +1322,19 @@ impl HistoryCell for PlanUpdateCell {
 
 // ==================== ExecCell ====================
 
+#[derive(Clone, PartialEq, Eq)]
+struct ExecWaitNote {
+    text: String,
+    is_error: bool,
+}
+
+#[derive(Clone, Default)]
+struct ExecWaitState {
+    total_wait: Option<Duration>,
+    waiting: bool,
+    note: Option<ExecWaitNote>,
+}
+
 pub(crate) struct ExecCell {
     pub(crate) command: Vec<String>,
     pub(crate) parsed: Vec<ParsedCommand>,
@@ -1336,6 +1349,7 @@ pub(crate) struct ExecCell {
     // Cached per-width layout (wrapped rows + totals) while content is stable
     cached_layout: std::cell::RefCell<Option<Rc<ExecLayoutCache>>>,
     has_bold_command: bool,
+    wait_state: std::cell::RefCell<ExecWaitState>,
 }
 
 #[derive(Clone)]
@@ -1814,6 +1828,9 @@ impl HistoryCell for ExecCell {
     fn has_custom_render(&self) -> bool {
         true
     }
+    fn is_animating(&self) -> bool {
+        self.output.is_none() && self.start_time.is_some()
+    }
     fn desired_height(&self, width: u16) -> u16 {
         let (pre_total, _out_block_total, out_total_with_status) = self.ensure_wrap_totals(width);
         pre_total.saturating_add(out_total_with_status)
@@ -1942,6 +1959,82 @@ impl HistoryCell for ExecCell {
 }
 
 impl ExecCell {
+    fn invalidate_render_caches(&self) {
+        self.cached_display_lines.borrow_mut().take();
+        self.cached_pre_lines.borrow_mut().take();
+        self.cached_out_lines.borrow_mut().take();
+        self.cached_layout.borrow_mut().take();
+        self.stream_status_line.borrow_mut().take();
+    }
+
+    pub(crate) fn set_waiting(&self, waiting: bool) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.waiting != waiting {
+            state.waiting = waiting;
+            drop(state);
+            self.invalidate_render_caches();
+        }
+    }
+
+    pub(crate) fn set_wait_total(&self, total: Option<Duration>) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.total_wait != total {
+            state.total_wait = total;
+            drop(state);
+            self.invalidate_render_caches();
+        }
+    }
+
+    pub(crate) fn wait_total(&self) -> Option<Duration> {
+        self.wait_state.borrow().total_wait
+    }
+
+    pub(crate) fn set_wait_note(&self, note: Option<(String, bool)>) {
+        let new_note = note.map(|(text, is_error)| ExecWaitNote { text, is_error });
+        let mut state = self.wait_state.borrow_mut();
+        if state.note != new_note {
+            state.note = new_note;
+            drop(state);
+            self.invalidate_render_caches();
+        }
+    }
+
+    fn wait_note_line(&self, state: &ExecWaitState) -> Option<Line<'static>> {
+        let note = state.note.as_ref()?;
+        let mut line = Line::from(note.text.clone());
+        let mut style = Style::default().fg(if note.is_error {
+            crate::colors::error()
+        } else {
+            crate::colors::text_dim()
+        });
+        if note.is_error {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        for span in line.spans.iter_mut() {
+            span.style = style;
+        }
+        Some(line)
+    }
+
+    fn wait_state_snapshot(&self) -> ExecWaitState {
+        self.wait_state.borrow().clone()
+    }
+
+    fn wait_summary_line(&self, state: &ExecWaitState) -> Option<Line<'static>> {
+        if state.waiting {
+            return None;
+        }
+        let total = state.total_wait?;
+        if total.is_zero() {
+            return None;
+        }
+        let text = format!("Waited {}", format_duration(total));
+        Some(Line::styled(
+            text,
+            Style::default().fg(crate::colors::text_dim()),
+        ))
+    }
+
     #[cfg(test)]
     fn has_bold_command(&self) -> bool {
         self.has_bold_command
@@ -1955,11 +2048,7 @@ impl ExecCell {
         self.command = command;
         self.parsed = parsed;
         self.has_bold_command = command_has_bold_token(&self.command);
-        self.cached_display_lines.borrow_mut().take();
-        self.cached_pre_lines.borrow_mut().take();
-        self.cached_out_lines.borrow_mut().take();
-        self.cached_layout.borrow_mut().take();
-        self.stream_status_line.borrow_mut().take();
+        self.invalidate_render_caches();
     }
     /// Compute wrapped row totals for the preamble and the output at the given width.
     /// Delegates to the per-width layout cache to avoid redundant reflow work.
@@ -1973,10 +2062,14 @@ impl ExecCell {
     }
 
     fn ensure_layout(&self, width: u16) -> Rc<ExecLayoutCache> {
-        if let Some(layout) = self.cached_layout.borrow().as_ref() {
-            if layout.width == width {
-                return layout.clone();
+        if self.output.is_some() {
+            if let Some(layout) = self.cached_layout.borrow().as_ref() {
+                if layout.width == width {
+                    return layout.clone();
+                }
             }
+        } else {
+            self.cached_layout.borrow_mut().take();
         }
 
         let (pre_lines_raw, out_lines_raw, status_line_opt) = self.exec_render_parts();
@@ -2020,7 +2113,9 @@ impl ExecCell {
             out_block_total,
             out_total_with_status,
         });
-        *self.cached_layout.borrow_mut() = Some(layout.clone());
+        if self.output.is_some() {
+            *self.cached_layout.borrow_mut() = Some(layout.clone());
+        }
         layout
     }
     // Build separate segments: (preamble lines, output lines)
@@ -2040,12 +2135,15 @@ impl ExecCell {
             return (pre.clone(), out.clone(), None);
         }
 
-        let (pre, out, status) = if self.parsed.is_empty() {
+        let wait_state = self.wait_state_snapshot();
+        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+        let (pre, mut out, status) = if self.parsed.is_empty() {
             exec_render_parts_generic(
                 &self.command,
                 self.output.as_ref(),
                 self.stream_preview.as_ref(),
                 self.start_time,
+                status_label,
             )
         } else {
             exec_render_parts_parsed(
@@ -2053,10 +2151,59 @@ impl ExecCell {
                 self.output.as_ref(),
                 self.stream_preview.as_ref(),
                 self.start_time,
+                status_label,
             )
         };
 
         if self.output.is_some() {
+            let mut extra_lines: Vec<Line<'static>> = Vec::new();
+            if let Some(summary_line) = self.wait_summary_line(&wait_state) {
+                extra_lines.push(summary_line);
+            }
+            if let Some(note_line) = self.wait_note_line(&wait_state) {
+                extra_lines.push(note_line);
+            }
+            if !extra_lines.is_empty() {
+                let is_blank_line = |line: &Line<'static>| {
+                    line.spans
+                        .iter()
+                        .all(|span| span.content.as_ref().trim().is_empty())
+                };
+                let is_error_line = |line: &Line<'static>| {
+                    line.spans
+                        .first()
+                        .map(|span| span.content.as_ref().starts_with("Error (exit code"))
+                        .unwrap_or(false)
+                };
+                if let Some(pos) = out.iter().position(is_error_line) {
+                    let mut insert_at = pos;
+                    if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
+                        out.insert(insert_at, Line::from(""));
+                        insert_at += 1;
+                    }
+                    for line in extra_lines.iter() {
+                        out.insert(insert_at, line.clone());
+                        insert_at += 1;
+                        out.insert(insert_at, Line::from(""));
+                        insert_at += 1;
+                    }
+                } else {
+                    let mut insert_at = out.len();
+                    if insert_at > 0 && is_blank_line(&out[insert_at.saturating_sub(1)]) {
+                        insert_at = insert_at.saturating_sub(1);
+                    }
+                    if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
+                        out.insert(insert_at, Line::from(""));
+                        insert_at += 1;
+                    }
+                    for line in extra_lines.iter() {
+                        out.insert(insert_at, line.clone());
+                        insert_at += 1;
+                        out.insert(insert_at, Line::from(""));
+                        insert_at += 1;
+                    }
+                }
+            }
             *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
             *self.cached_out_lines.borrow_mut() = Some(out.clone());
             self.stream_status_line.borrow_mut().take();
@@ -2079,11 +2226,7 @@ impl ExecCell {
                 stderr: stderr.to_string(),
             });
         }
-        self.cached_display_lines.borrow_mut().take();
-        self.cached_pre_lines.borrow_mut().take();
-        self.cached_out_lines.borrow_mut().take();
-        self.cached_layout.borrow_mut().take();
-        self.stream_status_line.borrow_mut().take();
+        self.invalidate_render_caches();
     }
 }
 
@@ -3072,6 +3215,7 @@ fn exec_render_parts_generic(
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
+    status_label: &str,
 ) -> (
     Vec<Line<'static>>,
     Vec<Line<'static>>,
@@ -3106,7 +3250,7 @@ fn exec_render_parts_generic(
     let has_output = !trim_empty_lines(out.clone()).is_empty();
 
     if render_running_header {
-        let mut message = "Running...".to_string();
+        let mut message = format!("{}...", status_label);
         if let Some(start) = start_time {
             let elapsed = start.elapsed();
             message = format!("{message} ({})", format_duration(elapsed));
@@ -3143,6 +3287,7 @@ fn exec_render_parts_parsed(
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
+    status_label: &str,
 ) -> (
     Vec<Line<'static>>,
     Vec<Line<'static>>,
@@ -3170,8 +3315,8 @@ fn exec_render_parts_parsed(
                 )),
                 ExecAction::Run => {
                     let mut message = match &ctx_path {
-                        Some(p) => format!("Running... in {p}"),
-                        None => "Running...".to_string(),
+                        Some(p) => format!("{}... in {p}", status_label),
+                        None => format!("{}...", status_label),
                     };
                     if let Some(start) = start_time {
                         let elapsed = start.elapsed();
@@ -6065,6 +6210,7 @@ fn new_exec_cell(
         cached_out_lines: std::cell::RefCell::new(None),
         cached_layout: std::cell::RefCell::new(None),
         has_bold_command,
+        wait_state: std::cell::RefCell::new(ExecWaitState::default()),
     }
 }
 
