@@ -392,7 +392,7 @@ shellcheck = true
 markdownlint = true
 hadolint = true
 yamllint = true
-rustfmt = true
+cargo-check = true
 shfmt = true
 prettier = true
 ```
