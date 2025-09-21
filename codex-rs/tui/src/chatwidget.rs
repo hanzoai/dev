@@ -206,7 +206,7 @@ struct RunningCommand {
     stderr: String,
     wait_total: Option<Duration>,
     wait_active: bool,
-    wait_note: Option<(String, bool)>,
+    wait_notes: Vec<(String, bool)>,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -4444,7 +4444,7 @@ impl ChatWidget<'_> {
 
                         if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
                             running.wait_active = true;
-                            running.wait_note = None;
+                            running.wait_notes.clear();
                             let history_index = running.history_index;
                             if let Some(idx) = history_index {
                                 if idx < self.history_cells.len() {
@@ -4453,7 +4453,7 @@ impl ChatWidget<'_> {
                                         .downcast_mut::<history_cell::ExecCell>()
                                     {
                                         exec_cell.set_waiting(true);
-                                        exec_cell.set_wait_note(None);
+                                        exec_cell.clear_wait_notes();
                                     }
                                 }
                             }
@@ -4544,11 +4544,27 @@ impl ChatWidget<'_> {
                     {
                         let trimmed = content.trim();
                         let wait_still_pending = !success && trimmed != "Cancelled by user.";
-                        let wait_note = if trimmed == "Cancelled by user." {
-                            Some(("Wait cancelled".to_string(), true))
-                        } else {
-                            None
-                        };
+                        let mut note_lines: Vec<(String, bool)> = Vec::new();
+                        let suppress_json_notes = serde_json::from_str::<serde_json::Value>(
+                            trimmed,
+                        )
+                        .ok()
+                        .and_then(|value| {
+                            value.as_object().map(|obj| {
+                                obj.contains_key("output") || obj.contains_key("metadata")
+                            })
+                        })
+                        .unwrap_or(false);
+                        if !suppress_json_notes {
+                            for line in content.lines() {
+                                let note_text = line.trim();
+                                if note_text.is_empty() {
+                                    continue;
+                                }
+                                let is_error_note = note_text == "Cancelled by user.";
+                                note_lines.push((note_text.to_string(), is_error_note));
+                            }
+                        }
                         let mut history_index: Option<usize> = None;
                         if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
                             let base = running.wait_total.unwrap_or_default();
@@ -4556,7 +4572,17 @@ impl ChatWidget<'_> {
                             running.wait_total = Some(total);
                             history_index = running.history_index;
                             running.wait_active = wait_still_pending;
-                            running.wait_note = wait_note.clone();
+                            for (text, is_error_note) in &note_lines {
+                                if running
+                                    .wait_notes
+                                    .last()
+                                    .map(|(existing, existing_err)| existing == text && existing_err == is_error_note)
+                                    .unwrap_or(false)
+                                {
+                                    continue;
+                                }
+                                running.wait_notes.push((text.clone(), *is_error_note));
+                            }
                         }
 
                         let mut updated = false;
@@ -4576,7 +4602,9 @@ impl ChatWidget<'_> {
                                     } else {
                                         exec_cell.set_waiting(false);
                                     }
-                                    exec_cell.set_wait_note(wait_note.clone());
+                                    for (text, is_error_note) in &note_lines {
+                                        exec_cell.push_wait_note(text, *is_error_note);
+                                    }
                                     updated = true;
                                 }
                             }
@@ -4601,7 +4629,9 @@ impl ChatWidget<'_> {
                                 } else {
                                     exec_cell.set_waiting(false);
                                 }
-                                exec_cell.set_wait_note(wait_note.clone());
+                                for (text, is_error_note) in &note_lines {
+                                    exec_cell.push_wait_note(text, *is_error_note);
+                                }
                             }
                         }
 
