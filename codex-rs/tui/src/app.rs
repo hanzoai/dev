@@ -1153,6 +1153,13 @@ impl App<'_> {
                         widget.handle_terminal_after(after);
                     }
                 }
+                AppEvent::RequestValidationToolInstall { name, command } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if let Some(launch) = widget.launch_validation_tool_install(&name, &command) {
+                            self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                        }
+                    }
+                }
                 #[cfg(not(debug_assertions))]
                 AppEvent::RunUpdateCommand { command, display, latest_version } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
