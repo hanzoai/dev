@@ -5087,8 +5087,9 @@ impl ChatWidget<'_> {
         let config = self.config.clone();
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
+            let result = crate::updates::check_for_updates_now(&config).await;
             let mut state = shared_state.lock().expect("update state poisoned");
-            match crate::updates::check_for_updates_now(&config).await {
+            match result {
                 Ok(info) => {
                     state.checking = false;
                     state.latest_version = info.latest_version;

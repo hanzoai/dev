@@ -1719,17 +1719,15 @@ impl WidgetRef for ChatComposer {
                 let mut token_spans: Vec<Span> = Vec::new();
                 if let Some(token_usage_info) = &self.token_usage_info {
                     let turn_usage = &token_usage_info.last_token_usage;
-                    let turn_tokens = turn_usage.blended_total();
-                    let used_str = format_with_thousands(turn_tokens);
+                    let tokens_used = turn_usage.tokens_in_context_window();
+                    let used_str = format_with_thousands(tokens_used);
                     token_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
                     token_spans.push(Span::from(" tokens").style(label_style));
                     if let Some(context_window) = token_usage_info.model_context_window {
                         if context_window > 0 {
                             let percent_remaining = {
                                 let percent = 100.0
-                                    - (turn_usage.tokens_in_context_window() as f32
-                                        / context_window as f32
-                                        * 100.0);
+                                    - (tokens_used as f32 / context_window as f32 * 100.0);
                                 percent.clamp(0.0, 100.0) as u8
                             };
                             token_spans.push(Span::from(" (").style(label_style));
