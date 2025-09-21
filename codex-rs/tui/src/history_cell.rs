@@ -41,6 +41,7 @@ use std::io::Cursor;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -1332,15 +1333,17 @@ pub(crate) struct ExecCell {
     cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    // Cached per-width wrap totals (rows) for finalized execs
-    cached_wrap: std::cell::RefCell<Option<ExecWrapCache>>,
+    // Cached per-width layout (wrapped rows + totals) while content is stable
+    cached_layout: std::cell::RefCell<Option<Rc<ExecLayoutCache>>>,
     has_bold_command: bool,
 }
 
-// Cache of wrapped-row totals for ExecCell at a given width.
-#[derive(Clone, Copy)]
-struct ExecWrapCache {
+#[derive(Clone)]
+struct ExecLayoutCache {
     width: u16,
+    pre_lines: Vec<Line<'static>>,
+    out_lines: Vec<Line<'static>>,
+    status_line: Option<Line<'static>>,
     pre_total: u16,
     out_block_total: u16,
     out_total_with_status: u16,
@@ -1816,85 +1819,73 @@ impl HistoryCell for ExecCell {
         pre_total.saturating_add(out_total_with_status)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        // Render command header/content above and stdout/stderr preview inside a left-bordered block.
-        let (pre_lines_raw, out_lines_raw, status_line_opt) = self.exec_render_parts();
-        let pre_lines = trim_empty_lines(pre_lines_raw);
-        let out_lines = trim_empty_lines(out_lines_raw);
-        let status_line = if self.output.is_none() {
-            status_line_opt
-        } else {
-            None
-        };
+        let plan = self.ensure_layout(area.width);
+        let plan_ref = plan.as_ref();
 
-        // Prepare texts and total heights (after wrapping).
-        let pre_text = Text::from(pre_lines.clone());
-        let out_text = Text::from(out_lines.clone());
-        let (pre_total, out_block_total, out_total_with_status) =
-            self.ensure_wrap_totals(area.width);
-        let status_extra = out_total_with_status.saturating_sub(out_block_total);
+        let pre_total = plan_ref.pre_total;
+        let out_block_total = plan_ref.out_block_total;
 
-        // Compute how many rows to skip from the preamble, then from the output block and status row.
         let pre_skip = skip_rows.min(pre_total);
         let after_pre_skip = skip_rows.saturating_sub(pre_total);
         let block_skip = after_pre_skip.min(out_block_total);
         let after_block_skip = after_pre_skip.saturating_sub(block_skip);
 
-        // Compute available heights for each segment
-        let pre_remaining = pre_total.saturating_sub(pre_skip);
-        let pre_height = pre_remaining.min(area.height);
+        let pre_height = pre_total
+            .saturating_sub(pre_skip)
+            .min(area.height);
         let mut remaining_height = area.height.saturating_sub(pre_height);
 
-        let block_remaining = out_block_total.saturating_sub(block_skip);
-        let block_height = block_remaining.min(remaining_height);
+        let block_height = out_block_total
+            .saturating_sub(block_skip)
+            .min(remaining_height);
         remaining_height = remaining_height.saturating_sub(block_height);
 
-        let status_line_to_render =
-            if status_extra > 0 && after_block_skip == 0 && remaining_height > 0 {
-                status_line.as_ref().cloned()
-            } else {
-                None
-            };
-        let status_height = if status_line_to_render.is_some() {
-            1
+        let status_line_to_render = if plan_ref.status_line.is_some()
+            && after_block_skip == 0
+            && remaining_height > 0
+        {
+            plan_ref.status_line.as_ref().cloned()
         } else {
-            0
+            None
         };
+        let status_height = if status_line_to_render.is_some() { 1 } else { 0 };
 
-        // Render preamble (scrolled) if any space. Do not strip or offset the
-        // leading "└ ": render at the left edge so the angle is visible.
+        let mut cur_y = area.y;
+
         if pre_height > 0 {
             let pre_area = Rect {
                 x: area.x,
-                y: area.y,
+                y: cur_y,
                 width: area.width,
                 height: pre_height,
             };
-            // Hard clear: fill pre_area with spaces using theme background. This prevents
-            // artifacts when the preamble shrinks or when scrolling reveals previously
-            // longer content.
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text());
             fill_rect(buf, pre_area, Some(' '), bg_style);
-            let pre_block =
-                Block::default().style(Style::default().bg(crate::colors::background()));
-            Paragraph::new(pre_text)
-                .block(pre_block)
-                .wrap(Wrap { trim: false })
-                .scroll((pre_skip, 0))
-                .style(Style::default().bg(crate::colors::background()))
-                .render(pre_area, buf);
+            for (idx, line) in plan_ref
+                .pre_lines
+                .iter()
+                .skip(pre_skip as usize)
+                .take(pre_height as usize)
+                .enumerate()
+            {
+                let y = pre_area.y.saturating_add(idx as u16);
+                if y >= pre_area.y.saturating_add(pre_area.height) {
+                    break;
+                }
+                write_line(buf, pre_area.x, y, pre_area.width, line, bg_style);
+            }
+            cur_y = cur_y.saturating_add(pre_height);
         }
 
-        // Render output (scrolled) with a left border block if any space
-        if block_height > 0 {
+        if block_height > 0 && area.width > 0 {
             let out_area = Rect {
                 x: area.x,
-                y: area.y.saturating_add(pre_height),
+                y: cur_y,
                 width: area.width,
                 height: block_height,
             };
-            // Hard clear: fill out_area with spaces before drawing the bordered paragraph.
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text_dim());
@@ -1913,37 +1904,38 @@ impl HistoryCell for ExecCell {
                     top: 0,
                     bottom: 0,
                 });
-            Paragraph::new(out_text)
-                .block(block)
-                .wrap(Wrap { trim: false })
-                // Scroll count is based on the wrapped text rows at out_wrap_width
-                .scroll((block_skip, 0))
-                .style(
-                    Style::default()
-                        .bg(crate::colors::background())
-                        .fg(crate::colors::text_dim()),
-                )
-                .render(out_area, buf);
+            let inner_rect = block.inner(out_area);
+            block.render(out_area, buf);
+
+            if inner_rect.width > 0 {
+                for (idx, line) in plan_ref
+                    .out_lines
+                    .iter()
+                    .skip(block_skip as usize)
+                    .take(block_height as usize)
+                    .enumerate()
+                {
+                    let y = inner_rect.y.saturating_add(idx as u16);
+                    if y >= inner_rect.y.saturating_add(inner_rect.height) {
+                        break;
+                    }
+                    write_line(buf, inner_rect.x, y, inner_rect.width, line, bg_style);
+                }
+            }
+            cur_y = cur_y.saturating_add(block_height);
         }
 
         if let Some(line) = status_line_to_render {
-            let status_y = area
-                .y
-                .saturating_add(pre_height)
-                .saturating_add(block_height);
-            if status_y < area.y.saturating_add(area.height) {
+            if status_height > 0 {
                 let status_area = Rect {
                     x: area.x,
-                    y: status_y,
+                    y: cur_y,
                     width: area.width,
                     height: status_height,
                 };
                 let bg_style = Style::default().bg(crate::colors::background());
                 fill_rect(buf, status_area, Some(' '), bg_style);
-                Paragraph::new(Text::from(vec![line]))
-                    .wrap(Wrap { trim: false })
-                    .style(bg_style)
-                    .render(status_area, buf);
+                write_line(buf, status_area.x, status_area.y, status_area.width, &line, bg_style);
             }
         }
     }
@@ -1966,82 +1958,70 @@ impl ExecCell {
         self.cached_display_lines.borrow_mut().take();
         self.cached_pre_lines.borrow_mut().take();
         self.cached_out_lines.borrow_mut().take();
-        self.cached_wrap.borrow_mut().take();
+        self.cached_layout.borrow_mut().take();
         self.stream_status_line.borrow_mut().take();
     }
     /// Compute wrapped row totals for the preamble and the output at the given width.
-    /// Uses an ASCII fast path when all spans are ASCII; caches totals for finalized execs.
+    /// Delegates to the per-width layout cache to avoid redundant reflow work.
     fn ensure_wrap_totals(&self, width: u16) -> (u16, u16, u16) {
-        if self.output.is_some() {
-            if let Some(cache) = self.cached_wrap.borrow().as_ref() {
-                if cache.width == width {
-                    return (
-                        cache.pre_total,
-                        cache.out_block_total,
-                        cache.out_total_with_status,
-                    );
-                }
+        let layout = self.ensure_layout(width);
+        (
+            layout.pre_total,
+            layout.out_block_total,
+            layout.out_total_with_status,
+        )
+    }
+
+    fn ensure_layout(&self, width: u16) -> Rc<ExecLayoutCache> {
+        if let Some(layout) = self.cached_layout.borrow().as_ref() {
+            if layout.width == width {
+                return layout.clone();
             }
         }
 
-        let (pre_lines, out_lines, status_line_opt) = self.exec_render_parts();
-        let pre = trim_empty_lines(pre_lines);
-        let out = trim_empty_lines(out_lines);
+        let (pre_lines_raw, out_lines_raw, status_line_opt) = self.exec_render_parts();
+        let pre_trimmed = trim_empty_lines(pre_lines_raw);
+        let out_trimmed = trim_empty_lines(out_lines_raw);
 
         let pre_wrap_width = width;
         let out_wrap_width = width.saturating_sub(2);
 
-        fn ascii_rows(lines: &[Line<'_>], wrap_w: u16) -> Option<u16> {
-            if wrap_w == 0 {
-                return Some(0);
-            }
-            let w = wrap_w as usize;
-            let mut rows: u64 = 0;
-            for line in lines {
-                let mut len = 0usize;
-                for sp in &line.spans {
-                    let s = sp.content.as_ref();
-                    if !s.is_ascii() {
-                        return None;
-                    }
-                    len += s.len();
-                }
-                let row = if len == 0 { 1 } else { (len + w - 1) / w };
-                rows = rows.saturating_add(row as u64);
-                if rows > u16::MAX as u64 {
-                    return Some(u16::MAX);
-                }
-            }
-            Some(rows as u16)
-        }
+        let pre_wrapped = if pre_wrap_width == 0 {
+            Vec::new()
+        } else {
+            word_wrap_lines(&pre_trimmed, pre_wrap_width)
+        };
+        let out_wrapped = if out_wrap_width == 0 {
+            Vec::new()
+        } else {
+            word_wrap_lines(&out_trimmed, out_wrap_width)
+        };
 
-        let pre_total = ascii_rows(&pre, pre_wrap_width).unwrap_or_else(|| {
-            Paragraph::new(Text::from(pre.clone()))
-                .wrap(Wrap { trim: false })
-                .line_count(pre_wrap_width)
-                .try_into()
-                .unwrap_or(0)
-        });
-        let out_block_total = ascii_rows(&out, out_wrap_width).unwrap_or_else(|| {
-            Paragraph::new(Text::from(out.clone()))
-                .wrap(Wrap { trim: false })
-                .line_count(out_wrap_width)
-                .try_into()
-                .unwrap_or(0)
+        let clamp_len = |len: usize| -> u16 { len.min(u16::MAX as usize) as u16 };
+        let pre_total = clamp_len(pre_wrapped.len());
+        let out_block_total = clamp_len(out_wrapped.len());
+        let status_line = if self.output.is_none() {
+            status_line_opt
+        } else {
+            None
+        };
+        let out_total_with_status = out_block_total.saturating_add(if status_line.is_some() {
+            1
+        } else {
+            0
         });
 
-        let extra_status = if status_line_opt.is_some() { 1 } else { 0 };
-        let out_total_with_status = out_block_total.saturating_add(extra_status);
-
-        if self.output.is_some() {
-            *self.cached_wrap.borrow_mut() = Some(ExecWrapCache {
-                width,
-                pre_total,
-                out_block_total,
-                out_total_with_status,
-            });
-        }
-        (pre_total, out_block_total, out_total_with_status)
+        let layout = Rc::new(ExecLayoutCache {
+            width,
+            pre_lines: pre_wrapped,
+            out_lines: out_wrapped,
+            status_line,
+            pre_total,
+            out_block_total,
+            out_total_with_status,
+        });
+        *self.cached_layout.borrow_mut() = Some(layout.clone());
+        layout
     }
     // Build separate segments: (preamble lines, output lines)
     fn exec_render_parts(
@@ -2102,7 +2082,7 @@ impl ExecCell {
         self.cached_display_lines.borrow_mut().take();
         self.cached_pre_lines.borrow_mut().take();
         self.cached_out_lines.borrow_mut().take();
-        self.cached_wrap.borrow_mut().take();
+        self.cached_layout.borrow_mut().take();
         self.stream_status_line.borrow_mut().take();
     }
 }
@@ -6083,7 +6063,7 @@ fn new_exec_cell(
         cached_display_lines: std::cell::RefCell::new(None),
         cached_pre_lines: std::cell::RefCell::new(None),
         cached_out_lines: std::cell::RefCell::new(None),
-        cached_wrap: std::cell::RefCell::new(None),
+        cached_layout: std::cell::RefCell::new(None),
         has_bold_command,
     }
 }
