@@ -162,15 +162,17 @@ pub async fn process_exec_tool_call(
             };
 
             if timed_out {
-                return Err(CodexErr::Sandbox(SandboxErr::Timeout {
-                    output: Box::new(exec_output),
-                }));
+                return Err(CodexErr::Sandbox(SandboxErr::Timeout));
             }
 
             if exit_code != 0 && is_likely_sandbox_denied(sandbox_type, exit_code) {
-                return Err(CodexErr::Sandbox(SandboxErr::Denied {
-                    output: Box::new(exec_output),
-                }));
+                let stdout_str = exec_output.stdout.text.clone();
+                let stderr_str = exec_output.stderr.text.clone();
+                return Err(CodexErr::Sandbox(SandboxErr::Denied(
+                    exit_code,
+                    stdout_str,
+                    stderr_str,
+                )));
             }
 
             Ok(exec_output)
@@ -378,7 +380,7 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
         if let Some(stream) = &stream
             && emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
         {
-            let chunk = tmp[..n].to_vec();
+            let chunk = serde_bytes::ByteBuf::from(tmp[..n].to_vec());
             let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
                 call_id: stream.call_id.clone(),
                 stream: if is_stderr {
@@ -391,6 +393,8 @@ async fn read_capped<R: AsyncRead + Unpin + Send + 'static>(
             let event = Event {
                 id: stream.sub_id.clone(),
                 msg,
+                event_seq: 0,  // Will be set by the event processor
+                order: None,
             };
             #[allow(clippy::let_unit_value)]
             let _ = stream.tx_event.send(event).await;

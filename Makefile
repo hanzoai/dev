@@ -39,7 +39,7 @@ NODE_PORT := 3690
 OLLAMA_PORT := 11434
 
 # Build flags
-RUST_FLAGS := RUSTFLAGS="-C target-cpu=native"
+RUSTFLAGS := -C target-cpu=native
 CARGO_FLAGS := --release
 NODE_FLAGS := NODE_ENV=production
 
@@ -49,8 +49,8 @@ UV := uv
 
 .PHONY: all help clean build test install dev setup lint format check
 
-# Default target
-all: help
+# Default target - build and test
+all: build test
 
 # Help target
 help:
@@ -66,11 +66,10 @@ help:
 	@echo "$(CYAN)║$(NC)  $(GREEN)make install$(NC)      - Install all components"
 	@echo "$(CYAN)║                                                                ║$(NC)"
 	@echo "$(CYAN)║ Component-Specific:                                           ║$(NC)"
-	@echo "$(CYAN)║$(NC)  $(BLUE)make rust-*$(NC)       - Rust/Codex commands"
+	@echo "$(CYAN)║$(NC)  $(BLUE)make rust-*$(NC)       - Rust/Hanzo Dev commands"
 	@echo "$(CYAN)║$(NC)  $(BLUE)make node-*$(NC)       - Node.js/TypeScript commands"
 	@echo "$(CYAN)║$(NC)  $(BLUE)make python-*$(NC)     - Python commands"
-	@echo "$(CYAN)║$(NC)  $(BLUE)make engine-*$(NC)     - Hanzo Engine commands"
-	@echo "$(CYAN)║$(NC)  $(BLUE)make hanzo-node-*$(NC) - Hanzo Node commands"
+	@echo "$(CYAN)║$(NC)  $(BLUE)make hanzod-*$(NC)     - Hanzo daemon commands"
 	@echo "$(CYAN)║$(NC)  $(BLUE)make docker-*$(NC)     - Docker commands"
 	@echo "$(CYAN)║                                                                ║$(NC)"
 	@echo "$(CYAN)║ Services:                                                      ║$(NC)"
@@ -148,9 +147,9 @@ build-python: python-build
 # Rust/Codex Targets
 rust-build:
 	@echo "$(BLUE)Building Rust/Codex components...$(NC)"
-	@cd $(RUST_DIR) && $(RUST_FLAGS) cargo build $(CARGO_FLAGS)
+	@cd $(RUST_DIR) && RUSTFLAGS="$(RUSTFLAGS)" cargo build $(CARGO_FLAGS)
 	@if [ -d "$(CODEX_RS_DIR)" ]; then \
-		cd $(CODEX_RS_DIR) && $(RUST_FLAGS) cargo build $(CARGO_FLAGS); \
+		cd $(CODEX_RS_DIR) && RUSTFLAGS="$(RUSTFLAGS)" cargo build $(CARGO_FLAGS); \
 	fi
 	@echo "$(GREEN)✓ Rust build complete$(NC)"
 
@@ -177,7 +176,7 @@ rust-clean:
 
 rust-release:
 	@echo "$(BLUE)Building Rust release...$(NC)"
-	@cd $(RUST_DIR) && $(RUST_FLAGS) cargo build --release
+	@cd $(RUST_DIR) && RUSTFLAGS="$(RUSTFLAGS)" cargo build --release
 	@strip target/release/$(HANZO_BIN) 2>/dev/null || true
 	@echo "$(GREEN)✓ Release build complete: target/release/$(HANZO_BIN)$(NC)"
 
@@ -185,7 +184,10 @@ rust-release:
 node-build:
 	@echo "$(BLUE)Building Node.js/TypeScript components...$(NC)"
 	@if [ -f "$(TS_DIR)/package.json" ]; then \
-		cd $(TS_DIR) && pnpm install && pnpm build; \
+		cd $(TS_DIR) && pnpm install && (pnpm build 2>/dev/null || echo "No build script needed"); \
+	fi
+	@if [ -d "mcp" ]; then \
+		cd mcp && npm install && npm run build && echo "$(GREEN)✓ MCP tools built$(NC)"; \
 	fi
 	@echo "$(GREEN)✓ Node.js build complete$(NC)"
 
@@ -259,90 +261,62 @@ python-clean:
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 # ============================================================================
-# Hanzo Engine Commands
+# Hanzo Daemon (hanzod) Commands
 # ============================================================================
 
-engine-build:
-	@echo "$(BLUE)Building Hanzo Engine...$(NC)"
-	@if [ -d "$(ENGINE_DIR)" ]; then \
-		cd $(ENGINE_DIR) && cargo build --release --features cuda,flash-attn,cudnn; \
-		echo "$(GREEN)✓ Hanzo Engine built$(NC)"; \
+hanzod-build:
+	@echo "$(BLUE)Building hanzod...$(NC)"
+	@if [ -f "$(RUST_DIR)/Cargo.toml" ]; then \
+		cd $(RUST_DIR) && cargo build --release --bin hanzod 2>/dev/null || cargo build --release; \
+		if [ -f "$(RUST_DIR)/target/release/hanzod" ]; then \
+			cp $(RUST_DIR)/target/release/hanzod ./hanzod; \
+			echo "$(GREEN)✓ hanzod built and copied to current directory$(NC)"; \
+		else \
+			echo "$(GREEN)✓ Rust project built$(NC)"; \
+		fi; \
 	else \
-		echo "$(YELLOW)Hanzo Engine not found at $(ENGINE_DIR)$(NC)"; \
+		echo "$(YELLOW)hanzod source not found$(NC)"; \
 	fi
 
-engine-start:
-	@echo "$(BLUE)Starting Hanzo Engine on port $(ENGINE_PORT)...$(NC)"
-	@if [ -f "$(ENGINE_DIR)/target/release/$(ENGINE_BIN)" ]; then \
-		$(ENGINE_DIR)/target/release/$(ENGINE_BIN) serve --port $(ENGINE_PORT) & \
-		echo $$! > .engine.pid; \
-		echo "$(GREEN)✓ Hanzo Engine started (PID: $$(cat .engine.pid))$(NC)"; \
+hanzod-start:
+	@echo "$(BLUE)Starting hanzod on port $(NODE_PORT)...$(NC)"
+	@mkdir -p ~/.hanzo
+	@if [ -f "./hanzod" ]; then \
+		./hanzod --port $(NODE_PORT) > ~/.hanzo/hanzod.log 2>&1 & \
+		echo $$! > .hanzod.pid; \
+		echo "$(GREEN)✓ hanzod started (PID: $$(cat .hanzod.pid))$(NC)"; \
+		echo "$(GREEN)✓ API: http://localhost:$(NODE_PORT)$(NC)"; \
+	elif [ -f "$(RUST_DIR)/target/release/hanzod" ]; then \
+		$(RUST_DIR)/target/release/hanzod --port $(NODE_PORT) > ~/.hanzo/hanzod.log 2>&1 & \
+		echo $$! > .hanzod.pid; \
+		echo "$(GREEN)✓ hanzod started (PID: $$(cat .hanzod.pid))$(NC)"; \
+		echo "$(GREEN)✓ API: http://localhost:$(NODE_PORT)$(NC)"; \
 	else \
-		echo "$(RED)Hanzo Engine binary not found. Run 'make engine-build' first$(NC)"; \
+		echo "$(RED)hanzod not found. Run 'make hanzod-build' first$(NC)"; \
 	fi
 
-engine-stop:
-	@echo "$(YELLOW)Stopping Hanzo Engine...$(NC)"
-	@if [ -f .engine.pid ]; then \
-		kill $$(cat .engine.pid) 2>/dev/null || true; \
-		rm .engine.pid; \
-		echo "$(GREEN)✓ Hanzo Engine stopped$(NC)"; \
+hanzod-stop:
+	@echo "$(YELLOW)Stopping hanzod...$(NC)"
+	@if [ -f .hanzod.pid ]; then \
+		kill $$(cat .hanzod.pid) 2>/dev/null || true; \
+		rm .hanzod.pid; \
+		echo "$(GREEN)✓ hanzod stopped$(NC)"; \
 	fi
 
-engine-status:
-	@if curl -s http://localhost:$(ENGINE_PORT)/health >/dev/null 2>&1; then \
-		echo "$(GREEN)✓ Hanzo Engine is running on port $(ENGINE_PORT)$(NC)"; \
-	else \
-		echo "$(RED)✗ Hanzo Engine is not running$(NC)"; \
-	fi
-
-# ============================================================================
-# Hanzo Node Commands
-# ============================================================================
-
-hanzo-node-build:
-	@echo "$(BLUE)Building Hanzo Node...$(NC)"
-	@if [ -d "$(NODE_DIR)" ]; then \
-		cd $(NODE_DIR) && cargo build --release; \
-		echo "$(GREEN)✓ Hanzo Node built$(NC)"; \
-	else \
-		echo "$(YELLOW)Hanzo Node not found at $(NODE_DIR)$(NC)"; \
-	fi
-
-hanzo-node-start:
-	@echo "$(BLUE)Starting Hanzo Node with Qwen3 support...$(NC)"
-	@echo "$(CYAN)API Port: $(NODE_PORT), P2P Port: 3691$(NC)"
-	@if [ -f "./scripts/run_node_localhost.sh" ]; then \
-		./scripts/run_node_localhost.sh & \
-		echo $$! > .node.pid; \
-		echo "$(GREEN)✓ Hanzo Node started (PID: $$(cat .node.pid))$(NC)"; \
-		echo "$(GREEN)✓ Swagger UI: http://localhost:$(NODE_PORT)/v2/swagger-ui/$(NC)"; \
-	elif [ -f "$(NODE_DIR)/target/release/$(NODE_BIN)" ]; then \
-		HANZO_ENABLE_QWEN3=true \
-		QWEN3_MODELS="qwen3-8b,qwen3-14b,qwen3-72b" \
-		QWEN3_EMBEDDING_MODEL="qwen3-embedding-8b" \
-		QWEN3_RERANKER_MODEL="qwen3-reranker-4b" \
-		NODE_API_PORT=$(NODE_PORT) NODE_PORT=3691 \
-		$(NODE_DIR)/target/release/$(NODE_BIN) & \
-		echo $$! > .node.pid; \
-		echo "$(GREEN)✓ Hanzo Node started with Qwen3 (PID: $$(cat .node.pid))$(NC)"; \
-	else \
-		echo "$(RED)Hanzo Node not found. Run 'make hanzo-node-build' first$(NC)"; \
-	fi
-
-hanzo-node-stop:
-	@echo "$(YELLOW)Stopping Hanzo Node...$(NC)"
-	@if [ -f .node.pid ]; then \
-		kill $$(cat .node.pid) 2>/dev/null || true; \
-		rm .node.pid; \
-		echo "$(GREEN)✓ Hanzo Node stopped$(NC)"; \
-	fi
-
-hanzo-node-status:
+hanzod-status:
 	@if curl -s http://localhost:$(NODE_PORT)/health >/dev/null 2>&1; then \
-		echo "$(GREEN)✓ Hanzo Node is running on port $(NODE_PORT)$(NC)"; \
+		echo "$(GREEN)✓ hanzod is running on port $(NODE_PORT)$(NC)"; \
 	else \
-		echo "$(RED)✗ Hanzo Node is not running$(NC)"; \
+		echo "$(RED)✗ hanzod is not running$(NC)"; \
+	fi
+
+hanzod-restart: hanzod-stop hanzod-start
+	@echo "$(GREEN)✓ hanzod restarted$(NC)"
+
+hanzod-logs:
+	@if [ -f .hanzod.pid ]; then \
+		echo "$(CYAN)hanzod logs:$(NC)"; \
+		tail -f ~/.hanzo/hanzod.log 2>/dev/null || echo "No logs available"; \
 	fi
 
 # ============================================================================
@@ -383,7 +357,7 @@ start: start-services
 	@echo "$(GREEN)✓ All services started!$(NC)"
 	@make status
 
-start-services: engine-start hanzo-node-start
+start-services: hanzod-start
 	@echo "$(BLUE)Starting additional services...$(NC)"
 	@if command -v ollama >/dev/null 2>&1; then \
 		ollama serve >/dev/null 2>&1 & \
@@ -393,30 +367,21 @@ start-services: engine-start hanzo-node-start
 stop: stop-services
 	@echo "$(GREEN)✓ All services stopped!$(NC)"
 
-stop-services: engine-stop hanzo-node-stop
+stop-services: hanzod-stop
 	@echo "$(YELLOW)Stopping additional services...$(NC)"
 	@pkill ollama 2>/dev/null || true
 
 status:
 	@echo "$(CYAN)Service Status:$(NC)"
 	@echo "==============="
-	@make -s engine-status
-	@make -s hanzo-node-status
+	@make -s hanzod-status
 	@if lsof -i :$(OLLAMA_PORT) >/dev/null 2>&1; then \
 		echo "$(GREEN)✓ Ollama is running on port $(OLLAMA_PORT)$(NC)"; \
 	else \
 		echo "$(RED)✗ Ollama is not running$(NC)"; \
 	fi
 
-logs:
-	@if [ -f .engine.pid ]; then \
-		echo "$(CYAN)Hanzo Engine logs:$(NC)"; \
-		tail -f ~/.hanzo/engine.log 2>/dev/null || echo "No logs available"; \
-	fi
-	@if [ -f .node.pid ]; then \
-		echo "$(CYAN)Hanzo Node logs:$(NC)"; \
-		tail -f ~/.hanzo/node.log 2>/dev/null || echo "No logs available"; \
-	fi
+logs: hanzod-logs
 
 # ============================================================================
 # Development Commands

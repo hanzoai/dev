@@ -1,6 +1,6 @@
 use clap::Parser;
-use codex_common::ApprovalModeCliArg;
-use codex_common::CliConfigOverrides;
+use dev_common::ApprovalModeCliArg;
+use dev_common::CliConfigOverrides;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -44,7 +44,7 @@ pub struct Cli {
     /// Select the sandbox policy to use when executing model-generated shell
     /// commands.
     #[arg(long = "sandbox", short = 's')]
-    pub sandbox_mode: Option<codex_common::SandboxModeCliArg>,
+    pub sandbox_mode: Option<dev_common::SandboxModeCliArg>,
 
     /// Configure when the model requires human approval before executing a command.
     #[arg(long = "ask-for-approval", short = 'a')]

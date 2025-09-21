@@ -1,11 +1,10 @@
 // Qwen3 model information and configuration
-use crate::model_family::ModelFamily;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QwenModelInfo {
     pub name: String,
-    pub family: ModelFamily,
+    pub family: String,  // Changed from ModelFamily to String
     pub context_window: u64,
     pub max_output_tokens: u64,
     pub supports_thinking: bool,
@@ -18,7 +17,7 @@ impl QwenModelInfo {
     pub fn qwen3_8b() -> Self {
         Self {
             name: "Qwen3-8B".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 32768,
             max_output_tokens: 8192,
             supports_thinking: true,
@@ -31,7 +30,7 @@ impl QwenModelInfo {
     pub fn qwen3_14b() -> Self {
         Self {
             name: "Qwen3-14B".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 32768,
             max_output_tokens: 8192,
             supports_thinking: true,
@@ -44,7 +43,7 @@ impl QwenModelInfo {
     pub fn qwen3_30b_a3b() -> Self {
         Self {
             name: "Qwen3-30B-A3B".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 32768,
             max_output_tokens: 8192,
             supports_thinking: true,
@@ -57,7 +56,7 @@ impl QwenModelInfo {
     pub fn qwen3_72b() -> Self {
         Self {
             name: "Qwen3-72B".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 131072,
             max_output_tokens: 32768,
             supports_thinking: true,
@@ -70,7 +69,7 @@ impl QwenModelInfo {
     pub fn qwen3_235b() -> Self {
         Self {
             name: "Qwen3-235B".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 131072,
             max_output_tokens: 32768,
             supports_thinking: true,
@@ -83,7 +82,7 @@ impl QwenModelInfo {
     pub fn qwen3_reranker() -> Self {
         Self {
             name: "Qwen3-Reranker".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 8192,
             max_output_tokens: 0, // Reranker doesn't generate text
             supports_thinking: false,
@@ -96,7 +95,7 @@ impl QwenModelInfo {
     pub fn qwen2_vl() -> Self {
         Self {
             name: "Qwen2-VL".to_string(),
-            family: ModelFamily::QwenV3,
+            family: "qwen3".to_string(),
             context_window: 32768,
             max_output_tokens: 8192,
             supports_thinking: false,

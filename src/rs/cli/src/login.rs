@@ -1,4 +1,4 @@
-use codex_common::CliConfigOverrides;
+use dev_common::CliConfigOverrides;
 use hanzo_dev::CodexAuth;
 use hanzo_dev::auth::CLIENT_ID;
 use hanzo_dev::auth::OPENAI_API_KEY_ENV_VAR;

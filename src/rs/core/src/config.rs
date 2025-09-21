@@ -6,6 +6,7 @@ use crate::config_types::GithubConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
+use crate::config_types::ReasoningSummaryFormat;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyToml;
@@ -35,6 +36,7 @@ use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
 
 const OPENAI_DEFAULT_MODEL: &str = "gpt-5";
+pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5-codex";
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
@@ -693,14 +695,12 @@ pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
                             .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
                             .collect()
                     });
-                let startup_timeout_ms = t
-                    .get("startup_timeout_ms")
-                    .and_then(|v| v.as_integer())
-                    .map(|i| i as u64);
+                // Note: startup_timeout_ms was removed from McpServerConfig
+                // If needed in future, it can be stored separately
 
                 out.push((
                     name.to_string(),
-                    McpServerConfig { command, args, env, startup_timeout_ms },
+                    McpServerConfig { command, args, env },
                 ));
             }
         }
@@ -769,9 +769,7 @@ pub fn add_mcp_server(
         }
         server_tbl.insert("env", TomlItem::Value(toml_edit::Value::InlineTable(it)));
     }
-    if let Some(ms) = cfg.startup_timeout_ms {
-        server_tbl.insert("startup_timeout_ms", TomlItem::Value(toml_edit::Value::from(ms as i64)));
-    }
+    // Note: startup_timeout_ms was removed from McpServerConfig
 
     // Write into enabled table
     tbl.insert(name, TomlItem::Table(server_tbl));
@@ -1303,8 +1301,14 @@ impl Config {
                 family: model.clone(),
                 needs_special_apply_patch_instructions: false,
                 supports_reasoning_summaries,
+                reasoning_summary_format: if supports_reasoning_summaries {
+                    ReasoningSummaryFormat::Brief
+                } else {
+                    ReasoningSummaryFormat::None
+                },
                 uses_local_shell_tool: false,
                 apply_patch_tool_type: None,
+                base_instructions: crate::model_family::BASE_INSTRUCTIONS.to_string(),
             }
         });
 
@@ -1361,7 +1365,8 @@ impl Config {
             agents: cfg.agents,
             model_providers,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
-            codex_home,
+            codex_home: codex_home.clone(),
+            dev_home: codex_home,  // Use same path as codex_home for now
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             tui: cfg.tui.unwrap_or_default(),

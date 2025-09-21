@@ -16,6 +16,8 @@ pub fn sanitize_ref_component(s: &str) -> String {
         .collect()
 }
 
-pub fn setup_worktree(_path: &PathBuf, _branch: &str) -> Result<(), std::io::Error> {
-    Ok(())
+pub fn setup_worktree(path: &PathBuf, branch: &str) -> Result<(PathBuf, String), std::io::Error> {
+    // For now, return the same path and branch
+    // In a real implementation, this would create a git worktree
+    Ok((path.clone(), branch.to_string()))
 }

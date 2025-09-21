@@ -464,7 +464,7 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                     .await;
                 drop(manager);
 
-                match setup_worktree(&git_root, &branch_id).await {
+                match setup_worktree(&git_root, &branch_id) {
                     Ok((worktree_path, used_branch)) => {
                         let mut manager = AGENT_MANAGER.write().await;
                         manager

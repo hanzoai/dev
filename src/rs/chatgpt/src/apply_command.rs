@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use codex_common::CliConfigOverrides;
+use dev_common::CliConfigOverrides;
 use hanzo_dev::config::Config;
 use hanzo_dev::config::ConfigOverrides;
 

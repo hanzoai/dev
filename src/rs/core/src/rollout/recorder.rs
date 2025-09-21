@@ -24,7 +24,7 @@ use super::list::ConversationsPage;
 use super::list::Cursor;
 use super::list::get_conversations;
 use crate::config::Config;
-use super::policy::is_persisted_response_item;
+use super::policy::should_persist_response_item;
 use crate::conversation_manager::InitialHistory;
 use dev_protocol::models::ResponseItem;
 
@@ -167,7 +167,7 @@ impl RolloutRecorder {
     pub(crate) async fn record_items(&self, items: &[ResponseItem]) -> std::io::Result<()> {
         let filtered: Vec<ResponseItem> = items
             .iter()
-            .filter(|item| is_persisted_response_item(item))
+            .filter(|item| should_persist_response_item(item))
             .cloned()
             .collect();
         if filtered.is_empty() {

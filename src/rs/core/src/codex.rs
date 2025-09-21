@@ -73,7 +73,6 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
             InputItem::Image { image_url } => {
                 content_items.push(ContentItem::InputImage {
                     image_url,
-                    detail: None,
                 });
             }
             InputItem::LocalImage { path } => match std::fs::read(&path) {
@@ -85,7 +84,6 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
                     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
                     content_items.push(ContentItem::InputImage {
                         image_url: format!("data:{mime};base64,{encoded}"),
-                        detail: None,
                     });
                 }
                 Err(err) => {
@@ -119,7 +117,6 @@ fn response_input_from_core_items(items: Vec<InputItem>) -> ResponseInputItem {
                         tracing::info!("Created ephemeral image data URL with mime: {}", mime);
                         content_items.push(ContentItem::InputImage {
                             image_url: format!("data:{mime};base64,{encoded}"),
-                            detail: Some("high".to_string()),
                         });
                     }
                     Err(err) => {
@@ -1172,6 +1169,7 @@ impl Session {
                     stderr: StreamOutput::new(get_error_message_ui(e)),
                     aggregated_output: StreamOutput::new(get_error_message_ui(e)),
                     duration: Duration::default(),
+                    timed_out: false,
                 };
                 &output_stderr
             }
@@ -2195,6 +2193,7 @@ async fn run_turn(
                 Some(sess.user_shell.clone()),
             )),
             status_items, // Include status items with this request
+            text_format: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
@@ -2261,6 +2260,7 @@ async fn run_turn(
                                 base_instructions_override: Some(SUMMARIZATION_PROMPT.to_string()),
                                 environment_context: None,
                                 status_items: Vec::new(),
+                                text_format: None,
                             };
 
                             match drain_to_completed(sess, &sub_id, &compact_prompt).await {
@@ -2618,6 +2618,7 @@ async fn run_compact_agent(
             tools: Vec::new(),
             base_instructions_override: Some(compact_instructions.clone()),
             status_items, // Include status items with this request
+            text_format: None,
         };
 
         let attempt_result = drain_to_completed(&sess, &sub_id, &prompt).await;
@@ -5459,6 +5460,9 @@ async fn send_agent_status_update(sess: &Session) {
                 AgentStatus::Cancelled => "cancelled".to_string(),
             },
             model: Some(agent.model.clone()),
+            last_progress: agent.progress.last().cloned(),
+            result: agent.result.clone(),
+            error: agent.error.clone(),
         })
         .collect();
 
@@ -5536,7 +5540,6 @@ fn consume_pending_screenshots(sess: &Session) -> Vec<ResponseInputItem> {
                             ContentItem::InputText { text: metadata },
                             ContentItem::InputImage {
                                 image_url: format!("data:{mime};base64,{encoded}"),
-                                detail: Some("high".to_string()),
                             },
                         ],
                     }

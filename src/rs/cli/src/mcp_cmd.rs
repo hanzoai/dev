@@ -6,7 +6,7 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
-use codex_common::CliConfigOverrides;
+use dev_common::CliConfigOverrides;
 use hanzo_dev::config::Config;
 use hanzo_dev::config::ConfigOverrides;
 use hanzo_dev::config::find_codex_home;

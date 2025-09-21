@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 
 use clap::Parser;
-use codex_common::CliConfigOverrides;
+use dev_common::CliConfigOverrides;
 use hanzo_dev::AuthManager;
 use hanzo_dev::ConversationManager;
 use hanzo_dev::NewConversation;

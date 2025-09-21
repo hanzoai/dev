@@ -1,5 +1,5 @@
-use codex_common::elapsed::format_duration;
-use codex_common::elapsed::format_elapsed;
+use dev_common::elapsed::format_duration;
+use dev_common::elapsed::format_elapsed;
 use hanzo_dev::config::Config;
 use hanzo_dev::plan_tool::UpdatePlanArgs;
 use hanzo_dev::protocol::AgentMessageDeltaEvent;
@@ -35,7 +35,7 @@ use std::time::Instant;
 use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 use crate::event_processor::handle_last_message;
-use codex_common::create_config_summary_entries;
+use dev_common::create_config_summary_entries;
 
 /// This should be configurable. When used in CI, users may not want to impose
 /// a limit so they can see the full transcript.

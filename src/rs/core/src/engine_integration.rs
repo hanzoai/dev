@@ -3,7 +3,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use tokio::time::timeout;
 
 const ENGINE_PORT: u16 = 36900;
 const ENGINE_HOST: &str = "127.0.0.1";
@@ -70,11 +69,11 @@ impl HanzoEngine {
     }
 
     /// Start the native Hanzo engine process
-    pub fn start_engine(&mut self) -> Result<()> {
+    pub async fn start_engine(&mut self) -> Result<()> {
         println!("Starting native Hanzo Engine...");
 
         // Check if engine is already running
-        if self.is_running().unwrap_or(false) {
+        if self.is_running().await.unwrap_or(false) {
             println!("Engine already running on port {}", ENGINE_PORT);
             return Ok(());
         }
@@ -120,8 +119,8 @@ impl HanzoEngine {
 
         // Wait for engine to be ready
         for _ in 0..30 {
-            std::thread::sleep(Duration::from_secs(2));
-            if self.is_running().unwrap_or(false) {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            if self.is_running().await.unwrap_or(false) {
                 println!("✓ Engine started successfully on port {}", ENGINE_PORT);
                 return Ok(());
             }
@@ -131,9 +130,9 @@ impl HanzoEngine {
     }
 
     /// Check if the engine is running
-    pub fn is_running(&self) -> Result<bool> {
+    pub async fn is_running(&self) -> Result<bool> {
         let url = format!("{}/health", self.base_url);
-        match self.client.get(&url).send() {
+        match self.client.get(&url).send().await {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
         }
@@ -266,11 +265,11 @@ pub struct NativeEngineProvider {
 }
 
 impl NativeEngineProvider {
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         let mut engine = HanzoEngine::new()?;
-        
+
         // Try to start the engine
-        if let Err(e) = engine.start_engine() {
+        if let Err(e) = engine.start_engine().await {
             eprintln!("Warning: Could not start native engine: {}", e);
             eprintln!("Falling back to external providers");
         }
@@ -292,8 +291,8 @@ impl NativeEngineProvider {
             .unwrap_or_default())
     }
 
-    pub fn is_available(&self) -> bool {
-        self.engine.is_running().unwrap_or(false)
+    pub async fn is_available(&self) -> bool {
+        self.engine.is_running().await.unwrap_or(false)
     }
 }
 

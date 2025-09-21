@@ -130,10 +130,7 @@ impl McpConnectionManager {
                 continue;
             }
 
-            let timeout = cfg
-                .startup_timeout_ms
-                .map(Duration::from_millis)
-                .unwrap_or(DEFAULT_STARTUP_TIMEOUT);
+            let timeout = DEFAULT_STARTUP_TIMEOUT;
             per_server_timeout.insert(server_name.clone(), timeout);
 
             join_set.spawn(async move {

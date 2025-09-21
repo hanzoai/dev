@@ -19,7 +19,7 @@ pub struct GithubConfig {
 }
 
 /// Reasoning summary format
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ReasoningSummaryFormat {
     #[serde(rename = "none")]
     None,

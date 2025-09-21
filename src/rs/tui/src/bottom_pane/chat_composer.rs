@@ -32,7 +32,7 @@ use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_paste::try_decode_base64_image_to_temp_png;
-use codex_file_search::FileMatch;
+use dev_file_search::FileMatch;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

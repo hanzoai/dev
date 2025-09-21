@@ -1,8 +1,9 @@
 use crate::config_types::ReasoningSummaryFormat;
 use crate::tool_apply_patch::ApplyPatchToolType;
+use serde::{Deserialize, Serialize};
 
 /// Model family enum for proper typing
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ModelFamilyType {
     GPT35,
     GPT4,
@@ -51,11 +52,11 @@ impl ModelFamilyType {
 
 /// The `instructions` field in the payload sent to a model should always start
 /// with this content.
-const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const GPT_5_CODEX_INSTRUCTIONS: &str = include_str!("../gpt_5_codex_prompt.md");
 
 /// A model family is a group of models that share certain characteristics.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModelFamily {
     /// The full model slug used to derive this model family, e.g.
     /// "gpt-4.1-2025-04-14".
@@ -151,7 +152,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            reasoning_summary_format: ReasoningSummaryFormat::Experimental,
+            reasoning_summary_format: ReasoningSummaryFormat::Detailed,
             base_instructions: GPT_5_CODEX_INSTRUCTIONS.to_string(),
         )
     } else if slug.starts_with("gpt-5") {

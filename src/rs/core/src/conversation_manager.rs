@@ -105,7 +105,7 @@ impl ConversationManager {
             }
         };
 
-        let conversation = Arc::new(CodexConversation::new(codex));
+        let conversation = Arc::new(CodexConversation::new(conversation_id.to_string()));
         self.conversations
             .write()
             .await

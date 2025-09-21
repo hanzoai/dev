@@ -50,7 +50,7 @@ where
         // Safety: [`run_main`] never returns.
         codex_linux_sandbox::run_main();
     } else if exe_name == APPLY_PATCH_ARG0 || exe_name == MISSPELLED_APPLY_PATCH_ARG0 {
-        codex_apply_patch::main();
+        dev_apply_patch::main();
     }
 
     let argv1 = args.next().unwrap_or_default();
@@ -60,7 +60,7 @@ where
             Some(patch_arg) => {
                 let mut stdout = std::io::stdout();
                 let mut stderr = std::io::stderr();
-                match codex_apply_patch::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
+                match dev_apply_patch::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
                     Ok(()) => 0,
                     Err(_) => 1,
                 }
