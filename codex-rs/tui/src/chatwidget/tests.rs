@@ -634,7 +634,7 @@ fn interrupt_restores_queued_messages_into_composer() {
     // Composer should now contain the queued messages joined by newlines, in order.
     assert_eq!(
         chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued"
+        "first queued\n\nsecond queued"
     );
 
     // Queue should be cleared and no new user input should have been auto-submitted.
