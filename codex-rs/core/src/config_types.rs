@@ -237,7 +237,7 @@ pub struct GithubConfig {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ValidationConfig {
     /// Master toggle for the patch validation harness.
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub patch_harness: bool,
 
     /// Optional allowlist restricting which external tools may run.
@@ -256,7 +256,7 @@ pub struct ValidationConfig {
 impl Default for ValidationConfig {
     fn default() -> Self {
         Self {
-            patch_harness: true,
+            patch_harness: false,
             tools_allowlist: None,
             timeout_seconds: None,
             tools: ValidationTools::default(),

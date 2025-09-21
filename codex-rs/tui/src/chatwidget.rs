@@ -5457,6 +5457,46 @@ impl ChatWidget<'_> {
         })
     }
 
+    pub(crate) fn launch_validation_tool_install(
+        &mut self,
+        tool_name: &str,
+        install_hint: &str,
+    ) -> Option<TerminalLaunch> {
+        let trimmed = install_hint.trim();
+        if trimmed.is_empty() {
+            self.history_push(history_cell::new_error_event(format!(
+                "No install command available for validation tool '{tool_name}'."
+            )));
+            self.request_redraw();
+            return None;
+        }
+
+        let wrapped = wrap_command(trimmed);
+        if wrapped.is_empty() {
+            self.history_push(history_cell::new_error_event(format!(
+                "Unable to build install command for validation tool '{tool_name}'."
+            )));
+            self.request_redraw();
+            return None;
+        }
+
+        let id = self.terminal.alloc_id();
+        let display = Self::truncate_with_ellipsis(trimmed, 128);
+        let launch = TerminalLaunch {
+            id,
+            title: format!("Install {tool_name}"),
+            command: wrapped,
+            command_display: display,
+            controller: None,
+            auto_close_on_success: false,
+        };
+
+        self.history_push(history_cell::new_background_event(format!(
+            "Installing validation tool '{tool_name}' with `{trimmed}`"
+        )));
+        Some(launch)
+    }
+
     fn try_handle_terminal_shortcut(&mut self, raw_text: &str) -> bool {
         let trimmed = raw_text.trim_start();
         if let Some(rest) = trimmed.strip_prefix("$$") {
@@ -9658,12 +9698,12 @@ impl ChatWidget<'_> {
                 Ok(()) => self.history_push(history_cell::new_background_event(format!(
                     "✅ {}: {}",
                     name,
-                    if enable { "on" } else { "off" }
+                    if enable { "enabled" } else { "disabled" }
                 ))),
                 Err(err) => self.history_push(history_cell::new_background_event(format!(
                     "⚠️ {}: {} (persist failed: {err})",
                     name,
-                    if enable { "on" } else { "off" }
+                    if enable { "enabled" } else { "disabled" }
                 ))),
             }
             return;
@@ -9680,7 +9720,7 @@ impl ChatWidget<'_> {
             self.history_push(history_cell::new_background_event(format!(
                 "ℹ️ {} already {}",
                 name,
-                if enable { "on" } else { "off" }
+                if enable { "enabled" } else { "disabled" }
             )));
             return;
         }
@@ -9698,16 +9738,16 @@ impl ChatWidget<'_> {
             Err(err) => Err(err.to_string()),
         };
         match persist_result {
-            Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                "✅ {}: {}",
-                name,
-                if enable { "on" } else { "off" }
-            ))),
-            Err(err) => self.history_push(history_cell::new_background_event(format!(
-                "⚠️ {}: {} (persist failed: {err})",
-                name,
-                if enable { "on" } else { "off" }
-            ))),
+                Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                    "✅ {}: {}",
+                    name,
+                    if enable { "enabled" } else { "disabled" }
+                ))),
+                Err(err) => self.history_push(history_cell::new_background_event(format!(
+                    "⚠️ {}: {} (persist failed: {err})",
+                    name,
+                    if enable { "enabled" } else { "disabled" }
+                ))),
         }
     }
 
@@ -9721,11 +9761,11 @@ impl ChatWidget<'_> {
         lines.push("Tools:".to_string());
         for status in validation_settings_view::detect_tools() {
             let enabled = self.validation_tool_enabled(status.name);
-            let suffix = if status.installed { "" } else { " (missing)" };
+            let suffix = if status.installed { "" } else { " (not installed)" };
             lines.push(format!(
                 "• {} — {}{}",
                 status.name,
-                if enabled { "on" } else { "off" },
+                if enabled { "enabled" } else { "disabled" },
                 suffix
             ));
         }
