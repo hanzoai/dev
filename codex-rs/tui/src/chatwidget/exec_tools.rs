@@ -510,7 +510,7 @@ pub(super) fn handle_exec_begin_now(
                         stderr: String::new(),
                         wait_total: None,
                         wait_active: false,
-                        wait_note: None,
+                        wait_notes: Vec::new(),
                     },
                 );
                 chat.invalidate_height_cache();
@@ -544,7 +544,7 @@ pub(super) fn handle_exec_begin_now(
             stderr: String::new(),
             wait_total: None,
             wait_active: false,
-            wait_note: None,
+            wait_notes: Vec::new(),
         },
     );
     if !chat.tools_state.running_web_search.is_empty() {
@@ -593,7 +593,7 @@ pub(super) fn handle_exec_end_now(
     let ExecCommandEndEvent {
         call_id,
         exit_code,
-        duration: _,
+        duration,
         stdout,
         stderr,
     } = ev;
@@ -604,17 +604,17 @@ pub(super) fn handle_exec_end_now(
     chat.height_manager
         .borrow_mut()
         .record_event(HeightEvent::RunEnd);
-    let (command, parsed, history_index, explore_entry, wait_total, wait_note) = match cmd {
+    let (command, parsed, history_index, explore_entry, wait_total, wait_notes) = match cmd {
         Some(super::RunningCommand {
             command,
             parsed,
             history_index,
             explore_entry,
             wait_total,
-            wait_note,
+            wait_notes,
             ..
-        }) => (command, parsed, history_index, explore_entry, wait_total, wait_note),
-        None => (vec![call_id.clone()], vec![], None, None, None, None),
+        }) => (command, parsed, history_index, explore_entry, wait_total, wait_notes),
+        None => (vec![call_id.clone()], vec![], None, None, None, Vec::new()),
     };
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
@@ -684,8 +684,9 @@ pub(super) fn handle_exec_end_now(
     ));
     if let Some(ref cell) = completed_opt {
         cell.set_wait_total(wait_total);
-        cell.set_wait_note(wait_note.clone());
+        cell.set_wait_notes(&wait_notes);
         cell.set_waiting(false);
+        cell.set_run_duration(Some(duration));
     }
 
     let mut replaced = false;
