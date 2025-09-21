@@ -42,6 +42,8 @@ Notes
 - `/update`: check the installed version, detect available upgrades, and run the
   appropriate installer when possible.
 - `/mcp`: manage MCP servers (status/on/off/add).
+- `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
+  harness settings.
 
 ## Search & Mentions
 
