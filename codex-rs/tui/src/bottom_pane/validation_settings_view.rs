@@ -74,7 +74,8 @@ impl<'a> BottomPaneView<'a> for ValidationSettingsView {
                     self.selected_row += 1;
                 }
             }
-            KeyEvent { code: KeyCode::Left | KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
+            KeyEvent { code: KeyCode::Left, modifiers: KeyModifiers::NONE, .. }
+            | KeyEvent { code: KeyCode::Right, modifiers: KeyModifiers::NONE, .. } => {
                 if self.selected_row == 0 {
                     self.toggle_patch_harness();
                 } else if (1..=tool_rows).contains(&self.selected_row) {
