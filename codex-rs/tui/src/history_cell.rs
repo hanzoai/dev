@@ -1397,31 +1397,50 @@ impl AssistantMarkdownCell {
 
 // Cached layout for AssistantMarkdownCell (per width)
 #[derive(Clone)]
-struct AssistantLayoutCache {
+pub(crate) struct AssistantLayoutCache {
     width: u16,
     segs: Vec<AssistantSeg>,
     seg_rows: Vec<u16>,
     total_rows_with_padding: u16,
 }
 
+impl AssistantLayoutCache {
+    pub(crate) fn total_rows(&self) -> u16 {
+        self.total_rows_with_padding
+    }
+}
+
 #[derive(Clone, Debug)]
 enum AssistantSeg {
     Text(Vec<Line<'static>>),
     Bullet(Vec<Line<'static>>),
-    Code(Vec<Line<'static>>),
+    Code {
+        lines: Vec<Line<'static>>,
+        lang_label: Option<String>,
+        max_line_width: u16,
+    },
 }
 
 impl AssistantMarkdownCell {
-    fn ensure_layout(&self, width: u16) -> AssistantLayoutCache {
+    pub(crate) fn ensure_layout(&self, width: u16) -> AssistantLayoutCache {
         if let Some(cache) = self.cached_layout.borrow().as_ref() {
             if cache.width == width {
                 return cache.clone();
             }
         }
+
         let text_wrap_width = width;
         let mut segs: Vec<AssistantSeg> = Vec::new();
         let mut text_buf: Vec<Line<'static>> = Vec::new();
         let mut iter = self.display_lines_trimmed().into_iter().peekable();
+        let measure_line = |line: &Line<'_>| -> u16 {
+            line.spans
+                .iter()
+                .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+                .sum::<usize>()
+                .min(u16::MAX as usize) as u16
+        };
+
         while let Some(line) = iter.next() {
             if crate::render::line_utils::is_code_block_painted(&line) {
                 if !text_buf.is_empty() {
@@ -1429,36 +1448,66 @@ impl AssistantMarkdownCell {
                     segs.push(AssistantSeg::Text(wrapped));
                     text_buf.clear();
                 }
+
                 let mut chunk = vec![line];
-                while let Some(n) = iter.peek() {
-                    if crate::render::line_utils::is_code_block_painted(n) {
+                while let Some(next) = iter.peek() {
+                    if crate::render::line_utils::is_code_block_painted(next) {
                         chunk.push(iter.next().unwrap());
                     } else {
                         break;
                     }
                 }
-                // Remove language sentinel and trim blank padding rows (as in render)
-                if let Some(first) = chunk.first() {
-                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                    if flat.contains("⟦LANG:") {
-                        let _ = chunk.remove(0);
+
+                let mut lang_label: Option<String> = None;
+                let mut content_lines: Vec<Line<'static>> = Vec::new();
+                for (idx, candidate) in chunk.into_iter().enumerate() {
+                    if idx == 0 {
+                        let flat: String = candidate
+                            .spans
+                            .iter()
+                            .map(|s| s.content.as_ref())
+                            .collect();
+                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
+                            if let Some(end) = s.find('⟧') {
+                                lang_label = Some(s[..end].to_string());
+                                continue;
+                            }
+                        }
                     }
+                    content_lines.push(candidate);
                 }
-                while chunk
+
+                while content_lines
                     .first()
                     .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
                 {
-                    let _ = chunk.remove(0);
+                    let _ = content_lines.remove(0);
                 }
-                while chunk
+                while content_lines
                     .last()
                     .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
                 {
-                    let _ = chunk.pop();
+                    let _ = content_lines.pop();
                 }
-                segs.push(AssistantSeg::Code(chunk));
+
+                if content_lines.is_empty() {
+                    continue;
+                }
+
+                let max_line_width = content_lines
+                    .iter()
+                    .map(|l| measure_line(l))
+                    .max()
+                    .unwrap_or(0);
+
+                segs.push(AssistantSeg::Code {
+                    lines: content_lines,
+                    lang_label,
+                    max_line_width,
+                });
                 continue;
             }
+
             if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
                 if !text_buf.is_empty() {
                     let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
@@ -1474,6 +1523,7 @@ impl AssistantMarkdownCell {
                 segs.push(AssistantSeg::Bullet(vec![hr]));
                 continue;
             }
+
             if text_wrap_width > 4 {
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
                     if !text_buf.is_empty() {
@@ -1490,27 +1540,28 @@ impl AssistantMarkdownCell {
                     continue;
                 }
             }
+
             text_buf.push(line);
         }
+
         if !text_buf.is_empty() {
             let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
             segs.push(AssistantSeg::Text(wrapped));
             text_buf.clear();
         }
 
-        // Precompute rows per segment and total with top/bottom padding
         let mut seg_rows: Vec<u16> = Vec::with_capacity(segs.len());
         let mut total: u16 = 0;
         for seg in &segs {
             let rows = match seg {
-                AssistantSeg::Bullet(lines) => lines.len() as u16,
-                AssistantSeg::Text(lines) => lines.len() as u16,
-                AssistantSeg::Code(lines) => lines.len() as u16 + 2,
+                AssistantSeg::Text(lines) | AssistantSeg::Bullet(lines) => lines.len() as u16,
+                AssistantSeg::Code { lines, .. } => lines.len() as u16 + 2,
             };
             seg_rows.push(rows);
             total = total.saturating_add(rows);
         }
-        total = total.saturating_add(2); // top+bottom padding
+        total = total.saturating_add(2);
+
         let cache = AssistantLayoutCache {
             width,
             segs,
@@ -1519,6 +1570,154 @@ impl AssistantMarkdownCell {
         };
         *self.cached_layout.borrow_mut() = Some(cache.clone());
         cache
+    }
+
+    pub(crate) fn render_with_layout(
+        &self,
+        plan: &AssistantLayoutCache,
+        area: Rect,
+        buf: &mut Buffer,
+        skip_rows: u16,
+    ) {
+        let cell_bg = crate::colors::assistant_bg();
+        let bg_style = Style::default().bg(cell_bg);
+        fill_rect(buf, area, Some(' '), bg_style);
+
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let segs = &plan.segs;
+        let seg_rows = &plan.seg_rows;
+        let mut remaining_skip = skip_rows;
+        let mut cur_y = area.y;
+        let end_y = area.y.saturating_add(area.height);
+
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        }
+        remaining_skip = remaining_skip.saturating_sub(1);
+
+        for (seg_idx, seg) in segs.iter().enumerate() {
+            if cur_y >= end_y {
+                break;
+            }
+            let rows = seg_rows.get(seg_idx).copied().unwrap_or(0);
+            if remaining_skip >= rows {
+                remaining_skip -= rows;
+                continue;
+            }
+
+            match seg {
+                AssistantSeg::Text(lines) | AssistantSeg::Bullet(lines) => {
+                    let total = lines.len() as u16;
+                    if total == 0 {
+                        continue;
+                    }
+                    let start = usize::from(remaining_skip);
+                    let visible = total.saturating_sub(remaining_skip);
+                    let avail = end_y.saturating_sub(cur_y);
+                    let draw_count = visible.min(avail);
+                    if draw_count == 0 {
+                        remaining_skip = 0;
+                        continue;
+                    }
+                    for line in lines.iter().skip(start).take(draw_count as usize) {
+                        if cur_y >= end_y {
+                            break;
+                        }
+                        write_line(buf, area.x, cur_y, area.width, line, bg_style);
+                        cur_y = cur_y.saturating_add(1);
+                    }
+                    remaining_skip = 0;
+                }
+                AssistantSeg::Code {
+                    lines,
+                    lang_label,
+                    max_line_width,
+                } => {
+                    let avail = end_y.saturating_sub(cur_y);
+                    if avail == 0 {
+                        break;
+                    }
+
+                    let full_height = lines.len() as u16 + 2;
+                    let card_w = max_line_width
+                        .saturating_add(6)
+                        .min(area.width.max(6));
+
+                    let temp_area = Rect::new(0, 0, card_w, full_height);
+                    let mut temp_buf = Buffer::empty(temp_area);
+                    let code_bg = crate::colors::code_block_bg();
+                    let blk = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(crate::colors::border()))
+                        .style(Style::default().bg(code_bg))
+                        .padding(Padding {
+                            left: 2,
+                            right: 2,
+                            top: 0,
+                            bottom: 0,
+                        });
+                    let blk = if let Some(lang) = lang_label {
+                        blk.title(Span::styled(
+                            format!(" {} ", lang),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ))
+                    } else {
+                        blk
+                    };
+                    let inner_rect = blk.inner(temp_area);
+                    blk.clone().render(temp_area, &mut temp_buf);
+                    for (idx, line) in lines.iter().enumerate() {
+                        let target_y = inner_rect.y.saturating_add(idx as u16);
+                        if target_y >= inner_rect.y.saturating_add(inner_rect.height) {
+                            break;
+                        }
+                        write_line(
+                            &mut temp_buf,
+                            inner_rect.x,
+                            target_y,
+                            inner_rect.width,
+                            line,
+                            Style::default().bg(code_bg),
+                        );
+                    }
+
+                    let start_row = remaining_skip.min(full_height);
+                    let draw_rows = avail.min(full_height.saturating_sub(remaining_skip));
+                    if draw_rows == 0 {
+                        remaining_skip = 0;
+                        continue;
+                    }
+
+                    for row_offset in 0..usize::from(draw_rows) {
+                        let src_y = start_row + row_offset as u16;
+                        let dest_y = cur_y.saturating_add(row_offset as u16);
+                        if dest_y >= end_y {
+                            break;
+                        }
+                        for col in 0..usize::from(card_w) {
+                            let dest_x = area.x + col as u16;
+                            if dest_x >= area.x.saturating_add(area.width) {
+                                break;
+                            }
+                            let cell = temp_buf[(col as u16, src_y)].clone();
+                            buf[(dest_x, dest_y)] = cell;
+                        }
+                    }
+                    cur_y = cur_y.saturating_add(draw_rows);
+                    remaining_skip = 0;
+                }
+            }
+        }
+
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        } else {
+            remaining_skip = remaining_skip.saturating_sub(1);
+        }
+        let _ = (cur_y, remaining_skip);
     }
 }
 
@@ -1547,183 +1746,8 @@ impl HistoryCell for AssistantMarkdownCell {
         self.ensure_layout(width).total_rows_with_padding
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        // Mirror StreamingContentCell rendering so finalized assistant cells look
-        // identical to streaming ones (gutter alignment, padding, bg tint).
-        let cell_bg = crate::colors::assistant_bg();
-        let bg_style = Style::default().bg(cell_bg);
-
-        // Clear full area with assistant background
-        fill_rect(buf, area, Some(' '), bg_style);
-
-        // Build or reuse cached segments for this width
         let plan = self.ensure_layout(area.width);
-        let segs = &plan.segs;
-        let seg_rows = &plan.seg_rows;
-        let _text_wrap_width = area.width;
-
-        // Streaming-style top padding row for the entire assistant cell
-        let mut remaining_skip = skip_rows;
-        let mut cur_y = area.y;
-        let end_y = area.y.saturating_add(area.height);
-        if remaining_skip == 0 && cur_y < end_y {
-            cur_y = cur_y.saturating_add(1);
-        }
-        remaining_skip = remaining_skip.saturating_sub(1);
-
-        // Helpers
-        #[derive(Debug, Clone)]
-        enum Seg {
-            Text(Vec<Line<'static>>),
-            Bullet(Vec<Line<'static>>),
-            Code(Vec<Line<'static>>),
-        }
-        use unicode_width::UnicodeWidthStr as UW;
-        let measure_line =
-            |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
-        let mut draw_segment = |seg: &Seg, y: &mut u16, skip: &mut u16| {
-            if *y >= end_y {
-                return;
-            }
-            match seg {
-                Seg::Text(lines) | Seg::Bullet(lines) => {
-                    let total = lines.len() as u16;
-                    if *skip >= total {
-                        *skip -= total;
-                        return;
-                    }
-                    let start = (*skip) as usize;
-                    *skip = 0;
-                    for line in lines.iter().skip(start) {
-                        if *y >= end_y {
-                            break;
-                        }
-                        write_line(buf, area.x, *y, area.width, line, bg_style);
-                        *y = y.saturating_add(1);
-                    }
-                }
-                Seg::Code(lines_in) => {
-                    if lines_in.is_empty() {
-                        return;
-                    }
-                    let mut lang_label: Option<String> = None;
-                    let mut lines = lines_in.to_vec();
-                    if let Some(first) = lines.first() {
-                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
-                            if let Some(end) = s.find('⟧') {
-                                lang_label = Some(s[..end].to_string());
-                                lines.remove(0);
-                            }
-                        }
-                    }
-                    if lines.is_empty() {
-                        return;
-                    }
-                    let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
-                    let inner_w = max_w.max(1);
-                    let card_w = inner_w.saturating_add(6).min(area.width.max(6));
-                    let total = lines.len() as u16 + 2;
-                    if *skip >= total {
-                        *skip -= total;
-                        return;
-                    }
-                    let avail = end_y.saturating_sub(*y);
-                    if avail == 0 {
-                        return;
-                    }
-                    let mut local_skip = *skip;
-                    let mut top_border = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(top_border);
-                        top_border -= drop;
-                        local_skip -= drop;
-                    }
-                    let code_skip = local_skip.min(lines.len() as u16);
-                    local_skip -= code_skip;
-                    let mut bottom_border = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(bottom_border);
-                        bottom_border -= drop;
-                    }
-                    let visible = top_border + (lines.len() as u16 - code_skip) + bottom_border;
-                    let draw_h = visible.min(avail);
-                    if draw_h == 0 {
-                        return;
-                    }
-                    let rect = Rect {
-                        x: area.x,
-                        y: *y,
-                        width: card_w,
-                        height: draw_h,
-                    };
-                    let code_bg = crate::colors::code_block_bg();
-                    let mut blk = Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(crate::colors::border()))
-                        .style(Style::default().bg(code_bg))
-                        .padding(Padding {
-                            left: 2,
-                            right: 2,
-                            top: 0,
-                            bottom: 0,
-                        });
-                    if let Some(lang) = &lang_label {
-                        blk = blk.title(Span::styled(
-                            format!(" {} ", lang),
-                            Style::default().fg(crate::colors::text_dim()),
-                        ));
-                    }
-                    let blk_for_inner = blk.clone();
-                    blk.render(rect, buf);
-                    let inner_rect = blk_for_inner.inner(rect);
-                    if inner_rect.height > 0 {
-                        let slice_start = code_skip as usize;
-                        let slice_end = lines.len();
-                        for (idx, line) in lines[slice_start..slice_end].iter().enumerate() {
-                            let inner_y = inner_rect.y.saturating_add(idx as u16);
-                            if inner_y >= inner_rect.y.saturating_add(inner_rect.height) {
-                                break;
-                            }
-                            write_line(
-                                buf,
-                                inner_rect.x,
-                                inner_y,
-                                inner_rect.width,
-                                line,
-                                Style::default().bg(code_bg),
-                            );
-                        }
-                    }
-                    *y = y.saturating_add(draw_h);
-                    *skip = 0;
-                }
-            }
-        };
-
-        for (seg_idx, seg) in segs.iter().enumerate() {
-            if cur_y >= end_y {
-                break;
-            }
-            let rows = seg_rows.get(seg_idx).copied().unwrap_or(0);
-            if remaining_skip >= rows {
-                remaining_skip -= rows;
-                continue;
-            }
-            let seg_draw = match seg {
-                AssistantSeg::Text(v) => Seg::Text(v.clone()),
-                AssistantSeg::Bullet(v) => Seg::Bullet(v.clone()),
-                AssistantSeg::Code(v) => Seg::Code(v.clone()),
-            };
-            draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
-        }
-        // Bottom padding row (blank): area is already cleared to bg
-        if remaining_skip == 0 && cur_y < end_y {
-            cur_y = cur_y.saturating_add(1);
-        } else {
-            remaining_skip = remaining_skip.saturating_sub(1);
-        }
-        // Mark as used to satisfy unused_assignments lint
-        let _ = (cur_y, remaining_skip);
+        self.render_with_layout(&plan, area, buf, skip_rows);
     }
 }
 
@@ -4897,7 +4921,7 @@ impl HistoryCell for StreamingContentCell {
             let seg_draw = match seg {
                 AssistantSeg::Text(lines) => Seg::Text(lines.clone()),
                 AssistantSeg::Bullet(lines) => Seg::Bullet(lines.clone()),
-                AssistantSeg::Code(lines) => Seg::Code(lines.clone()),
+                AssistantSeg::Code { lines, .. } => Seg::Code(lines.clone()),
             };
             draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
         }
