@@ -480,7 +480,7 @@ impl ChatComposer {
             .token_usage_info
             .as_ref()
             .map(|info| info.initial_prompt_tokens)
-            .unwrap_or_else(|| last_token_usage.cached_input_tokens.unwrap_or(0));
+            .unwrap_or_else(|| last_token_usage.cached_input_tokens);
 
         self.token_usage_info = Some(TokenUsageInfo {
             _total_token_usage: total_token_usage,

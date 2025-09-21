@@ -151,6 +151,7 @@ use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
+use codex_core::protocol::RateLimitSnapshotEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -225,6 +226,7 @@ pub(crate) struct ChatWidget<'a> {
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
+    latest_rate_limits: Option<RateLimitSnapshotEvent>,
     content_buffer: String,
     // Buffer for streaming assistant answer text; we do not surface partial
     // We wait for the final AgentMessage event and then emit the full text
@@ -2028,6 +2030,7 @@ impl ChatWidget<'_> {
             ),
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            latest_rate_limits: None,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2219,6 +2222,7 @@ impl ChatWidget<'_> {
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            latest_rate_limits: None,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -4132,9 +4136,14 @@ impl ChatWidget<'_> {
                 }
                 self.mark_needs_redraw();
             }
-            EventMsg::TokenCount(token_usage) => {
-                self.total_token_usage = add_token_usage(&self.total_token_usage, &token_usage);
-                self.last_token_usage = token_usage;
+            EventMsg::TokenCount(event) => {
+                if let Some(info) = &event.info {
+                    self.total_token_usage = info.total_token_usage.clone();
+                    self.last_token_usage = info.last_token_usage.clone();
+                }
+                if let Some(snapshot) = event.rate_limits {
+                    self.latest_rate_limits = Some(snapshot);
+                }
                 self.bottom_pane.set_token_usage(
                     self.total_token_usage.clone(),
                     self.last_token_usage.clone(),
@@ -14462,34 +14471,6 @@ impl WidgetRef for &ChatWidget<'_> {
             let mut p = self.perf_state.stats.borrow_mut();
             p.ns_widget_render_total = p.ns_widget_render_total.saturating_add(dt);
         }
-    }
-}
-
-fn add_token_usage(current_usage: &TokenUsage, new_usage: &TokenUsage) -> TokenUsage {
-    let cached_input_tokens = match (
-        current_usage.cached_input_tokens,
-        new_usage.cached_input_tokens,
-    ) {
-        (Some(current), Some(new)) => Some(current + new),
-        (Some(current), None) => Some(current),
-        (None, Some(new)) => Some(new),
-        (None, None) => None,
-    };
-    let reasoning_output_tokens = match (
-        current_usage.reasoning_output_tokens,
-        new_usage.reasoning_output_tokens,
-    ) {
-        (Some(current), Some(new)) => Some(current + new),
-        (Some(current), None) => Some(current),
-        (None, Some(new)) => Some(new),
-        (None, None) => None,
-    };
-    TokenUsage {
-        input_tokens: current_usage.input_tokens + new_usage.input_tokens,
-        cached_input_tokens,
-        output_tokens: current_usage.output_tokens + new_usage.output_tokens,
-        reasoning_output_tokens,
-        total_tokens: current_usage.total_tokens + new_usage.total_tokens,
     }
 }
 
