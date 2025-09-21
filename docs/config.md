@@ -381,11 +381,12 @@ startup_timeout_ms = 20_000
 
 Controls the quick validation harness that runs before applying patches. The
 master toggle lives under `[validation]` with per-tool overrides in the nested
-`[validation.tools]` table:
+`[validation.tools]` table. The harness is disabled by default—enable it via the
+config file or `/validation` when needed:
 
 ```toml
 [validation]
-patch_harness = true
+patch_harness = false
 
 [validation.tools]
 shellcheck = true
