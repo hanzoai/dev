@@ -221,12 +221,16 @@ pub(crate) fn detect_tools() -> Vec<ToolStatus> {
         ("markdownlint", markdownlint_hint()),
         ("hadolint", hadolint_hint()),
         ("yamllint", yamllint_hint()),
-        ("rustfmt", rustfmt_hint()),
+        ("cargo-check", cargo_check_hint()),
         ("shfmt", shfmt_hint()),
         ("prettier", prettier_hint()),
     ];
     for (name, hint) in tools.into_iter() {
-        let installed = which(name).is_some();
+        let installed = if name == "cargo-check" {
+            has("cargo")
+        } else {
+            which(name).is_some()
+        };
         result.push(ToolStatus { name, installed, install_hint: hint });
     }
     result
@@ -331,11 +335,11 @@ pub fn yamllint_hint() -> String {
     "https://yamllint.readthedocs.io/".to_string()
 }
 
-pub fn rustfmt_hint() -> String {
-    if has("rustup") {
-        return "rustup component add rustfmt".to_string();
+pub fn cargo_check_hint() -> String {
+    if has("cargo") {
+        return "cargo check --all-targets".to_string();
     }
-    "Install Rust (rustup) then run: rustup component add rustfmt".to_string()
+    "Install Rust (https://rustup.rs) to enable cargo check".to_string()
 }
 
 pub fn shfmt_hint() -> String {

@@ -919,7 +919,7 @@ impl Session {
                 "markdownlint" => tools.markdownlint = Some(enable),
                 "hadolint" => tools.hadolint = Some(enable),
                 "yamllint" => tools.yamllint = Some(enable),
-                "rustfmt" => tools.rustfmt = Some(enable),
+                "cargo-check" => tools.cargo_check = Some(enable),
                 "shfmt" => tools.shfmt = Some(enable),
                 "prettier" => tools.prettier = Some(enable),
                 _ => {}

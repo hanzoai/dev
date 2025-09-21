@@ -270,7 +270,8 @@ pub struct ValidationTools {
     pub markdownlint: Option<bool>,
     pub hadolint: Option<bool>,
     pub yamllint: Option<bool>,
-    pub rustfmt: Option<bool>,
+    #[serde(rename = "cargo-check")]
+    pub cargo_check: Option<bool>,
     pub shfmt: Option<bool>,
     pub prettier: Option<bool>,
 }
