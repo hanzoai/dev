@@ -1,6 +1,11 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
+use ratatui::text::Line;
+use std::borrow::Cow;
+use unicode_width::UnicodeWidthStr;
+
+use crate::live_wrap::take_prefix_by_width;
 
 /// Fill the given rectangular area with the provided style and optional character.
 ///
@@ -27,5 +32,62 @@ pub fn fill_rect(buf: &mut Buffer, area: Rect, fill_char: Option<char>, style: S
                 cell.set_char(ch);
             }
         }
+    }
+}
+
+/// Draw a styled line into the buffer, clipping to the provided width and
+/// applying a base style (commonly used to enforce background colors).
+pub fn write_line(
+    buf: &mut Buffer,
+    origin_x: u16,
+    origin_y: u16,
+    max_width: u16,
+    line: &Line<'_>,
+    base_style: Style,
+) {
+    if max_width == 0 {
+        return;
+    }
+    let buf_rect = buf.area;
+    if origin_y < buf_rect.y || origin_y >= buf_rect.y.saturating_add(buf_rect.height) {
+        return;
+    }
+
+    let line_style = base_style.patch(line.style);
+    let mut cursor_x = origin_x.max(buf_rect.x);
+    let right_edge = buf_rect
+        .x
+        .saturating_add(buf_rect.width)
+        .min(origin_x.saturating_add(max_width));
+    if cursor_x >= right_edge {
+        return;
+    }
+    let mut remaining = right_edge.saturating_sub(cursor_x);
+
+    for span in &line.spans {
+        if remaining == 0 {
+            break;
+        }
+        if span.content.is_empty() {
+            continue;
+        }
+        let span_style = line_style.patch(span.style);
+        let mut text: Cow<'_, str> = Cow::Borrowed(span.content.as_ref());
+        let mut span_width = UnicodeWidthStr::width(text.as_ref());
+        if span_width == 0 {
+            continue;
+        }
+        if span_width as u16 > remaining {
+            let (prefix, _, taken) = take_prefix_by_width(text.as_ref(), remaining as usize);
+            if taken == 0 {
+                break;
+            }
+            text = Cow::Owned(prefix);
+            span_width = taken;
+        }
+        buf.set_string(cursor_x, origin_y, text.as_ref(), span_style);
+        let advance = span_width.min(remaining as usize) as u16;
+        cursor_x = cursor_x.saturating_add(advance);
+        remaining = remaining.saturating_sub(advance);
     }
 }
