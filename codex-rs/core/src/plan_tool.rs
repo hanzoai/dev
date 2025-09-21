@@ -40,7 +40,7 @@ pub(crate) static PLAN_TOOL: LazyLock<OpenAiTool> = LazyLock::new(|| {
     properties.insert(
         "name".to_string(),
         JsonSchema::String {
-            description: Some("2-5 word title describing the plan. Words, not an ID.".to_string()),
+            description: Some("2-5 word title describing the plan e.g. 'Fix Box Rendering'".to_string()),
         },
     );
     properties.insert("plan".to_string(), plan_items_schema);
