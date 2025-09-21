@@ -204,6 +204,9 @@ struct RunningCommand {
     explore_entry: Option<(usize, usize)>,
     stdout: String,
     stderr: String,
+    wait_total: Option<Duration>,
+    wait_active: bool,
+    wait_note: Option<(String, bool)>,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -486,6 +489,12 @@ fn wait_target_from_params(params: Option<&String>, call_id: &str) -> String {
         }
     }
     format!("call {}", call_id)
+}
+
+fn wait_exec_call_id_from_params(params: Option<&String>) -> Option<ExecCallId> {
+    params
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|json| json.get("call_id").and_then(|v| v.as_str()).map(|s| ExecCallId(s.to_string())))
 }
 
 fn line_text(line: &Line<'static>) -> String {
@@ -2027,6 +2036,7 @@ impl ChatWidget<'_> {
             tools_state: ToolState {
                 running_custom_tools: HashMap::new(),
                 running_web_search: HashMap::new(),
+                running_wait_tools: HashMap::new(),
             },
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -2217,6 +2227,7 @@ impl ChatWidget<'_> {
             tools_state: ToolState {
                 running_custom_tools: HashMap::new(),
                 running_web_search: HashMap::new(),
+                running_wait_tools: HashMap::new(),
             },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
@@ -4423,6 +4434,37 @@ impl ChatWidget<'_> {
                 self.flush_interrupt_queue();
                 // Show an active entry immediately for all custom tools so the user sees progress
                 let params_string = parameters.map(|p| p.to_string());
+                if tool_name == "wait" {
+                    if let Some(exec_call_id) =
+                        wait_exec_call_id_from_params(params_string.as_ref())
+                    {
+                        self.tools_state
+                            .running_wait_tools
+                            .insert(ToolCallId(call_id.clone()), exec_call_id.clone());
+
+                        if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
+                            running.wait_active = true;
+                            running.wait_note = None;
+                            let history_index = running.history_index;
+                            if let Some(idx) = history_index {
+                                if idx < self.history_cells.len() {
+                                    if let Some(exec_cell) = self.history_cells[idx]
+                                        .as_any_mut()
+                                        .downcast_mut::<history_cell::ExecCell>()
+                                    {
+                                        exec_cell.set_waiting(true);
+                                        exec_cell.set_wait_note(None);
+                                    }
+                                }
+                            }
+                        }
+                        self.bottom_pane
+                            .update_status_text("waiting for command".to_string());
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                        return;
+                    }
+                }
                 // Animated running cell with live timer and formatted args
                 let cell = if tool_name.starts_with("browser_") {
                     history_cell::new_running_browser_tool_call(
@@ -4494,6 +4536,92 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
+                if tool_name == "wait" {
+                    if let Some(exec_call_id) = self
+                        .tools_state
+                        .running_wait_tools
+                        .remove(&ToolCallId(call_id.clone()))
+                    {
+                        let trimmed = content.trim();
+                        let wait_still_pending = !success && trimmed != "Cancelled by user.";
+                        let wait_note = if trimmed == "Cancelled by user." {
+                            Some(("Wait cancelled".to_string(), true))
+                        } else {
+                            None
+                        };
+                        let mut history_index: Option<usize> = None;
+                        if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
+                            let base = running.wait_total.unwrap_or_default();
+                            let total = base.saturating_add(duration);
+                            running.wait_total = Some(total);
+                            history_index = running.history_index;
+                            running.wait_active = wait_still_pending;
+                            running.wait_note = wait_note.clone();
+                        }
+
+                        let mut updated = false;
+                        if let Some(idx) = history_index {
+                            if idx < self.history_cells.len() {
+                                if let Some(exec_cell) = self.history_cells[idx]
+                                    .as_any_mut()
+                                    .downcast_mut::<history_cell::ExecCell>()
+                                {
+                                    let total = exec_cell
+                                        .wait_total()
+                                        .unwrap_or_default()
+                                        .saturating_add(duration);
+                                    exec_cell.set_wait_total(Some(total));
+                                    if wait_still_pending {
+                                        exec_cell.set_waiting(true);
+                                    } else {
+                                        exec_cell.set_waiting(false);
+                                    }
+                                    exec_cell.set_wait_note(wait_note.clone());
+                                    updated = true;
+                                }
+                            }
+                        }
+                        if !updated {
+                            if let Some(exec_cell) = self
+                                .history_cells
+                                .iter_mut()
+                                .rev()
+                                .find_map(|cell| {
+                                    cell.as_any_mut()
+                                        .downcast_mut::<history_cell::ExecCell>()
+                                })
+                            {
+                                let total = exec_cell
+                                    .wait_total()
+                                    .unwrap_or_default()
+                                    .saturating_add(duration);
+                                exec_cell.set_wait_total(Some(total));
+                                if wait_still_pending {
+                                    exec_cell.set_waiting(true);
+                                } else {
+                                    exec_cell.set_waiting(false);
+                                }
+                                exec_cell.set_wait_note(wait_note.clone());
+                            }
+                        }
+
+                        if success {
+                            self.remove_background_completion_message(&call_id);
+                            self.bottom_pane
+                                .update_status_text("responding".to_string());
+                            self.maybe_hide_spinner();
+                        } else if trimmed == "Cancelled by user." {
+                            self.bottom_pane
+                                .update_status_text("wait cancelled".to_string());
+                        } else {
+                            self.bottom_pane
+                                .update_status_text("waiting for command".to_string());
+                        }
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                        return;
+                    }
+                }
                 let running_entry = self
                     .tools_state
                     .running_custom_tools
@@ -14264,6 +14392,7 @@ impl RunningToolEntry {
 struct ToolState {
     running_custom_tools: HashMap<ToolCallId, RunningToolEntry>,
     running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
+    running_wait_tools: HashMap<ToolCallId, ExecCallId>,
 }
 #[derive(Default)]
 struct StreamState {

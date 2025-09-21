@@ -508,6 +508,9 @@ pub(super) fn handle_exec_begin_now(
                         explore_entry: Some((idx, entry_idx)),
                         stdout: String::new(),
                         stderr: String::new(),
+                        wait_total: None,
+                        wait_active: false,
+                        wait_note: None,
                     },
                 );
                 chat.invalidate_height_cache();
@@ -539,6 +542,9 @@ pub(super) fn handle_exec_begin_now(
             explore_entry: None,
             stdout: String::new(),
             stderr: String::new(),
+            wait_total: None,
+            wait_active: false,
+            wait_note: None,
         },
     );
     if !chat.tools_state.running_web_search.is_empty() {
@@ -598,15 +604,17 @@ pub(super) fn handle_exec_end_now(
     chat.height_manager
         .borrow_mut()
         .record_event(HeightEvent::RunEnd);
-    let (command, parsed, history_index, explore_entry) = match cmd {
+    let (command, parsed, history_index, explore_entry, wait_total, wait_note) = match cmd {
         Some(super::RunningCommand {
             command,
             parsed,
             history_index,
             explore_entry,
+            wait_total,
+            wait_note,
             ..
-        }) => (command, parsed, history_index, explore_entry),
-        None => (vec![call_id.clone()], vec![], None, None),
+        }) => (command, parsed, history_index, explore_entry, wait_total, wait_note),
+        None => (vec![call_id.clone()], vec![], None, None, None, None),
     };
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
@@ -674,6 +682,11 @@ pub(super) fn handle_exec_end_now(
             stderr,
         },
     ));
+    if let Some(ref cell) = completed_opt {
+        cell.set_wait_total(wait_total);
+        cell.set_wait_note(wait_note.clone());
+        cell.set_waiting(false);
+    }
 
     let mut replaced = false;
     if let Some(idx) = history_index {
