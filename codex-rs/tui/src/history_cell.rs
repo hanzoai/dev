@@ -1331,8 +1331,9 @@ struct ExecWaitNote {
 #[derive(Clone, Default)]
 struct ExecWaitState {
     total_wait: Option<Duration>,
+    run_duration: Option<Duration>,
     waiting: bool,
-    note: Option<ExecWaitNote>,
+    notes: Vec<ExecWaitNote>,
 }
 
 pub(crate) struct ExecCell {
@@ -1985,35 +1986,95 @@ impl ExecCell {
         }
     }
 
-    pub(crate) fn wait_total(&self) -> Option<Duration> {
-        self.wait_state.borrow().total_wait
-    }
-
-    pub(crate) fn set_wait_note(&self, note: Option<(String, bool)>) {
-        let new_note = note.map(|(text, is_error)| ExecWaitNote { text, is_error });
+    pub(crate) fn set_run_duration(&self, duration: Option<Duration>) {
         let mut state = self.wait_state.borrow_mut();
-        if state.note != new_note {
-            state.note = new_note;
+        if state.run_duration != duration {
+            state.run_duration = duration;
             drop(state);
             self.invalidate_render_caches();
         }
     }
 
-    fn wait_note_line(&self, state: &ExecWaitState) -> Option<Line<'static>> {
-        let note = state.note.as_ref()?;
-        let mut line = Line::from(note.text.clone());
-        let mut style = Style::default().fg(if note.is_error {
-            crate::colors::error()
-        } else {
-            crate::colors::text_dim()
+    pub(crate) fn wait_total(&self) -> Option<Duration> {
+        self.wait_state.borrow().total_wait
+    }
+
+    pub(crate) fn clear_wait_notes(&self) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.notes.is_empty() {
+            return;
+        }
+        state.notes.clear();
+        drop(state);
+        self.invalidate_render_caches();
+    }
+
+    pub(crate) fn push_wait_note(&self, text: &str, is_error: bool) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let mut state = self.wait_state.borrow_mut();
+        if state
+            .notes
+            .last()
+            .map(|note| note.text == trimmed && note.is_error == is_error)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        state.notes.push(ExecWaitNote {
+            text: trimmed.to_string(),
+            is_error,
         });
-        if note.is_error {
-            style = style.add_modifier(Modifier::BOLD);
+        drop(state);
+        self.invalidate_render_caches();
+    }
+
+    pub(crate) fn set_wait_notes(&self, notes: &[(String, bool)]) {
+        let mut state = self.wait_state.borrow_mut();
+        let mut changed = state.notes.len() != notes.len();
+        if !changed {
+            for (existing, (text, is_error)) in state.notes.iter().zip(notes.iter()) {
+                if existing.text != text.trim() || existing.is_error != *is_error {
+                    changed = true;
+                    break;
+                }
+            }
         }
-        for span in line.spans.iter_mut() {
-            span.style = style;
+        if !changed {
+            return;
         }
-        Some(line)
+        state.notes = notes
+            .iter()
+            .map(|(text, is_error)| ExecWaitNote {
+                text: text.trim().to_string(),
+                is_error: *is_error,
+            })
+            .filter(|note| !note.text.is_empty())
+            .collect();
+        drop(state);
+        self.invalidate_render_caches();
+    }
+
+    fn wait_note_lines(&self, state: &ExecWaitState) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for note in &state.notes {
+            let mut line = Line::from(note.text.clone());
+            let mut style = Style::default().fg(if note.is_error {
+                crate::colors::error()
+            } else {
+                crate::colors::text_dim()
+            });
+            if note.is_error {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            for span in line.spans.iter_mut() {
+                span.style = style;
+            }
+            lines.push(line);
+        }
+        lines
     }
 
     fn wait_state_snapshot(&self) -> ExecWaitState {
@@ -2023,6 +2084,16 @@ impl ExecCell {
     fn wait_summary_line(&self, state: &ExecWaitState) -> Option<Line<'static>> {
         if state.waiting {
             return None;
+        }
+        if let Some(run_duration) = state.run_duration {
+            if run_duration.is_zero() {
+                return None;
+            }
+            let text = format!("Ran for {}", format_duration(run_duration));
+            return Some(Line::styled(
+                text,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
         }
         let total = state.total_wait?;
         if total.is_zero() {
@@ -2160,9 +2231,7 @@ impl ExecCell {
             if let Some(summary_line) = self.wait_summary_line(&wait_state) {
                 extra_lines.push(summary_line);
             }
-            if let Some(note_line) = self.wait_note_line(&wait_state) {
-                extra_lines.push(note_line);
-            }
+            extra_lines.extend(self.wait_note_lines(&wait_state));
             if !extra_lines.is_empty() {
                 let is_blank_line = |line: &Line<'static>| {
                     line.spans
@@ -2175,34 +2244,26 @@ impl ExecCell {
                         .map(|span| span.content.as_ref().starts_with("Error (exit code"))
                         .unwrap_or(false)
                 };
-                if let Some(pos) = out.iter().position(is_error_line) {
-                    let mut insert_at = pos;
-                    if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
-                        out.insert(insert_at, Line::from(""));
-                        insert_at += 1;
-                    }
-                    for line in extra_lines.iter() {
-                        out.insert(insert_at, line.clone());
-                        insert_at += 1;
-                        out.insert(insert_at, Line::from(""));
-                        insert_at += 1;
+                let insert_at = if let Some(pos) = out.iter().position(is_error_line) {
+                    pos
+                } else {
+                    out.len()
+                };
+
+                let mut block: Vec<Line<'static>> = Vec::new();
+                if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
+                    block.push(Line::from(""));
+                }
+                block.extend(extra_lines.into_iter());
+                if insert_at < out.len() {
+                    if !is_blank_line(&out[insert_at]) {
+                        block.push(Line::from(""));
                     }
                 } else {
-                    let mut insert_at = out.len();
-                    if insert_at > 0 && is_blank_line(&out[insert_at.saturating_sub(1)]) {
-                        insert_at = insert_at.saturating_sub(1);
-                    }
-                    if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
-                        out.insert(insert_at, Line::from(""));
-                        insert_at += 1;
-                    }
-                    for line in extra_lines.iter() {
-                        out.insert(insert_at, line.clone());
-                        insert_at += 1;
-                        out.insert(insert_at, Line::from(""));
-                        insert_at += 1;
-                    }
+                    block.push(Line::from(""));
                 }
+
+                out.splice(insert_at..insert_at, block);
             }
             *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
             *self.cached_out_lines.borrow_mut() = Some(out.clone());
