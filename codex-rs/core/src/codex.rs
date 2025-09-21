@@ -5241,15 +5241,28 @@ async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
         Ok(params) => {
             let mut manager = AGENT_MANAGER.write().await;
 
-            // Handle model parameter (can be string or array)
-            let models = match params.model {
-                Some(serde_json::Value::String(model)) => vec![model],
-                Some(serde_json::Value::Array(models)) => models
-                    .into_iter()
-                    .filter_map(|m| m.as_str().map(String::from))
-                    .collect(),
-                _ => vec!["code".to_string()], // Default model
-            };
+            // Collect requested models from the `models` field.
+            let raw_models: Vec<String> = params.models.clone();
+
+            // Split comma-delimited strings, trim whitespace, and deduplicate case-insensitively.
+            let mut seen_models = HashSet::new();
+            let mut models: Vec<String> = Vec::new();
+            for entry in raw_models {
+                for candidate in entry.split(',') {
+                    let trimmed = candidate.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let dedupe_key = trimmed.to_lowercase();
+                    if seen_models.insert(dedupe_key) {
+                        models.push(trimmed.to_string());
+                    }
+                }
+            }
+
+            if models.is_empty() {
+                models.push("code".to_string());
+            }
 
             // Helper: derive the command to check for a given model/config pair.
             fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
@@ -5305,10 +5318,11 @@ async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             let mut agent_ids = Vec::new();
             let mut skipped: Vec<String> = Vec::new();
             for model in models {
+                let model_key = model.to_lowercase();
                 // Check if this model is configured and enabled
                 let agent_config = sess.agents.iter().find(|a| {
-                    a.name.to_lowercase() == model.to_lowercase()
-                        || a.command.to_lowercase() == model.to_lowercase()
+                    a.name.to_lowercase() == model_key
+                        || a.command.to_lowercase() == model_key
                 });
 
                 if let Some(config) = agent_config {
