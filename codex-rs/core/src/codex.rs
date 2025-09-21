@@ -8,6 +8,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
@@ -823,6 +824,8 @@ pub(crate) struct Session {
     /// Track the last screenshot path and hash to detect changes
     last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
     confirm_guard: ConfirmGuardRuntime,
+    github: Arc<RwLock<crate::config_types::GithubConfig>>,
+    validation: Arc<RwLock<crate::config_types::ValidationConfig>>,
 }
 
 #[derive(Debug, Clone)]
@@ -859,6 +862,43 @@ impl Session {
 
     pub(crate) fn get_sandbox_policy(&self) -> &SandboxPolicy {
         &self.sandbox_policy
+    }
+
+    pub(crate) fn get_github_config(&self) -> Arc<RwLock<crate::config_types::GithubConfig>> {
+        Arc::clone(&self.github)
+    }
+
+    pub(crate) fn validation_config(&self) -> Arc<RwLock<crate::config_types::ValidationConfig>> {
+        Arc::clone(&self.validation)
+    }
+
+    pub(crate) fn update_validation_patch_harness(&self, enabled: bool) {
+        if let Ok(mut cfg) = self.validation.write() {
+            cfg.patch_harness = enabled;
+        }
+    }
+
+    pub(crate) fn update_validation_tool(&self, name: &str, enable: bool) {
+        if name == "actionlint" {
+            if let Ok(mut github) = self.github.write() {
+                github.actionlint_on_patch = enable;
+            }
+            return;
+        }
+
+        if let Ok(mut cfg) = self.validation.write() {
+            let tools = &mut cfg.tools;
+            match name {
+                "shellcheck" => tools.shellcheck = Some(enable),
+                "markdownlint" => tools.markdownlint = Some(enable),
+                "hadolint" => tools.hadolint = Some(enable),
+                "yamllint" => tools.yamllint = Some(enable),
+                "rustfmt" => tools.rustfmt = Some(enable),
+                "shfmt" => tools.shfmt = Some(enable),
+                "prettier" => tools.prettier = Some(enable),
+                _ => {}
+            }
+        }
     }
 
     fn resolve_path(&self, path: Option<String>) -> PathBuf {
@@ -1505,7 +1545,7 @@ impl Session {
     /// Helper that emits a BackgroundEvent with the given message. This keeps
     /// the call‑sites terse so adding more diagnostics does not clutter the
     /// core agent logic.
-    async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
+    pub(crate) async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
         let event = self.make_event(
             sub_id,
             EventMsg::BackgroundEvent(BackgroundEventEvent { message: message.into() }),
@@ -2198,6 +2238,8 @@ async fn submission_loop(
                     last_system_status: Mutex::new(None),
                     last_screenshot_info: Mutex::new(None),
                     confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
+                    github: Arc::new(RwLock::new(config.github.clone())),
+                    validation: Arc::new(RwLock::new(config.validation.clone())),
                 }));
                 if let Some(sess_arc) = &sess {
                     if !config.always_allow_commands.is_empty() {
@@ -2380,6 +2422,20 @@ async fn submission_loop(
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
+                }
+            }
+            Op::UpdateValidationPatchHarness { enabled } => {
+                if let Some(sess) = sess.as_ref() {
+                    sess.update_validation_patch_harness(enabled);
+                } else {
+                    send_no_session_event(sub.id).await;
+                }
+            }
+            Op::UpdateValidationTool { name, enable } => {
+                if let Some(sess) = sess.as_ref() {
+                    sess.update_validation_tool(&name, enable);
+                } else {
+                    send_no_session_event(sub.id).await;
                 }
             }
             Op::AddToHistory { text } => {
@@ -6203,6 +6259,7 @@ async fn handle_container_exec_with_params(
         Some(ApplyPatchExec {
             action: ApplyPatchAction { patch, cwd, .. },
             user_explicitly_approved_this_action,
+            ..
         }) => {
             let path_to_codex = std::env::current_exe()
                 .ok()
@@ -6262,6 +6319,10 @@ async fn handle_container_exec_with_params(
         }
     };
 
+    let harness_summary_json = apply_patch_exec
+        .as_ref()
+        .and_then(|exec| exec.harness_summary_json.clone());
+
     let sandbox_type = match safety {
         SafetyCheck::AutoApprove { sandbox_type } => sandbox_type,
         SafetyCheck::AskUser => {
@@ -6319,6 +6380,7 @@ async fn handle_container_exec_with_params(
             |ApplyPatchExec {
                  action,
                  user_explicitly_approved_this_action,
+                 ..
              }| ApplyPatchCommandContext {
                 user_explicitly_approved_this_action,
                 changes: convert_apply_patch_to_protocol(&action),
@@ -6480,7 +6542,13 @@ async fn handle_container_exec_with_params(
         };
         if let Some(done) = done_opt {
             let is_success = done.exit_code == 0;
-            let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &done);
+            let mut content = format_exec_output_with_limit(sess, &sub_id, &call_id, &done);
+            if let Some(harness) = harness_summary_json.as_ref() {
+                if !harness.is_empty() {
+                    content.push('\n');
+                    content.push_str(harness);
+                }
+            }
             return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(is_success) } };
         } else {
             // Fallback (should not happen): indicate completion without detail

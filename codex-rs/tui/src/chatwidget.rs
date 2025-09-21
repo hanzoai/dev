@@ -108,6 +108,8 @@ use crate::app_event::{
     TerminalRunController,
 };
 use crate::app_event_sender::AppEventSender;
+use crate::bottom_pane::validation_settings_view;
+use crate::bottom_pane::validation_settings_view::ToolStatus;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
@@ -137,7 +139,10 @@ use codex_ansi_escape::ansi_escape_line;
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
 use codex_core::config::resolve_codex_path_for_read;
+use codex_core::config::set_github_actionlint_on_patch;
 use codex_core::config::set_github_check_on_push;
+use codex_core::config::set_validation_patch_harness;
+use codex_core::config::set_validation_tool_enabled;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -9339,6 +9344,219 @@ impl ChatWidget<'_> {
             lines,
             kind: history_cell::HistoryCellType::BackgroundEvent,
         });
+    }
+
+    fn validation_tool_flag_mut(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut Option<bool>> {
+        let tools = &mut self.config.validation.tools;
+        match name {
+            "shellcheck" => Some(&mut tools.shellcheck),
+            "markdownlint" => Some(&mut tools.markdownlint),
+            "hadolint" => Some(&mut tools.hadolint),
+            "yamllint" => Some(&mut tools.yamllint),
+            "rustfmt" => Some(&mut tools.rustfmt),
+            "shfmt" => Some(&mut tools.shfmt),
+            "prettier" => Some(&mut tools.prettier),
+            _ => None,
+        }
+    }
+
+    fn validation_tool_enabled(&self, name: &str) -> bool {
+        let tools = &self.config.validation.tools;
+        match name {
+            "actionlint" => self.config.github.actionlint_on_patch,
+            "shellcheck" => tools.shellcheck.unwrap_or(true),
+            "markdownlint" => tools.markdownlint.unwrap_or(true),
+            "hadolint" => tools.hadolint.unwrap_or(true),
+            "yamllint" => tools.yamllint.unwrap_or(true),
+            "rustfmt" => tools.rustfmt.unwrap_or(true),
+            "shfmt" => tools.shfmt.unwrap_or(true),
+            "prettier" => tools.prettier.unwrap_or(true),
+            _ => true,
+        }
+    }
+
+    pub(crate) fn apply_validation_patch_harness(&mut self, enabled: bool) {
+        if self.config.validation.patch_harness == enabled {
+            self.history_push(history_cell::new_background_event(format!(
+                "ℹ️ Validate New Code already {}",
+                if enabled { "enabled" } else { "disabled" }
+            )));
+            return;
+        }
+
+        self.config.validation.patch_harness = enabled;
+        if let Err(err) = self
+            .codex_op_tx
+            .send(Op::UpdateValidationPatchHarness { enabled })
+        {
+            tracing::warn!("failed to send validation patch harness update: {err}");
+        }
+
+        let persist_result = match find_codex_home() {
+            Ok(home) => set_validation_patch_harness(&home, enabled)
+                .map_err(|e| e.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+
+        match persist_result {
+            Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                "✅ Validate New Code {}",
+                if enabled { "enabled" } else { "disabled" }
+            ))),
+            Err(err) => self.history_push(history_cell::new_background_event(format!(
+                "⚠️ Validate New Code {} (persist failed: {err})",
+                if enabled { "enabled" } else { "disabled" }
+            ))),
+        }
+    }
+
+    fn apply_validation_tool_toggle(&mut self, name: &str, enable: bool) {
+        if name == "actionlint" {
+            if self.config.github.actionlint_on_patch == enable {
+                self.history_push(history_cell::new_background_event(format!(
+                    "ℹ️ {} already {}",
+                    name,
+                    if enable { "on" } else { "off" }
+                )));
+                return;
+            }
+            self.config.github.actionlint_on_patch = enable;
+            if let Err(err) = self
+                .codex_op_tx
+                .send(Op::UpdateValidationTool { name: name.to_string(), enable })
+            {
+                tracing::warn!("failed to send validation tool update: {err}");
+            }
+            let persist_result = match find_codex_home() {
+                Ok(home) => set_github_actionlint_on_patch(&home, enable)
+                    .map_err(|e| e.to_string()),
+                Err(err) => Err(err.to_string()),
+            };
+            match persist_result {
+                Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                    "✅ {}: {}",
+                    name,
+                    if enable { "on" } else { "off" }
+                ))),
+                Err(err) => self.history_push(history_cell::new_background_event(format!(
+                    "⚠️ {}: {} (persist failed: {err})",
+                    name,
+                    if enable { "on" } else { "off" }
+                ))),
+            }
+            return;
+        }
+
+        let Some(flag) = self.validation_tool_flag_mut(name) else {
+            self.history_push(history_cell::new_background_event(format!(
+                "⚠️ Unknown validation tool '{name}'"
+            )));
+            return;
+        };
+
+        if flag.unwrap_or(true) == enable {
+            self.history_push(history_cell::new_background_event(format!(
+                "ℹ️ {} already {}",
+                name,
+                if enable { "on" } else { "off" }
+            )));
+            return;
+        }
+
+        *flag = Some(enable);
+        if let Err(err) = self
+            .codex_op_tx
+            .send(Op::UpdateValidationTool { name: name.to_string(), enable })
+        {
+            tracing::warn!("failed to send validation tool update: {err}");
+        }
+        let persist_result = match find_codex_home() {
+            Ok(home) => set_validation_tool_enabled(&home, name, enable)
+                .map_err(|e| e.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+        match persist_result {
+            Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                "✅ {}: {}",
+                name,
+                if enable { "on" } else { "off" }
+            ))),
+            Err(err) => self.history_push(history_cell::new_background_event(format!(
+                "⚠️ {}: {} (persist failed: {err})",
+                name,
+                if enable { "on" } else { "off" }
+            ))),
+        }
+    }
+
+    fn build_validation_status_message(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Validate New Code: {}",
+            if self.config.validation.patch_harness { "enabled" } else { "disabled" }
+        ));
+        lines.push("".to_string());
+        lines.push("Tools:".to_string());
+        for status in validation_settings_view::detect_tools() {
+            let enabled = self.validation_tool_enabled(status.name);
+            let suffix = if status.installed { "" } else { " (missing)" };
+            lines.push(format!(
+                "• {} — {}{}",
+                status.name,
+                if enabled { "on" } else { "off" },
+                suffix
+            ));
+        }
+        lines.join("\n")
+    }
+
+    pub(crate) fn toggle_validation_tool(&mut self, name: &str, enable: bool) {
+        self.apply_validation_tool_toggle(name, enable);
+    }
+
+    pub(crate) fn handle_validation_command(&mut self, command_text: String) {
+        let trimmed = command_text.trim();
+        if trimmed.is_empty() {
+            let tools: Vec<(ToolStatus, bool)> = validation_settings_view::detect_tools()
+                .into_iter()
+                .map(|status| {
+                    let enabled = self.validation_tool_enabled(status.name);
+                    (status, enabled)
+                })
+                .collect();
+            self.bottom_pane
+                .show_validation_settings(self.config.validation.patch_harness, tools);
+            return;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        match parts.next().unwrap_or("") {
+            "status" => {
+                let message = self.build_validation_status_message();
+                self.history_push(history_cell::new_background_event(message));
+            }
+            "on" => self.apply_validation_patch_harness(true),
+            "off" => self.apply_validation_patch_harness(false),
+            tool => {
+                let Some(state) = parts.next() else {
+                    self.history_push(history_cell::new_background_event(
+                        "Usage: /validation <tool> on|off".to_string(),
+                    ));
+                    return;
+                };
+                match state {
+                    "on" | "enable" => self.apply_validation_tool_toggle(tool, true),
+                    "off" | "disable" => self.apply_validation_tool_toggle(tool, false),
+                    _ => self.history_push(history_cell::new_background_event(format!(
+                        "⚠️ Unknown validation command '{}'. Use on|off.",
+                        state
+                    ))),
+                }
+            }
+        }
     }
 
     /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
