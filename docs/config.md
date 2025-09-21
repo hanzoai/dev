@@ -377,6 +377,36 @@ env = { "API_KEY" = "value" }
 startup_timeout_ms = 20_000
 ```
 
+## validation
+
+Controls the quick validation harness that runs before applying patches. The
+master toggle lives under `[validation]` with per-tool overrides in the nested
+`[validation.tools]` table:
+
+```toml
+[validation]
+patch_harness = true
+
+[validation.tools]
+shellcheck = true
+markdownlint = true
+hadolint = true
+yamllint = true
+rustfmt = true
+shfmt = true
+prettier = true
+```
+
+When enabled, Codex can also run `actionlint` against modified workflows. This
+is configured under `[github]`:
+
+```toml
+[github]
+actionlint_on_patch = true
+# Optional: provide an explicit binary path
+actionlint_path = "/usr/local/bin/actionlint"
+```
+
 ## disable_response_storage
 
 Currently, customers whose accounts are set to use Zero Data Retention (ZDR) must set `disable_response_storage` to `true` so that Codex uses an alternative to the Responses API that works with ZDR:
