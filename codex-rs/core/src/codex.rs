@@ -52,6 +52,7 @@ use self::compact::collect_user_messages;
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 const HOOK_OUTPUT_LIMIT: usize = 2048;
+const PENDING_ONLY_SENTINEL: &str = "__codex_pending_only__";
 
 #[derive(Clone, Default)]
 struct ConfirmGuardRuntime {
@@ -998,6 +999,16 @@ impl Session {
         } else {
             Some(state.pending_user_input.remove(0))
         }
+    }
+
+    /// Enqueue a response item that should be surfaced to the model at the start of the
+    /// next turn. Returns `true` if no agent is currently running and a new turn should be
+    /// scheduled immediately.
+    pub fn enqueue_out_of_turn_item(&self, item: ResponseInputItem) -> bool {
+        let mut state = self.state.lock().unwrap();
+        let should_start_turn = state.current_task.is_none();
+        state.pending_input.push(item);
+        should_start_turn
     }
 
     pub(crate) fn next_internal_sub_id(&self) -> String {
@@ -2394,11 +2405,17 @@ async fn submission_loop(
             Op::AddPendingInputDeveloper { text } => {
                 let sess = match sess.as_ref() { Some(s) => s.clone(), None => { send_no_session_event(sub.id).await; continue; } };
                 let dev_msg = ResponseInputItem::Message { role: "developer".to_string(), content: vec![ContentItem::InputText { text }] };
-                {
-                    let mut state = sess.state.lock().unwrap();
-                    state.pending_input.push(dev_msg);
+                let should_start_turn = sess.enqueue_out_of_turn_item(dev_msg);
+                if should_start_turn {
+                    sess.cleanup_old_status_items().await;
+                    let turn_context = sess.make_turn_context();
+                    let sub_id = sess.next_internal_sub_id();
+                    let sentinel_input = vec![InputItem::Text {
+                        text: PENDING_ONLY_SENTINEL.to_string(),
+                    }];
+                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, sentinel_input);
+                    sess.set_task(agent);
                 }
-                // No events emitted here; a follow-up empty UserInput should be sent by the caller to trigger a turn.
             }
             Op::ConfigureSession {
                 provider,
@@ -2992,7 +3009,12 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         return;
     }
     // Continue with our fork's history and input handling.
-    
+
+    let pending_only_turn = input.len() == 1
+        && matches!(
+            &input[0],
+            InputItem::Text { text } if text == PENDING_ONLY_SENTINEL
+        );
 
     // Debug logging for ephemeral images
     let ephemeral_count = input
@@ -3007,13 +3029,17 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         );
     }
 
-    // Convert input to ResponseInputItem
-    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
-    let initial_response_item: ResponseItem = initial_input_for_turn.clone().into();
+    let mut initial_response_item: Option<ResponseItem> = None;
 
-    // Record to history but we'll handle ephemeral images separately
-    sess.record_conversation_items(&[initial_response_item.clone()])
-        .await;
+    if !pending_only_turn {
+        // Convert input to ResponseInputItem
+        let response_item: ResponseItem = response_input_from_core_items(input.clone()).into();
+
+        // Record to history but we'll handle ephemeral images separately
+        sess.record_conversation_items(&[response_item.clone()])
+            .await;
+        initial_response_item = Some(response_item);
+    }
 
     let mut last_task_message: Option<String> = None;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Agent which contains
@@ -3032,7 +3058,21 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
-        let pending_input_tail = pending_input.clone();
+        let mut pending_input_tail = pending_input.clone();
+
+        if initial_response_item.is_none() {
+            if let Some(first_pending) = pending_input_tail.first().cloned() {
+                pending_input_tail.remove(0);
+                sess.record_conversation_items(&[first_pending.clone()])
+                    .await;
+                initial_response_item = Some(first_pending);
+            } else {
+                tracing::warn!(
+                    "pending-only turn had no queued input; skipping model invocation"
+                );
+                break;
+            }
+        }
 
         // Do not duplicate the initial input in `pending_input`.
         // It is already recorded to history above; ephemeral items are appended separately.
@@ -3240,7 +3280,7 @@ async fn run_turn(
     turn_context: &Arc<TurnContext>,
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
-    initial_user_item: ResponseItem,
+    initial_user_item: Option<ResponseItem>,
     pending_input_tail: Vec<ResponseItem>,
     mut input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
@@ -3355,7 +3395,9 @@ async fn run_turn(
                                 attempt_input = input.clone();
                             } else {
                                 let mut rebuilt = compacted_history;
-                                rebuilt.push(initial_user_item.clone());
+                                if let Some(initial_item) = initial_user_item.clone() {
+                                    rebuilt.push(initial_item);
+                                }
                                 if !pending_input_tail.is_empty() {
                                     let (missing_calls, filtered_outputs) =
                                         reconcile_pending_tool_outputs(&pending_input_tail, &rebuilt, &previous_input_snapshot);
