@@ -1,5 +1,5 @@
 use crate::colors;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use codex_common::elapsed::format_duration;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use ratatui::prelude::*;
@@ -8,6 +8,11 @@ use ratatui::style::Stylize;
 const WEEKLY_CELL: &str = "▇▇";
 const HOURLY_CELL: &str = "▓▓";
 const UNUSED_CELL: &str = "░░";
+const BAR_SLOTS: usize = 20;
+const BAR_FILLED: &str = "▰";
+const BAR_EMPTY: &str = "▱";
+const SECTION_INDENT: &str = "  ";
+const CHART_INDENT: &str = "     ";
 
 /// Aggregated output used by the `/limits` command.
 /// It contains the rendered summary lines, optional legend,
@@ -16,6 +21,7 @@ const UNUSED_CELL: &str = "░░";
 pub(crate) struct LimitsView {
     pub(crate) summary_lines: Vec<Line<'static>>,
     pub(crate) legend_lines: Vec<Line<'static>>,
+    pub(crate) footer_lines: Vec<Line<'static>>,
     grid_state: Option<GridState>,
     grid: GridConfig,
 }
@@ -61,6 +67,7 @@ pub(crate) fn build_limits_view(
     LimitsView {
         summary_lines: build_summary_lines(&metrics, snapshot, reset_info),
         legend_lines: build_legend_lines(grid_state.is_some()),
+        footer_lines: build_footer_lines(&metrics),
         grid_state,
         grid: grid_config,
     }
@@ -72,21 +79,28 @@ struct RateLimitMetrics {
     weekly_used: f64,
     hourly_remaining: f64,
     weekly_remaining: f64,
-    hourly_window_label: String,
-    weekly_window_label: String,
+    primary_window_minutes: u64,
+    weekly_window_minutes: u64,
+    primary_to_weekly_ratio_percent: Option<f64>,
 }
 
 impl RateLimitMetrics {
     fn from_snapshot(snapshot: &RateLimitSnapshotEvent) -> Self {
         let hourly_used = snapshot.primary_used_percent.clamp(0.0, 100.0);
         let weekly_used = snapshot.weekly_used_percent.clamp(0.0, 100.0);
+        let ratio = if snapshot.primary_to_weekly_ratio_percent.is_finite() {
+            Some(snapshot.primary_to_weekly_ratio_percent.clamp(0.0, 100.0))
+        } else {
+            None
+        };
         Self {
             hourly_used,
             weekly_used,
             hourly_remaining: (100.0 - hourly_used).max(0.0),
             weekly_remaining: (100.0 - weekly_used).max(0.0),
-            hourly_window_label: format_window_label(Some(snapshot.primary_window_minutes)),
-            weekly_window_label: format_window_label(Some(snapshot.weekly_window_minutes)),
+            primary_window_minutes: snapshot.primary_window_minutes,
+            weekly_window_minutes: snapshot.weekly_window_minutes,
+            primary_to_weekly_ratio_percent: ratio,
         }
     }
 
@@ -97,74 +111,6 @@ impl RateLimitMetrics {
     fn weekly_exhausted(&self) -> bool {
         self.weekly_remaining <= 0.0
     }
-}
-
-fn format_window_label(minutes: Option<u64>) -> String {
-    approximate_duration(minutes)
-        .map(|(value, unit)| format!("≈{value} {} window", pluralize_unit(unit, value)))
-        .unwrap_or_else(|| "window unknown".to_string())
-}
-
-fn approximate_duration(minutes: Option<u64>) -> Option<(u64, DurationUnit)> {
-    let minutes = minutes?;
-    if minutes == 0 {
-        return Some((1, DurationUnit::Minute));
-    }
-    if minutes < 60 {
-        return Some((minutes, DurationUnit::Minute));
-    }
-    if minutes < 1_440 {
-        let hours = ((minutes as f64) / 60.0).round().max(1.0) as u64;
-        return Some((hours, DurationUnit::Hour));
-    }
-    let days = ((minutes as f64) / 1_440.0).round().max(1.0) as u64;
-    if days >= 7 {
-        let weeks = ((days as f64) / 7.0).round().max(1.0) as u64;
-        Some((weeks, DurationUnit::Week))
-    } else {
-        Some((days, DurationUnit::Day))
-    }
-}
-
-fn pluralize_unit(unit: DurationUnit, value: u64) -> String {
-    match unit {
-        DurationUnit::Minute => {
-            if value == 1 {
-                "minute".to_string()
-            } else {
-                "minutes".to_string()
-            }
-        }
-        DurationUnit::Hour => {
-            if value == 1 {
-                "hour".to_string()
-            } else {
-                "hours".to_string()
-            }
-        }
-        DurationUnit::Day => {
-            if value == 1 {
-                "day".to_string()
-            } else {
-                "days".to_string()
-            }
-        }
-        DurationUnit::Week => {
-            if value == 1 {
-                "week".to_string()
-            } else {
-                "weeks".to_string()
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DurationUnit {
-    Minute,
-    Hour,
-    Day,
-    Week,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -178,63 +124,193 @@ fn build_summary_lines(
     snapshot: &RateLimitSnapshotEvent,
     reset_info: RateLimitResetInfo,
 ) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = vec![
-        "/limits".magenta().into(),
-        "".into(),
-        vec!["Usage Limits".bold()].into(),
-        build_usage_line(
-            "  • Hourly limit",
-            &metrics.hourly_window_label,
-            metrics.hourly_used,
-        ),
-        build_usage_line(
-            "  • Weekly limit",
-            &metrics.weekly_window_label,
-            metrics.weekly_used,
-        ),
-    ];
-    if let Some(line) = build_reset_line(
-        "Hourly",
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push("/limits".magenta().into());
+    lines.push("".into());
+
+    lines.push(section_header("Hourly Limit"));
+    lines.push(build_bar_line(
+        "Used",
+        metrics.hourly_used,
+        " used",
+        Style::default()
+            .fg(colors::text())
+            .add_modifier(Modifier::BOLD),
+    ));
+    lines.push(build_hourly_window_line(metrics));
+    lines.push(build_hourly_reset_line(
         snapshot.primary_window_minutes,
         reset_info.primary_last_reset,
-    ) {
-        lines.push(line);
-    }
-    if let Some(line) = build_reset_line(
-        "Weekly",
+    ));
+
+    lines.push("".into());
+
+    lines.push(section_header("Weekly Limit"));
+    lines.push(build_bar_line(
+        "Usage",
+        metrics.weekly_used,
+        "",
+        Style::default()
+            .fg(colors::text())
+            .add_modifier(Modifier::BOLD),
+    ));
+    lines.push(build_weekly_window_line(
+        metrics.weekly_window_minutes,
+        reset_info.weekly_last_reset,
+    ));
+    lines.push(build_weekly_reset_line(
         snapshot.weekly_window_minutes,
         reset_info.weekly_last_reset,
-    ) {
-        lines.push(line);
-    }
-    lines.push(build_status_line(metrics));
+    ));
+
+    lines.push("".into());
+    lines.push(section_header("Chart"));
+    lines.push("".into());
     lines
 }
 
-fn build_usage_line(label: &str, window_label: &str, used_percent: f64) -> Line<'static> {
-    Line::from(vec![
-        label.to_string().into(),
-        format!(" ({window_label})").dim(),
-        ": ".into(),
-        format!("{used_percent:.1}% used").dark_gray().bold(),
-    ])
+fn build_footer_lines(metrics: &RateLimitMetrics) -> Vec<Line<'static>> {
+    vec!["".into(), build_status_line(metrics)]
+}
+
+fn section_header(title: &str) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        format!("{SECTION_INDENT}{title}"),
+        Style::default().add_modifier(Modifier::BOLD),
+    )])
+}
+
+fn build_bar_line(label: &str, percent: f64, suffix: &str, style: Style) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(field_prefix(label)));
+    spans.push(Span::styled(render_percent_bar(percent), style));
+    let mut text = format_percent(percent);
+    if !suffix.is_empty() {
+        text.push_str(suffix);
+    }
+    spans.push(Span::raw(format!(" {text}")));
+    Line::from(spans)
+}
+
+fn build_hourly_window_line(metrics: &RateLimitMetrics) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(field_prefix("Window")));
+    let ratio = metrics
+        .primary_to_weekly_ratio_percent
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0);
+    spans.push(Span::styled(
+        render_percent_bar(ratio),
+        Style::default()
+            .fg(colors::info())
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    let primary = format_minutes_short(metrics.primary_window_minutes);
+    let weekly = format_minutes_short(metrics.weekly_window_minutes);
+    let detail = metrics
+        .primary_to_weekly_ratio_percent
+        .map(|value| format!("{} ({primary} / {weekly})", format_percent(value)))
+        .unwrap_or_else(|| format!("({primary} / {weekly})"));
+    spans.push(Span::raw(format!(" {detail}")));
+    Line::from(spans)
+}
+
+fn build_hourly_reset_line(
+    window_minutes: u64,
+    last_reset: Option<DateTime<Utc>>,
+) -> Line<'static> {
+    let text = if let (Some(last), true) = (last_reset, window_minutes > 0) {
+        if let Some((remaining, timestamp)) = compute_reset_eta(window_minutes, last) {
+            format!("{SECTION_INDENT}Resets in ≈{remaining} @ {timestamp}")
+        } else {
+            format!("{SECTION_INDENT}Reset timing updating…")
+        }
+    } else {
+        format!("{SECTION_INDENT}Reset shown once next window detected")
+    };
+    Line::from(vec![Span::raw(text)])
+}
+
+fn build_weekly_window_line(
+    weekly_minutes: u64,
+    last_reset: Option<DateTime<Utc>>,
+) -> Line<'static> {
+    let prefix = field_prefix("Window");
+    let since = last_reset
+        .and_then(|last| Utc::now().signed_duration_since(last).to_std().ok())
+        .map(format_duration)
+        .unwrap_or_else(|| "unknown".to_string());
+    let window = format_minutes_short(weekly_minutes);
+    Line::from(vec![Span::raw(prefix), Span::raw(format!("({since} / {window})"))])
+}
+
+fn build_weekly_reset_line(
+    window_minutes: u64,
+    last_reset: Option<DateTime<Utc>>,
+) -> Line<'static> {
+    let text = if let (Some(last), true) = (last_reset, window_minutes > 0) {
+        if let Some((remaining, timestamp)) = compute_reset_eta(window_minutes, last) {
+            format!("{SECTION_INDENT}Resets in ≈{remaining} @ {timestamp}")
+        } else {
+            format!("{SECTION_INDENT}Reset timing updating…")
+        }
+    } else {
+        format!("{SECTION_INDENT}Reset shown once next window detected")
+    };
+    Line::from(vec![Span::raw(text)])
+}
+
+fn compute_reset_eta(
+    window_minutes: u64,
+    last_reset: DateTime<Utc>,
+) -> Option<(String, String)> {
+    let window_seconds = (window_minutes as i64).checked_mul(60)?;
+    if window_seconds <= 0 {
+        return None;
+    }
+    let now = Utc::now();
+    let elapsed = now.signed_duration_since(last_reset);
+    let mut periods = 0i64;
+    if elapsed.num_seconds() > 0 {
+        periods = elapsed.num_seconds() / window_seconds;
+    }
+    let mut next_reset = last_reset + chrono::Duration::seconds(window_seconds);
+    if periods > 0 {
+        next_reset = last_reset + chrono::Duration::seconds(window_seconds * (periods + 1));
+    }
+    if next_reset <= now {
+        next_reset = now + chrono::Duration::seconds(window_seconds);
+    }
+    let remaining = next_reset.signed_duration_since(now).to_std().ok()?;
+    let local_time = next_reset.with_timezone(&Local).format("%I:%M%P").to_string();
+    Some((format_duration(remaining), local_time))
 }
 
 fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
     if metrics.weekly_exhausted() || metrics.hourly_exhausted() {
-        spans.push("  Rate limited: ".into());
         let reason = match (metrics.hourly_exhausted(), metrics.weekly_exhausted()) {
             (true, true) => "weekly and hourly windows exhausted",
             (true, false) => "hourly window exhausted",
             (false, true) => "weekly window exhausted",
             (false, false) => unreachable!(),
         };
-        spans.push(reason.red());
+        Line::from(vec![
+            Span::raw(SECTION_INDENT),
+            Span::styled(
+                format!("✕ Rate limited: {reason}"),
+                Style::default().fg(colors::error()),
+            ),
+        ])
     } else {
-        spans.push("  Within current limits".green());
+        Line::from(vec![
+            Span::raw(SECTION_INDENT),
+            Span::styled(
+                "✓ Within current limits".to_string(),
+                Style::default().fg(colors::success()),
+            ),
+        ])
     }
-    Line::from(spans)
 }
 
 fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
@@ -242,42 +318,99 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
         return Vec::new();
     }
 
-    vec![
-        vec!["Legend".bold()].into(),
-        vec![
-            "  • ".into(),
-            Span::styled(
-                WEEKLY_CELL.to_string(),
-                Style::default()
-                    .fg(colors::text())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            " weekly usage".into(),
-        ]
-        .into(),
-        vec![
-            "  • ".into(),
-            Span::styled(
-                HOURLY_CELL.to_string(),
-                Style::default()
-                    .fg(colors::info())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            " hourly headroom".into(),
-        ]
-        .into(),
-        vec![
-            "  • ".into(),
-            Span::styled(
-                UNUSED_CELL.to_string(),
-                Style::default()
-                    .fg(colors::success())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            " unused weekly".into(),
-        ]
-        .into(),
-    ]
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![
+        Span::raw(CHART_INDENT),
+        Span::styled(
+            WEEKLY_CELL.to_string(),
+            Style::default()
+                .fg(colors::text())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" weekly usage"),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw(CHART_INDENT),
+        Span::styled(
+            HOURLY_CELL.to_string(),
+            Style::default()
+                .fg(colors::info())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" hourly headroom"),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw(CHART_INDENT),
+        Span::styled(
+            UNUSED_CELL.to_string(),
+            Style::default()
+                .fg(colors::success())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" unused weekly"),
+    ]));
+    lines
+}
+
+fn field_prefix(label: &str) -> String {
+    let target_width = 7usize;
+    let padding = 2 + target_width.saturating_sub(label.len());
+    let spaces = " ".repeat(padding);
+    format!("{SECTION_INDENT}{label}:{spaces}")
+}
+
+fn render_percent_bar(percent: f64) -> String {
+    let clamped = percent.clamp(0.0, 100.0);
+    let mut filled = ((clamped / 100.0) * BAR_SLOTS as f64).round() as usize;
+    if clamped > 0.0 && filled == 0 {
+        filled = 1;
+    }
+    let filled = filled.min(BAR_SLOTS);
+    let empty = BAR_SLOTS.saturating_sub(filled);
+    let mut bar = String::with_capacity(BAR_SLOTS * BAR_FILLED.len());
+    for _ in 0..filled {
+        bar.push_str(BAR_FILLED);
+    }
+    for _ in 0..empty {
+        bar.push_str(BAR_EMPTY);
+    }
+    bar
+}
+
+fn format_percent(percent: f64) -> String {
+    let clamped = percent.clamp(0.0, 100.0);
+    if clamped == 0.0 || clamped >= 1.0 {
+        format!("{clamped:.0}%")
+    } else {
+        format!("{clamped:.1}%")
+    }
+}
+
+fn format_minutes_short(minutes: u64) -> String {
+    if minutes == 0 {
+        return "0m".to_string();
+    }
+    if minutes % 10_080 == 0 {
+        let weeks = minutes / 10_080;
+        return format!("{weeks} {}", if weeks == 1 { "week" } else { "weeks" });
+    }
+    if minutes % 1_440 == 0 {
+        let days = minutes / 1_440;
+        return format!("{days} {}", if days == 1 { "day" } else { "days" });
+    }
+    if minutes % 60 == 0 {
+        let hours = minutes / 60;
+        return format!("{hours} {}", if hours == 1 { "hour" } else { "hours" });
+    }
+    if minutes > 60 {
+        let hours = minutes / 60;
+        let mins = minutes % 60;
+        if mins == 0 {
+            return format!("{hours}h");
+        }
+        return format!("{hours}h {mins}m");
+    }
+    format!("{minutes}m")
 }
 
 fn extract_capacity_fraction(snapshot: &RateLimitSnapshotEvent) -> Option<f64> {
@@ -328,36 +461,14 @@ fn render_limit_grid(state: GridState, grid_config: GridConfig, width: u16) -> V
         .unwrap_or_default()
 }
 
-fn build_reset_line(
-    label: &str,
-    window_minutes: u64,
-    last_reset: Option<DateTime<Utc>>,
-) -> Option<Line<'static>> {
-    let last = last_reset?;
-    let now = Utc::now();
-    let since = now.signed_duration_since(last).to_std().ok()?;
-    let mut text = format!("  • {label} window started ~{} ago", format_duration(since));
-
-    let next = last + chrono::Duration::minutes(window_minutes as i64);
-    if let Ok(until) = next.signed_duration_since(now).to_std() {
-        if until.as_secs() > 0 {
-            text.push_str(&format!(" (resets in ≈ {})", format_duration(until)));
-        }
-    }
-
-    Some(Line::from(text))
-}
-
 /// Precomputed layout information for the usage grid.
 struct GridLayout {
     size: usize,
-    inner_width: usize,
 }
 
 impl GridLayout {
     const MIN_SIDE: usize = 4;
     const MAX_SIDE: usize = 12;
-    const PREFIX: &'static str = "  ";
 
     fn new(config: GridConfig, width: u16) -> Option<Self> {
         if config.weekly_slots == 0 {
@@ -365,8 +476,9 @@ impl GridLayout {
         }
         let cell_width = WEEKLY_CELL.chars().count();
 
-        let available_inner = width.saturating_sub((Self::PREFIX.len() + 2) as u16) as usize;
-        if available_inner == 0 {
+        let indent_width = CHART_INDENT.chars().count() as u16;
+        let available_inner = width.saturating_sub(indent_width) as usize;
+        if available_inner < cell_width {
             return None;
         }
 
@@ -381,30 +493,25 @@ impl GridLayout {
         if width_limited_side >= Self::MIN_SIDE {
             side = side.max(Self::MIN_SIDE.min(width_limited_side));
         }
-        let side = side.clamp(1, Self::MAX_SIDE);
+        side = side.clamp(1, width_limited_side);
+        while side > 1 && (side * cell_width + side.saturating_sub(1)) > available_inner {
+            side -= 1;
+        }
         if side == 0 {
             return None;
         }
 
-        let inner_width = side * cell_width + side.saturating_sub(1);
-        Some(Self {
-            size: side,
-            inner_width,
-        })
+        Some(Self { size: side })
     }
 
     /// Render the grid into styled lines for the history cell.
     fn render(&self, state: GridState) -> Vec<Line<'static>> {
         let counts = self.cell_counts(state);
         let mut lines = Vec::new();
-        lines.push("".into());
-        lines.push(self.render_border('╭', '╮'));
-
         let mut cell_index = 0isize;
         for _ in 0..self.size {
             let mut spans: Vec<Span<'static>> = Vec::new();
-            spans.push(Self::PREFIX.into());
-            spans.push("│".dim());
+            spans.push(Span::raw(CHART_INDENT));
 
             for col in 0..self.size {
                 if col > 0 {
@@ -429,28 +536,10 @@ impl GridLayout {
                 spans.push(span);
                 cell_index += 1;
             }
-
-            spans.push("│".dim());
             lines.push(Line::from(spans));
         }
-
-        lines.push(self.render_border('╰', '╯'));
         lines.push("".into());
-
-        if counts.white_cells == 0 {
-            lines.push(vec!["  (No unused weekly capacity remaining)".dim()].into());
-            lines.push("".into());
-        }
-
         lines
-    }
-
-    fn render_border(&self, left: char, right: char) -> Line<'static> {
-        let mut text = String::from(Self::PREFIX);
-        text.push(left);
-        text.push_str(&"─".repeat(self.inner_width));
-        text.push(right);
-        vec![Span::from(text).dim()].into()
     }
 
     /// Translate usage ratios into the number of coloured cells.
@@ -462,21 +551,17 @@ impl GridLayout {
         if dark_cells + green_cells > total_cells as isize {
             green_cells = (total_cells as isize - dark_cells).max(0);
         }
-        let white_cells = (total_cells as isize - dark_cells - green_cells).max(0);
-
         GridCellCounts {
             dark_cells,
             green_cells,
-            white_cells,
         }
     }
 }
 
-/// Number of weekly (dark), hourly (green) and unused (default) cells.
+/// Number of weekly (dark) and hourly (green) cells; remaining slots imply unused weekly capacity.
 struct GridCellCounts {
     dark_cells: isize,
     green_cells: isize,
-    white_cells: isize,
 }
 
 #[cfg(test)]
@@ -494,38 +579,28 @@ mod tests {
     }
 
     #[test]
-    fn approximate_duration_handles_hours_and_weeks() {
-        assert_eq!(
-            approximate_duration(Some(299)),
-            Some((5, DurationUnit::Hour))
-        );
-        assert_eq!(
-            approximate_duration(Some(10_080)),
-            Some((1, DurationUnit::Week))
-        );
-        assert_eq!(
-            approximate_duration(Some(90)),
-            Some((2, DurationUnit::Hour))
-        );
-    }
-
-    #[test]
     fn build_display_constructs_summary_and_gauge() {
         let display = build_limits_view(
             &snapshot(),
             RateLimitResetInfo::default(),
             DEFAULT_GRID_CONFIG,
         );
-        assert!(display.summary_lines.iter().any(|line| {
-            line.spans
-                .iter()
-                .any(|span| span.content.contains("Weekly limit"))
-        }));
-        assert!(display.summary_lines.iter().any(|line| {
-            line.spans
-                .iter()
-                .any(|span| span.content.contains("Hourly limit"))
-        }));
+        let summary_text: Vec<String> = display
+            .summary_lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+        assert!(summary_text
+            .iter()
+            .any(|line| line.contains("Hourly Limit")));
+        assert!(summary_text
+            .iter()
+            .any(|line| line.contains("Weekly Limit")));
         assert!(!display.gauge_lines(80).is_empty());
     }
 
@@ -548,8 +623,17 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(summary.contains("Hourly limit (≈5 hours window): 30.0% used"));
-        assert!(summary.contains("Weekly limit (≈1 week window): 60.0% used"));
+        let used_line = summary
+            .split('\n')
+            .find(|line| line.contains("Used"))
+            .expect("expected hourly used line");
+        assert!(used_line.contains("30%"));
+
+        let weekly_line = summary
+            .split('\n')
+            .find(|line| line.contains("Usage"))
+            .expect("expected weekly usage line");
+        assert!(weekly_line.contains("60%"));
     }
 
     #[test]
