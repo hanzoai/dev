@@ -16,12 +16,12 @@ use codex_core::built_in_model_providers;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_protocol::mcp_protocol::ConversationId;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::WebSearchAction;
 use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id;
+use core_test_support::non_sandbox_test;
 use core_test_support::responses;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
@@ -127,12 +127,7 @@ fn write_auth_json(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resume_includes_initial_messages_and_sends_prior_items() {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    non_sandbox_test!();
 
     // Create a fake rollout session file with prior user + system + assistant messages.
     let tmpdir = TempDir::new().unwrap();
@@ -298,12 +293,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn includes_conversation_id_and_model_headers_in_request() {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    non_sandbox_test!();
 
     // Mock server
     let server = MockServer::start().await;
@@ -428,12 +418,7 @@ async fn includes_base_instructions_override_in_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chatgpt_auth_sends_correct_request() {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    non_sandbox_test!();
 
     // Mock server
     let server = MockServer::start().await;
@@ -507,12 +492,7 @@ async fn chatgpt_auth_sends_correct_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    non_sandbox_test!();
 
     // Mock server
     let server = MockServer::start().await;
@@ -737,12 +717,7 @@ async fn configure_session_refreshes_user_instructions_after_cwd_change() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn azure_responses_request_includes_store_and_reasoning_ids() {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    non_sandbox_test!();
 
     let server = MockServer::start().await;
 
@@ -1135,12 +1110,7 @@ fn create_dummy_codex_auth() -> CodexAuth {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn history_dedupes_streamed_and_final_messages_across_turns() {
     // Skip under Codex sandbox network restrictions (mirrors other tests).
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    non_sandbox_test!();
 
     // Mock server that will receive three sequential requests and return the same SSE stream
     // each time: a few deltas, then a final assistant message, then completed.
