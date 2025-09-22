@@ -36,7 +36,6 @@ use mcp_types::JSONRPCResponse;
 use mcp_types::ListToolsResult;
 use mcp_types::ModelContextProtocolRequest;
 use mcp_types::RequestId;
-use mcp_types::ServerCapabilitiesTools;
 use mcp_types::ServerNotification;
 use mcp_types::TextContent;
 use serde_json::json;
@@ -102,6 +101,50 @@ impl MessageProcessor {
 
         // Hold on to the ID so we can respond.
         let request_id = request.id.clone();
+
+        let mut request = request;
+
+        if request.method == mcp_types::InitializeRequest::METHOD {
+            if let Some(params) = request.params.as_mut() {
+                if let Some(protocol_version) = params.get_mut("protocolVersion") {
+                    if let Some(num) = protocol_version.as_i64() {
+                        *protocol_version = serde_json::Value::String(num.to_string());
+                    } else if let Some(num) = protocol_version.as_u64() {
+                        *protocol_version = serde_json::Value::String(num.to_string());
+                    } else if protocol_version.is_null() {
+                        *protocol_version = serde_json::Value::String("1".to_string());
+                    }
+                }
+
+                if let serde_json::Value::Object(map) = params {
+                    if !map.contains_key("capabilities") {
+                        let capabilities = map
+                            .remove("clientCapabilities")
+                            .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+
+                        let mut cap_wrapper = serde_json::Map::new();
+                        cap_wrapper.insert("experimental".to_string(), capabilities);
+                        map.insert(
+                            "capabilities".to_string(),
+                            serde_json::Value::Object(cap_wrapper),
+                        );
+                    }
+
+                    map.entry("clientInfo").or_insert_with(|| {
+                        let mut info = serde_json::Map::new();
+                        info.insert(
+                            "name".to_string(),
+                            serde_json::Value::String("unknown-client".into()),
+                        );
+                        info.insert(
+                            "version".to_string(),
+                            serde_json::Value::String("0.0.0".into()),
+                        );
+                        serde_json::Value::Object(info)
+                    });
+                }
+            }
+        }
 
         let client_request = match McpClientRequest::try_from(request) {
             Ok(client_request) => client_request,
@@ -233,29 +276,44 @@ impl MessageProcessor {
         self.initialized = true;
 
         // Build a minimal InitializeResult. Fill with placeholders.
-        let result = mcp_types::InitializeResult {
-            capabilities: mcp_types::ServerCapabilities {
-                completions: None,
-                experimental: None,
-                logging: None,
-                prompts: None,
-                resources: None,
-                tools: Some(ServerCapabilitiesTools {
-                    list_changed: Some(true),
-                }),
-            },
-            instructions: None,
-            protocol_version: params.protocol_version.clone(),
-            server_info: mcp_types::Implementation {
-                name: "code-mcp-server".to_string(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                title: Some("Codex".to_string()),
-                user_agent: Some(get_codex_user_agent_default()),
-            },
-        };
+        let server_info = serde_json::json!({
+            "name": "code-mcp-server",
+            "version": env!("CARGO_PKG_VERSION"),
+            "title": "Codex",
+            "user_agent": get_codex_user_agent_default(),
+        });
 
-        self.send_response::<mcp_types::InitializeRequest>(id, result)
-            .await;
+        let agent_capabilities = serde_json::json!({
+            "promptCapabilities": {
+                "image": true,
+                "embeddedContext": true,
+                "audio": false
+            },
+            "mcpCapabilities": {
+                "http": false,
+                "sse": false
+            }
+        });
+
+        let auth_methods = serde_json::json!([{
+            "id": "code-login",
+            "name": "Use Code login",
+            "description": "Run `code login` (ChatGPT or API key) before connecting."
+        }]);
+
+        let result = serde_json::json!({
+            "protocolVersion": 1,
+            "serverInfo": server_info,
+            "capabilities": {
+                "tools": {
+                    "listChanged": true
+                }
+            },
+            "agentCapabilities": agent_capabilities,
+            "authMethods": auth_methods
+        });
+
+        self.outgoing.send_response(id, result).await;
     }
 
     async fn send_response<T>(&self, id: RequestId, result: T::Result)

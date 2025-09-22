@@ -102,7 +102,7 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
         [bash, flag, script]
-            if bash == "bash"
+            if is_bash_like(bash)
                 && flag == "-lc"
                 && script.trim_start().starts_with("apply_patch") =>
         {
@@ -116,6 +116,17 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
         }
         _ => MaybeApplyPatch::NotApplyPatch,
     }
+}
+
+fn is_bash_like(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    let basename = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+
+    matches!(basename.as_str(), "bash" | "bash.exe")
 }
 
 #[derive(Debug, PartialEq)]
@@ -728,6 +739,34 @@ mod tests {
 *** End Patch
 PATCH"#,
         ]);
+
+        match maybe_parse_apply_patch(&args) {
+            MaybeApplyPatch::Body(hunks) => {
+                assert_eq!(
+                    hunks,
+                    vec![Hunk::AddFile {
+                        path: PathBuf::from("foo"),
+                        contents: "hi\n".to_string()
+                    }]
+                );
+            }
+            result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn test_heredoc_with_absolute_bash() {
+        let script = [
+            "apply_patch <<'PATCH'",
+            "*** Begin Patch",
+            "*** Add File: foo",
+            "+hi",
+            "*** End Patch",
+            "PATCH",
+        ]
+        .join("\n");
+
+        let args = strs_to_strings(&["/bin/bash", "-lc", &script]);
 
         match maybe_parse_apply_patch(&args) {
             MaybeApplyPatch::Body(hunks) => {
