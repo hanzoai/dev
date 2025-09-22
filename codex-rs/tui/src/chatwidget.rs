@@ -81,6 +81,8 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
 use codex_core::protocol::Op;
+use codex_core::protocol::ReviewOutputEvent;
+use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
@@ -158,6 +160,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use crate::rate_limits_view::RateLimitResetInfo;
+use codex_core::review_format::format_review_findings_block;
 use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
@@ -319,6 +322,8 @@ pub(crate) struct ChatWidget<'a> {
     last_agent_prompt: Option<String>,
     agent_context: Option<String>,
     agent_task: Option<String>,
+    active_review_hint: Option<String>,
+    active_review_prompt: Option<String>,
     overall_task_status: String,
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
@@ -2133,6 +2138,8 @@ impl ChatWidget<'_> {
             last_agent_prompt: None,
             agent_context: None,
             agent_task: None,
+            active_review_hint: None,
+            active_review_prompt: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -2340,6 +2347,8 @@ impl ChatWidget<'_> {
             last_agent_prompt: None,
             agent_context: None,
             agent_task: None,
+            active_review_hint: None,
+            active_review_prompt: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -5083,8 +5092,73 @@ impl ChatWidget<'_> {
             EventMsg::UserMessage(_) => {}
             EventMsg::TurnAborted(_) => {}
             EventMsg::ConversationPath(_) => {}
-            EventMsg::EnteredReviewMode(_) => {}
-            EventMsg::ExitedReviewMode(_) => {}
+            EventMsg::EnteredReviewMode(review_request) => {
+                let hint = review_request.user_facing_hint.trim();
+                let banner = if hint.is_empty() {
+                    ">> Code review started <<".to_string()
+                } else {
+                    format!(">> Code review started: {hint} <<")
+                };
+                self.active_review_hint = Some(review_request.user_facing_hint.clone());
+                self.active_review_prompt = Some(review_request.prompt.clone());
+                self.history_push(history_cell::new_background_event(banner));
+
+                let prompt_text = review_request.prompt.trim();
+                if !prompt_text.is_empty() {
+                    let mut lines: Vec<Line<'static>> = Vec::new();
+                    lines.push(Line::from(vec![RtSpan::styled(
+                        "Review focus",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]));
+                    lines.push(Line::from(""));
+                    for line in prompt_text.lines() {
+                        lines.push(Line::from(line.to_string()));
+                    }
+                    self.history_push(history_cell::PlainHistoryCell::new(
+                        lines,
+                        history_cell::HistoryCellType::Notice,
+                    ));
+                }
+                self.request_redraw();
+            }
+            EventMsg::ExitedReviewMode(review_output) => {
+                let hint = self.active_review_hint.take();
+                let prompt = self.active_review_prompt.take();
+                match review_output {
+                    Some(output) => {
+                        let summary_cell = self.build_review_summary_cell(
+                            hint.as_deref(),
+                            prompt.as_deref(),
+                            &output,
+                        );
+                        self.history_push(summary_cell);
+                        let finish_banner = match hint.as_deref() {
+                            Some(h) if !h.trim().is_empty() => {
+                                let trimmed = h.trim();
+                                format!("<< Code review finished: {trimmed} >>")
+                            }
+                            _ => "<< Code review finished >>".to_string(),
+                        };
+                        self.history_push(history_cell::new_background_event(finish_banner));
+                    }
+                    None => {
+                        let banner = match hint.as_deref() {
+                            Some(h) if !h.trim().is_empty() => {
+                                let trimmed = h.trim();
+                                format!(
+                                    "<< Code review finished without a final response ({trimmed}) >>"
+                                )
+                            }
+                            _ => "<< Code review finished without a final response >>".to_string(),
+                        };
+                        self.history_push(history_cell::new_background_event(banner));
+                        self.history_push(history_cell::new_warning_event(
+                            "Review session ended without returning findings. Try `/review` again if you still need feedback.".to_string(),
+                        ));
+                    }
+                }
+                self.request_redraw();
+            }
         }
     }
 
@@ -11305,6 +11379,113 @@ fn update_rate_limit_resets(
 }
 
 impl ChatWidget<'_> {
+    /// Handle `/review [focus]` command by starting a dedicated review session.
+    pub(crate) fn handle_review_command(&mut self, args: String) {
+        if self.is_task_running() {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/review` — complete or cancel the current task before starting a new review.".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        let trimmed = args.trim();
+        let (prompt, hint) = if trimmed.is_empty() {
+            (
+                "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
+                "current workspace changes".to_string(),
+            )
+        } else {
+            let value = trimmed.to_string();
+            (value.clone(), value)
+        };
+
+        self.active_review_hint = None;
+        self.active_review_prompt = None;
+
+        let preparation_notice = if trimmed.is_empty() {
+            "Preparing code review request...".to_string()
+        } else {
+            format!("Preparing code review for {hint}")
+        };
+        self.insert_background_event_early(preparation_notice);
+        self.request_redraw();
+
+        let review_request = ReviewRequest {
+            prompt,
+            user_facing_hint: hint,
+        };
+
+        self.submit_op(Op::Review { review_request });
+    }
+
+    fn build_review_summary_cell(
+        &self,
+        hint: Option<&str>,
+        prompt: Option<&str>,
+        output: &ReviewOutputEvent,
+    ) -> history_cell::PlainHistoryCell {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let title = match hint {
+            Some(h) if !h.trim().is_empty() => {
+                let trimmed = h.trim();
+                format!("Review summary — {trimmed}")
+            }
+            _ => "Review summary".to_string(),
+        };
+        lines.push(Line::from(vec![RtSpan::styled(
+            title,
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+
+        if let Some(p) = prompt {
+            let trimmed_prompt = p.trim();
+            if !trimmed_prompt.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    RtSpan::styled(
+                        "Prompt:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    RtSpan::raw(" "),
+                    RtSpan::raw(trimmed_prompt.to_string()),
+                ]));
+            }
+        }
+
+        let mut sections: Vec<String> = Vec::new();
+        let explanation = output.overall_explanation.trim();
+        if !explanation.is_empty() {
+            sections.push(explanation.to_string());
+        }
+        if !output.findings.is_empty() {
+            sections.push(format_review_findings_block(&output.findings, None));
+        }
+        let correctness = output.overall_correctness.trim();
+        if !correctness.is_empty() {
+            sections.push(format!("Overall correctness: {correctness}"));
+        }
+        if output.overall_confidence_score > 0.0 {
+            let score = output.overall_confidence_score;
+            sections.push(format!("Confidence score: {score:.1}"));
+        }
+        if sections.is_empty() {
+            sections.push("No detailed findings were provided.".to_string());
+        }
+
+        lines.push(Line::from(""));
+        for (idx, section) in sections.iter().enumerate() {
+            if idx > 0 {
+                lines.push(Line::from(""));
+            }
+            for line in section.lines() {
+                lines.push(Line::from(line.to_string()));
+            }
+        }
+
+        history_cell::PlainHistoryCell::new(lines, history_cell::HistoryCellType::Assistant)
+    }
+
     /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
     /// optionally copies current uncommitted changes, then switches the session cwd
     /// into the worktree. If `task` is non-empty, submits it immediately.
