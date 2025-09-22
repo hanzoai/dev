@@ -134,7 +134,7 @@ fn build_summary_lines(
         "Usage",
         metrics.hourly_used,
         "",
-        Style::default().fg(colors::info()),
+        Style::default().fg(colors::text()),
     ));
     lines.push(build_hourly_window_line(
         metrics,
@@ -152,7 +152,7 @@ fn build_summary_lines(
         "Usage",
         metrics.weekly_used,
         "",
-        Style::default().fg(colors::info()),
+        Style::default().fg(colors::text()),
     ));
     lines.push(build_weekly_window_line(
         metrics.weekly_window_minutes,
@@ -221,7 +221,7 @@ fn build_hourly_window_line(
                 spans.extend(render_percent_bar(percent));
                 spans.push(Span::styled(
                     format!(" {}", format_percent(percent)),
-                    Style::default().fg(colors::info()),
+                    Style::default().fg(colors::text()),
                 ));
                 let elapsed_display = format_duration(elapsed);
                 let total_display =
@@ -239,8 +239,8 @@ fn build_hourly_window_line(
         Span::raw(prefix),
         Span::styled(
             format!(
-                "≈{} rolling window",
-                format_minutes_short(metrics.primary_window_minutes)
+                "(unknown / {})",
+                format_minutes_round_units(metrics.primary_window_minutes)
             ),
             Style::default().fg(colors::dim()),
         ),
@@ -257,12 +257,10 @@ fn build_hourly_reset_line(
             return Line::from(vec![
                 Span::raw(format!("{FIELD_INDENT}Resets:")),
                 Span::raw("   "),
+                Span::raw("at "),
+                Span::raw(format!("{}", timing.next_reset_local)),
                 Span::styled(
-                    format!("{}", timing.next_reset_local),
-                    Style::default().fg(colors::info()),
-                ),
-                Span::styled(
-                    format!(" ({remaining})"),
+                    format!(" (in {remaining})"),
                     Style::default().fg(colors::dim()),
                 ),
             ]);
@@ -307,7 +305,7 @@ fn build_weekly_window_line(
                 spans.extend(render_percent_bar(percent));
                 spans.push(Span::styled(
                     format!(" {}", format_percent(percent)),
-                    Style::default().fg(colors::info()),
+                    Style::default().fg(colors::text()),
                 ));
                 let elapsed_display = format_duration(elapsed);
                 let total_display = format_minutes_round_units(weekly_minutes);
@@ -324,8 +322,8 @@ fn build_weekly_window_line(
         Span::raw(prefix),
         Span::styled(
             format!(
-                "≈{} rolling window",
-                format_minutes_short(weekly_minutes)
+                "(unknown / {})",
+                format_minutes_round_units(weekly_minutes)
             ),
             Style::default().fg(colors::dim()),
         ),
@@ -342,12 +340,10 @@ fn build_weekly_reset_line(
             return Line::from(vec![
                 Span::raw(format!("{FIELD_INDENT}Resets:")),
                 Span::raw("   "),
+                Span::raw("at "),
+                Span::raw(format!("{}", timing.next_reset_local)),
                 Span::styled(
-                    format!("{}", timing.next_reset_local),
-                    Style::default().fg(colors::info()),
-                ),
-                Span::styled(
-                    format!(" ({remaining})"),
+                    format!(" (in {remaining})"),
                     Style::default().fg(colors::dim()),
                 ),
             ]);
@@ -426,7 +422,7 @@ fn build_compact_tokens_line(used: u64, limit: u64) -> Line<'static> {
     spans.extend(render_percent_bar(percent));
     spans.push(Span::styled(
         format!(" {percent_display}"),
-        Style::default().fg(colors::info()),
+        Style::default().fg(colors::text()),
     ));
 
     let used_fmt = format_with_separators(used);
@@ -490,7 +486,7 @@ fn build_context_tokens_line(used: u64, window: u64) -> Line<'static> {
     };
     spans.push(Span::styled(
         format!(" {percent_display}"),
-        Style::default().fg(colors::info()),
+        Style::default().fg(colors::text()),
     ));
     spans.push(Span::styled(
         format!(
@@ -725,48 +721,6 @@ fn format_percent(percent: f64) -> String {
     } else {
         format!("{clamped:.1}%")
     }
-}
-
-fn format_minutes_short(minutes: u64) -> String {
-    if minutes == 0 {
-        return "0m".to_string();
-    }
-    if minutes % 10_080 == 0 {
-        let weeks = minutes / 10_080;
-        return format!("{weeks} {}", if weeks == 1 { "week" } else { "weeks" });
-    }
-    if minutes >= 1_440 {
-        let days = minutes / 1_440;
-        let remainder = minutes % 1_440;
-        if remainder == 0 {
-            return format!("{days} {}", if days == 1 { "day" } else { "days" });
-        }
-
-        let hours = remainder / 60;
-        if hours > 0 {
-            return format!("{days}d {hours}h");
-        }
-
-        let leftover_minutes = remainder % 60;
-        if leftover_minutes > 0 {
-            return format!("{days}d {leftover_minutes}m");
-        }
-
-        return format!("{days}d");
-    }
-    if minutes % 60 == 0 {
-        let hours = minutes / 60;
-        return format!("{hours} {}", if hours == 1 { "hour" } else { "hours" });
-    }
-    if minutes > 60 {
-        let hours = minutes / 60;
-        let mins = minutes % 60;
-        if mins == 0 {
-            return format!("{hours}h");
-        }
-        return format!("{hours}h {mins}m");
-    }
-    format!("{minutes}m")
 }
 
 fn format_minutes_round_units(minutes: u64) -> String {

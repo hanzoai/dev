@@ -38,6 +38,7 @@ use mcp_types::ModelContextProtocolRequest;
 use mcp_types::RequestId;
 use mcp_types::ServerNotification;
 use mcp_types::TextContent;
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -52,6 +53,7 @@ pub(crate) struct MessageProcessor {
     conversation_manager: Arc<ConversationManager>,
     session_map: Arc<Mutex<HashMap<Uuid, Arc<CodexConversation>>>>,
     running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
+    base_config: Arc<Config>,
 }
 
 impl MessageProcessor {
@@ -69,12 +71,13 @@ impl MessageProcessor {
             config.responses_originator_header.clone(),
         );
         let conversation_manager = Arc::new(ConversationManager::new(auth_manager.clone()));
+        let config_for_processor = config.clone();
         let codex_message_processor = CodexMessageProcessor::new(
             auth_manager,
             conversation_manager.clone(),
             outgoing.clone(),
             codex_linux_sandbox_exe.clone(),
-            config,
+            config_for_processor,
         );
         Self {
             codex_message_processor,
@@ -84,6 +87,7 @@ impl MessageProcessor {
             conversation_manager,
             session_map: Arc::new(Mutex::new(HashMap::new())),
             running_requests_id_to_codex_uuid: Arc::new(Mutex::new(HashMap::new())),
+            base_config: config,
         }
     }
 
@@ -101,6 +105,35 @@ impl MessageProcessor {
 
         // Hold on to the ID so we can respond.
         let request_id = request.id.clone();
+
+        if request.method == "session/new" {
+            tracing::info!("handling session/new via ACP shim");
+            if let Some(params) = request.params.clone() {
+                match serde_json::from_value::<SessionNewParams>(params) {
+                    Ok(session_params) => {
+                        self.handle_session_new(request_id, session_params)
+                            .await;
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to parse session/new params: {err}");
+                        let error = JSONRPCErrorError {
+                            code: INVALID_REQUEST_ERROR_CODE,
+                            message: format!("invalid session/new params: {err}"),
+                            data: None,
+                        };
+                        self.outgoing.send_error(request_id, error).await;
+                    }
+                }
+            } else {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "session/new requires params".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+            return;
+        }
 
         let mut request = request;
 
@@ -752,14 +785,27 @@ impl MessageProcessor {
                 return;
             };
 
-            let acp_response = acp::NewSessionOutput {
-                session_id: acp::SessionId(session_id.to_string().into()),
-            };
+            let session_id_str = session_id.to_string();
+            let modes_payload = serde_json::json!({
+                "currentModeId": "default",
+                "availableModes": [
+                    {
+                        "id": "default",
+                        "name": "Default",
+                        "description": "Code prompts before executing tools or applying patches."
+                    }
+                ]
+            });
+
+            let structured = serde_json::json!({
+                "sessionId": session_id_str,
+                "modes": modes_payload
+            });
 
             let response = CallToolResult {
                 content: vec![],
                 is_error: None,
-                structured_content: Some(serde_json::to_value(acp_response).unwrap_or_default()),
+                structured_content: Some(structured),
             };
 
             outgoing.send_response(request_id, response).await;
@@ -802,6 +848,95 @@ impl MessageProcessor {
             codex_core::config::Config::load_with_cli_overrides(Default::default(), overrides)?;
 
         Ok(cfg)
+    }
+
+    async fn handle_session_new(
+        &self,
+        request_id: RequestId,
+        params: SessionNewParams,
+    ) {
+        let config = match self.session_new_config(params).await {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                tracing::warn!("Failed to prepare session config: {err}");
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: format!("failed to prepare session config: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        let outgoing = self.outgoing.clone();
+        let session_map = self.session_map.clone();
+        let conversation_manager = self.conversation_manager.clone();
+
+        task::spawn(async move {
+            let Some(session_id) = crate::acp_tool_runner::new_session(
+                request_id.clone(),
+                config,
+                outgoing.clone(),
+                session_map,
+                conversation_manager,
+            )
+            .await
+            else {
+                return;
+            };
+
+            let response = serde_json::json!({
+                "sessionId": session_id.to_string(),
+                "modes": {
+                    "currentModeId": "default",
+                    "availableModes": [
+                        {
+                            "id": "default",
+                            "name": "Default",
+                            "description": "Code prompts before executing tools or applying patches."
+                        }
+                    ]
+                }
+            });
+
+            outgoing.send_response(request_id, response).await;
+        });
+    }
+
+    async fn session_new_config(&self, params: SessionNewParams) -> anyhow::Result<Config> {
+        let mcp_servers: HashMap<String, McpServerConfig> = params
+            .mcp_servers
+            .into_iter()
+            .map(|server| {
+                let env: HashMap<String, String> = server
+                    .env
+                    .into_iter()
+                    .map(|var| (var.name, var.value))
+                    .collect();
+
+                (
+                    server.name,
+                    McpServerConfig {
+                        command: server.command.display().to_string(),
+                        args: server.args,
+                        env: if env.is_empty() { None } else { Some(env) },
+                        startup_timeout_ms: None,
+                    },
+                )
+            })
+            .collect();
+
+        let base_tools = self.base_config.experimental_client_tools.clone();
+
+        let overrides = codex_core::config::ConfigOverrides {
+            cwd: Some(params.cwd),
+            mcp_servers: Some(mcp_servers),
+            experimental_client_tools: base_tools,
+            ..Default::default()
+        };
+
+        Ok(Config::load_with_cli_overrides(Default::default(), overrides)?)
     }
 
     async fn handle_tool_call_acp_prompt(
@@ -912,10 +1047,35 @@ impl MessageProcessor {
         tracing::info!("notifications/tools/list_changed -> params: {:?}", params);
     }
 
-    fn handle_logging_message(
+fn handle_logging_message(
         &self,
         params: <mcp_types::LoggingMessageNotification as mcp_types::ModelContextProtocolNotification>::Params,
     ) {
         tracing::info!("notifications/message -> params: {:?}", params);
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionNewParams {
+    cwd: PathBuf,
+    #[serde(default, rename = "mcpServers")]
+    mcp_servers: Vec<SessionNewMcpServer>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionNewMcpServer {
+    name: String,
+    command: PathBuf,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: Vec<SessionNewEnvVar>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionNewEnvVar {
+    name: String,
+    value: String,
 }
