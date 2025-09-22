@@ -269,6 +269,9 @@ pub(crate) struct ChatWidget<'a> {
     last_token_usage: TokenUsage,
     rate_limit_snapshot: Option<RateLimitSnapshotEvent>,
     rate_limit_warnings: RateLimitWarningState,
+    rate_limit_fetch_inflight: bool,
+    rate_limit_fetch_placeholder: Option<usize>,
+    rate_limit_fetch_ack_pending: bool,
     content_buffer: String,
     // Buffer for streaming assistant answer text; we do not surface partial
     // We wait for the final AgentMessage event and then emit the full text
@@ -2074,6 +2077,9 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             rate_limit_snapshot: None,
             rate_limit_warnings: RateLimitWarningState::default(),
+            rate_limit_fetch_inflight: false,
+            rate_limit_fetch_placeholder: None,
+            rate_limit_fetch_ack_pending: false,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2267,6 +2273,9 @@ impl ChatWidget<'_> {
             last_token_usage: TokenUsage::default(),
             rate_limit_snapshot: None,
             rate_limit_warnings: RateLimitWarningState::default(),
+            rate_limit_fetch_inflight: false,
+            rate_limit_fetch_placeholder: None,
+            rate_limit_fetch_ack_pending: false,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -3758,6 +3767,14 @@ impl ChatWidget<'_> {
                     tracing::debug!("Ignoring AgentMessage after interrupt");
                     return;
                 }
+                if self.rate_limit_fetch_ack_pending && message.trim().eq_ignore_ascii_case("ok") {
+                    self.rate_limit_fetch_ack_pending = false;
+                    self.stream_state
+                        .closed_answer_ids
+                        .insert(StreamId(id.clone()));
+                    self.maybe_hide_spinner();
+                    return;
+                }
                 self.stream_state.seq_answer_final = Some(event.event_seq);
                 // Strict order for the stream id
                 let ok = match event.order.as_ref() {
@@ -4195,6 +4212,24 @@ impl ChatWidget<'_> {
                             self.history_push(history_cell::new_warning_event(warning));
                         }
                         self.request_redraw();
+                    }
+                    if let Some(snapshot_ref) = self.rate_limit_snapshot.as_ref() {
+                        if self.rate_limit_fetch_placeholder.is_some() || self.rate_limit_fetch_inflight {
+                            if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
+                                if idx < self.history_cells.len() {
+                                    self.history_replace_at(
+                                        idx,
+                                        Box::new(history_cell::new_limits_output(snapshot_ref)),
+                                    );
+                                } else {
+                                    self.history_push(history_cell::new_limits_output(snapshot_ref));
+                                }
+                            } else {
+                                self.history_push(history_cell::new_limits_output(snapshot_ref));
+                            }
+                            self.rate_limit_fetch_inflight = false;
+                            self.rate_limit_fetch_ack_pending = false;
+                        }
                     }
                 }
                 self.bottom_pane.set_token_usage(
@@ -5062,8 +5097,38 @@ impl ChatWidget<'_> {
         if let Some(snapshot) = &self.rate_limit_snapshot {
             self.history_push(history_cell::new_limits_output(snapshot));
         } else {
-            self.history_push(history_cell::new_limits_unavailable());
+            self.request_latest_rate_limits();
         }
+    }
+
+    fn request_latest_rate_limits(&mut self) {
+        if self.rate_limit_fetch_placeholder.is_none() {
+            let key = self.next_internal_key();
+            let idx = self.history_insert_with_key_global_tagged(
+                Box::new(history_cell::new_limits_fetching()),
+                key,
+                "limits",
+            );
+            self.rate_limit_fetch_placeholder = Some(idx);
+        }
+
+        if self.rate_limit_fetch_inflight {
+            return;
+        }
+
+        self.rate_limit_fetch_inflight = true;
+        self.rate_limit_fetch_ack_pending = true;
+
+        use crate::chatwidget::message::UserMessage;
+        use codex_core::protocol::InputItem;
+
+        let ping = UserMessage {
+            display_text: String::new(),
+            ordered_items: vec![InputItem::Text {
+                text: "Yield immediately with only the message \"ok\"".to_string(),
+            }],
+        };
+        self.submit_user_message(ping);
     }
 
     #[cfg(not(debug_assertions))]
