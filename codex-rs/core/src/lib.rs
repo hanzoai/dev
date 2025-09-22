@@ -20,6 +20,7 @@ pub mod config_edit;
 pub mod config_profile;
 pub mod config_types;
 mod conversation_history;
+pub mod acp;
 pub mod custom_prompts;
 pub mod debug_logger;
 mod environment_context;
