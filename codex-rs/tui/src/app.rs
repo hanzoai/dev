@@ -1810,18 +1810,6 @@ impl App<'_> {
                     self.schedule_redraw_in(duration);
                 }
             }
-            AppEvent::OpenReviewBranchPicker(cwd) => {
-                self.chat_widget.show_review_branch_picker(&cwd).await;
-            }
-            AppEvent::OpenReviewCommitPicker(cwd) => {
-                self.chat_widget.show_review_commit_picker(&cwd).await;
-            }
-            AppEvent::OpenReviewCustomPrompt => {
-                self.chat_widget.show_review_custom_prompt();
-            }
-            AppEvent::OpenReviewPopup => {
-                self.chat_widget.open_review_popup();
-            }
         }
         if self.alt_screen_active {
             terminal.clear()?;

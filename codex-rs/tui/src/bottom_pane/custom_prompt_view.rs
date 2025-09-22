@@ -12,7 +12,7 @@ use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::Widget;
 use std::cell::RefCell;
 
-use super::popup_consts::STANDARD_POPUP_HINT_LINE;
+use super::popup_consts::_STANDARD_POPUP_HINT_LINE as STANDARD_POPUP_HINT_LINE;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::SelectionAction;
 
