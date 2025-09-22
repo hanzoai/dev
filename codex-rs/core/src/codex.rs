@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,6 +48,7 @@ use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
+use shlex::try_join as shlex_try_join;
 
 pub mod compact;
 use self::compact::build_compacted_history;
@@ -6207,22 +6209,6 @@ async fn handle_container_exec_with_params(
     // Intercept risky git commands and require an explicit confirm prefix.
     // We support a simple convention: prefix the script with `confirm:` to proceed.
     // The prefix is stripped before execution.
-    fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
-        // Return (index_of_script, script) if argv matches: <shell> (-lc|-c) <script>
-        if argv.len() == 3 {
-            let shell = std::path::Path::new(&argv[0])
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
-            let is_shell = matches!(shell, "bash" | "sh" | "zsh");
-            let is_flag = matches!(argv[1].as_str(), "-lc" | "-c");
-            if is_shell && is_flag {
-                return Some((2, argv[2].clone()));
-            }
-        }
-        None
-    }
-
     #[derive(Copy, Clone, Debug, PartialEq, Eq)]
     enum SensitiveGitKind {
         BranchChange,
@@ -6471,6 +6457,7 @@ async fn handle_container_exec_with_params(
         )
     }
 
+
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
     let mut params = params;
     let seq_hint_for_exec = seq_hint;
@@ -6569,6 +6556,36 @@ async fn handle_container_exec_with_params(
     }
 
     strip_leading_confirm_prefix(&mut params.command);
+
+    if let Some(redundant) = detect_redundant_cd(&params.command, &params.cwd) {
+        let guidance = guidance_for_redundant_cd(&redundant);
+        sess
+            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .await;
+
+        return ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: guidance,
+                success: None,
+            },
+        };
+    }
+
+    if let Some(python_guard) = detect_python_write(&params.command) {
+        let guidance = guidance_for_python_write(&python_guard);
+        sess
+            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .await;
+
+        return ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: guidance,
+                success: None,
+            },
+        };
+    }
 
     // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
     if extract_shell_script_from_wrapper(&params.command).is_none() {
@@ -8727,6 +8744,367 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
     )
     .await
 }
+
+fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
+    // Return (index_of_script, script) if argv matches: <shell> (-lc|-c) <script>
+    if argv.len() == 3 {
+        let shell = std::path::Path::new(&argv[0])
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let is_shell = matches!(shell, "bash" | "sh" | "zsh");
+        let is_flag = matches!(argv[1].as_str(), "-lc" | "-c");
+        if is_shell && is_flag {
+            return Some((2, argv[2].clone()));
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PythonWriteSuggestion {
+    label: &'static str,
+    original_value: String,
+}
+
+fn detect_python_write(argv: &[String]) -> Option<PythonWriteSuggestion> {
+    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+        if script_contains_python_write(&script) {
+            return Some(PythonWriteSuggestion {
+                label: "original_script",
+                original_value: script,
+            });
+        }
+    }
+
+    detect_python_write_in_argv(argv)
+}
+
+fn detect_python_write_in_argv(argv: &[String]) -> Option<PythonWriteSuggestion> {
+    if argv.is_empty() {
+        return None;
+    }
+
+    if !is_python_command(&argv[0]) {
+        return None;
+    }
+
+    if argv.len() >= 3 && argv[1] == "-c" {
+        let code = &argv[2];
+        if python_code_writes_files(code) {
+            return Some(PythonWriteSuggestion {
+                label: "python_inline_script",
+                original_value: code.clone(),
+            });
+        }
+    }
+
+    None
+}
+
+fn script_contains_python_write(script: &str) -> bool {
+    let lower = script.to_ascii_lowercase();
+    if !(lower.contains("python ")
+        || lower.contains("python3")
+        || lower.contains("python\n"))
+    {
+        return false;
+    }
+    contains_python_write_keywords(&lower)
+}
+
+fn python_code_writes_files(code: &str) -> bool {
+    contains_python_write_keywords(&code.to_ascii_lowercase())
+}
+
+fn contains_python_write_keywords(lower: &str) -> bool {
+    const KEYWORDS: &[&str] = &["write_text(", "write_bytes(", ".write_text(", ".write_bytes("];
+    KEYWORDS.iter().any(|needle| lower.contains(needle))
+}
+
+fn is_python_command(cmd: &str) -> bool {
+    std::path::Path::new(cmd)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| {
+            let lower = name.to_ascii_lowercase();
+            matches!(lower.as_str(), "python" | "python3" | "python2")
+        })
+        .unwrap_or(false)
+}
+
+fn guidance_for_python_write(suggestion: &PythonWriteSuggestion) -> String {
+    format!(
+        "Blocked python command that writes files directly. Use apply_patch to edit files so changes stay reviewable.\n\n{}: {}",
+        suggestion.label,
+        suggestion.original_value
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RedundantCdSuggestion {
+    label: &'static str,
+    original_value: String,
+    suggested: Vec<String>,
+    target_arg: String,
+    cwd: PathBuf,
+}
+
+fn detect_redundant_cd(argv: &[String], cwd: &Path) -> Option<RedundantCdSuggestion> {
+    let normalized_cwd = normalize_path(cwd);
+    if let Some((script_index, script)) = extract_shell_script_from_wrapper(argv) {
+        if let Some(suggestion) = detect_redundant_cd_in_shell(
+            argv,
+            script_index,
+            &script,
+            cwd,
+            &normalized_cwd,
+        ) {
+            return Some(suggestion);
+        }
+    }
+    detect_redundant_cd_in_argv(argv, cwd, &normalized_cwd)
+}
+
+fn detect_redundant_cd_in_shell(
+    argv: &[String],
+    script_index: usize,
+    script: &str,
+    cwd: &Path,
+    normalized_cwd: &Path,
+) -> Option<RedundantCdSuggestion> {
+    let trimmed = script.trim_start();
+    let tokens = shlex_split(trimmed)?;
+    if tokens.len() < 3 {
+        return None;
+    }
+    if tokens.first().map(String::as_str) != Some("cd") {
+        return None;
+    }
+    let target = tokens.get(1)?.clone();
+    if !is_simple_cd_target(&target) {
+        return None;
+    }
+    let resolved_target = resolve_cd_target(&target, cwd)?;
+    if resolved_target != normalized_cwd {
+        return None;
+    }
+
+    let mut idx = 2;
+    let mut saw_connector = false;
+    while idx < tokens.len() && is_connector(&tokens[idx]) {
+        saw_connector = true;
+        idx += 1;
+    }
+    if !saw_connector || idx >= tokens.len() {
+        return None;
+    }
+
+    let remainder_tokens = tokens[idx..].to_vec();
+    let suggested_script = shlex_try_join(remainder_tokens.iter().map(|s| s.as_str()))
+        .unwrap_or_else(|_| remainder_tokens.join(" "));
+    if suggested_script.trim().is_empty() {
+        return None;
+    }
+
+    let mut suggested = argv.to_vec();
+    suggested[script_index] = suggested_script;
+
+    Some(RedundantCdSuggestion {
+        label: "original_script",
+        original_value: script.to_string(),
+        suggested,
+        target_arg: target,
+        cwd: normalized_cwd.to_path_buf(),
+    })
+}
+
+fn detect_redundant_cd_in_argv(
+    argv: &[String],
+    cwd: &Path,
+    normalized_cwd: &Path,
+) -> Option<RedundantCdSuggestion> {
+    if argv.len() < 4 {
+        return None;
+    }
+    if argv.first().map(String::as_str) != Some("cd") {
+        return None;
+    }
+    let target = argv.get(1)?.clone();
+    if !is_simple_cd_target(&target) {
+        return None;
+    }
+    let resolved_target = resolve_cd_target(&target, cwd)?;
+    if resolved_target != normalized_cwd {
+        return None;
+    }
+
+    let mut idx = 2;
+    let mut saw_connector = false;
+    while idx < argv.len() && is_connector(&argv[idx]) {
+        saw_connector = true;
+        idx += 1;
+    }
+    if !saw_connector || idx >= argv.len() {
+        return None;
+    }
+
+    let suggested = argv[idx..].to_vec();
+    if suggested.is_empty() {
+        return None;
+    }
+
+    Some(RedundantCdSuggestion {
+        label: "original_argv",
+        original_value: format!("{:?}", argv),
+        suggested,
+        target_arg: target,
+        cwd: normalized_cwd.to_path_buf(),
+    })
+}
+
+fn resolve_cd_target(target: &str, cwd: &Path) -> Option<PathBuf> {
+    if target.is_empty() {
+        return None;
+    }
+    let candidate = if Path::new(target).is_absolute() {
+        PathBuf::from(target)
+    } else {
+        cwd.join(target)
+    };
+    Some(normalize_path(candidate.as_path()))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            Component::Prefix(prefix) => {
+                normalized = PathBuf::from(prefix.as_os_str());
+            }
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn is_simple_cd_target(target: &str) -> bool {
+    if target.is_empty() || target == "-" {
+        return false;
+    }
+    !target.chars().any(|ch| matches!(ch, '$' | '`' | '*' | '?' | '[' | ']' | '{' | '}' | '(' | ')' | '|' | '>' | '<' | '!'))
+}
+
+fn is_connector(token: &str) -> bool {
+    matches!(token, "&&" | ";" | "||")
+}
+
+fn guidance_for_redundant_cd(suggestion: &RedundantCdSuggestion) -> String {
+    let suggested = serde_json::to_string(&suggestion.suggested)
+        .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+    let target_display = shlex_try_join(std::iter::once(suggestion.target_arg.as_str()))
+        .unwrap_or_else(|_| suggestion.target_arg.clone());
+    format!(
+        "Leading cd {target_display} is redundant because the command already runs in {}. Drop the prefix before retrying.\n\n{}: {}\nresend_exact_argv: {}",
+        suggestion.cwd.display(),
+        suggestion.label,
+        suggestion.original_value,
+        suggested
+    )
+}
+
+#[cfg(test)]
+mod command_guard_detection_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn detects_shell_redundant_cd() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd /tmp/project && ls".to_string(),
+        ];
+
+        let suggestion = detect_redundant_cd(&argv, &cwd).expect("should flag redundant cd");
+        assert_eq!(suggestion.label, "original_script");
+        assert_eq!(suggestion.suggested, vec!["bash".to_string(), "-lc".to_string(), "ls".to_string()]);
+    }
+
+    #[test]
+    fn ignores_cd_to_different_directory() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd /tmp/project/src && ls".to_string(),
+        ];
+
+        assert!(detect_redundant_cd(&argv, &cwd).is_none());
+    }
+
+    #[test]
+    fn skips_dynamic_cd_targets() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd $PWD && ls".to_string(),
+        ];
+
+        assert!(detect_redundant_cd(&argv, &cwd).is_none());
+    }
+
+    #[test]
+    fn detects_python_here_doc_write() {
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "python3 - <<'PY'\nfrom pathlib import Path\nPath('docs.txt').write_text('hello')\nPY".to_string(),
+        ];
+
+        let suggestion = detect_python_write(&argv).expect("should flag python write");
+        assert_eq!(suggestion.label, "original_script");
+        assert!(suggestion.original_value.contains("write_text"));
+    }
+
+    #[test]
+    fn detects_python_inline_write() {
+        let argv = vec![
+            "python3".to_string(),
+            "-c".to_string(),
+            "from pathlib import Path; Path('foo.txt').write_text('hi')".to_string(),
+        ];
+
+        let suggestion = detect_python_write(&argv).expect("should flag inline python write");
+        assert_eq!(suggestion.label, "python_inline_script");
+        assert!(suggestion.original_value.contains("write_text"));
+    }
+
+    #[test]
+    fn allows_read_only_python() {
+        let argv = vec![
+            "python3".to_string(),
+            "-c".to_string(),
+            "print('hello world')".to_string(),
+        ];
+
+        assert!(detect_python_write(&argv).is_none());
+    }
+}
+
 fn debug_history(label: &str, items: &[ResponseItem]) {
     let preview: Vec<String> = items
         .iter()
