@@ -3,8 +3,9 @@
 This document describes Codex’s experimental MCP interface: a JSON‑RPC API that runs over the Model Context Protocol (MCP) transport to control a local Codex engine.
 
 - Status: experimental and subject to change without notice
-- Recommended entry point: `code mcp`
+- Recommended entry point: `code mcp` (wraps the same binary used by the CLI)
 - Underlying Rust binary (for development): `cargo run -p code-mcp-server`
+- ACP compatibility: surfaces `acp/new_session` + `acp/prompt` as MCP tools and emits `acp/session_update` notifications
 - Transport: standard MCP over stdio (JSON‑RPC 2.0, line‑delimited)
 
 ## Overview
