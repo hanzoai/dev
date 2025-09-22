@@ -22,10 +22,10 @@ Any existing MCP servers can remain in this table; the exiting overrides simply 
 
 ## 2. Launch the MCP server under the new name
 
-If you globally installed Code from npm (`npm install -g @just-every/code`), the postinstall step now places the prebuilt `code-mcp-server` alongside the other `code-*` binaries on your `PATH`. You can launch it directly:
+If you globally installed Code from npm (`npm install -g @just-every/code`), launch the MCP server with the built-in subcommand:
 
 ```bash
-code-mcp-server --stdio
+code mcp
 ```
 
 Prefer building from source? The previous workflow still works:
@@ -44,8 +44,8 @@ Add an entry to Zed's MCP configuration (for example, `~/.config/zed/mcp.json`):
 {
   "servers": {
     "code": {
-      "command": "/path/to/code-mcp-server",
-      "args": ["--stdio"],
+      "command": "/path/to/code",
+      "args": ["mcp"],
       "env": {
         "CODEX_HOME": "/Users/you/.code" ,
         "RUST_LOG": "info"
@@ -63,4 +63,4 @@ When Zed starts the server it will discover the ACP tools, call `acp/new_session
 - Explicit approvals (for shell commands or apply_patch) are raised via `permission/request`.
 - Code retains confirm guards, sandbox policies, and validation harnesses; the server simply forwards the resulting events over ACP.
 
-Once configured, Zed users can work with Code without any terminal interaction beyond starting `code-mcp-server`.
+Once configured, Zed users can work with Code without any terminal interaction beyond starting `code mcp` (or `coder mcp` if the `code` alias is unavailable).

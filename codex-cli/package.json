@@ -4,8 +4,7 @@
   "license": "Apache-2.0",
   "description": "Lightweight coding agent that runs in your terminal - fork of OpenAI Codex",
   "bin": {
-    "coder": "bin/coder.js",
-    "code-mcp-server": "bin/code-mcp-server.js"
+    "coder": "bin/coder.js"
   },
   "type": "module",
   "engines": {
@@ -13,7 +12,6 @@
   },
   "files": [
     "bin/coder.js",
-    "bin/code-mcp-server.js",
     "bin/codex.js",
     "postinstall.js",
     "scripts/preinstall.js",
