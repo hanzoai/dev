@@ -21,6 +21,8 @@ use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::StdFileSystem;
 use codex_browser::BrowserConfig as CodexBrowserConfig;
 use codex_browser::BrowserManager;
+use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
+use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::ClientTools;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
@@ -132,6 +134,8 @@ pub(crate) struct TurnContext {
     pub(crate) user_instructions: Option<String>,
     pub(crate) approval_policy: AskForApproval,
     pub(crate) sandbox_policy: SandboxPolicy,
+    pub(crate) shell_environment_policy: ShellEnvironmentPolicy,
+    pub(crate) is_review_mode: bool,
 }
 
 /// Gather ephemeral, per-turn context that should not be persisted to history.
@@ -457,8 +461,7 @@ use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
 use crate::apply_patch::{self, ApplyPatchResult};
 use crate::client::ModelClient;
-use crate::client_common::Prompt;
-use crate::client_common::ResponseEvent;
+use crate::client_common::{Prompt, ResponseEvent, REVIEW_PROMPT};
 use crate::environment_context::EnvironmentContext;
 use crate::user_instructions::UserInstructions;
 use crate::config::{persist_model_selection, Config};
@@ -475,6 +478,7 @@ use crate::exec::SandboxType;
 use crate::exec::StdoutStream;
 use crate::exec::StreamOutput;
 use crate::exec::process_exec_tool_call;
+use crate::review_format::format_review_findings_block;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
@@ -523,6 +527,8 @@ use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenCountEvent;
 use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
+use crate::protocol::ReviewOutputEvent;
+use crate::protocol::ReviewRequest;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
 use crate::protocol::Submission;
@@ -1214,6 +1220,8 @@ impl Session {
             user_instructions: self.user_instructions.clone(),
             approval_policy: self.approval_policy,
             sandbox_policy: self.sandbox_policy.clone(),
+            shell_environment_policy: self.shell_environment_policy.clone(),
+            is_review_mode: false,
         })
     }
 
@@ -2365,11 +2373,19 @@ fn build_exec_hook_payload(
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum AgentTaskKind {
+    Regular,
+    Review,
+    Compact,
+}
+
 /// A series of Turns in response to user input.
 pub(crate) struct AgentTask {
     sess: Arc<Session>,
     sub_id: String,
     handle: AbortHandle,
+    kind: AgentTaskKind,
 }
 
 impl AgentTask {
@@ -2392,6 +2408,7 @@ impl AgentTask {
             sess,
             sub_id,
             handle,
+            kind: AgentTaskKind::Regular,
         }
     }
 
@@ -2423,6 +2440,30 @@ impl AgentTask {
             sess,
             sub_id,
             handle,
+            kind: AgentTaskKind::Compact,
+        }
+    }
+
+    fn review(
+        sess: Arc<Session>,
+        turn_context: Arc<TurnContext>,
+        sub_id: String,
+        input: Vec<InputItem>,
+    ) -> Self {
+        let handle = {
+            let sess_clone = Arc::clone(&sess);
+            let tc_clone = Arc::clone(&turn_context);
+            let sub_clone = sub_id.clone();
+            tokio::spawn(async move {
+                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+            })
+            .abort_handle()
+        };
+        Self {
+            sess,
+            sub_id,
+            handle,
+            kind: AgentTaskKind::Review,
         }
     }
 
@@ -2433,7 +2474,12 @@ impl AgentTask {
                 .sess
                 .make_event(&self.sub_id, EventMsg::TurnAborted(TurnAbortedEvent { reason }));
             let sess = self.sess.clone();
+            let sub_id = self.sub_id.clone();
+            let kind = self.kind;
             tokio::spawn(async move {
+                if kind == AgentTaskKind::Review {
+                    exit_review_mode(sess.clone(), sub_id, None).await;
+                }
                 sess.send_event(event).await;
             });
         }
@@ -3045,6 +3091,18 @@ async fn submission_loop(
                     compact::spawn_compact_task(sess.clone(), turn_context, sub.id.clone(), items);
                 }
             }
+            Op::Review { review_request } => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+                let config = Arc::clone(&config);
+                let sub_id = sub.id.clone();
+                spawn_review_thread(sess, config, sub_id, review_request).await;
+            }
             Op::Shutdown => {
                 info!("Shutting down Codex instance");
 
@@ -3095,6 +3153,168 @@ async fn submission_loop(
     debug!("Agent loop exited");
 }
 
+async fn spawn_review_thread(
+    sess: Arc<Session>,
+    config: Arc<Config>,
+    sub_id: String,
+    review_request: ReviewRequest,
+) {
+    // Ensure any running task is stopped before starting the review flow.
+    sess.abort();
+
+    let parent_turn_context = sess.make_turn_context();
+
+    // Determine model + family for review mode.
+    let review_model = config.review_model.clone();
+    let review_family = find_family_for_model(&review_model)
+        .unwrap_or_else(|| derive_default_model_family(&review_model));
+
+    // Prepare a per-review configuration that favors deterministic feedback.
+    let mut review_config = (*config).clone();
+    review_config.model = review_model.clone();
+    review_config.model_family = review_family.clone();
+    review_config.model_reasoning_effort = ReasoningEffortConfig::Low;
+    review_config.model_reasoning_summary = ReasoningSummaryConfig::Detailed;
+    review_config.model_text_verbosity = config.model_text_verbosity;
+    review_config.user_instructions = None;
+    review_config.base_instructions = Some(REVIEW_PROMPT.to_string());
+    if let Some(info) = get_model_info(&review_family) {
+        review_config.model_context_window = Some(info.context_window);
+        review_config.model_max_output_tokens = Some(info.max_output_tokens);
+    }
+    let review_config = Arc::new(review_config);
+
+    let review_debug_logger = match crate::debug_logger::DebugLogger::new(review_config.debug) {
+        Ok(logger) => Arc::new(Mutex::new(logger)),
+        Err(err) => {
+            warn!("failed to create review debug logger: {err}");
+            Arc::new(Mutex::new(
+                crate::debug_logger::DebugLogger::new(false).unwrap(),
+            ))
+        }
+    };
+
+    let review_client = ModelClient::new(
+        review_config.clone(),
+        parent_turn_context.client.get_auth_manager(),
+        parent_turn_context.client.get_provider(),
+        review_config.model_reasoning_effort,
+        review_config.model_reasoning_summary,
+        review_config.model_text_verbosity,
+        sess.session_uuid(),
+        review_debug_logger,
+    );
+
+    let review_turn_context = Arc::new(TurnContext {
+        client: review_client,
+        cwd: parent_turn_context.cwd.clone(),
+        base_instructions: Some(REVIEW_PROMPT.to_string()),
+        user_instructions: None,
+        approval_policy: parent_turn_context.approval_policy,
+        sandbox_policy: parent_turn_context.sandbox_policy.clone(),
+        shell_environment_policy: parent_turn_context.shell_environment_policy.clone(),
+        is_review_mode: true,
+    });
+
+    let review_prompt_text = format!(
+        "{}\n\n---\n\nNow, here's your task: {}",
+        REVIEW_PROMPT.trim(),
+        review_request.prompt.trim()
+    );
+    let review_input = vec![InputItem::Text {
+        text: review_prompt_text,
+    }];
+
+    let task = AgentTask::review(Arc::clone(&sess), Arc::clone(&review_turn_context), sub_id.clone(), review_input);
+    sess.set_task(task);
+
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::EnteredReviewMode(review_request.clone()),
+    );
+    sess.send_event(event).await;
+}
+
+async fn exit_review_mode(
+    session: Arc<Session>,
+    task_sub_id: String,
+    review_output: Option<ReviewOutputEvent>,
+) {
+    let event = session.make_event(&task_sub_id, EventMsg::ExitedReviewMode(review_output.clone()));
+    session.send_event(event).await;
+
+    let developer_text = match review_output.clone() {
+        Some(output) => {
+            let mut sections: Vec<String> = Vec::new();
+            if !output.overall_explanation.trim().is_empty() {
+                sections.push(output.overall_explanation.trim().to_string());
+            }
+            if !output.findings.is_empty() {
+                sections.push(format_review_findings_block(&output.findings, None));
+            }
+            if !output.overall_correctness.trim().is_empty() {
+                sections.push(format!(
+                    "Overall correctness: {}",
+                    output.overall_correctness.trim()
+                ));
+            }
+            if output.overall_confidence_score > 0.0 {
+                sections.push(format!(
+                    "Confidence score: {:.1}",
+                    output.overall_confidence_score
+                ));
+            }
+
+            let results = if sections.is_empty() {
+                "Reviewer did not provide any findings.".to_string()
+            } else {
+                sections.join("\n\n")
+            };
+
+            format!(
+                "<user_action>\n  <context>User initiated a review task. Here's the full review output from reviewer model. User may select one or more comments to resolve.</context>\n  <action>review</action>\n  <results>\n  {}\n  </results>\n</user_action>\n",
+                results
+            )
+        }
+        None => {
+            "<user_action>\n  <context>User initiated a review task, but it ended without a final response. If the user asks about this, tell them to re-initiate a review with `/review` and wait for it to complete.</context>\n  <action>review</action>\n  <results>\n  None.\n  </results>\n</user_action>\n"
+                .to_string()
+        }
+    };
+
+    let developer_message = ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText { text: developer_text }],
+    };
+    session
+        .record_conversation_items(&[developer_message])
+        .await;
+}
+
+fn parse_review_output_event(text: &str) -> ReviewOutputEvent {
+    if let Ok(parsed) = serde_json::from_str::<ReviewOutputEvent>(text) {
+        return parsed;
+    }
+
+    // Attempt to extract JSON from fenced code blocks if present.
+    if let Some(idx) = text.find("```json") {
+        if let Some(end_idx) = text[idx + 7..].find("```") {
+            let json_slice = &text[idx + 7..idx + 7 + end_idx];
+            if let Ok(parsed) = serde_json::from_str::<ReviewOutputEvent>(json_slice) {
+                return parsed;
+            }
+        }
+    }
+
+    ReviewOutputEvent {
+        findings: Vec::new(),
+        overall_correctness: String::new(),
+        overall_explanation: text.trim().to_string(),
+        overall_confidence_score: 0.0,
+    }
+}
+
 // Intentionally omit upstream review thread spawning; our fork handles review flows differently.
 /// Takes a user message as input and runs a loop where, at each turn, the model
 /// replies with either:
@@ -3118,6 +3338,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         return;
     }
     // Continue with our fork's history and input handling.
+
+    let is_review_mode = turn_context.is_review_mode;
+    let mut review_history: Vec<ResponseItem> = Vec::new();
+    let mut review_messages: Vec<String> = Vec::new();
+    let mut review_exit_emitted = false;
 
     let pending_only_turn = input.len() == 1
         && matches!(
@@ -3144,9 +3369,13 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         // Convert input to ResponseInputItem
         let response_item: ResponseItem = response_input_from_core_items(input.clone()).into();
 
-        // Record to history but we'll handle ephemeral images separately
-        sess.record_conversation_items(&[response_item.clone()])
-            .await;
+        if is_review_mode {
+            review_history.push(response_item.clone());
+        } else {
+            // Record to history but we'll handle ephemeral images separately
+            sess.record_conversation_items(&[response_item.clone()])
+                .await;
+        }
         initial_response_item = Some(response_item);
     }
 
@@ -3172,8 +3401,12 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         if initial_response_item.is_none() {
             if let Some(first_pending) = pending_input_tail.first().cloned() {
                 pending_input_tail.remove(0);
-                sess.record_conversation_items(&[first_pending.clone()])
-                    .await;
+                if is_review_mode {
+                    review_history.push(first_pending.clone());
+                } else {
+                    sess.record_conversation_items(&[first_pending.clone()])
+                        .await;
+                }
                 initial_response_item = Some(first_pending);
             } else {
                 tracing::warn!(
@@ -3197,7 +3430,14 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         // conversation history on each turn. The rollout file, however, should
         // only record the new items that originated in this turn so that it
         // represents an append-only log without duplicates.
-        let turn_input: Vec<ResponseItem> = sess.turn_input_with_history(pending_input_tail.clone());
+        let turn_input: Vec<ResponseItem> = if is_review_mode {
+            if !pending_input_tail.is_empty() {
+                review_history.extend(pending_input_tail.clone());
+            }
+            review_history.clone()
+        } else {
+            sess.turn_input_with_history(pending_input_tail.clone())
+        };
 
         let turn_input_messages: Vec<String> = turn_input
             .iter()
@@ -3231,13 +3471,22 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                     match (&item, &response) {
                         (ResponseItem::Message { role, .. }, None) if role == "assistant" => {
                             // If the model returned a message, we need to record it.
-                            items_to_record_in_conversation_history.push(item);
+                            items_to_record_in_conversation_history.push(item.clone());
+                            if is_review_mode {
+                                if let ResponseItem::Message { content, .. } = &item {
+                                    for ci in content {
+                                        if let ContentItem::OutputText { text } = ci {
+                                            review_messages.push(text.clone());
+                                        }
+                                    }
+                                }
+                            }
                         }
                         (
                             ResponseItem::LocalShellCall { .. },
                             Some(ResponseInputItem::FunctionCallOutput { call_id, output }),
                         ) => {
-                            items_to_record_in_conversation_history.push(item);
+                            items_to_record_in_conversation_history.push(item.clone());
                             items_to_record_in_conversation_history.push(
                                 ResponseItem::FunctionCallOutput {
                                     call_id: call_id.clone(),
@@ -3253,7 +3502,7 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                                 "Recording function call and output for call_id: {}",
                                 call_id
                             );
-                            items_to_record_in_conversation_history.push(item);
+                            items_to_record_in_conversation_history.push(item.clone());
                             items_to_record_in_conversation_history.push(
                                 ResponseItem::FunctionCallOutput {
                                     call_id: call_id.clone(),
@@ -3265,7 +3514,7 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                             ResponseItem::CustomToolCall { .. },
                             Some(ResponseInputItem::CustomToolCallOutput { call_id, output }),
                         ) => {
-                            items_to_record_in_conversation_history.push(item);
+                            items_to_record_in_conversation_history.push(item.clone());
                             items_to_record_in_conversation_history.push(
                                 ResponseItem::CustomToolCallOutput {
                                     call_id: call_id.clone(),
@@ -3277,7 +3526,7 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                             ResponseItem::FunctionCall { .. },
                             Some(ResponseInputItem::McpToolCallOutput { call_id, result }),
                         ) => {
-                            items_to_record_in_conversation_history.push(item);
+                            items_to_record_in_conversation_history.push(item.clone());
                             let output =
                                 convert_call_tool_result_to_function_call_output_payload(&result);
                             items_to_record_in_conversation_history.push(
@@ -3314,11 +3563,15 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
 
                 // Only attempt to take the lock if there is something to record.
                 if !items_to_record_in_conversation_history.is_empty() {
-                    // Record items in their original chronological order to maintain
-                    // proper sequence of events. This ensures function calls and their
-                    // outputs appear in the correct order in conversation history.
-                    sess.record_conversation_items(&items_to_record_in_conversation_history)
-                        .await;
+                    if is_review_mode {
+                        review_history.extend(items_to_record_in_conversation_history.clone());
+                    } else {
+                        // Record items in their original chronological order to maintain
+                        // proper sequence of events. This ensures function calls and their
+                        // outputs appear in the correct order in conversation history.
+                        sess.record_conversation_items(&items_to_record_in_conversation_history)
+                            .await;
+                    }
                 }
 
                 // If there are responses, add them to pending input for the next iteration
@@ -3351,11 +3604,29 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
                     EventMsg::Error(ErrorEvent { message: e.to_string() }),
                 );
                 sess.tx_event.send(event).await.ok();
+                if is_review_mode && !review_exit_emitted {
+                    exit_review_mode(sess.clone(), sub_id.clone(), None).await;
+                    review_exit_emitted = true;
+                }
                 // let the user continue the conversation
                 break;
             }
         }
     }
+    if is_review_mode && !review_exit_emitted {
+        let combined = if !review_messages.is_empty() {
+            review_messages.join("\n\n")
+        } else {
+            last_task_message.clone().unwrap_or_default()
+        };
+        let output = if combined.trim().is_empty() {
+            None
+        } else {
+            Some(parse_review_output_event(&combined))
+        };
+        exit_review_mode(sess.clone(), sub_id.clone(), output).await;
+    }
+
     sess.remove_task(&sub_id);
     let event = sess.make_event(
         &sub_id,
