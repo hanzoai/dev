@@ -34,6 +34,7 @@ pub enum SlashCommand {
     Prompts,
     Perf,
     Agents,
+    Pro,
     Branch,
     Merge,
     Github,
@@ -76,6 +77,7 @@ impl SlashCommand {
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Model => "choose model & reasoning effort",
             SlashCommand::Agents => "create and configure agents",
+            SlashCommand::Pro => "manage Pro mode (toggle/status/auto)",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }

@@ -6246,6 +6246,12 @@ fn popular_commands_lines(latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
+        Span::styled("/pro", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Pro.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("/model", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Model.description())

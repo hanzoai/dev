@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use codex_core::debug_logger::DebugLogger;
 use codex_core::ContentItem;
 use codex_core::LocalShellAction;
 use codex_core::LocalShellExecAction;
@@ -68,7 +69,9 @@ async fn run_request(input: Vec<ResponseItem>) -> Value {
     config.show_raw_agent_reasoning = true;
     let effort = config.model_reasoning_effort;
     let summary = config.model_reasoning_summary;
+    let verbosity = config.model_text_verbosity;
     let config = Arc::new(config);
+    let debug_logger = Arc::new(Mutex::new(DebugLogger::new(false).unwrap()));
 
     let client = ModelClient::new(
         Arc::clone(&config),
@@ -76,7 +79,9 @@ async fn run_request(input: Vec<ResponseItem>) -> Value {
         provider,
         effort,
         summary,
+        verbosity,
         Uuid::new_v4(),
+        Arc::clone(&debug_logger),
     );
 
     let mut prompt = Prompt::default();

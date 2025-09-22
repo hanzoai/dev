@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
+use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_channel::Receiver;
 use async_channel::Sender;
@@ -43,6 +44,9 @@ use crate::CodexAuth;
 use crate::acp::AcpFileSystem;
 use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::ApprovedCommandMatchKind;
+use crate::protocol::ProEvent;
+use crate::protocol::ProPhase;
+use crate::protocol::ProStats;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
@@ -56,6 +60,7 @@ use self::compact::collect_user_messages;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
+pub(crate) const PRO_SUBMISSION_ID: &str = "pro";
 const HOOK_OUTPUT_LIMIT: usize = 2048;
 const PENDING_ONLY_SENTINEL: &str = "__codex_pending_only__";
 
@@ -841,6 +846,16 @@ pub(crate) struct Session {
     hook_guard: AtomicBool,
     github: Arc<RwLock<crate::config_types::GithubConfig>>,
     validation: Arc<RwLock<crate::config_types::ValidationConfig>>,
+    pro_enabled: AtomicBool,
+    pro_supervisor: Mutex<Option<crate::pro_supervisor::ProSupervisorHandle>>,
+    pro_observer_history: Mutex<ConversationHistory>,
+    pro_observer_log: Mutex<Vec<ResponseItem>>,
+    pro_autonomous_enabled: AtomicBool,
+    pro_observer_running: AtomicBool,
+    pro_observer_trigger_after_current: AtomicBool,
+    pro_observer_last_trigger_at: Mutex<Option<Instant>>,
+    pro_observer_activity_since_last: AtomicU64,
+    self_handle: Weak<Session>,
 }
 
 struct HookGuard<'a> {
@@ -912,6 +927,188 @@ impl Session {
 
     pub(crate) fn client_tools(&self) -> Option<&ClientTools> {
         self.client_tools.as_ref()
+    }
+
+    fn upgrade_self(&self) -> Option<Arc<Self>> {
+        self.self_handle.upgrade()
+    }
+
+    pub(crate) fn get_user_shell(&self) -> shell::Shell {
+        self.user_shell.clone()
+    }
+
+    pub(crate) fn get_history_contents(&self) -> Vec<ResponseItem> {
+        self.state.lock_unchecked().history.contents()
+    }
+
+    pub(crate) fn model_client(&self) -> &ModelClient {
+        &self.client
+    }
+
+    pub(crate) fn pro_observer_history(&self) -> &Mutex<ConversationHistory> {
+        &self.pro_observer_history
+    }
+
+    pub(crate) fn pro_observer_log(&self) -> &Mutex<Vec<ResponseItem>> {
+        &self.pro_observer_log
+    }
+
+    pub(crate) fn pro_is_enabled(&self) -> bool {
+        self.pro_enabled.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn pro_autonomous_enabled(&self) -> bool {
+        self.pro_autonomous_enabled.load(Ordering::Relaxed)
+    }
+
+    pub(crate) async fn emit_pro_event(&self, sub_id: &str, event: ProEvent) {
+        let msg = EventMsg::Pro(event);
+        let event = self.make_event(sub_id, msg);
+        let _ = self.tx_event.send(event).await;
+    }
+
+    pub(crate) async fn emit_pro_status_snapshot(&self, sub_id: &str) {
+        self
+            .emit_pro_event(
+                sub_id,
+                ProEvent::Status {
+                    phase: ProPhase::Idle,
+                    stats: ProStats::default(),
+                },
+            )
+            .await;
+    }
+
+    pub(crate) fn stop_pro_supervisor(&self) {
+        let mut guard = self.pro_supervisor.lock_unchecked();
+        if let Some(handle) = guard.take() {
+            handle.abort();
+        }
+    }
+
+    pub(crate) fn ensure_pro_supervisor(self: &Arc<Self>) {
+        let mut guard = self.pro_supervisor.lock_unchecked();
+        if guard.is_none() {
+            let handle = crate::pro_supervisor::spawn(Arc::clone(self));
+            *guard = Some(handle);
+        }
+    }
+
+    pub(crate) fn observer_mark_activity(&self) {
+        self.pro_observer_activity_since_last
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn history_has_assistant_output(&self) -> bool {
+        let state = self.state.lock_unchecked();
+        Self::items_have_assistant_output(&state.history.contents())
+    }
+
+    fn items_have_assistant_output(items: &[ResponseItem]) -> bool {
+        items.iter().any(|item| match item {
+            ResponseItem::Message { role, content, .. } if role == "assistant" => content
+                .iter()
+                .any(|c| matches!(c, ContentItem::OutputText { text } if !text.trim().is_empty())),
+            ResponseItem::FunctionCall { .. } | ResponseItem::FunctionCallOutput { .. } => true,
+            _ => false,
+        })
+    }
+
+    pub(crate) fn observer_maybe_trigger(&self, sub_id: String, force: bool, reason: &'static str) {
+        if !self.pro_is_enabled() {
+            return;
+        }
+        if self.pro_observer_running.load(Ordering::Relaxed) {
+            if force {
+                self.pro_observer_trigger_after_current
+                    .store(true, Ordering::Relaxed);
+            }
+            return;
+        }
+
+        let now = Instant::now();
+        let mut last_guard = self.pro_observer_last_trigger_at.lock_unchecked();
+        if !force {
+            let ready = last_guard
+                .map(|t| now.duration_since(t) >= Duration::from_secs(20))
+                .unwrap_or(true);
+            if !ready {
+                return;
+            }
+        }
+        *last_guard = Some(now);
+        drop(last_guard);
+
+        if !force {
+            let activity = self
+                .pro_observer_activity_since_last
+                .load(Ordering::Relaxed);
+            if activity < 4 {
+                return;
+            }
+            if !self.history_has_assistant_output() {
+                return;
+            }
+        }
+
+        self.pro_observer_activity_since_last
+            .store(0, Ordering::Relaxed);
+        self.pro_observer_running
+            .store(true, Ordering::Relaxed);
+
+        let Some(sess_arc) = self.upgrade_self() else {
+            self.pro_observer_running
+                .store(false, Ordering::Relaxed);
+            return;
+        };
+
+        tokio::spawn(async move {
+            crate::pro_observer::observe_now(Arc::clone(&sess_arc), sub_id.clone(), reason).await;
+            sess_arc
+                .pro_observer_running
+                .store(false, Ordering::Relaxed);
+            if sess_arc
+                .pro_observer_trigger_after_current
+                .swap(false, Ordering::Relaxed)
+            {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                sess_arc.observer_maybe_trigger(sub_id, true, "follow_up");
+            }
+        });
+    }
+
+    pub(crate) async fn submit_follow_up_user_message(&self, text: String) {
+        let items = vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: text.clone(),
+            }],
+        }];
+        self.record_conversation_items(&items).await;
+
+        let input = vec![InputItem::Text { text: text.clone() }];
+        if let Err(items) = self.inject_input(input) {
+            if let Some(sess_arc) = self.upgrade_self() {
+                let turn_context = sess_arc.make_turn_context();
+                let submission_id = Uuid::new_v4().to_string();
+                let agent = AgentTask::spawn(Arc::clone(&sess_arc), turn_context, submission_id, items);
+                sess_arc.set_task(agent);
+            }
+        }
+
+        if let Some(sess_arc) = self.upgrade_self() {
+            sess_arc
+                .emit_pro_event(
+                    PRO_SUBMISSION_ID,
+                    ProEvent::DeveloperNote {
+                        turn_id: "observer_followup".to_string(),
+                        note: "Observer submitted follow-up".to_string(),
+                        artifacts: Vec::new(),
+                    },
+                )
+                .await;
+        }
     }
 
     pub(crate) fn mcp_connection_manager(&self) -> &McpConnectionManager {
@@ -1295,6 +1492,10 @@ impl Session {
         self.record_state_snapshot(items).await;
 
         self.state.lock().unwrap().history.record_items(items);
+
+        if self.pro_is_enabled() && Self::items_have_assistant_output(items) {
+            self.observer_mark_activity();
+        }
     }
 
     /// Clean up old screenshots and system status messages from conversation history
@@ -1547,6 +1748,14 @@ impl Session {
                 let event = self.make_event(sub_id, msg);
                 let _ = self.tx_event.send(event).await;
             }
+        }
+
+        if self.pro_is_enabled() {
+            self.observer_mark_activity();
+            let force = *exit_code != 0;
+            let reason = if force { "exec_failure" } else { "activity" };
+            let sub = Uuid::new_v4().to_string();
+            self.observer_maybe_trigger(sub, force, reason);
         }
     }
     /// Runs the exec tool call and emits events for the begin and end of the
@@ -2183,6 +2392,9 @@ impl Session {
         // KillOnDrop in exec.rs.
 
         // (debug removed)
+        self.stop_pro_supervisor();
+        self.pro_enabled.store(false, Ordering::Relaxed);
+        self.pro_autonomous_enabled.store(false, Ordering::Relaxed);
     }
 
     /// Spawn the configured notifier (if any) with the given JSON payload as
@@ -2735,7 +2947,7 @@ async fn submission_loop(
                 tools_config.web_search_allowed_domains =
                     config.tools_web_search_allowed_domains.clone();
 
-                sess = Some(Arc::new(Session {
+                let mut new_session = Arc::new(Session {
                     id: session_id,
                     client,
                     tools_config,
@@ -2767,7 +2979,22 @@ async fn submission_loop(
                     hook_guard: AtomicBool::new(false),
                     github: Arc::new(RwLock::new(config.github.clone())),
                     validation: Arc::new(RwLock::new(config.validation.clone())),
-                }));
+                    pro_enabled: AtomicBool::new(false),
+                    pro_supervisor: Mutex::new(None),
+                    pro_observer_history: Mutex::new(ConversationHistory::new()),
+                    pro_observer_log: Mutex::new(Vec::new()),
+                    pro_autonomous_enabled: AtomicBool::new(false),
+                    pro_observer_running: AtomicBool::new(false),
+                    pro_observer_trigger_after_current: AtomicBool::new(false),
+                    pro_observer_last_trigger_at: Mutex::new(None),
+                    pro_observer_activity_since_last: AtomicU64::new(0),
+                    self_handle: Weak::new(),
+                });
+                let weak_handle = Arc::downgrade(&new_session);
+                if let Some(inner) = Arc::get_mut(&mut new_session) {
+                    inner.self_handle = weak_handle;
+                }
+                sess = Some(new_session);
                 if let Some(sess_arc) = &sess {
                     if !config.always_allow_commands.is_empty() {
                         let mut st = sess_arc.state.lock().unwrap();
@@ -2846,7 +3073,7 @@ async fn submission_loop(
                     let tx_event_clone = tx_event.clone();
                     tokio::spawn(async move {
                         while let Some(payload) = agent_rx.recv().await {
-                            let event = sess_for_agents.make_event(
+                            let status_event = sess_for_agents.make_event(
                                 "agent_status",
                                 EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
                                     agents: payload.agents.clone(),
@@ -2854,7 +3081,28 @@ async fn submission_loop(
                                     task: payload.task.clone(),
                                 }),
                             );
-                            let _ = tx_event_clone.send(event).await;
+                            let _ = tx_event_clone.send(status_event).await;
+
+                            let mut spawned: u32 = 0;
+                            let mut active: u32 = 0;
+                            let mut completed: u32 = 0;
+                            for agent in &payload.agents {
+                                spawned = spawned.saturating_add(1);
+                                match agent.status.as_str() {
+                                    "pending" | "running" => active = active.saturating_add(1),
+                                    "completed" => completed = completed.saturating_add(1),
+                                    _ => {}
+                                }
+                            }
+                            let phase = if active > 0 { ProPhase::Background } else { ProPhase::Idle };
+                            let pro_event = sess_for_agents.make_event(
+                                PRO_SUBMISSION_ID,
+                                EventMsg::Pro(ProEvent::Status {
+                                    phase,
+                                    stats: crate::protocol::ProStats { active, completed, spawned },
+                                }),
+                            );
+                            let _ = tx_event_clone.send(pro_event).await;
                         }
                     });
                     agent_manager_initialized = true;
@@ -2980,6 +3228,90 @@ async fn submission_loop(
                         warn!("failed to append to message history: {e}");
                     }
                 });
+            }
+
+            Op::Pro { action } => {
+                let Some(active_sess) = sess.as_ref() else {
+                    send_no_session_event(sub.id).await;
+                    continue;
+                };
+                let sess_ref = Arc::clone(active_sess);
+                use crate::protocol::ProAction;
+
+                let mut enable_change: Option<bool> = None;
+                let mut auto_change: Option<bool> = None;
+
+                match action {
+                    ProAction::On => enable_change = Some(true),
+                    ProAction::Off => enable_change = Some(false),
+                    ProAction::Toggle => {
+                        enable_change = Some(!sess_ref.pro_is_enabled());
+                    }
+                    ProAction::Status => {
+                        sess_ref.emit_pro_status_snapshot(&sub.id).await;
+                    }
+                    ProAction::AutoOn => auto_change = Some(true),
+                    ProAction::AutoOff => auto_change = Some(false),
+                    ProAction::AutoToggle => {
+                        auto_change = Some(!sess_ref.pro_autonomous_enabled());
+                    }
+                    ProAction::AutoStatus => {
+                        let enabled = sess_ref.pro_autonomous_enabled();
+                        let message = format!(
+                            "Autonomous mode: {}",
+                            if enabled { "enabled" } else { "disabled" }
+                        );
+                        sess_ref
+                            .emit_pro_event(
+                                &sub.id,
+                                ProEvent::DeveloperNote {
+                                    turn_id: "auto_status".to_string(),
+                                    note: message,
+                                    artifacts: Vec::new(),
+                                },
+                            )
+                            .await;
+                    }
+                }
+
+                if let Some(enable) = enable_change {
+                    sess_ref.pro_enabled.store(enable, Ordering::Relaxed);
+                    if enable {
+                        sess_ref.ensure_pro_supervisor();
+                        sess_ref
+                            .emit_pro_status_snapshot(PRO_SUBMISSION_ID)
+                            .await;
+                    } else {
+                        sess_ref.stop_pro_supervisor();
+                    }
+
+                    sess_ref
+                        .emit_pro_event(
+                            &sub.id,
+                            ProEvent::Toggled { enabled: enable },
+                        )
+                        .await;
+                }
+
+                if let Some(auto) = auto_change {
+                    sess_ref
+                        .pro_autonomous_enabled
+                        .store(auto, Ordering::Relaxed);
+                    let message = format!(
+                        "Pro Autonomous {}",
+                        if auto { "enabled" } else { "disabled" }
+                    );
+                    sess_ref
+                        .emit_pro_event(
+                            &sub.id,
+                            ProEvent::DeveloperNote {
+                                turn_id: "autonomous_toggle".to_string(),
+                                note: message,
+                                artifacts: Vec::new(),
+                            },
+                        )
+                        .await;
+                }
             }
 
             Op::RunProjectCommand { name } => {
@@ -3370,6 +3702,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         _ => {}
     }
     sess.tx_event.send(event).await.ok();
+
+    if sess.pro_is_enabled() {
+        let sub = Uuid::new_v4().to_string();
+        sess.observer_maybe_trigger(sub, true, "task_complete");
+    }
 
     if let Some(queued) = sess.pop_next_queued_user_input() {
         let sess_clone = Arc::clone(&sess);
@@ -5366,7 +5703,7 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
     params
 }
 
-async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
+pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
