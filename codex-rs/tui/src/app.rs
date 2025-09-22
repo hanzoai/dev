@@ -945,7 +945,7 @@ impl App<'_> {
                             let _ = self.toggle_screen_mode(terminal);
                             // Propagate mode to widget so it can adapt layout
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.standard_terminal_mode = !self.alt_screen_active;
+                                widget.set_standard_terminal_mode(!self.alt_screen_active);
                             }
                         }
                         KeyEvent {
