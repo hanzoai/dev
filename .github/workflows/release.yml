@@ -265,7 +265,7 @@ jobs:
           RUST_BACKTRACE: "1"
         run: |
           cd codex-rs
-          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code --bin code-mcp-server
+          cargo build --release --frozen --locked --timings --target ${{ matrix.target }} --bin code
 
       - name: Post-build smoke (run binary) [Unix]
         if: |
@@ -297,10 +297,8 @@ jobs:
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
-            cp codex-rs/target/${{ matrix.target }}/release/code-mcp-server.exe artifacts/code-mcp-server-${{ matrix.target }}.exe
           else
             cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
-            cp codex-rs/target/${{ matrix.target }}/release/code-mcp-server artifacts/code-mcp-server-${{ matrix.target }}
           fi
 
       - name: Compress artifacts (Windows)
@@ -423,11 +421,11 @@ jobs:
 
           map_target() {
             case "$1" in
-              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64 target=$1" ;;
-              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64 target=$1" ;;
-              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl target=$1" ;;
-              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl target=$1" ;;
-              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64 target=$1" ;;
+              aarch64-apple-darwin) echo "os=darwin cpu=arm64 pkg=@just-every/code-darwin-arm64" ;;
+              x86_64-apple-darwin) echo "os=darwin cpu=x64 pkg=@just-every/code-darwin-x64" ;;
+              x86_64-unknown-linux-musl) echo "os=linux cpu=x64 pkg=@just-every/code-linux-x64-musl" ;;
+              aarch64-unknown-linux-musl) echo "os=linux cpu=arm64 pkg=@just-every/code-linux-arm64-musl" ;;
+              x86_64-pc-windows-msvc.exe) echo "os=win32 cpu=x64 pkg=@just-every/code-win32-x64" ;;
               *) echo "" ;;
             esac
           }
@@ -459,14 +457,6 @@ jobs:
             esac
           }
 
-          targets=(
-            aarch64-apple-darwin
-            x86_64-apple-darwin
-            x86_64-unknown-linux-musl
-            aarch64-unknown-linux-musl
-            x86_64-pc-windows-msvc.exe
-          )
-
           for f in release-assets/*; do
             b="$(basename "$f")"
             # Derive target triple from the filename while preserving optional .exe (Windows):
@@ -477,32 +467,20 @@ jobs:
               *.zip)    base="${b%.zip}" ;;
               *)        base="$b" ;;
             esac
-            match=""
-            for candidate in "${targets[@]}"; do
-              if [[ "$base" == code-*"$candidate" ]]; then
-                match="$candidate"
-                break
-              fi
-            done
-            if [ -z "$match" ]; then
-              echo "Skipping unrecognized artifact: $b"
-              continue
-            fi
-
-            meta="$(map_target "$match")" || true
+            t="${base#code-}"
+            meta="$(map_target "$t")" || true
             if [ -z "$meta" ]; then
               echo "Skipping unrecognized artifact: $b"
               continue
             fi
-            eval "$meta" # sets os, cpu, pkg, target
+            eval "$meta" # sets os, cpu, pkg
             workdir="$stage_root/${pkg##*/}"
-            mkdir -p "$workdir/bin"
+            rm -rf "$workdir" && mkdir -p "$workdir/bin"
             rawbin="$(decompress_to "$f" "$workdir/bin")"
             chmod +x "$rawbin" || true
-            if [ ! -f "$workdir/package.json" ]; then
-              printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
-                "$pkg" "$NEW_VERSION" "$target" "$os" "$cpu" > "$workdir/package.json"
-            fi
+            # package.json
+            printf '{\n  "name": "%s",\n  "version": "%s",\n  "license": "Apache-2.0",\n  "description": "Platform binary for @just-every/code (%s)",\n  "os": ["%s"],\n  "cpu": ["%s"],\n  "files": ["bin/"],\n  "private": false\n}\n' \
+              "$pkg" "$NEW_VERSION" "$t" "$os" "$cpu" > "$workdir/package.json"
           done
 
           ls -R "$stage_root"
