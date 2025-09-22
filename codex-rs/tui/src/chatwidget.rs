@@ -6688,6 +6688,8 @@ fn update_rate_limit_resets(
                 codex_core::protocol::FileChange::Update {
                     unified_diff: unified.clone(),
                     move_path: None,
+                    original_content: baseline.clone(),
+                    new_content: current.clone(),
                 },
             );
             let detail = create_diff_details_only(&single);
