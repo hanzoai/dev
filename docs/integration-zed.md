@@ -22,7 +22,7 @@ Any existing MCP servers can remain in this table; the exiting overrides simply 
 
 ## 2. Launch the MCP server under the new name
 
-If you globally installed Code from npm (`npm install -g @just-every/code`), launch the MCP server with the built-in subcommand:
+If you globally installed Code from npm (`npm install -g @just-every/code`), launch the MCP server with the built-in subcommand (`code mcp`; `code acp` is an equivalent alias):
 
 ```bash
 code mcp
@@ -45,7 +45,7 @@ Add an entry to Zed's `settings.json` under `agent_servers` (see [Zed’s extern
   "agent_servers": {
     "Code": {
       "command": "/usr/local/bin/code",
-      "args": ["mcp"],
+      "args": ["mcp"], // or "acp"
       "env": {
         "CODEX_HOME": "/Users/you/.code",
         "RUST_LOG": "info"
