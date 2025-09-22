@@ -24,7 +24,7 @@ codex-common = { path = "../common", features = ["cli"] }
 codex-core = { path = "../core" }
 codex-exec = { path = "../exec" }
 codex-login = { path = "../login" }
-code-mcp-server = { path = "../mcp-server" }
+codex-mcp-server = { path = "../mcp-server" }
 codex-protocol = { path = "../protocol" }
 codex-tui = { path = "../tui" }
 codex-version = { path = "../codex-version" }
