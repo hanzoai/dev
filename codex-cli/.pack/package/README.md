@@ -44,7 +44,7 @@ npx -y @just-every/code
 ```bash
 npm install -g @just-every/code
 code # or `coder` if you're using VS Code
-code mcp # launches the MCP server over stdio
+code mcp # launches the MCP server over stdio (alias: `code acp`)
 ```
 
 Note: If another tool already provides a `code` command (e.g. VS Code), our CLI is also installed as `coder`. Use `coder` to avoid conflicts.
