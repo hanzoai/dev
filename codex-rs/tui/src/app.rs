@@ -697,6 +697,10 @@ impl App<'_> {
                     }
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::RateLimitFetchFailed { message } => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.on_rate_limit_refresh_failed(message),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }

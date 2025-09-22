@@ -42,6 +42,7 @@ mod interrupts;
 mod layout_scroll;
 mod message;
 mod perf;
+mod rate_limit_refresh;
 mod streaming;
 mod terminal_handlers;
 mod tools;
@@ -51,6 +52,7 @@ use self::agent_install::{
     start_prompt_terminal_session,
     wrap_command,
 };
+use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::HistoryRenderState;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
@@ -221,6 +223,7 @@ struct RunningCommand {
 }
 
 const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
+const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
 
 const RATE_LIMIT_RESET_FILE: &str = "state/rate_limit_resets.json";
 
@@ -278,7 +281,7 @@ pub(crate) struct ChatWidget<'a> {
     rate_limit_warnings: RateLimitWarningState,
     rate_limit_fetch_inflight: bool,
     rate_limit_fetch_placeholder: Option<usize>,
-    rate_limit_fetch_ack_pending: bool,
+    rate_limit_last_fetch_at: Option<DateTime<Utc>>,
     rate_limit_last_primary_reset_at: Option<chrono::DateTime<chrono::Utc>>,
     rate_limit_last_weekly_reset_at: Option<chrono::DateTime<chrono::Utc>>,
     content_buffer: String,
@@ -2094,7 +2097,7 @@ impl ChatWidget<'_> {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_fetch_inflight: false,
             rate_limit_fetch_placeholder: None,
-            rate_limit_fetch_ack_pending: false,
+            rate_limit_last_fetch_at: None,
             rate_limit_last_primary_reset_at: primary_last_reset,
             rate_limit_last_weekly_reset_at: weekly_last_reset,
             content_buffer: String::new(),
@@ -2298,7 +2301,7 @@ impl ChatWidget<'_> {
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_fetch_inflight: false,
             rate_limit_fetch_placeholder: None,
-            rate_limit_fetch_ack_pending: false,
+            rate_limit_last_fetch_at: None,
             rate_limit_last_primary_reset_at: primary_last_reset,
             rate_limit_last_weekly_reset_at: weekly_last_reset,
             content_buffer: String::new(),
@@ -3792,14 +3795,6 @@ impl ChatWidget<'_> {
                     tracing::debug!("Ignoring AgentMessage after interrupt");
                     return;
                 }
-                if self.rate_limit_fetch_ack_pending && message.trim().eq_ignore_ascii_case("ok") {
-                    self.rate_limit_fetch_ack_pending = false;
-                    self.stream_state
-                        .closed_answer_ids
-                        .insert(StreamId(id.clone()));
-                    self.maybe_hide_spinner();
-                    return;
-                }
                 self.stream_state.seq_answer_final = Some(event.event_seq);
                 // Strict order for the stream id
                 let ok = match event.order.as_ref() {
@@ -4264,8 +4259,8 @@ impl ChatWidget<'_> {
                                     reset_info,
                                 ));
                             }
+                            self.rate_limit_last_fetch_at = Some(Utc::now());
                             self.rate_limit_fetch_inflight = false;
-                            self.rate_limit_fetch_ack_pending = false;
                         }
                     }
                 }
@@ -5131,18 +5126,31 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn add_limits_output(&mut self) {
-        if let Some(snapshot) = &self.rate_limit_snapshot {
-            self.history_push(history_cell::new_limits_output(
-                snapshot,
-                self.rate_limit_reset_info(),
-            ));
+        if let Some(snapshot) = self.rate_limit_snapshot.clone() {
+            let reset_info = self.rate_limit_reset_info();
+            let key = self.next_internal_key();
+            let idx = self.history_insert_with_key_global_tagged(
+                Box::new(history_cell::new_limits_output(&snapshot, reset_info)),
+                key,
+                "limits",
+            );
+
+            if self.should_refresh_limits() {
+                self.request_latest_rate_limits(Some(idx));
+            }
         } else {
-            self.request_latest_rate_limits();
+            self.request_latest_rate_limits(None);
         }
     }
 
-    fn request_latest_rate_limits(&mut self) {
-        if self.rate_limit_fetch_placeholder.is_none() {
+    fn request_latest_rate_limits(&mut self, target_idx: Option<usize>) {
+        if self.rate_limit_fetch_inflight {
+            return;
+        }
+
+        if let Some(idx) = target_idx {
+            self.rate_limit_fetch_placeholder = Some(idx);
+        } else if self.rate_limit_fetch_placeholder.is_none() {
             let key = self.next_internal_key();
             let idx = self.history_insert_with_key_global_tagged(
                 Box::new(history_cell::new_limits_fetching()),
@@ -5152,23 +5160,44 @@ impl ChatWidget<'_> {
             self.rate_limit_fetch_placeholder = Some(idx);
         }
 
+        self.rate_limit_fetch_inflight = true;
+
+        start_rate_limit_refresh(
+            self.app_event_tx.clone(),
+            self.config.clone(),
+            self.config.debug,
+        );
+    }
+
+    fn should_refresh_limits(&self) -> bool {
         if self.rate_limit_fetch_inflight {
-            return;
+            return false;
+        }
+        match self.rate_limit_last_fetch_at {
+            Some(ts) => Utc::now() - ts > RATE_LIMIT_REFRESH_INTERVAL,
+            None => true,
+        }
+    }
+
+    pub(crate) fn on_rate_limit_refresh_failed(&mut self, message: String) {
+        if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
+            if self.rate_limit_snapshot.is_none() {
+                if idx < self.history_cells.len() {
+                    self.history_replace_at(
+                        idx,
+                        Box::new(history_cell::new_error_event(message.clone())),
+                    );
+                } else {
+                    self.history_push(history_cell::new_error_event(message.clone()));
+                }
+            }
         }
 
-        self.rate_limit_fetch_inflight = true;
-        self.rate_limit_fetch_ack_pending = true;
+        self.rate_limit_fetch_inflight = false;
 
-        use crate::chatwidget::message::UserMessage;
-        use codex_core::protocol::InputItem;
-
-        let ping = UserMessage {
-            display_text: String::new(),
-            ordered_items: vec![InputItem::Text {
-                text: "Yield immediately with only the message \"ok\"".to_string(),
-            }],
-        };
-        self.submit_user_message(ping);
+        if self.rate_limit_snapshot.is_some() {
+            self.history_push(history_cell::new_warning_event(message));
+        }
     }
 
     fn rate_limit_reset_info(&self) -> RateLimitResetInfo {
@@ -10719,6 +10748,7 @@ fn update_rate_limit_resets(
         self.total_token_usage = TokenUsage::default();
         self.rate_limit_snapshot = None;
         self.rate_limit_warnings.reset();
+        self.rate_limit_last_fetch_at = None;
         self.bottom_pane.set_token_usage(
             self.total_token_usage.clone(),
             self.last_token_usage.clone(),
