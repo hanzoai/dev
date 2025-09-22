@@ -36,6 +36,7 @@ use crate::event_processor::EventProcessor;
 
 pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     let Cli {
+        command: _,
         images,
         model: model_cli_arg,
         oss,

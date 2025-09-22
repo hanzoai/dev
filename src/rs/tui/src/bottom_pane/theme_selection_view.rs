@@ -296,9 +296,9 @@ impl ThemeSelectionView {
                 // Use the same auth preference as the active Codex session.
                 // When logged in with ChatGPT, prefer ChatGPT auth; otherwise fall back to API key.
                 let preferred_auth = if cfg.using_chatgpt_auth {
-                    codex_protocol::mcp_protocol::AuthMode::ChatGPT
+                    dev_protocol::mcp_protocol::AuthMode::ChatGPT
                 } else {
-                    codex_protocol::mcp_protocol::AuthMode::ApiKey
+                    dev_protocol::mcp_protocol::AuthMode::ApiKey
                 };
                 let auth_mgr = hanzo_dev::AuthManager::shared(
                     cfg.codex_home.clone(),
@@ -319,9 +319,9 @@ impl ThemeSelectionView {
 
                 // Build developer guidance and input
                 let developer = "You are performing a custom task to create a terminal spinner.\n\nRequirements:\n- Output JSON ONLY, no prose.\n- `interval` is the delay in milliseconds between frames; MUST be between 50 and 300 inclusive.\n- `frames` is an array of strings; each element is a frame displayed sequentially at the given interval.\n- The spinner SHOULD have between 2 and 60 frames.\n- Each frame SHOULD be between 1 and 30 characters wide. ALL frames MUST be the SAME width (same number of characters). If you propose frames with varying widths, PAD THEM ON THE LEFT with spaces so they are uniform.\n- You MAY use both ASCII and Unicode characters (e.g., box drawing, braille, arrows). Use EMOJIS ONLY if the user explicitly requests emojis in their prompt.\n- Be creative! You have the full range of Unicode to play with!\n".to_string();
-                let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
-                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: developer }] });
-                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: user_prompt }] });
+                let mut input: Vec<dev_protocol::models::ResponseItem> = Vec::new();
+                input.push(dev_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![dev_protocol::models::ContentItem::InputText { text: developer }] });
+                input.push(dev_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![dev_protocol::models::ContentItem::InputText { text: user_prompt }] });
 
                 // JSON schema for structured output
                 let schema = serde_json::json!({
@@ -340,12 +340,13 @@ impl ThemeSelectionView {
                     "required": ["name", "interval", "frames"],
                     "additionalProperties": false
                 });
-                let format = hanzo_dev::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
+                // TODO: Fix TextFormat - it's an enum not a struct
+                // let format = hanzo_dev::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_spinner".to_string()), strict: Some(true), schema: Some(schema) };
 
                 let mut prompt = hanzo_dev::Prompt::default();
                 prompt.input = input;
                 prompt.store = true;
-                prompt.text_format = Some(format);
+                // prompt.text_format = Some(format);
 
                 // Stream and collect final JSON
                 use futures::StreamExt;
@@ -362,8 +363,8 @@ impl ThemeSelectionView {
                         Ok(hanzo_dev::ResponseEvent::ReasoningContentDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[reasoning]: {}", delta); }
                         Ok(hanzo_dev::ResponseEvent::OutputTextDelta { delta, .. }) => { tracing::info!(target: "spinner", "LLM[delta]: {}", delta); let _ = progress_tx.send(ProgressMsg::OutputDelta(delta.clone())); out.push_str(&delta); }
                         Ok(hanzo_dev::ResponseEvent::OutputItemDone { item, .. }) => {
-                            if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
-                                for c in content { if let codex_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
+                            if let dev_protocol::models::ResponseItem::Message { content, .. } = item {
+                                for c in content { if let dev_protocol::models::ContentItem::OutputText { text } = c { out.push_str(&text); } }
                             }
                             tracing::info!(target: "spinner", "LLM[item_done]");
                         }
@@ -594,7 +595,7 @@ impl ThemeSelectionView {
                 };
                 let auth_mgr = hanzo_dev::AuthManager::shared(
                     cfg.codex_home.clone(),
-                    codex_protocol::mcp_protocol::AuthMode::ApiKey,
+                    dev_protocol::mcp_protocol::AuthMode::ApiKey,
                     cfg.responses_originator_header.clone(),
                 );
                 let client = hanzo_dev::ModelClient::new(
@@ -613,9 +614,9 @@ impl ThemeSelectionView {
                     "You are designing a TUI color theme for a terminal UI.\n\nOutput: Strict JSON only. Include fields: `name` (string), `is_dark` (boolean), and `colors` (object of hex strings #RRGGBB).\n\nImportant rules:\n- Include EVERY `colors` key below. If you are not changing a value, copy it from the Current example.\n- Ensure strong contrast and readability for text vs background and for dim/bright variants.\n- Favor accessible color contrast (WCAG-ish) where possible.\n\nColor semantics (how the UI uses them):\n- background: main screen background.\n- foreground: primary foreground accents for widgets.\n- text: normal body text; must be readable on background.\n- text_dim: secondary/description text; slightly lower contrast than text.\n- text_bright: headings/emphasis; higher contrast than text.\n- primary: primary action/highlight color for selected items/buttons.\n- secondary: secondary accents (less prominent than primary).\n- border: container borders/dividers; should be visible but subtle against background.\n- border_focused: border when focused/active; slightly stronger than border.\n- selection: background for selected list rows; must contrast with text.\n- cursor: text caret color in input fields; must contrast with background.\n- success/warning/error/info: status badges and notices.\n- keyword/string/comment/function: syntax highlight accents in code blocks.\n- spinner: glyph color for loading animations; should be visible on background.\n- progress: progress-bar foreground color.\n\nCurrent theme example (copy unchanged values from here):\n{}",
                     example.to_string()
                 );
-                let mut input: Vec<codex_protocol::models::ResponseItem> = Vec::new();
-                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: developer }] });
-                input.push(codex_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![codex_protocol::models::ContentItem::InputText { text: user_prompt }] });
+                let mut input: Vec<dev_protocol::models::ResponseItem> = Vec::new();
+                input.push(dev_protocol::models::ResponseItem::Message { id: None, role: "developer".to_string(), content: vec![dev_protocol::models::ContentItem::InputText { text: developer }] });
+                input.push(dev_protocol::models::ResponseItem::Message { id: None, role: "user".to_string(), content: vec![dev_protocol::models::ContentItem::InputText { text: user_prompt }] });
 
                 let schema = serde_json::json!({
                     "type": "object",
@@ -659,12 +660,13 @@ impl ThemeSelectionView {
                     "required": ["name", "is_dark", "colors"],
                     "additionalProperties": false
                 });
-                let format = hanzo_dev::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
+                // TODO: Fix TextFormat - it's an enum not a struct
+                // let format = hanzo_dev::TextFormat { r#type: "json_schema".to_string(), name: Some("custom_theme".to_string()), strict: Some(true), schema: Some(schema) };
 
                 let mut prompt = hanzo_dev::Prompt::default();
                 prompt.input = input;
                 prompt.store = true;
-                prompt.text_format = Some(format);
+                // prompt.text_format = Some(format);
 
                 use futures::StreamExt;
                 let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(connecting to model)".to_string()));
@@ -694,9 +696,9 @@ impl ThemeSelectionView {
                             out.push_str(&delta);
                         }
                         Ok(hanzo_dev::ResponseEvent::OutputItemDone { item, .. }) => {
-                            if let codex_protocol::models::ResponseItem::Message { content, .. } = item {
+                            if let dev_protocol::models::ResponseItem::Message { content, .. } = item {
                                 for c in content {
-                                    if let codex_protocol::models::ContentItem::OutputText { text } = c {
+                                    if let dev_protocol::models::ContentItem::OutputText { text } = c {
                                         out.push_str(&text);
                                     }
                                 }

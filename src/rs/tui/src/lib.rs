@@ -45,6 +45,7 @@ mod history_cell;
 mod insert_history;
 pub mod live_wrap;
 mod markdown;
+mod markdown_render;
 mod markdown_renderer;
 mod markdown_stream;
 mod syntax_highlight;
@@ -375,7 +376,7 @@ fn run_ratatui_app(
         images,
         should_show_trust_screen,
         debug,
-        order,
+        order.is_some(),
         terminal_info,
         timing,
     );

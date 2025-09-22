@@ -12,8 +12,8 @@
 use clap::Parser;
 use dev_arg0::arg0_dispatch_or_else;
 use dev_common::CliConfigOverrides;
-use dev_exec::Cli;
-use dev_exec::run_main;
+use codex_exec::Cli;
+use codex_exec::run_main;
 
 #[derive(Parser, Debug)]
 struct TopCli {

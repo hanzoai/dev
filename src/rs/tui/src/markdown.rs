@@ -11,6 +11,16 @@ pub(crate) fn append_markdown(
     append_markdown_with_opener_and_cwd(markdown_source, lines, config.file_opener, &config.cwd);
 }
 
+pub(crate) fn append_markdown_with_bold_first(
+    markdown_source: &str,
+    lines: &mut Vec<Line<'static>>,
+    config: &Config,
+) {
+    // For now, just use the regular append_markdown
+    // TODO: Implement bold first line formatting
+    append_markdown(markdown_source, lines, config);
+}
+
 fn append_markdown_with_opener_and_cwd(
     markdown_source: &str,
     lines: &mut Vec<Line<'static>>,

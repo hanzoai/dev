@@ -6,7 +6,7 @@ use pulldown_cmark::HeadingLevel;
 use pulldown_cmark::Options;
 use pulldown_cmark::Parser;
 use pulldown_cmark::Tag;
-use pulldown_cmark::TagEnd;
+// TagEnd doesn't exist in pulldown-cmark 0.9
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -120,7 +120,8 @@ where
                 self.needs_newline = true;
             }
             Event::Html(html) => self.html(html, false),
-            Event::InlineHtml(html) => self.html(html, true),
+            // InlineHtml is deprecated in newer pulldown-cmark
+            // Event::InlineHtml(html) => self.html(html, true),
             Event::FootnoteReference(_) => {}
             Event::TaskListMarker(_) => {}
         }
@@ -129,7 +130,7 @@ where
     fn start_tag(&mut self, tag: Tag<'a>) {
         match tag {
             Tag::Paragraph => self.start_paragraph(),
-            Tag::Heading { level, .. } => self.start_heading(level),
+            Tag::Heading(level, _, _) => self.start_heading(level),
             Tag::BlockQuote => self.start_blockquote(),
             Tag::CodeBlock(kind) => {
                 let indent = match kind {
@@ -147,39 +148,38 @@ where
             Tag::Emphasis => self.push_inline_style(Style::new().italic()),
             Tag::Strong => self.push_inline_style(Style::new().bold()),
             Tag::Strikethrough => self.push_inline_style(Style::new().crossed_out()),
-            Tag::Link { dest_url, .. } => self.push_link(dest_url.to_string()),
-            Tag::HtmlBlock
-            | Tag::FootnoteDefinition(_)
+            Tag::Link(_, dest_url, _) => self.push_link(dest_url.to_string()),
+            // Tag::HtmlBlock is deprecated
+            Tag::FootnoteDefinition(_)
             | Tag::Table(_)
             | Tag::TableHead
             | Tag::TableRow
             | Tag::TableCell
             | Tag::Image { .. }
-            | Tag::MetadataBlock(_) => {}
+            // | Tag::MetadataBlock(_) => {} // deprecated
+            => {}
         }
     }
 
-    fn end_tag(&mut self, tag: TagEnd) {
+    fn end_tag(&mut self, tag: Tag<'a>) {
         match tag {
-            TagEnd::Paragraph => self.end_paragraph(),
-            TagEnd::Heading(_) => self.end_heading(),
-            TagEnd::BlockQuote => self.end_blockquote(),
-            TagEnd::CodeBlock => self.end_codeblock(),
-            TagEnd::List(_) => self.end_list(),
-            TagEnd::Item => {
+            Tag::Paragraph => self.end_paragraph(),
+            Tag::Heading(_, _, _) => self.end_heading(),
+            Tag::BlockQuote => self.end_blockquote(),
+            Tag::CodeBlock(_) => self.end_codeblock(),
+            Tag::List(_) => self.end_list(),
+            Tag::Item => {
                 self.indent_stack.pop();
                 self.pending_marker_line = false;
             }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => self.pop_inline_style(),
-            TagEnd::Link => self.pop_link(),
-            TagEnd::HtmlBlock
-            | TagEnd::FootnoteDefinition
-            | TagEnd::Table
-            | TagEnd::TableHead
-            | TagEnd::TableRow
-            | TagEnd::TableCell
-            | TagEnd::Image
-            | TagEnd::MetadataBlock(_) => {}
+            Tag::Emphasis | Tag::Strong | Tag::Strikethrough => self.pop_inline_style(),
+            Tag::Link(_, _, _) => self.pop_link(),
+            Tag::FootnoteDefinition(_)
+            | Tag::Table(_)
+            | Tag::TableHead
+            | Tag::TableRow
+            | Tag::TableCell
+            | Tag::Image(_, _, _) => {}
         }
     }
 

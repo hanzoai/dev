@@ -22,6 +22,7 @@ mod diff_handlers;
 mod perf;
 mod diff_ui;
 mod message;
+mod gh_actions;
 use hanzo_dev::parse_command::ParsedCommand;
 use hanzo_dev::protocol::AgentMessageDeltaEvent;
 use hanzo_dev::protocol::AgentMessageEvent;
@@ -209,6 +210,9 @@ pub(crate) struct ChatWidget<'a> {
 
     // True when connected to external Chrome via CDP; affects HUD titles
     browser_is_external: bool,
+
+    // Standard terminal mode (no fancy UI features)
+    standard_terminal_mode: bool,
 
     // Prefix sums of content heights (including spacing) for fast scroll range
     prefix_sums: std::cell::RefCell<Vec<u16>>,
@@ -1169,6 +1173,7 @@ impl ChatWidget<'_> {
             queued_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
             browser_is_external: false,
+            standard_terminal_mode: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey { req: 0, out: -1, seq: 0 }],
             cell_order_dbg: vec![None; 1],
@@ -1292,6 +1297,7 @@ impl ChatWidget<'_> {
             queued_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
             browser_is_external: false,
+            standard_terminal_mode: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey { req: 0, out: -1, seq: 0 }],
             cell_order_dbg: vec![None; 1],
@@ -2469,12 +2475,13 @@ impl ChatWidget<'_> {
                 // Avoid interleaving plan updates inside streaming sections.
                 // If a stream is active, defer until the stream finalizes so
                 // the plan block doesn't split a heading and its content.
+                let update_str = serde_json::to_string_pretty(&update).unwrap_or_else(|_| "Plan update".to_string());
                 if self.is_write_cycle_active() {
                     let seq = self.next_sequence();
-                    self.interrupts.push_plan_update(seq, update, event.order.clone());
+                    self.interrupts.push_plan_update(seq, update_str.clone(), event.order.clone());
                 } else {
                     let key = self.next_internal_key();
-                    let _ = self.history_insert_with_key_global(Box::new(history_cell::new_plan_update(update)), key);
+                    let _ = self.history_insert_with_key_global(Box::new(history_cell::new_plan_update_from_string(update_str)), key);
                 }
             }
             EventMsg::ExecApprovalRequest(ev) => {
@@ -2926,6 +2933,12 @@ impl ChatWidget<'_> {
             lines,
             kind: crate::history_cell::HistoryCellType::Notice,
         });
+    }
+
+    /// Show navigation hint on first scroll (if applicable)
+    pub(crate) fn maybe_show_history_nav_hint_on_first_scroll(&mut self) {
+        // This is a placeholder for the history navigation hint functionality
+        // It can be enhanced later to show hints to users about navigation controls
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {

@@ -50,6 +50,7 @@ libc = "0.2"
 mcp-types = { path = "../mcp-types" }
 once_cell = "1"
 path-clean = "1.0.1"
+pulldown-cmark = "0.9"
 rand = "0.9"
 ratatui = { version = "0.29.0", features = [
     "scrolling-regions",

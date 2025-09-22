@@ -104,7 +104,7 @@ impl ListSelectionView {
     }
 }
 
-impl BottomPaneView for ListSelectionView {
+impl<'a> BottomPaneView<'a> for ListSelectionView {
     fn handle_key_event(&mut self, _pane: &mut BottomPane, key_event: KeyEvent) {
         match key_event {
             KeyEvent {

@@ -6195,6 +6195,22 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
     }
 }
 
+pub(crate) fn new_plan_update_from_string(update_str: String) -> PlainHistoryCell {
+    // For now, just show the raw JSON as a simple plan update
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled("plan update", Style::default().dim()),
+    ]));
+    for line in update_str.lines() {
+        lines.push(Line::from(line.to_string()));
+    }
+
+    PlainHistoryCell {
+        lines,
+        kind: HistoryCellType::Notice,
+    }
+}
+
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
     let UpdatePlanArgs { explanation, plan } = update;
 

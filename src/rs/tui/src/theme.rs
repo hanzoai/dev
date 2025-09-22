@@ -78,7 +78,7 @@ pub fn init_theme(config: &ThemeConfig) {
     if matches!(config.name, ThemeName::Custom) {
         *CUSTOM_THEME_LABEL.write().unwrap() = config.label.clone();
         *CUSTOM_THEME_COLORS.write().unwrap() = Some(config.colors.clone());
-        *CUSTOM_THEME_IS_DARK.write().unwrap() = config.is_dark;
+        *CUSTOM_THEME_IS_DARK.write().unwrap() = Some(config.is_dark);
     }
 }
 

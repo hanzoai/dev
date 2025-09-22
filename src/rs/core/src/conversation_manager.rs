@@ -11,7 +11,6 @@ use uuid::Uuid;
 use crate::codex::Codex;
 use crate::codex::CodexSpawnOk;
 use crate::codex::INITIAL_SUBMIT_ID;
-use crate::codex_conversation::SimpleCodexConversation;
 use crate::conversation::CodexConversation;
 use crate::config::Config;
 use crate::error::CodexErr;

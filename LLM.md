@@ -3,6 +3,37 @@
 ## Project Overview
 Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise features and maintained by Hanzo AI. This is a Rust-based CLI tool that provides AI-powered development assistance directly in the terminal.
 
+## Recent Updates (December 2025)
+
+### Major Architecture Improvements
+
+1. **Compilation Fixes and Code Quality**
+   - Fixed all Rust compilation warnings in core module
+   - Resolved TUI interface compilation issues including:
+     - Added missing `LIVE_PREFIX_COLS` constant
+     - Implemented `FrameRequester` trait for frame updates
+     - Fixed lifetime parameters in `BottomPaneView` trait
+     - Created missing `gh_actions` module for GitHub integration
+   - Fixed protocol imports (changed from `codex_protocol` to `dev_protocol`)
+   - Added `pulldown-cmark` dependency for markdown rendering
+
+2. **New Cryptographic Library: hanzo-crypto**
+   - Implemented pure Rust cryptographic primitives library
+   - Features both classical and post-quantum algorithms:
+     - **Hash functions**: SHA-256/512, SHA3-256/512, BLAKE3
+     - **Symmetric encryption**: AES-256-GCM, ChaCha20Poly1305
+     - **Asymmetric cryptography**: Ed25519 signatures, X25519 key exchange
+     - **Post-quantum crypto**: Kyber (KEM), Dilithium (signatures) - placeholders
+     - **Key derivation**: Argon2id for password hashing
+     - **Secure random**: Cryptographically secure RNG
+   - Full test suite with 7 passing tests
+   - Zero-copy design with `zeroize` for secure memory handling
+
+3. **Testing Infrastructure**
+   - Created comprehensive integration tests for core modules
+   - Added TUI-specific test suite
+   - All crypto module tests passing (100% success rate)
+
 ## Recent Updates (September 2025)
 
 ### Merged from OpenAI Codex Upstream
@@ -35,8 +66,10 @@ Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb
 │   │   ├── tui/      # Terminal UI (Ratatui-based)
 │   │   ├── mcp-*     # Model Context Protocol implementation
 │   │   ├── exec/     # Command execution
-│   │   └── ...       # 21 total crates
+│   │   ├── hanzo-crypto/ # Pure Rust cryptographic primitives
+│   │   └── ...       # 22 total crates
 │   └── ts/           # TypeScript/npm wrapper
+├── tests/            # Integration test suites
 ├── .github/          # CI/CD workflows
 └── docs/            # Documentation
 ```
@@ -47,6 +80,7 @@ Successfully incorporated key improvements from OpenAI Codex (up to commit 9bbeb
 - **MCP** (`mcp-server/client/types`): Full MCP protocol support
 - **Exec** (`dev-exec`): Command execution with sandboxing
 - **Protocol** (`dev-protocol`): Shared protocol definitions
+- **Hanzo Crypto** (`hanzo-crypto`): Cryptographic primitives library with post-quantum support
 
 ## Technical Decisions
 

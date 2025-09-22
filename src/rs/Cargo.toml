@@ -11,6 +11,7 @@ members = [
     "exec",
     "execpolicy",
     "file-search",
+    "hanzo-crypto",
     "linux-sandbox",
     "login",
     "mcp-client",

@@ -54,14 +54,51 @@ impl Default for Spinner {
     }
 }
 
-pub fn current_spinner() -> &'static str {
+pub fn frame_at_time(_def: SpinnerDefinition, _time_ms: u64) -> &'static str {
     "⠋"
 }
 
-pub fn frame_at_time(_time: Duration) -> &'static str {
-    "⠋"
+pub struct SpinnerDefinition {
+    pub name: &'static str,
+    pub frames: &'static [&'static str],
+    pub interval: u64,
+}
+
+pub fn find_spinner_by_name(name: &str) -> Option<SpinnerDefinition> {
+    match name {
+        "dots" => Some(SpinnerDefinition {
+            name: "dots",
+            frames: &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            interval: 80,
+        }),
+        _ => None,
+    }
+}
+
+pub fn current_spinner() -> SpinnerDefinition {
+    SpinnerDefinition {
+        name: "dots",
+        frames: &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+        interval: 80,
+    }
 }
 
 pub fn spinner_names() -> Vec<&'static str> {
     vec!["dots", "line", "dots2", "dots3"]
+}
+
+pub fn add_custom_spinner(_name: String, _frames: Vec<String>, _interval: u64) {
+    // Placeholder for custom spinner registration
+}
+
+pub fn switch_spinner(_name: &str) {
+    // Placeholder for switching spinner
+}
+
+pub fn spinner_label_for(name: &str) -> String {
+    name.to_string()
+}
+
+pub fn global_max_frame_len() -> usize {
+    1 // Maximum frame length for alignment
 }

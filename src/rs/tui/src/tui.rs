@@ -28,6 +28,12 @@ use ratatui_image::picker::Picker;
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<BufWriter<Stdout>>>;
 
+/// Trait for requesting frame updates
+pub trait FrameRequester: Clone + Send + 'static {
+    fn request_frame(&self);
+    fn test_dummy() -> Self;
+}
+
 /// Terminal information queried at startup
 #[derive(Clone)]
 pub struct TerminalInfo {

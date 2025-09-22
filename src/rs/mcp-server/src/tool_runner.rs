@@ -33,6 +33,10 @@ use crate::patch_approval::handle_patch_approval_request;
 
 pub(crate) const INVALID_PARAMS_ERROR_CODE: i64 = -32602;
 
+// Aliases for compatibility
+pub use self::run_codex_tool_session as run_dev_tool_session;
+pub use self::run_codex_tool_session_reply as run_dev_tool_session_reply;
+
 /// Run a complete Codex session and stream events back to the client.
 ///
 /// On completion (success or error) the function sends the appropriate

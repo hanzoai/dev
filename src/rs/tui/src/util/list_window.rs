@@ -51,3 +51,34 @@ impl<T> ListWindow<T> {
         self.items.is_empty()
     }
 }
+
+/// Create an anchored window for list display
+pub fn anchored_window(
+    total_items: usize,
+    window_size: usize,
+    selected_index: usize,
+    anchor: Option<usize>,
+) -> (usize, usize) {
+    use std::cmp;
+
+    if total_items == 0 {
+        return (0, 0);
+    }
+
+    let window_size = cmp::min(window_size, total_items);
+    let anchor = anchor.unwrap_or(0);
+
+    // Calculate the window start based on selected index
+    let start = if selected_index < anchor {
+        selected_index
+    } else if selected_index >= anchor + window_size {
+        selected_index - window_size + 1
+    } else {
+        anchor
+    };
+
+    let start = cmp::min(start, total_items.saturating_sub(window_size));
+    let end = cmp::min(start + window_size, total_items);
+
+    (start, end)
+}
