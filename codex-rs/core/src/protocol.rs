@@ -32,6 +32,13 @@ pub use codex_protocol::protocol::ReviewCodeLocation;
 pub use codex_protocol::protocol::ReviewFinding;
 pub use codex_protocol::protocol::ReviewLineRange;
 pub use codex_protocol::protocol::ReviewOutputEvent;
+pub use codex_protocol::protocol::ReviewRequest;
+pub use codex_protocol::protocol::GitInfo;
+pub use codex_protocol::protocol::RolloutItem;
+pub use codex_protocol::protocol::RolloutLine;
+pub use codex_protocol::protocol::ConversationPathResponseEvent;
+pub use codex_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
+pub use codex_protocol::protocol::ExitedReviewModeEvent;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -175,6 +182,8 @@ pub enum Op {
     /// The agent will use its existing context (either conversation history or previous response id)
     /// to generate a summary which will be returned as an AgentMessage event.
     Compact,
+    /// Request the agent to perform a dedicated code review.
+    Review { review_request: ReviewRequest },
     /// Request to shut down codex instance.
     Shutdown,
 }

@@ -1339,6 +1339,11 @@ impl App<'_> {
                     };
 
                     match command {
+                        SlashCommand::Review => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_review_command(command_args);
+                            }
+                        }
                         SlashCommand::Branch => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_branch_command(command_args);
