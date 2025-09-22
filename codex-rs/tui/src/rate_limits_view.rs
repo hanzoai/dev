@@ -1,6 +1,11 @@
+use crate::colors;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
+
+const WEEKLY_CELL: &str = "██";
+const HOURLY_CELL: &str = "▓▓";
+const UNUSED_CELL: &str = "░░";
 
 /// Aggregated output used by the `/limits` command.
 /// It contains the rendered summary lines, optional legend,
@@ -27,13 +32,11 @@ impl LimitsView {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GridConfig {
     pub(crate) weekly_slots: usize,
-    pub(crate) logo: &'static str,
 }
 
 /// Default gauge configuration used by the TUI.
 pub(crate) const DEFAULT_GRID_CONFIG: GridConfig = GridConfig {
     weekly_slots: 100,
-    logo: "(>_)",
 };
 
 /// Build the lines and optional gauge used by the `/limits` view.
@@ -230,24 +233,40 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
     if !show_gauge {
         return Vec::new();
     }
+
     vec![
         vec!["Legend".bold()].into(),
         vec![
             "  • ".into(),
-            "Dark gray".dark_gray().bold(),
-            " = weekly usage so far".into(),
+            Span::styled(
+                WEEKLY_CELL.to_string(),
+                Style::default()
+                    .fg(colors::warning())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            " weekly usage".into(),
         ]
         .into(),
         vec![
             "  • ".into(),
-            "Green".green().bold(),
-            " = hourly capacity still available".into(),
+            Span::styled(
+                HOURLY_CELL.to_string(),
+                Style::default()
+                    .fg(colors::success())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            " hourly headroom".into(),
         ]
         .into(),
         vec![
             "  • ".into(),
-            "Default".bold(),
-            " = weekly capacity beyond the hourly window".into(),
+            Span::styled(
+                UNUSED_CELL.to_string(),
+                Style::default()
+                    .fg(colors::text_dim())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            " unused weekly".into(),
         ]
         .into(),
     ]
@@ -305,7 +324,6 @@ fn render_limit_grid(state: GridState, grid_config: GridConfig, width: u16) -> V
 struct GridLayout {
     size: usize,
     inner_width: usize,
-    config: GridConfig,
 }
 
 impl GridLayout {
@@ -314,13 +332,10 @@ impl GridLayout {
     const PREFIX: &'static str = "  ";
 
     fn new(config: GridConfig, width: u16) -> Option<Self> {
-        if config.weekly_slots == 0 || config.logo.is_empty() {
+        if config.weekly_slots == 0 {
             return None;
         }
-        let cell_width = config.logo.chars().count();
-        if cell_width == 0 {
-            return None;
-        }
+        let cell_width = WEEKLY_CELL.chars().count();
 
         let available_inner = width.saturating_sub((Self::PREFIX.len() + 2) as u16) as usize;
         if available_inner == 0 {
@@ -347,7 +362,6 @@ impl GridLayout {
         Some(Self {
             size: side,
             inner_width,
-            config,
         })
     }
 
@@ -369,11 +383,20 @@ impl GridLayout {
                     spans.push(" ".into());
                 }
                 let span = if cell_index < counts.dark_cells {
-                    self.config.logo.dark_gray()
+                    Span::styled(
+                        WEEKLY_CELL.to_string(),
+                        Style::default().fg(colors::warning()),
+                    )
                 } else if cell_index < counts.dark_cells + counts.green_cells {
-                    self.config.logo.green()
+                    Span::styled(
+                        HOURLY_CELL.to_string(),
+                        Style::default().fg(colors::success()),
+                    )
                 } else {
-                    self.config.logo.into()
+                    Span::styled(
+                        UNUSED_CELL.to_string(),
+                        Style::default().fg(colors::text_dim()),
+                    )
                 };
                 spans.push(span);
                 cell_index += 1;
