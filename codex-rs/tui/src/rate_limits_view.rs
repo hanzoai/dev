@@ -131,12 +131,10 @@ fn build_summary_lines(
 
     lines.push(section_header("Hourly Limit"));
     lines.push(build_bar_line(
-        "Used",
+        "Usage",
         metrics.hourly_used,
-        " used",
-        Style::default()
-            .fg(colors::text())
-            .add_modifier(Modifier::BOLD),
+        "",
+        Style::default().fg(colors::info()),
     ));
     lines.push(build_hourly_window_line(
         metrics,
@@ -154,9 +152,7 @@ fn build_summary_lines(
         "Usage",
         metrics.weekly_used,
         "",
-        Style::default()
-            .fg(colors::text())
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(colors::info()),
     ));
     lines.push(build_weekly_window_line(
         metrics.weekly_window_minutes,
@@ -225,10 +221,11 @@ fn build_hourly_window_line(
                 spans.extend(render_percent_bar(percent));
                 spans.push(Span::styled(
                     format!(" {}", format_percent(percent)),
-                    Style::default().fg(colors::text()),
+                    Style::default().fg(colors::info()),
                 ));
                 let elapsed_display = format_duration(elapsed);
-                let total_display = format_minutes_short(metrics.primary_window_minutes);
+                let total_display =
+                    format_minutes_round_units(metrics.primary_window_minutes);
                 spans.push(Span::styled(
                     format!(" ({elapsed_display} / {total_display})"),
                     Style::default().fg(colors::dim()),
@@ -241,7 +238,10 @@ fn build_hourly_window_line(
     Line::from(vec![
         Span::raw(prefix),
         Span::styled(
-            format!("≈{} rolling window", format_minutes_short(metrics.primary_window_minutes)),
+            format!(
+                "≈{} rolling window",
+                format_minutes_short(metrics.primary_window_minutes)
+            ),
             Style::default().fg(colors::dim()),
         ),
     ])
@@ -255,12 +255,14 @@ fn build_hourly_reset_line(
         if let Some(timing) = compute_window_timing(window_minutes, last) {
             let remaining = format_duration(timing.remaining);
             return Line::from(vec![
-                Span::raw(format!(
-                    "{FIELD_INDENT}Resets at ≈{} ",
-                    timing.next_reset_local
-                )),
+                Span::raw(format!("{FIELD_INDENT}Resets:")),
+                Span::raw("   "),
                 Span::styled(
-                    format!("({remaining})"),
+                    format!("{}", timing.next_reset_local),
+                    Style::default().fg(colors::info()),
+                ),
+                Span::styled(
+                    format!(" ({remaining})"),
                     Style::default().fg(colors::dim()),
                 ),
             ]);
@@ -269,9 +271,14 @@ fn build_hourly_reset_line(
             "{FIELD_INDENT}Reset timing updating…"
         ))]);
     }
-    Line::from(vec![Span::raw(format!(
-        "{FIELD_INDENT}Reset shown once next window detected"
-    ))])
+    Line::from(vec![
+        Span::raw(format!("{FIELD_INDENT}Resets:")),
+        Span::raw("   "),
+        Span::styled(
+            "shown once next window detected".to_string(),
+            Style::default().fg(colors::dim()),
+        ),
+    ])
 }
 
 fn build_weekly_window_line(
@@ -279,15 +286,47 @@ fn build_weekly_window_line(
     last_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     let prefix = field_prefix("Window");
-    let since = last_reset
-        .and_then(|last| Utc::now().signed_duration_since(last).to_std().ok())
-        .map(format_duration)
-        .unwrap_or_else(|| "unknown".to_string());
-    let window = format_minutes_short(weekly_minutes);
+    if weekly_minutes == 0 {
+        return Line::from(vec![
+            Span::raw(prefix),
+            Span::styled(
+                "window length unavailable".to_string(),
+                Style::default().fg(colors::dim()),
+            ),
+        ]);
+    }
+
+    if let Some(last) = last_reset {
+        if let Some(timing) = compute_window_timing(weekly_minutes, last) {
+            let window_secs = timing.window.as_secs_f64();
+            if window_secs > 0.0 {
+                let elapsed = timing.elapsed();
+                let percent = ((elapsed.as_secs_f64() / window_secs) * 100.0).clamp(0.0, 100.0);
+                let mut spans: Vec<Span<'static>> = Vec::new();
+                spans.push(Span::raw(prefix.clone()));
+                spans.extend(render_percent_bar(percent));
+                spans.push(Span::styled(
+                    format!(" {}", format_percent(percent)),
+                    Style::default().fg(colors::info()),
+                ));
+                let elapsed_display = format_duration(elapsed);
+                let total_display = format_minutes_round_units(weekly_minutes);
+                spans.push(Span::styled(
+                    format!(" ({elapsed_display} / {total_display})"),
+                    Style::default().fg(colors::dim()),
+                ));
+                return Line::from(spans);
+            }
+        }
+    }
+
     Line::from(vec![
         Span::raw(prefix),
         Span::styled(
-            format!("({since} / {window})"),
+            format!(
+                "≈{} rolling window",
+                format_minutes_short(weekly_minutes)
+            ),
             Style::default().fg(colors::dim()),
         ),
     ])
@@ -301,12 +340,14 @@ fn build_weekly_reset_line(
         if let Some(timing) = compute_window_timing(window_minutes, last) {
             let remaining = format_duration(timing.remaining);
             return Line::from(vec![
-                Span::raw(format!(
-                    "{FIELD_INDENT}Resets at ≈{} ",
-                    timing.next_reset_local
-                )),
+                Span::raw(format!("{FIELD_INDENT}Resets:")),
+                Span::raw("   "),
                 Span::styled(
-                    format!("({remaining})"),
+                    format!("{}", timing.next_reset_local),
+                    Style::default().fg(colors::info()),
+                ),
+                Span::styled(
+                    format!(" ({remaining})"),
                     Style::default().fg(colors::dim()),
                 ),
             ]);
@@ -315,9 +356,14 @@ fn build_weekly_reset_line(
             "{FIELD_INDENT}Reset timing updating…"
         ))]);
     }
-    Line::from(vec![Span::raw(format!(
-        "{FIELD_INDENT}Reset shown once next window detected"
-    ))])
+    Line::from(vec![
+        Span::raw(format!("{FIELD_INDENT}Resets:")),
+        Span::raw("   "),
+        Span::styled(
+            "shown once next window detected".to_string(),
+            Style::default().fg(colors::dim()),
+        ),
+    ])
 }
 
 fn build_compact_lines(reset_info: &RateLimitResetInfo) -> Vec<Line<'static>> {
@@ -341,8 +387,11 @@ fn build_compact_lines(reset_info: &RateLimitResetInfo) -> Vec<Line<'static>> {
                 (reset_info.context_window, reset_info.context_tokens_used)
             {
                 lines.push(build_context_tokens_line(used, window));
-                lines.push(build_context_remaining_line(used, window));
-                lines.push(build_context_status_line(reset_info.overflow_auto_compact));
+                lines.push(build_context_status_line(
+                    used,
+                    window,
+                    reset_info.overflow_auto_compact,
+                ));
             } else if reset_info.overflow_auto_compact {
                 lines.push(Line::from(vec![Span::styled(
                     format!("{FIELD_INDENT}Auto-compaction runs after overflow errors"),
@@ -377,7 +426,7 @@ fn build_compact_tokens_line(used: u64, limit: u64) -> Line<'static> {
     spans.extend(render_percent_bar(percent));
     spans.push(Span::styled(
         format!(" {percent_display}"),
-        Style::default().fg(colors::text()),
+        Style::default().fg(colors::info()),
     ));
 
     let used_fmt = format_with_separators(used);
@@ -394,10 +443,10 @@ fn build_compact_status_line(used: u64, limit: u64) -> Line<'static> {
     if used < limit {
         let remaining = limit - used;
         return Line::from(vec![
-            Span::raw(field_prefix("Remaining")),
+            Span::raw(field_prefix("Status")),
             Span::styled(
                 format!(
-                    "{} tokens until compact",
+                    "{} tokens before compact",
                     format_with_separators(remaining)
                 ),
                 Style::default().fg(colors::dim()),
@@ -441,7 +490,7 @@ fn build_context_tokens_line(used: u64, window: u64) -> Line<'static> {
     };
     spans.push(Span::styled(
         format!(" {percent_display}"),
-        Style::default().fg(colors::text()),
+        Style::default().fg(colors::info()),
     ));
     spans.push(Span::styled(
         format!(
@@ -454,29 +503,46 @@ fn build_context_tokens_line(used: u64, window: u64) -> Line<'static> {
     Line::from(spans)
 }
 
-fn build_context_remaining_line(used: u64, window: u64) -> Line<'static> {
-    let remaining = window.saturating_sub(used);
-    Line::from(vec![
-        Span::raw(field_prefix("Remaining")),
-        Span::styled(
-            format!(
-                "{} tokens before overflow",
-                format_with_separators(remaining)
+fn build_context_status_line(
+    used: u64,
+    window: u64,
+    overflow_auto_compact: bool,
+) -> Line<'static> {
+    if used < window {
+        let remaining = window - used;
+        return Line::from(vec![
+            Span::raw(field_prefix("Status")),
+            Span::styled(
+                format!(
+                    "{} tokens before compact",
+                    format_with_separators(remaining)
+                ),
+                Style::default().fg(colors::dim()),
             ),
-            Style::default().fg(colors::dim()),
-        ),
-    ])
-}
+        ]);
+    }
 
-fn build_context_status_line(overflow_auto_compact: bool) -> Line<'static> {
-    let status = if overflow_auto_compact {
-        "Auto-compaction runs after overflow errors"
-    } else {
-        "Auto-compaction unavailable"
-    };
+    if used == window {
+        return Line::from(vec![
+            Span::raw(field_prefix("Status")),
+            Span::styled(
+                "Auto-compact will trigger on the next turn".to_string(),
+                Style::default().fg(colors::warning()),
+            ),
+        ]);
+    }
+
+    let overage = used.saturating_sub(window);
+    let mut message = format!(
+        "Exceeded by {} tokens",
+        format_with_separators(overage)
+    );
+    if overflow_auto_compact {
+        message.push_str("; auto-compaction runs after overflow");
+    }
     Line::from(vec![
         Span::raw(field_prefix("Status")),
-        Span::styled(status.to_string(), Style::default().fg(colors::dim())),
+        Span::styled(message, Style::default().fg(colors::error())),
     ])
 }
 
@@ -637,7 +703,7 @@ fn render_percent_bar(percent: f64) -> Vec<Span<'static>> {
         spans.push(Span::styled(
             BAR_EMPTY.repeat(empty),
             Style::default()
-                .fg(colors::info())
+                .fg(colors::primary())
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -645,7 +711,7 @@ fn render_percent_bar(percent: f64) -> Vec<Span<'static>> {
         spans.push(Span::styled(
             BAR_EMPTY.repeat(BAR_SLOTS),
             Style::default()
-                .fg(colors::info())
+                .fg(colors::primary())
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -701,6 +767,33 @@ fn format_minutes_short(minutes: u64) -> String {
         return format!("{hours}h {mins}m");
     }
     format!("{minutes}m")
+}
+
+fn format_minutes_round_units(minutes: u64) -> String {
+    if minutes == 0 {
+        return "0 minutes".to_string();
+    }
+
+    if minutes >= 1_440 {
+        let mut days = ((minutes as f64) / 1_440.0).round() as u64;
+        if days == 0 {
+            days = 1;
+        }
+        let unit = if days == 1 { "day" } else { "days" };
+        return format!("{days} {unit}");
+    }
+
+    if minutes >= 60 {
+        let mut hours = ((minutes as f64) / 60.0).round() as u64;
+        if hours == 0 {
+            hours = 1;
+        }
+        let unit = if hours == 1 { "hour" } else { "hours" };
+        return format!("{hours} {unit}");
+    }
+
+    let unit = if minutes == 1 { "minute" } else { "minutes" };
+    format!("{minutes} {unit}")
 }
 
 fn extract_capacity_fraction(snapshot: &RateLimitSnapshotEvent) -> Option<f64> {
