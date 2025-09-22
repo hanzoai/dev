@@ -155,14 +155,9 @@ pub async fn run_main(
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         debug: Some(cli.debug),
-<<<<<<< HEAD
-        // Enable web search by default (no CLI flag).
-        tools_web_search_request: Some(true),
+        tools_web_search_request: Some(cli.web_search),
         mcp_servers: None,
         experimental_client_tools: None,
-=======
-        tools_web_search_request: Some(cli.web_search),
->>>>>>> origin/main
     };
 
     // Parse `-c` overrides from the CLI.
