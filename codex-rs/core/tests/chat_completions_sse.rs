@@ -8,6 +8,7 @@ use codex_core::Prompt;
 use codex_core::ResponseEvent;
 use codex_core::ResponseItem;
 use codex_core::WireApi;
+use codex_core::debug_logger::DebugLogger;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use futures::StreamExt;
@@ -74,7 +75,7 @@ async fn run_stream(sse_body: &str) -> Vec<ResponseEvent> {
         summary,
         verbosity,
         Uuid::new_v4(),
-        Arc::clone(&debug_logger),
+        debug_logger,
     );
 
     let mut prompt = Prompt::default();
@@ -310,12 +311,21 @@ async fn streams_reasoning_before_tool_call() {
     match &events[2] {
         ResponseEvent::OutputItemDone {
             item: ResponseItem::FunctionCall {
+<<<<<<< HEAD
                 name,
                 arguments,
                 call_id,
                 ..
             },
             ..
+=======
+            name,
+            arguments,
+            call_id,
+            ..
+        },
+            ..
+>>>>>>> refs/heads/main
         } => {
             assert_eq!(name, "run");
             assert_eq!(arguments, "{}");
