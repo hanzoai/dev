@@ -15,6 +15,7 @@ use std::time::Instant;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 
+use codex_common::elapsed::format_duration;
 use codex_common::model_presets::ModelPreset;
 use codex_common::model_presets::builtin_model_presets;
 use codex_core::ConversationManager;
@@ -81,6 +82,8 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
 use codex_core::protocol::Op;
+use codex_core::protocol::ReviewOutputEvent;
+use codex_core::protocol::ReviewRequest;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
@@ -164,6 +167,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use crate::rate_limits_view::RateLimitResetInfo;
+use codex_core::review_format::format_review_findings_block;
 use chrono::{DateTime, Local, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
@@ -325,6 +329,8 @@ pub(crate) struct ChatWidget<'a> {
     last_agent_prompt: Option<String>,
     agent_context: Option<String>,
     agent_task: Option<String>,
+    active_review_hint: Option<String>,
+    active_review_prompt: Option<String>,
     overall_task_status: String,
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
@@ -2140,6 +2146,8 @@ impl ChatWidget<'_> {
             last_agent_prompt: None,
             agent_context: None,
             agent_task: None,
+            active_review_hint: None,
+            active_review_prompt: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -2349,6 +2357,8 @@ impl ChatWidget<'_> {
             last_agent_prompt: None,
             agent_context: None,
             agent_task: None,
+            active_review_hint: None,
+            active_review_prompt: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -5323,8 +5333,73 @@ impl ChatWidget<'_> {
             EventMsg::UserMessage(_) => {}
             EventMsg::TurnAborted(_) => {}
             EventMsg::ConversationPath(_) => {}
-            EventMsg::EnteredReviewMode(_) => {}
-            EventMsg::ExitedReviewMode(_) => {}
+            EventMsg::EnteredReviewMode(review_request) => {
+                let hint = review_request.user_facing_hint.trim();
+                let banner = if hint.is_empty() {
+                    ">> Code review started <<".to_string()
+                } else {
+                    format!(">> Code review started: {hint} <<")
+                };
+                self.active_review_hint = Some(review_request.user_facing_hint.clone());
+                self.active_review_prompt = Some(review_request.prompt.clone());
+                self.history_push(history_cell::new_background_event(banner));
+
+                let prompt_text = review_request.prompt.trim();
+                if !prompt_text.is_empty() {
+                    let mut lines: Vec<Line<'static>> = Vec::new();
+                    lines.push(Line::from(vec![RtSpan::styled(
+                        "Review focus",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]));
+                    lines.push(Line::from(""));
+                    for line in prompt_text.lines() {
+                        lines.push(Line::from(line.to_string()));
+                    }
+                    self.history_push(history_cell::PlainHistoryCell::new(
+                        lines,
+                        history_cell::HistoryCellType::Notice,
+                    ));
+                }
+                self.request_redraw();
+            }
+            EventMsg::ExitedReviewMode(review_output) => {
+                let hint = self.active_review_hint.take();
+                let prompt = self.active_review_prompt.take();
+                match review_output {
+                    Some(output) => {
+                        let summary_cell = self.build_review_summary_cell(
+                            hint.as_deref(),
+                            prompt.as_deref(),
+                            &output,
+                        );
+                        self.history_push(summary_cell);
+                        let finish_banner = match hint.as_deref() {
+                            Some(h) if !h.trim().is_empty() => {
+                                let trimmed = h.trim();
+                                format!("<< Code review finished: {trimmed} >>")
+                            }
+                            _ => "<< Code review finished >>".to_string(),
+                        };
+                        self.history_push(history_cell::new_background_event(finish_banner));
+                    }
+                    None => {
+                        let banner = match hint.as_deref() {
+                            Some(h) if !h.trim().is_empty() => {
+                                let trimmed = h.trim();
+                                format!(
+                                    "<< Code review finished without a final response ({trimmed}) >>"
+                                )
+                            }
+                            _ => "<< Code review finished without a final response >>".to_string(),
+                        };
+                        self.history_push(history_cell::new_background_event(banner));
+                        self.history_push(history_cell::new_warning_event(
+                            "Review session ended without returning findings. Try `/review` again if you still need feedback.".to_string(),
+                        ));
+                    }
+                }
+                self.request_redraw();
+            }
         }
     }
 
@@ -6415,12 +6490,21 @@ fn update_rate_limit_resets(
         );
     }
 
+    pub(crate) fn terminal_send_input(&mut self, id: u64, data: Vec<u8>) {
+        if data.is_empty() {
+            return;
+        }
+        self.app_event_tx
+            .send(AppEvent::TerminalSendInput { id, data });
+    }
+
     pub(crate) fn terminal_mark_running(&mut self, id: u64) {
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
                 overlay.running = true;
                 overlay.exit_code = None;
                 overlay.duration = None;
+                overlay.start_time = Some(Instant::now());
                 self.request_redraw();
             }
         }
@@ -6585,6 +6669,9 @@ fn update_rate_limit_resets(
     }
 
     pub(crate) fn terminal_handle_pending_key(&mut self, key_event: KeyEvent) -> bool {
+        if self.terminal_is_running() {
+            return false;
+        }
         if !self.terminal_has_pending_command() {
             return false;
         }
@@ -11545,6 +11632,113 @@ fn update_rate_limit_resets(
 }
 
 impl ChatWidget<'_> {
+    /// Handle `/review [focus]` command by starting a dedicated review session.
+    pub(crate) fn handle_review_command(&mut self, args: String) {
+        if self.is_task_running() {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/review` — complete or cancel the current task before starting a new review.".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        let trimmed = args.trim();
+        let (prompt, hint) = if trimmed.is_empty() {
+            (
+                "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
+                "current workspace changes".to_string(),
+            )
+        } else {
+            let value = trimmed.to_string();
+            (value.clone(), value)
+        };
+
+        self.active_review_hint = None;
+        self.active_review_prompt = None;
+
+        let preparation_notice = if trimmed.is_empty() {
+            "Preparing code review request...".to_string()
+        } else {
+            format!("Preparing code review for {hint}")
+        };
+        self.insert_background_event_early(preparation_notice);
+        self.request_redraw();
+
+        let review_request = ReviewRequest {
+            prompt,
+            user_facing_hint: hint,
+        };
+
+        self.submit_op(Op::Review { review_request });
+    }
+
+    fn build_review_summary_cell(
+        &self,
+        hint: Option<&str>,
+        prompt: Option<&str>,
+        output: &ReviewOutputEvent,
+    ) -> history_cell::PlainHistoryCell {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let title = match hint {
+            Some(h) if !h.trim().is_empty() => {
+                let trimmed = h.trim();
+                format!("Review summary — {trimmed}")
+            }
+            _ => "Review summary".to_string(),
+        };
+        lines.push(Line::from(vec![RtSpan::styled(
+            title,
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+
+        if let Some(p) = prompt {
+            let trimmed_prompt = p.trim();
+            if !trimmed_prompt.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    RtSpan::styled(
+                        "Prompt:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    RtSpan::raw(" "),
+                    RtSpan::raw(trimmed_prompt.to_string()),
+                ]));
+            }
+        }
+
+        let mut sections: Vec<String> = Vec::new();
+        let explanation = output.overall_explanation.trim();
+        if !explanation.is_empty() {
+            sections.push(explanation.to_string());
+        }
+        if !output.findings.is_empty() {
+            sections.push(format_review_findings_block(&output.findings, None));
+        }
+        let correctness = output.overall_correctness.trim();
+        if !correctness.is_empty() {
+            sections.push(format!("Overall correctness: {correctness}"));
+        }
+        if output.overall_confidence_score > 0.0 {
+            let score = output.overall_confidence_score;
+            sections.push(format!("Confidence score: {score:.1}"));
+        }
+        if sections.is_empty() {
+            sections.push("No detailed findings were provided.".to_string());
+        }
+
+        lines.push(Line::from(""));
+        for (idx, section) in sections.iter().enumerate() {
+            if idx > 0 {
+                lines.push(Line::from(""));
+            }
+            for line in section.lines() {
+                lines.push(Line::from(line.to_string()));
+            }
+        }
+
+        history_cell::PlainHistoryCell::new(lines, history_cell::HistoryCellType::Assistant)
+    }
+
     /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
     /// optionally copies current uncommitted changes, then switches the session cwd
     /// into the worktree. If `task` is non-empty, submits it immediately.
@@ -14983,7 +15177,112 @@ impl WidgetRef for &ChatWidget<'_> {
                     header_area
                 };
 
-                // Header intentionally left blank to avoid duplicating status text.
+                if header_height > 0 {
+                    fill_rect(buf, header_area, Some(' '), inner_bg);
+                    let width_limit = header_area.width as usize;
+                    let mut header_spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+                    let mut consumed_width: usize = 0;
+
+                    if overlay.running {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        let frame = crate::spinner::frame_at_time(
+                            crate::spinner::current_spinner(),
+                            now_ms,
+                        );
+                        if !frame.is_empty() {
+                            consumed_width += frame.chars().count();
+                            header_spans.push(ratatui::text::Span::styled(
+                                frame,
+                                Style::default().fg(crate::colors::spinner()),
+                            ));
+                            header_spans.push(ratatui::text::Span::raw(" "));
+                            consumed_width = consumed_width.saturating_add(1);
+                        }
+
+                        let status_text = overlay
+                            .start_time
+                            .map(|start| format!("Running… ({})", format_duration(start.elapsed())))
+                            .unwrap_or_else(|| "Running…".to_string());
+                        consumed_width = consumed_width
+                            .saturating_add(UnicodeWidthStr::width(status_text.as_str()));
+                        header_spans.push(ratatui::text::Span::styled(
+                            status_text,
+                            Style::default().fg(crate::colors::text_dim()),
+                        ));
+
+                        let interval = crate::spinner::current_spinner().interval_ms.max(50);
+                        self.app_event_tx
+                            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+                    } else {
+                        let (icon, color, status_text) = match overlay.exit_code {
+                            Some(0) => (
+                                "✔",
+                                crate::colors::success(),
+                                overlay
+                                    .duration
+                                    .map(|d| format!("Completed in {}", format_duration(d)))
+                                    .unwrap_or_else(|| "Completed".to_string()),
+                            ),
+                            Some(code) => (
+                                "✖",
+                                crate::colors::error(),
+                                overlay
+                                    .duration
+                                    .map(|d| format!("Exit {code} in {}", format_duration(d)))
+                                    .unwrap_or_else(|| format!("Exit {code}")),
+                            ),
+                            None => (
+                                "⚠",
+                                crate::colors::warning(),
+                                overlay
+                                    .duration
+                                    .map(|d| format!("Stopped after {}", format_duration(d)))
+                                    .unwrap_or_else(|| "Stopped".to_string()),
+                            ),
+                        };
+
+                        header_spans.push(ratatui::text::Span::styled(
+                            format!("{icon} "),
+                            Style::default().fg(color),
+                        ));
+                        consumed_width = consumed_width.saturating_add(icon.chars().count() + 1);
+
+                        consumed_width = consumed_width
+                            .saturating_add(UnicodeWidthStr::width(status_text.as_str()));
+                        header_spans.push(ratatui::text::Span::styled(
+                            status_text,
+                            Style::default().fg(crate::colors::text_dim()),
+                        ));
+                    }
+
+                    if !overlay.command_display.is_empty() && width_limit > consumed_width + 5 {
+                        let remaining = width_limit.saturating_sub(consumed_width + 5);
+                        if remaining > 0 {
+                            let truncated = ChatWidget::truncate_with_ellipsis(
+                                &overlay.command_display,
+                                remaining,
+                            );
+                            if !truncated.is_empty() {
+                                header_spans.push(ratatui::text::Span::styled(
+                                    "  •  ",
+                                    Style::default().fg(crate::colors::text_dim()),
+                                ));
+                                header_spans.push(ratatui::text::Span::styled(
+                                    truncated,
+                                    Style::default().fg(crate::colors::text()),
+                                ));
+                            }
+                        }
+                    }
+
+                    let header_line = ratatui::text::Line::from(header_spans);
+                    Paragraph::new(RtText::from(vec![header_line]))
+                        .wrap(ratatui::widgets::Wrap { trim: true })
+                        .render(header_area, buf);
+                }
 
                 let mut body_space = content
                     .height
@@ -15916,6 +16215,7 @@ struct TerminalOverlay {
     running: bool,
     exit_code: Option<i32>,
     duration: Option<Duration>,
+    start_time: Option<Instant>,
     truncated: bool,
     pending_utf8: Vec<u8>,
     pending_line: String,
@@ -15991,6 +16291,7 @@ impl TerminalOverlay {
             running: true,
             exit_code: None,
             duration: None,
+            start_time: None,
             truncated: false,
             pending_utf8: Vec::new(),
             pending_line: String::new(),
@@ -16047,6 +16348,7 @@ impl TerminalOverlay {
         self.running = true;
         self.exit_code = None;
         self.duration = None;
+        self.start_time = None;
         self.truncated = false;
         self.pending_utf8.clear();
         self.pending_line.clear();
@@ -16252,6 +16554,7 @@ impl TerminalOverlay {
         self.running = false;
         self.exit_code = exit_code;
         self.duration = Some(duration);
+        self.start_time = None;
     }
 
     fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {
