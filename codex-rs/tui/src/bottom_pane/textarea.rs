@@ -135,10 +135,6 @@ impl TextArea {
         self.wrapped_lines(width).len() as u16
     }
 
-    pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        self.cursor_pos_with_state(area, &TextAreaState::default())
-    }
-
     /// Compute the on-screen cursor position taking scrolling into account.
     pub fn cursor_pos_with_state(&self, area: Rect, state: &TextAreaState) -> Option<(u16, u16)> {
         let lines = self.wrapped_lines(area.width);
@@ -1395,7 +1391,8 @@ mod tests {
         // Place cursor in "world"
         let world_start = t.text().find("world").unwrap();
         t.set_cursor(world_start + 3);
-        let (_x, y) = t.cursor_pos(area).unwrap();
+        let default_state = TextAreaState::default();
+        let (_x, y) = t.cursor_pos_with_state(area, &default_state).unwrap();
         assert_eq!(y, 1); // world should be on second wrapped line
 
         // With state and small height, cursor is mapped onto visible row
@@ -1422,7 +1419,10 @@ mod tests {
         // Even if an absurd scroll is provided, when content fits the area the
         // effective scroll is 0 and the cursor position matches cursor_pos.
         let bad_state = TextAreaState { scroll: 999 };
-        let (x1, y1) = t.cursor_pos(area).unwrap();
+        let baseline_state = TextAreaState::default();
+        let (x1, y1) = t
+            .cursor_pos_with_state(area, &baseline_state)
+            .unwrap();
         let (x2, y2) = t.cursor_pos_with_state(area, &bad_state).unwrap();
         assert_eq!((x2, y2), (x1, y1));
 
@@ -1468,7 +1468,10 @@ mod tests {
         // Cursor at boundary index 4 should be displayed at start of second wrapped line
         t.set_cursor(4);
         let area = Rect::new(0, 0, 4, 10);
-        let (x, y) = t.cursor_pos(area).unwrap();
+        let default_state = TextAreaState::default();
+        let (x, y) = t
+            .cursor_pos_with_state(area, &default_state)
+            .unwrap();
         assert_eq!((x, y), (0, 1));
 
         // With state and small height, cursor should be visible at row 0, col 0
@@ -1788,7 +1791,8 @@ mod tests {
                 ratatui::widgets::WidgetRef::render_ref(&(&ta), full_area, &mut buf);
 
                 // cursor_pos: x must be within width when present
-                let _ = ta.cursor_pos(area);
+                let baseline_state = TextAreaState::default();
+                let _ = ta.cursor_pos_with_state(area, &baseline_state);
 
                 // cursor_pos_with_state: always within viewport rows
                 let (_x, _y) = ta
