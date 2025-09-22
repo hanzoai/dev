@@ -152,6 +152,8 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
 use codex_core::protocol::RateLimitSnapshotEvent;
+use crate::rate_limits_view::RateLimitResetInfo;
+use chrono::Utc;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -272,6 +274,8 @@ pub(crate) struct ChatWidget<'a> {
     rate_limit_fetch_inflight: bool,
     rate_limit_fetch_placeholder: Option<usize>,
     rate_limit_fetch_ack_pending: bool,
+    rate_limit_last_primary_reset_at: Option<chrono::DateTime<chrono::Utc>>,
+    rate_limit_last_weekly_reset_at: Option<chrono::DateTime<chrono::Utc>>,
     content_buffer: String,
     // Buffer for streaming assistant answer text; we do not surface partial
     // We wait for the final AgentMessage event and then emit the full text
@@ -2080,6 +2084,8 @@ impl ChatWidget<'_> {
             rate_limit_fetch_inflight: false,
             rate_limit_fetch_placeholder: None,
             rate_limit_fetch_ack_pending: false,
+            rate_limit_last_primary_reset_at: None,
+            rate_limit_last_weekly_reset_at: None,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2276,6 +2282,8 @@ impl ChatWidget<'_> {
             rate_limit_fetch_inflight: false,
             rate_limit_fetch_placeholder: None,
             rate_limit_fetch_ack_pending: false,
+            rate_limit_last_primary_reset_at: None,
+            rate_limit_last_weekly_reset_at: None,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -4203,6 +4211,8 @@ impl ChatWidget<'_> {
                     self.last_token_usage = info.last_token_usage.clone();
                 }
                 if let Some(snapshot) = event.rate_limits {
+                    let previous_snapshot = self.rate_limit_snapshot.clone();
+                    self.update_rate_limit_resets(previous_snapshot.as_ref(), &snapshot);
                     let warnings = self
                         .rate_limit_warnings
                         .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
@@ -4215,17 +4225,27 @@ impl ChatWidget<'_> {
                     }
                     if let Some(snapshot_ref) = self.rate_limit_snapshot.as_ref() {
                         if self.rate_limit_fetch_placeholder.is_some() || self.rate_limit_fetch_inflight {
+                            let reset_info = self.rate_limit_reset_info();
                             if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
                                 if idx < self.history_cells.len() {
                                     self.history_replace_at(
                                         idx,
-                                        Box::new(history_cell::new_limits_output(snapshot_ref)),
+                                        Box::new(history_cell::new_limits_output(
+                                            snapshot_ref,
+                                            reset_info.clone(),
+                                        )),
                                     );
                                 } else {
-                                    self.history_push(history_cell::new_limits_output(snapshot_ref));
+                                    self.history_push(history_cell::new_limits_output(
+                                        snapshot_ref,
+                                        reset_info.clone(),
+                                    ));
                                 }
                             } else {
-                                self.history_push(history_cell::new_limits_output(snapshot_ref));
+                                self.history_push(history_cell::new_limits_output(
+                                    snapshot_ref,
+                                    reset_info,
+                                ));
                             }
                             self.rate_limit_fetch_inflight = false;
                             self.rate_limit_fetch_ack_pending = false;
@@ -5095,7 +5115,10 @@ impl ChatWidget<'_> {
 
     pub(crate) fn add_limits_output(&mut self) {
         if let Some(snapshot) = &self.rate_limit_snapshot {
-            self.history_push(history_cell::new_limits_output(snapshot));
+            self.history_push(history_cell::new_limits_output(
+                snapshot,
+                self.rate_limit_reset_info(),
+            ));
         } else {
             self.request_latest_rate_limits();
         }
@@ -5129,6 +5152,36 @@ impl ChatWidget<'_> {
             }],
         };
         self.submit_user_message(ping);
+    }
+
+    fn rate_limit_reset_info(&self) -> RateLimitResetInfo {
+        RateLimitResetInfo {
+            primary_last_reset: self.rate_limit_last_primary_reset_at,
+            weekly_last_reset: self.rate_limit_last_weekly_reset_at,
+        }
+    }
+
+    fn update_rate_limit_resets(
+        &mut self,
+        previous: Option<&RateLimitSnapshotEvent>,
+        current: &RateLimitSnapshotEvent,
+    ) {
+        let now = Utc::now();
+        if let Some(prev) = previous {
+            if current.primary_used_percent + 1.0 < prev.primary_used_percent {
+                self.rate_limit_last_primary_reset_at = Some(now);
+            }
+            if current.weekly_used_percent + 0.5 < prev.weekly_used_percent {
+                self.rate_limit_last_weekly_reset_at = Some(now);
+            }
+        } else {
+            if current.primary_used_percent <= 1.0 {
+                self.rate_limit_last_primary_reset_at = Some(now);
+            }
+            if current.weekly_used_percent <= 1.0 {
+                self.rate_limit_last_weekly_reset_at = Some(now);
+            }
+        }
     }
 
     #[cfg(not(debug_assertions))]
