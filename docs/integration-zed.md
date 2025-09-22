@@ -1,6 +1,6 @@
 # Using Code with Zed via ACP
 
-The Rust MCP server now exposes the Agent Client Protocol (ACP) tools that Zed expects. This section walks through a minimal setup.
+The Rust MCP server now exposes the Agent Client Protocol (ACP) tools (`acp/new_session`, `acp/prompt`) that Zed expects. Zed still connects over MCP/JSON-RPC, but every conversation is represented through these ACP calls. This section walks through a minimal setup.
 
 ## 1. Configure Code's MCP server
 
@@ -38,16 +38,16 @@ The server will advertise four tools during the handshake: `codex`, `codex-reply
 
 ## 3. Point Zed at Code's MCP endpoint
 
-Add an entry to Zed's MCP configuration (for example, `~/.config/zed/mcp.json`):
+Add an entry to Zed's `settings.json` under `agent_servers` (see [Zed’s external agents guide](https://zed.dev/docs/ai/external-agents#add-custom-agents)):
 
-```json
+```jsonc
 {
-  "servers": {
-    "code": {
-      "command": "/path/to/code",
+  "agent_servers": {
+    "Code": {
+      "command": "/usr/local/bin/code",
       "args": ["mcp"],
       "env": {
-        "CODEX_HOME": "/Users/you/.code" ,
+        "CODEX_HOME": "/Users/you/.code",
         "RUST_LOG": "info"
       }
     }
@@ -55,7 +55,7 @@ Add an entry to Zed's MCP configuration (for example, `~/.config/zed/mcp.json`):
 }
 ```
 
-When Zed starts the server it will discover the ACP tools, call `acp/new_session` to create a Codex conversation, and use `acp/prompt` for additional turns. Code streams `acp/session_update` notifications back to Zed, including exec/patch events and approval requests.
+When Zed launches this server it connects over MCP, then issues ACP tool calls (`acp/new_session`, `acp/prompt`) that we expose. Those tool invocations are bridged into full Codex sessions, and we stream ACP `session_update` notifications back so Zed can render reasoning, tool executions, and approvals.
 
 ## 4. Permission flow summary
 
