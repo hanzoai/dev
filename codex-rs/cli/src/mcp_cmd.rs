@@ -96,7 +96,7 @@ impl McpCli {
 
         match subcommand {
             McpSubcommand::Serve => {
-                code_mcp_server::run_main(codex_linux_sandbox_exe, config_overrides).await?;
+                codex_mcp_server::run_main(codex_linux_sandbox_exe, config_overrides).await?;
             }
             McpSubcommand::List(args) => {
                 run_list(&config_overrides, args)?;
