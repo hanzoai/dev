@@ -284,12 +284,21 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 return CodexStatus::InitiateShutdown;
             }
             EventMsg::TokenCount(ev) => {
-                // Our fork carries TokenUsage directly
-                ts_println!(
-                    self,
-                    "tokens used: {}",
-                    format_with_separators(ev.blended_total())
-                );
+                if let Some(info) = &ev.info {
+                    ts_println!(
+                        self,
+                        "tokens used: {}",
+                        format_with_separators(info.total_token_usage.blended_total())
+                    );
+                }
+                if let Some(snapshot) = &ev.rate_limits {
+                    ts_println!(
+                        self,
+                        "rate limits: hourly {:.1}% • weekly {:.1}%",
+                        snapshot.primary_used_percent,
+                        snapshot.weekly_used_percent
+                    );
+                }
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 if !self.answer_started {

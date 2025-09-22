@@ -29,6 +29,7 @@ Notes
   from the repository root (not inside another branch worktree).
 - `/merge`: merge the current worktree branch back into the default branch and
   remove the worktree. Run this from inside the worktree created by `/branch`.
+- `/cmd <name>`: run a project command defined for the current workspace.
 
 ## UX & Display
 
@@ -38,9 +39,12 @@ Notes
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
+- `/limits`: visualize current hourly and weekly rate-limit usage.
 - `/update`: check the installed version, detect available upgrades, and run the
   appropriate installer when possible.
 - `/mcp`: manage MCP servers (status/on/off/add).
+- `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
+  harness settings.
 
 ## Search & Mentions
 

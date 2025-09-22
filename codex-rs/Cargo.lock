@@ -219,6 +219,12 @@ dependencies = [
 
 [[package]]
 name = "arrayvec"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
+
+[[package]]
+name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
@@ -399,7 +405,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f3efb2ca85bc610acfa917b5aaa36f3fcbebed5b3182d7f877b02531c4b80c8"
 dependencies = [
  "anyhow",
- "arrayvec",
+ "arrayvec 0.7.6",
  "log",
  "nom",
  "num-rational 0.4.2",
@@ -412,7 +418,7 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47c8fbc0f831f4519fe8b810b6a7a91410ec83031b8233f730a0480029f6a23f"
 dependencies = [
- "arrayvec",
+ "arrayvec 0.7.6",
 ]
 
 [[package]]
@@ -949,6 +955,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "serde_yaml",
  "sha1",
  "shlex",
  "similar",
@@ -1160,6 +1167,7 @@ dependencies = [
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "sys-locale",
+ "tempfile",
  "tracing",
  "ts-rs",
  "uuid",
@@ -1198,6 +1206,7 @@ dependencies = [
  "color-eyre",
  "crossterm",
  "diffy",
+ "fs2",
  "futures",
  "image 0.25.8",
  "insta",
@@ -1216,6 +1225,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shlex",
+ "strip-ansi-escapes",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "supports-color",
@@ -4363,7 +4373,7 @@ checksum = "cd87ce80a7665b1cce111f8a16c1f3929f6547ce91ade6addf4ec86a8dda5ce9"
 dependencies = [
  "arbitrary",
  "arg_enum_proc_macro",
- "arrayvec",
+ "arrayvec 0.7.6",
  "av1-grain",
  "bitstream-io",
  "built",
@@ -5050,6 +5060,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap 2.10.0",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "serial2"
 version = "0.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5341,6 +5364,15 @@ dependencies = [
  "phf_shared",
  "proc-macro2",
  "quote",
+]
+
+[[package]]
+name = "strip-ansi-escapes"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "011cbb39cf7c1f62871aea3cc46e5817b0937b49e9447370c93cacbe93a766d8"
+dependencies = [
+ "vte 0.10.1",
 ]
 
 [[package]]
@@ -6239,6 +6271,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6336,7 +6374,18 @@ dependencies = [
  "itoa",
  "log",
  "unicode-width 0.1.14",
- "vte",
+ "vte 0.11.1",
+]
+
+[[package]]
+name = "vte"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cbce692ab4ca2f1f3047fcf732430249c0e971bfdd2b234cf2c47ad93af5983"
+dependencies = [
+ "arrayvec 0.5.2",
+ "utf8parse",
+ "vte_generate_state_changes",
 ]
 
 [[package]]
@@ -6345,7 +6394,7 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f5022b5fbf9407086c180e9557be968742d839e68346af7792b8592489732197"
 dependencies = [
- "arrayvec",
+ "arrayvec 0.7.6",
  "utf8parse",
  "vte_generate_state_changes",
 ]

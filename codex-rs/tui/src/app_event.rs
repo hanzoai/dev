@@ -119,6 +119,12 @@ pub(crate) enum AppEvent {
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
+    /// Update validation harness master toggle
+    UpdateValidationPatchHarness(bool),
+    /// Enable/disable a specific validation tool
+    UpdateValidationTool { name: String, enable: bool },
+    /// Start installing a validation tool through the terminal overlay
+    RequestValidationToolInstall { name: String, command: String },
 
     /// Enable/disable a specific MCP server
     UpdateMcpServer { name: String, enable: bool },
@@ -185,6 +191,9 @@ pub(crate) enum AppEvent {
     /// Insert a background event at the end of the current request so it
     /// follows previously rendered content.
     InsertBackgroundEventLate(String),
+
+    /// Background rate limit refresh failed (threaded request).
+    RateLimitFetchFailed { message: String },
 
     #[allow(dead_code)]
     StartCommitAnimation,
@@ -265,6 +274,7 @@ pub(crate) enum AppEvent {
         suggestion: String,
         ack: Redacted<StdSender<TerminalCommandGate>>,
     },
+    TerminalApprovalDecision { id: u64, approved: bool },
     #[cfg(not(debug_assertions))]
     RunUpdateCommand {
         command: Vec<String>,

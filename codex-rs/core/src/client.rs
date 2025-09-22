@@ -361,13 +361,19 @@ impl ModelClient {
                     }
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
-                    if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers())
-                        && tx_event
+                    if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers()) {
+                        debug!(
+                            "rate limit headers:\n{}",
+                            format_rate_limit_headers(resp.headers())
+                        );
+
+                        if tx_event
                             .send(Ok(ResponseEvent::RateLimits(snapshot)))
                             .await
                             .is_err()
-                    {
-                        debug!("receiver dropped rate limit snapshot event");
+                        {
+                            debug!("receiver dropped rate limit snapshot event");
+                        }
                     }
 
                     // spawn task to process SSE
@@ -551,6 +557,11 @@ impl ModelClient {
         self.config.model_family.clone()
     }
 
+    #[allow(dead_code)]
+    pub fn get_model_context_window(&self) -> Option<u64> {
+        self.config.model_context_window
+    }
+
     // duplicate of earlier helpers removed during merge cleanup
 
     #[allow(dead_code)]
@@ -599,9 +610,15 @@ impl From<ResponseCompletedUsage> for TokenUsage {
     fn from(val: ResponseCompletedUsage) -> Self {
         TokenUsage {
             input_tokens: val.input_tokens,
-            cached_input_tokens: val.input_tokens_details.map(|d| d.cached_tokens),
+            cached_input_tokens: val
+                .input_tokens_details
+                .map(|d| d.cached_tokens)
+                .unwrap_or(0),
             output_tokens: val.output_tokens,
-            reasoning_output_tokens: val.output_tokens_details.map(|d| d.reasoning_tokens),
+            reasoning_output_tokens: val
+                .output_tokens_details
+                .map(|d| d.reasoning_tokens)
+                .unwrap_or(0),
             total_tokens: val.total_tokens,
         }
     }
@@ -659,6 +676,18 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEve
         primary_window_minutes,
         weekly_window_minutes,
     })
+}
+
+fn format_rate_limit_headers(headers: &HeaderMap) -> String {
+    let mut pairs: Vec<String> = headers
+        .iter()
+        .map(|(name, value)| {
+            let value_str = value.to_str().unwrap_or("<invalid>");
+            format!("{}: {}", name, value_str)
+        })
+        .collect();
+    pairs.sort();
+    pairs.join("\n")
 }
 
 fn parse_header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {

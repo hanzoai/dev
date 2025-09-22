@@ -144,7 +144,6 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
             command,
             display: command_display,
         } if !command.is_empty() => (command, command_display),
-        }
         _ => {
             info!("auto-upgrade enabled but no managed installer detected; skipping");
             return Ok(None);
