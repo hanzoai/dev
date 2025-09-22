@@ -39,6 +39,7 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use shlex::Shlex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::Component;
 use std::path::Path;
@@ -104,7 +105,7 @@ pub(crate) enum ExecAction {
 }
 
 pub(crate) fn action_enum_from_parsed(
-    parsed: &Vec<codex_core::parse_command::ParsedCommand>,
+    parsed: &[codex_core::parse_command::ParsedCommand],
 ) -> ExecAction {
     use codex_core::parse_command::ParsedCommand;
     for p in parsed {
@@ -805,7 +806,7 @@ impl ExploreAggregationCell {
         session_root: &Path,
         original_command: &[String],
     ) -> Option<usize> {
-        let action = action_enum_from_parsed(&parsed.to_vec());
+        let action = action_enum_from_parsed(parsed);
         let summary = match action {
             ExecAction::Search => parsed.iter().find_map(|p| match p {
                 ParsedCommand::Search { query, path, cmd } => {
@@ -1405,6 +1406,8 @@ pub(crate) struct ExecCell {
     // Cached per-width layout (wrapped rows + totals) while content is stable
     cached_layout: std::cell::RefCell<Option<Rc<ExecLayoutCache>>>,
     cached_command_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    cached_wait_extras: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    parsed_meta: Option<ParsedExecMetadata>,
     has_bold_command: bool,
     wait_state: std::cell::RefCell<ExecWaitState>,
 }
@@ -1416,6 +1419,31 @@ struct ExecLayoutCache {
     out_lines: Vec<Line<'static>>,
     pre_total: u16,
     out_block_total: u16,
+}
+
+#[derive(Clone)]
+struct ParsedExecMetadata {
+    action: ExecAction,
+    ctx_path: Option<String>,
+    search_paths: HashSet<String>,
+}
+
+impl ParsedExecMetadata {
+    fn from_commands(parsed: &[ParsedCommand]) -> Self {
+        let action = action_enum_from_parsed(parsed);
+        let ctx_path = first_context_path(parsed);
+        let mut search_paths: HashSet<String> = HashSet::new();
+        for pc in parsed {
+            if let ParsedCommand::Search { path: Some(p), .. } = pc {
+                search_paths.insert(p.to_string());
+            }
+        }
+        Self {
+            action,
+            ctx_path,
+            search_paths,
+        }
+    }
 }
 
 // ==================== AssistantMarkdownCell ====================
@@ -1831,7 +1859,7 @@ impl HistoryCell for ExecCell {
         self
     }
     fn kind(&self) -> HistoryCellType {
-        let kind = match action_enum_from_parsed(&self.parsed) {
+        let kind = match self.parsed_action() {
             ExecAction::Read => ExecKind::Read,
             ExecAction::Search => ExecKind::Search,
             ExecAction::List => ExecKind::List,
@@ -2019,7 +2047,17 @@ impl ExecCell {
         self.cached_pre_lines.borrow_mut().take();
         self.cached_out_lines.borrow_mut().take();
         self.cached_layout.borrow_mut().take();
+        self.cached_wait_extras.borrow_mut().take();
     }
+
+    fn parsed_action(&self) -> ExecAction {
+        self
+            .parsed_meta
+            .as_ref()
+            .map(|meta| meta.action)
+            .unwrap_or(ExecAction::Run)
+    }
+
 
     pub(crate) fn set_waiting(&self, waiting: bool) {
         let mut state = self.wait_state.borrow_mut();
@@ -2159,6 +2197,21 @@ impl ExecCell {
         ))
     }
 
+    fn wait_extras(&self, state: &ExecWaitState) -> Vec<Line<'static>> {
+        if let Some(cached) = self.cached_wait_extras.borrow().as_ref() {
+            return cached.clone();
+        }
+        let mut extra_lines: Vec<Line<'static>> = Vec::new();
+        if let Some(summary_line) = self.wait_summary_line(state) {
+            extra_lines.push(summary_line);
+        }
+        extra_lines.extend(self.wait_note_lines(state));
+        if self.output.is_some() && !extra_lines.is_empty() {
+            *self.cached_wait_extras.borrow_mut() = Some(extra_lines.clone());
+        }
+        extra_lines
+    }
+
     #[cfg(test)]
     fn has_bold_command(&self) -> bool {
         self.has_bold_command
@@ -2173,6 +2226,12 @@ impl ExecCell {
         self.parsed = parsed;
         self.has_bold_command = command_has_bold_token(&self.command);
         self.cached_command_lines.borrow_mut().take();
+        self.cached_wait_extras.borrow_mut().take();
+        self.parsed_meta = if self.parsed.is_empty() {
+            None
+        } else {
+            Some(ParsedExecMetadata::from_commands(&self.parsed))
+        };
         self.invalidate_render_caches();
     }
     /// Compute wrapped row totals for the preamble and the output at the given width.
@@ -2240,13 +2299,19 @@ impl ExecCell {
         Vec<Line<'static>>,
         Option<Line<'static>>,
     ) {
-        // For completed executions, cache pre/output segments since they are immutable.
-        if let (true, Some(pre), Some(out)) = (
-            self.output.is_some(),
+        if let (Some(pre), Some(out)) = (
             self.cached_pre_lines.borrow().as_ref(),
             self.cached_out_lines.borrow().as_ref(),
         ) {
-            return (pre.clone(), out.clone(), None);
+            if self.output.is_some() {
+                return (pre.clone(), out.clone(), None);
+            }
+            if self.stream_preview.is_some() {
+                let wait_state = self.wait_state_snapshot();
+                let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+                let status = self.streaming_status_line_for_label(status_label);
+                return (pre.clone(), out.clone(), status);
+            }
         }
 
         let wait_state = self.wait_state_snapshot();
@@ -2276,21 +2341,27 @@ impl ExecCell {
                 }
             }
 
-            exec_render_parts_parsed(
-                &self.parsed,
-                self.output.as_ref(),
-                self.stream_preview.as_ref(),
-                self.start_time,
-                status_label,
-            )
+            match self.parsed_meta.as_ref() {
+                Some(meta) => exec_render_parts_parsed_with_meta(
+                    &self.parsed,
+                    meta,
+                    self.output.as_ref(),
+                    self.stream_preview.as_ref(),
+                    self.start_time,
+                    status_label,
+                ),
+                None => exec_render_parts_parsed(
+                    &self.parsed,
+                    self.output.as_ref(),
+                    self.stream_preview.as_ref(),
+                    self.start_time,
+                    status_label,
+                ),
+            }
         };
 
         if self.output.is_some() {
-            let mut extra_lines: Vec<Line<'static>> = Vec::new();
-            if let Some(summary_line) = self.wait_summary_line(&wait_state) {
-                extra_lines.push(summary_line);
-            }
-            extra_lines.extend(self.wait_note_lines(&wait_state));
+            let extra_lines = self.wait_extras(&wait_state);
             if !extra_lines.is_empty() {
                 let is_blank_line = |line: &Line<'static>| {
                     line.spans
@@ -2326,7 +2397,7 @@ impl ExecCell {
             }
             *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
             *self.cached_out_lines.borrow_mut() = Some(out.clone());
-        } else if self.parsed.is_empty() {
+        } else if self.output.is_none() {
             *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
             *self.cached_out_lines.borrow_mut() = Some(out.clone());
         }
@@ -2452,12 +2523,15 @@ impl ExecCell {
             return Some(running_status_line(message));
         }
 
-        let action = action_enum_from_parsed(&self.parsed.to_vec());
-        if !matches!(action, ExecAction::Run) {
+        let meta = match self.parsed_meta.as_ref() {
+            Some(meta) => meta,
+            None => return None,
+        };
+        if !matches!(meta.action, ExecAction::Run) {
             return None;
         }
 
-        let mut message = match first_context_path(&self.parsed) {
+        let mut message = match meta.ctx_path.as_deref() {
             Some(p) => format!("{status_label}... in {p}"),
             None => format!("{status_label}..."),
         };
@@ -2626,7 +2700,7 @@ impl MergedExecCell {
     }
     pub(crate) fn from_exec(exec: &ExecCell) -> Self {
         let (pre, out, _) = exec.exec_render_parts();
-        let kind = match action_enum_from_parsed(&exec.parsed) {
+        let kind = match exec.parsed_action() {
             ExecAction::Read => ExecKind::Read,
             ExecAction::Search => ExecKind::Search,
             ExecAction::List => ExecKind::List,
@@ -3451,8 +3525,9 @@ impl HistoryCell for MergedExecCell {
     }
 }
 
-fn exec_render_parts_parsed(
+fn exec_render_parts_parsed_with_meta(
     parsed_commands: &[ParsedCommand],
+    meta: &ParsedExecMetadata,
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
@@ -3462,8 +3537,8 @@ fn exec_render_parts_parsed(
     Vec<Line<'static>>,
     Option<Line<'static>>,
 ) {
-    let action = action_enum_from_parsed(&parsed_commands.to_vec());
-    let ctx_path = first_context_path(parsed_commands);
+    let action = meta.action;
+    let ctx_path = meta.ctx_path.as_deref();
     let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
     let mut pre: Vec<Line<'static>> = Vec::new();
     let mut running_status: Option<Line<'static>> = None;
@@ -3552,12 +3627,7 @@ fn exec_render_parts_parsed(
     }
 
     // Reuse the same parsed-content rendering as new_parsed_command
-    let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for pc in parsed_commands.iter() {
-        if let ParsedCommand::Search { path: Some(p), .. } = pc {
-            search_paths.insert(p.to_string());
-        }
-    }
+    let search_paths = &meta.search_paths;
     // Compute output preview first to know whether to draw the downward corner.
     let show_stdout = matches!(action, ExecAction::Run);
     let display_output = output.or(stream_preview);
@@ -3880,6 +3950,28 @@ fn exec_render_parts_parsed(
     }
 
     (pre, out, running_status)
+}
+
+fn exec_render_parts_parsed(
+    parsed_commands: &[ParsedCommand],
+    output: Option<&CommandOutput>,
+    stream_preview: Option<&CommandOutput>,
+    start_time: Option<Instant>,
+    status_label: &str,
+) -> (
+    Vec<Line<'static>>,
+    Vec<Line<'static>>,
+    Option<Line<'static>>,
+) {
+    let meta = ParsedExecMetadata::from_commands(parsed_commands);
+    exec_render_parts_parsed_with_meta(
+        parsed_commands,
+        &meta,
+        output,
+        stream_preview,
+        start_time,
+        status_label,
+    )
 }
 
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
@@ -6367,6 +6459,11 @@ fn new_exec_cell(
         None
     };
     let has_bold_command = command_has_bold_token(&command);
+    let parsed_meta = if parsed.is_empty() {
+        None
+    } else {
+        Some(ParsedExecMetadata::from_commands(&parsed))
+    };
     ExecCell {
         command,
         parsed,
@@ -6378,6 +6475,8 @@ fn new_exec_cell(
         cached_out_lines: std::cell::RefCell::new(None),
         cached_layout: std::cell::RefCell::new(None),
         cached_command_lines: std::cell::RefCell::new(None),
+        cached_wait_extras: std::cell::RefCell::new(None),
+        parsed_meta,
         has_bold_command,
         wait_state: std::cell::RefCell::new(ExecWaitState::default()),
     }
@@ -7673,8 +7772,9 @@ fn new_parsed_command(
     stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
 ) -> Vec<Line<'static>> {
-    let action = action_enum_from_parsed(&parsed_commands.to_vec());
-    let ctx_path = first_context_path(parsed_commands);
+    let meta = ParsedExecMetadata::from_commands(parsed_commands);
+    let action = meta.action;
+    let ctx_path = meta.ctx_path.as_deref();
     let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
     let mut lines: Vec<Line> = Vec::new();
     let mut running_status: Option<Line<'static>> = None;
@@ -7725,7 +7825,7 @@ fn new_parsed_command(
                         Style::default().fg(crate::colors::text()),
                     ));
                 } else {
-                    let done = match &ctx_path {
+                    let done = match ctx_path {
                         Some(p) => format!("Ran in {p}"),
                         None => "Ran".to_string(),
                     };
@@ -7752,7 +7852,7 @@ fn new_parsed_command(
                         Style::default().fg(crate::colors::text()),
                     ));
                 } else {
-                    let done = match &ctx_path {
+                    let done = match ctx_path {
                         Some(p) => format!("Ran in {p}"),
                         None => "Ran".to_string(),
                     };
@@ -7768,12 +7868,7 @@ fn new_parsed_command(
     }
 
     // Collect any paths referenced by search commands to suppress redundant directory lines
-    let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for pc in parsed_commands.iter() {
-        if let ParsedCommand::Search { path: Some(p), .. } = pc {
-            search_paths.insert(p.to_string());
-        }
-    }
+    let search_paths = &meta.search_paths;
 
     // We'll emit only content lines here; the header above already communicates the action.
     // Use a single leading "└ " for the very first content line, then indent subsequent ones,
@@ -8068,7 +8163,7 @@ fn new_parsed_command(
     // the list path was suppressed because a Search referenced the same path),
     // emit a single contextual line so the location is always visible.
     if matches!(action, ExecAction::List) && !any_content_emitted {
-        let display_p = match &ctx_path {
+        let display_p = match ctx_path {
             Some(p) if !p.is_empty() => {
                 if p.ends_with('/') {
                     p.to_string()
