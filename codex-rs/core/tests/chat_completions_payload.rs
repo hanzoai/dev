@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use codex_core::debug_logger::DebugLogger;
 use codex_core::ContentItem;
 use codex_core::LocalShellAction;
 use codex_core::LocalShellExecAction;
@@ -81,7 +82,11 @@ async fn run_request(input: Vec<ResponseItem>) -> Value {
         summary,
         verbosity,
         Uuid::new_v4(),
+<<<<<<< HEAD
+        Arc::clone(&debug_logger),
+=======
         debug_logger,
+>>>>>>> refs/heads/main
     );
 
     let mut prompt = Prompt::default();
