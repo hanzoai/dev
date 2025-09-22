@@ -152,13 +152,13 @@ impl CodexToolCallParam {
         // Build the `ConfigOverrides` recognized by codex-core.
         let overrides = hanzo_dev::config::ConfigOverrides {
             model,
-            review_model: None,
+            // review_model field doesn't exist in ConfigOverrides
             config_profile: profile,
             cwd: cwd.map(PathBuf::from),
             approval_policy: approval_policy.map(Into::into),
             sandbox_mode: sandbox.map(Into::into),
             model_provider: None,
-            dev_linux_sandbox_exe,
+            codex_linux_sandbox_exe: dev_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
             disable_response_storage: None,

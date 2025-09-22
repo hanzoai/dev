@@ -34,6 +34,20 @@ pub trait FrameRequester: Clone + Send + 'static {
     fn test_dummy() -> Self;
 }
 
+/// Default frame requester for testing
+#[derive(Clone)]
+pub struct DefaultFrameRequester;
+
+impl FrameRequester for DefaultFrameRequester {
+    fn request_frame(&self) {
+        // No-op for testing
+    }
+
+    fn test_dummy() -> Self {
+        DefaultFrameRequester
+    }
+}
+
 /// Terminal information queried at startup
 #[derive(Clone)]
 pub struct TerminalInfo {
@@ -191,6 +205,13 @@ fn set_panic_hook() {
 }
 
 /// Restore the terminal to its original state
+/// Leave alternate screen mode only (without restoring terminal state)
+pub fn leave_alt_screen_only() -> Result<()> {
+    use crossterm::terminal::{LeaveAlternateScreen};
+    execute!(stdout(), LeaveAlternateScreen)?;
+    Ok(())
+}
+
 pub fn restore() -> Result<()> {
     // Pop may fail on platforms that didn't support the push; ignore errors.
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);

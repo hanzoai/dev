@@ -11,3 +11,8 @@ pub fn render_key_hint(area: Rect, buf: &mut Buffer, hint: &str) {
 pub fn format_key_hint(key: &str, description: &str) -> String {
     format!("{} {}", key, description)
 }
+
+/// Format an Alt key combination hint
+pub fn alt(key: &str) -> Span<'static> {
+    Span::styled(format!("Alt+{}", key), Style::default().bold())
+}

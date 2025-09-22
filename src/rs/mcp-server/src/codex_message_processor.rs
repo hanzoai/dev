@@ -595,7 +595,7 @@ fn derive_config_from_params(
         approval_policy: approval_policy.map(map_ask_for_approval_from_wire),
         sandbox_mode,
         model_provider: None,
-        dev_linux_sandbox_exe,
+        codex_linux_sandbox_exe: dev_linux_sandbox_exe,
         base_instructions,
         include_plan_tool,
         disable_response_storage: None,

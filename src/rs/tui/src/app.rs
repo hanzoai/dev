@@ -237,7 +237,7 @@ impl App<'_> {
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
                     event_tx: app_event_tx.clone(),
-                    dev_home: config.dev_home.clone(),
+                    codex_home: config.codex_home.clone(),
                     cwd: config.cwd.clone(),
                     show_trust_screen,
                     show_login_screen,

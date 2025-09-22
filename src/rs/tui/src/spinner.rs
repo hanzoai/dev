@@ -64,6 +64,13 @@ pub struct SpinnerDefinition {
     pub interval: u64,
 }
 
+impl SpinnerDefinition {
+    /// Get the interval in milliseconds
+    pub fn interval_ms(&self) -> u64 {
+        self.interval
+    }
+}
+
 pub fn find_spinner_by_name(name: &str) -> Option<SpinnerDefinition> {
     match name {
         "dots" => Some(SpinnerDefinition {

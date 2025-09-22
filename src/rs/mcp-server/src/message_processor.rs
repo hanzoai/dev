@@ -231,6 +231,7 @@ impl MessageProcessor {
                 name: "dev-mcp-server".to_string(),
                 version: dev_version::version().to_string(),
                 title: Some("Dev".to_string()),
+                user_agent: Some("dev-mcp-server".to_string()),
             },
         };
 
