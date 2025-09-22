@@ -86,6 +86,7 @@ unicode-width = "0.1"
 url = "2"
 uuid = "1"
 futures = "0.3"
+fs2 = "0.4"
 syntect = { version = "5", features = ["yaml-load", "plist-load", "parsing", "default-syntaxes"] }
 which = "6"
 urlencoding = "2.1"
