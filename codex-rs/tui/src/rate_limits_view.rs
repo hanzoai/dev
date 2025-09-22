@@ -181,7 +181,6 @@ fn build_summary_lines(
     let mut lines: Vec<Line<'static>> = vec![
         "/limits".magenta().into(),
         "".into(),
-        vec!["Rate limit usage snapshot".bold()].into(),
         vec!["  Tip: run `/limits` right after Codex replies for freshest numbers.".dim()].into(),
         build_usage_line(
             "  • Hourly limit",
