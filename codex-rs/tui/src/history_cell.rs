@@ -9687,10 +9687,8 @@ pub(crate) fn new_status_output(
             )));
         }
 
-        if let Some(limit) = auto_compact_limit {
-            if limit <= 0 {
-                lines.push(Line::from("  • Auto-compact threshold: disabled"));
-            } else {
+        match auto_compact_limit {
+            Some(limit) if limit > 0 => {
                 let limit_u64 = limit as u64;
                 let remaining = limit_u64.saturating_sub(total_usage.total_tokens);
                 lines.push(Line::from(format!(
@@ -9700,6 +9698,34 @@ pub(crate) fn new_status_output(
                 )));
                 if total_usage.total_tokens > limit_u64 {
                     lines.push(Line::from("    • Compacting will trigger on the next turn".dim()));
+                }
+            }
+            _ => {
+                if let Some(window) = context_window {
+                    if window > 0 {
+                        let used = last_usage.tokens_in_context_window();
+                        let remaining = window.saturating_sub(used);
+                        let percent_left = if window == 0 {
+                            0.0
+                        } else {
+                            (remaining as f64 / window as f64) * 100.0
+                        };
+                        lines.push(Line::from(format!(
+                            "  • Context window: {} used of {} ({:.0}% left)",
+                            format_with_separators(used),
+                            format_with_separators(window),
+                            percent_left
+                        )));
+                        lines.push(Line::from(format!(
+                            "  • {} tokens before overflow",
+                            format_with_separators(remaining)
+                        )));
+                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    } else {
+                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    }
+                } else {
+                    lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
                 }
             }
         }

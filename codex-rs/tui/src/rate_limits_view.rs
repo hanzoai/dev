@@ -5,6 +5,7 @@ use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_protocol::num_format::format_with_separators;
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
+use std::time::Duration;
 
 const WEEKLY_CELL: &str = "▇▇";
 const HOURLY_CELL: &str = "▓▓";
@@ -50,6 +51,9 @@ pub(crate) struct RateLimitResetInfo {
     pub(crate) weekly_last_reset: Option<DateTime<Utc>>,
     pub(crate) session_tokens_used: Option<u64>,
     pub(crate) auto_compact_limit: Option<u64>,
+    pub(crate) overflow_auto_compact: bool,
+    pub(crate) context_window: Option<u64>,
+    pub(crate) context_tokens_used: Option<u64>,
 }
 
 /// Default gauge configuration used by the TUI.
@@ -69,7 +73,7 @@ pub(crate) fn build_limits_view(
         .map(|state| scale_grid_state(state, grid_config));
 
     LimitsView {
-        summary_lines: build_summary_lines(&metrics, snapshot, reset_info),
+        summary_lines: build_summary_lines(&metrics, snapshot, &reset_info),
         legend_lines: build_legend_lines(grid_state.is_some()),
         footer_lines: build_footer_lines(&metrics),
         grid_state,
@@ -126,7 +130,7 @@ struct GridState {
 fn build_summary_lines(
     metrics: &RateLimitMetrics,
     snapshot: &RateLimitSnapshotEvent,
-    reset_info: RateLimitResetInfo,
+    reset_info: &RateLimitResetInfo,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push("/limits".magenta().into());
@@ -141,7 +145,10 @@ fn build_summary_lines(
             .fg(colors::text())
             .add_modifier(Modifier::BOLD),
     ));
-    lines.push(build_hourly_window_line(metrics));
+    lines.push(build_hourly_window_line(
+        metrics,
+        reset_info.primary_last_reset,
+    ));
     lines.push(build_hourly_reset_line(
         snapshot.primary_window_minutes,
         reset_info.primary_last_reset,
@@ -168,7 +175,7 @@ fn build_summary_lines(
     ));
 
     lines.push("".into());
-    lines.extend(build_compact_lines(&reset_info));
+    lines.extend(build_compact_lines(reset_info));
 
     lines.push("".into());
     lines.push(section_header("Chart"));
@@ -199,28 +206,52 @@ fn build_bar_line(label: &str, percent: f64, suffix: &str, style: Style) -> Line
     Line::from(spans)
 }
 
-fn build_hourly_window_line(metrics: &RateLimitMetrics) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::raw(field_prefix("Window")));
-    let ratio = metrics
-        .primary_to_weekly_ratio_percent
-        .unwrap_or(0.0)
-        .clamp(0.0, 100.0);
-    spans.extend(render_percent_bar(ratio));
-
-    let primary = format_minutes_short(metrics.primary_window_minutes);
-    let weekly = format_minutes_short(metrics.weekly_window_minutes);
-    if let Some(value) = metrics.primary_to_weekly_ratio_percent {
-        spans.push(Span::styled(
-            format!(" {}", format_percent(value)),
-            Style::default().fg(colors::text()),
-        ));
+fn build_hourly_window_line(
+    metrics: &RateLimitMetrics,
+    last_reset: Option<DateTime<Utc>>,
+) -> Line<'static> {
+    let prefix = field_prefix("Window");
+    if metrics.primary_window_minutes == 0 {
+        return Line::from(vec![
+            Span::raw(prefix),
+            Span::styled(
+                "window length unavailable".to_string(),
+                Style::default().fg(colors::dim()),
+            ),
+        ]);
     }
-    spans.push(Span::styled(
-        format!(" ({primary} / {weekly})"),
-        Style::default().fg(colors::dim()),
-    ));
-    Line::from(spans)
+
+    if let Some(last) = last_reset {
+        if let Some(timing) = compute_window_timing(metrics.primary_window_minutes, last) {
+            let window_secs = timing.window.as_secs_f64();
+            if window_secs > 0.0 {
+                let elapsed = timing.elapsed();
+                let percent = ((elapsed.as_secs_f64() / window_secs) * 100.0).clamp(0.0, 100.0);
+                let mut spans: Vec<Span<'static>> = Vec::new();
+                spans.push(Span::raw(prefix.clone()));
+                spans.extend(render_percent_bar(percent));
+                spans.push(Span::styled(
+                    format!(" {}", format_percent(percent)),
+                    Style::default().fg(colors::text()),
+                ));
+                let elapsed_display = format_duration(elapsed);
+                let total_display = format_minutes_short(metrics.primary_window_minutes);
+                spans.push(Span::styled(
+                    format!(" ({elapsed_display} / {total_display})"),
+                    Style::default().fg(colors::dim()),
+                ));
+                return Line::from(spans);
+            }
+        }
+    }
+
+    Line::from(vec![
+        Span::raw(prefix),
+        Span::styled(
+            format!("≈{} rolling window", format_minutes_short(metrics.primary_window_minutes)),
+            Style::default().fg(colors::dim()),
+        ),
+    ])
 }
 
 fn build_hourly_reset_line(
@@ -305,10 +336,23 @@ fn build_compact_lines(reset_info: &RateLimitResetInfo) -> Vec<Line<'static>> {
             }
         }
         None => {
-            lines.push(Line::from(vec![Span::styled(
-                format!("{FIELD_INDENT}Auto-compact threshold disabled"),
-                Style::default().fg(colors::dim()),
-            )]));
+            if let (Some(window), Some(used)) =
+                (reset_info.context_window, reset_info.context_tokens_used)
+            {
+                lines.push(build_context_tokens_line(used, window));
+                lines.push(build_context_remaining_line(used, window));
+                lines.push(build_context_status_line(reset_info.overflow_auto_compact));
+            } else if reset_info.overflow_auto_compact {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("{FIELD_INDENT}Auto-compaction runs after overflow errors"),
+                    Style::default().fg(colors::dim()),
+                )]));
+            } else {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("{FIELD_INDENT}Auto-compaction unavailable"),
+                    Style::default().fg(colors::dim()),
+                )]));
+            }
         }
     }
 
@@ -377,6 +421,61 @@ fn build_compact_status_line(used: u64, limit: u64) -> Line<'static> {
             format!("Exceeded by {} tokens", format_with_separators(overage)),
             Style::default().fg(colors::error()),
         ),
+    ])
+}
+
+fn build_context_tokens_line(used: u64, window: u64) -> Line<'static> {
+    let percent = if window == 0 {
+        0.0
+    } else {
+        (used as f64 / window as f64) * 100.0
+    };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(field_prefix("Context")));
+    spans.extend(render_percent_bar(percent));
+    let percent_display = if percent > 100.0 {
+        format!("{percent:.0}%")
+    } else {
+        format_percent(percent)
+    };
+    spans.push(Span::styled(
+        format!(" {percent_display}"),
+        Style::default().fg(colors::text()),
+    ));
+    spans.push(Span::styled(
+        format!(
+            " ({} / {})",
+            format_with_separators(used),
+            format_with_separators(window)
+        ),
+        Style::default().fg(colors::dim()),
+    ));
+    Line::from(spans)
+}
+
+fn build_context_remaining_line(used: u64, window: u64) -> Line<'static> {
+    let remaining = window.saturating_sub(used);
+    Line::from(vec![
+        Span::raw(field_prefix("Remaining")),
+        Span::styled(
+            format!(
+                "{} tokens before overflow",
+                format_with_separators(remaining)
+            ),
+            Style::default().fg(colors::dim()),
+        ),
+    ])
+}
+
+fn build_context_status_line(overflow_auto_compact: bool) -> Line<'static> {
+    let status = if overflow_auto_compact {
+        "Auto-compaction runs after overflow errors"
+    } else {
+        "Auto-compaction unavailable"
+    };
+    Line::from(vec![
+        Span::raw(field_prefix("Status")),
+        Span::styled(status.to_string(), Style::default().fg(colors::dim())),
     ])
 }
 
