@@ -48,12 +48,10 @@ function getCacheDir(version) {
   return dir;
 }
 
-function getCachedBinaryPath(version, binaryName, isWindows) {
+function getCachedBinaryPath(version, targetTriple, isWindows) {
+  const ext = isWindows ? '.exe' : '';
   const cacheDir = getCacheDir(version);
-  if (isWindows && !binaryName.endsWith('.exe')) {
-    return join(cacheDir, `${binaryName}.exe`);
-  }
-  return join(cacheDir, binaryName);
+  return join(cacheDir, `code-${targetTriple}${ext}`);
 }
 
 function isWSL() {
@@ -314,7 +312,7 @@ async function main() {
   const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
   const version = packageJson.version;
   
-  // Download only the primary CLI binary; subcommands (e.g., `code mcp`) reuse it.
+  // Download only the primary binary; we'll create wrappers for legacy names.
   const binaries = ['code'];
   
   console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
@@ -322,7 +320,7 @@ async function main() {
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
     const localPath = join(binDir, binaryName);
-    const cachePath = getCachedBinaryPath(version, binaryName, isWindows);
+    const cachePath = getCachedBinaryPath(version, targetTriple, isWindows);
     
     // On Windows we avoid placing the executable inside node_modules to prevent
     // EBUSY/EPERM during global upgrades when the binary is in use.
@@ -532,9 +530,9 @@ async function main() {
   const mainBinary = `code-${targetTriple}${binaryExt}`;
   const mainBinaryPath = join(binDir, mainBinary);
   
-  if (existsSync(mainBinaryPath) || existsSync(getCachedBinaryPath(version, mainBinary, platform() === 'win32'))) {
+  if (existsSync(mainBinaryPath) || existsSync(getCachedBinaryPath(version, targetTriple, platform() === 'win32'))) {
     try {
-      const probePath = existsSync(mainBinaryPath) ? mainBinaryPath : getCachedBinaryPath(version, mainBinary, platform() === 'win32');
+      const probePath = existsSync(mainBinaryPath) ? mainBinaryPath : getCachedBinaryPath(version, targetTriple, platform() === 'win32');
       const stats = statSync(probePath);
       if (!stats.size) throw new Error('binary is empty (download likely failed)');
       const valid = validateDownloadedBinary(probePath);
