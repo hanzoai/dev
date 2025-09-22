@@ -238,11 +238,15 @@ pub async fn run_main(
     // Wrap file in non‑blocking writer.
     let (non_blocking, _guard) = non_blocking(log_file);
 
-    // use RUST_LOG env var, default to info for codex crates.
+    let default_filter = if cli.debug {
+        "codex_core=info,codex_tui=info,codex_browser=info"
+    } else {
+        "codex_core=warn,codex_tui=warn,codex_browser=warn"
+    };
+
+    // use RUST_LOG env var, defaulting based on debug flag.
     let env_filter = || {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("codex_core=info,codex_tui=info,codex_browser=info")
-        })
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
     };
 
     // Build layered subscriber:
