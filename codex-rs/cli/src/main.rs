@@ -24,7 +24,7 @@ use codex_tui::Cli as TuiCli;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
-use tokio::runtime::Builder as TokioRuntimeBuilder;
+use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioHandle};
 
 mod mcp_cmd;
 
@@ -475,13 +475,12 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
     let codex_home = codex_core::config::find_codex_home()
         .context("failed to locate Codex home directory")?;
 
-    let runtime = TokioRuntimeBuilder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("failed to create async runtime for resume lookup")?;
-
-    runtime.block_on(async {
-        if let Some(id) = session_id {
+    // Build the async work once, then execute it either on the existing
+    // runtime (from a helper thread) or a fresh current-thread runtime.
+    // Clone borrowed inputs so the async task can be 'static when spawned.
+    let sess = session_id.map(|s| s.to_string());
+    let fetch = async move {
+        if let Some(id) = sess.as_deref() {
             let maybe = find_conversation_path_by_id_str(&codex_home, id)
                 .await
                 .context("failed to look up session by id")?;
@@ -494,7 +493,21 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
         } else {
             Ok(None)
         }
-    })
+    };
+
+    match TokioHandle::try_current() {
+        Ok(handle) => {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.block_on(fetch))
+                .join()
+                .map_err(|_| anyhow!("resume lookup thread panicked"))?
+        }
+        Err(_) => TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to create async runtime for resume lookup")?
+            .block_on(fetch),
+    }
 }
 
 fn push_experimental_resume_override(interactive: &mut TuiCli, path: &Path) {
