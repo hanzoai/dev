@@ -22,7 +22,13 @@ Any existing MCP servers can remain in this table; the exiting overrides simply 
 
 ## 2. Launch the MCP server under the new name
 
-Build the workspace and run:
+If you globally installed Code from npm (`npm install -g @just-every/code`), the postinstall step now places the prebuilt `code-mcp-server` alongside the other `code-*` binaries on your `PATH`. You can launch it directly:
+
+```bash
+code-mcp-server --stdio
+```
+
+Prefer building from source? The previous workflow still works:
 
 ```bash
 cargo run -p code-mcp-server -- --stdio
