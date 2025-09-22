@@ -48,10 +48,12 @@ function getCacheDir(version) {
   return dir;
 }
 
-function getCachedBinaryPath(version, targetTriple, isWindows) {
-  const ext = isWindows ? '.exe' : '';
+function getCachedBinaryPath(version, binaryName, isWindows) {
   const cacheDir = getCacheDir(version);
-  return join(cacheDir, `code-${targetTriple}${ext}`);
+  if (isWindows && !binaryName.endsWith('.exe')) {
+    return join(cacheDir, `${binaryName}.exe`);
+  }
+  return join(cacheDir, binaryName);
 }
 
 function isWSL() {
@@ -313,14 +315,14 @@ async function main() {
   const version = packageJson.version;
   
   // Download only the primary binary; we'll create wrappers for legacy names.
-  const binaries = ['code'];
+  const binaries = ['code', 'code-mcp-server'];
   
   console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
   
   for (const binary of binaries) {
     const binaryName = `${binary}-${targetTriple}${binaryExt}`;
     const localPath = join(binDir, binaryName);
-    const cachePath = getCachedBinaryPath(version, targetTriple, isWindows);
+    const cachePath = getCachedBinaryPath(version, binaryName, isWindows);
     
     // On Windows we avoid placing the executable inside node_modules to prevent
     // EBUSY/EPERM during global upgrades when the binary is in use.
@@ -530,9 +532,9 @@ async function main() {
   const mainBinary = `code-${targetTriple}${binaryExt}`;
   const mainBinaryPath = join(binDir, mainBinary);
   
-  if (existsSync(mainBinaryPath) || existsSync(getCachedBinaryPath(version, targetTriple, platform() === 'win32'))) {
+  if (existsSync(mainBinaryPath) || existsSync(getCachedBinaryPath(version, mainBinary, platform() === 'win32'))) {
     try {
-      const probePath = existsSync(mainBinaryPath) ? mainBinaryPath : getCachedBinaryPath(version, targetTriple, platform() === 'win32');
+      const probePath = existsSync(mainBinaryPath) ? mainBinaryPath : getCachedBinaryPath(version, mainBinary, platform() === 'win32');
       const stats = statSync(probePath);
       if (!stats.size) throw new Error('binary is empty (download likely failed)');
       const valid = validateDownloadedBinary(probePath);
