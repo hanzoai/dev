@@ -38,6 +38,7 @@ use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
+use serde::de::{self, Unexpected};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -1345,6 +1346,7 @@ pub struct ConfigToml {
     pub disable_response_storage: Option<bool>,
 
     /// Enable silent upgrades during startup when a newer release is available.
+    #[serde(default, deserialize_with = "deserialize_option_bool_from_maybe_string")]
     pub auto_upgrade_enabled: Option<bool>,
 
     /// Optional external command to spawn for end-user notifications.
@@ -1447,6 +1449,37 @@ pub struct ConfigToml {
     pub subagents: Option<crate::config_types::SubagentsToml>,
     /// Experimental path to a rollout file to resume from.
     pub experimental_resume: Option<PathBuf>,
+}
+
+fn deserialize_option_bool_from_maybe_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrString {
+        Bool(bool),
+        String(String),
+    }
+
+    let value = Option::<BoolOrString>::deserialize(deserializer)?;
+    match value {
+        Some(BoolOrString::Bool(b)) => Ok(Some(b)),
+        Some(BoolOrString::String(s)) => {
+            let normalized = s.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "true" => Ok(Some(true)),
+                "false" => Ok(Some(false)),
+                _ => Err(de::Error::invalid_value(
+                    Unexpected::Str(&s),
+                    &"a boolean or string 'true'/'false'",
+                )),
+            }
+        }
+        None => Ok(None),
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -2156,6 +2189,24 @@ persistence = "none"
             }),
             history_no_persistence_cfg.history
         );
+    }
+
+    #[test]
+    fn auto_upgrade_enabled_accepts_string_boolean() {
+        let cfg_true = r#"auto_upgrade_enabled = "true""#;
+        let parsed_true = toml::from_str::<ConfigToml>(cfg_true)
+            .expect("string boolean should deserialize");
+        assert_eq!(parsed_true.auto_upgrade_enabled, Some(true));
+
+        let cfg_false = r#"auto_upgrade_enabled = "false""#;
+        let parsed_false = toml::from_str::<ConfigToml>(cfg_false)
+            .expect("string boolean should deserialize");
+        assert_eq!(parsed_false.auto_upgrade_enabled, Some(false));
+
+        let cfg_bool = r#"auto_upgrade_enabled = true"#;
+        let parsed_bool = toml::from_str::<ConfigToml>(cfg_bool)
+            .expect("boolean should deserialize");
+        assert_eq!(parsed_bool.auto_upgrade_enabled, Some(true));
     }
 
     #[test]
