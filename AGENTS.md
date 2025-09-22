@@ -39,7 +39,9 @@ Examples:
 - `fix(core/codex): handle SIGINT in on_exec_command_begin to avoid orphaned child`
 - `docs(agents): clarify commit-message expectations`
 
-## Git Push Policy (Do Not Rebase On Push Requests)
+## How to Git Push
+
+### Merge-and-Push Policy (Do Not Rebase)
 
 When the user asks you to "push" local work:
 
@@ -90,10 +92,11 @@ This architecture separates concerns between execution logic (core), UI state ma
 - Prefer snapshot assertions (`assert_snapshot!`) or rich string comparisons so UI regressions are obvious. Keep snapshots deterministic by trimming trailing space and driving commit ticks just like the existing tests do.
 - When adding fixtures or updating snapshots, gate rewrites behind an opt-in env var (e.g., `UPDATE_IDEAL=1`) so baseline refreshes remain explicit.
 
-## Monitoring Release Workflows
+### Monitor Release Workflows After Pushing
 
 - Use `scripts/wait-for-gh-run.sh` to follow GitHub Actions releases without spamming manual `gh` commands.
-- Typical release check: `scripts/wait-for-gh-run.sh --workflow Release --branch main`.
-- If you already know the ID (e.g., from a push webhook), run `scripts/wait-for-gh-run.sh --run <run-id>`.
+- Typical release check right after a push: `scripts/wait-for-gh-run.sh --workflow Release --branch main`.
+- If you already know the run ID (e.g., from webhook output), run `scripts/wait-for-gh-run.sh --run <run-id>`.
 - Adjust the poll cadence via `--interval <seconds>` (defaults to 8). The script exits 0 on success and 1 on failure, so it can gate local automation.
+- Pass `--failure-logs` to automatically dump logs for any job that does not finish successfully.
 - Dependencies: GitHub CLI (`gh`) and `jq` must be available in `PATH`.
