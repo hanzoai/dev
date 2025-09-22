@@ -5,7 +5,7 @@ use codex_core::protocol::RateLimitSnapshotEvent;
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
 
-const WEEKLY_CELL: &str = "██";
+const WEEKLY_CELL: &str = "▇▇";
 const HOURLY_CELL: &str = "▓▓";
 const UNUSED_CELL: &str = "░░";
 
@@ -250,7 +250,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
             Span::styled(
                 WEEKLY_CELL.to_string(),
                 Style::default()
-                    .fg(colors::warning())
+                    .fg(colors::text())
                     .add_modifier(Modifier::BOLD),
             ),
             " weekly usage".into(),
@@ -261,7 +261,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
             Span::styled(
                 HOURLY_CELL.to_string(),
                 Style::default()
-                    .fg(colors::success())
+                    .fg(colors::info())
                     .add_modifier(Modifier::BOLD),
             ),
             " hourly headroom".into(),
@@ -272,7 +272,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
             Span::styled(
                 UNUSED_CELL.to_string(),
                 Style::default()
-                    .fg(colors::text_dim())
+                    .fg(colors::success())
                     .add_modifier(Modifier::BOLD),
             ),
             " unused weekly".into(),
@@ -414,17 +414,17 @@ impl GridLayout {
                 let span = if cell_index < counts.dark_cells {
                     Span::styled(
                         WEEKLY_CELL.to_string(),
-                        Style::default().fg(colors::warning()),
+                        Style::default().fg(colors::text()),
                     )
                 } else if cell_index < counts.dark_cells + counts.green_cells {
                     Span::styled(
                         HOURLY_CELL.to_string(),
-                        Style::default().fg(colors::success()),
+                        Style::default().fg(colors::info()),
                     )
                 } else {
                     Span::styled(
                         UNUSED_CELL.to_string(),
-                        Style::default().fg(colors::text_dim()),
+                        Style::default().fg(colors::success()),
                     )
                 };
                 spans.push(span);
