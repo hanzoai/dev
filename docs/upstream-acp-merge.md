@@ -3,8 +3,8 @@
 ## Context
 
 Upstream PR [openai/codex#1707](https://github.com/openai/codex/pull/1707) introduces an
-experimental Agent Client Protocol (ACP) bridge so Zed can drive Codex via new
-`acp/new_session` and `acp/prompt` MCP tools. The branch (fetched locally as
+experimental Agent Client Protocol (ACP) bridge so Zed can drive Codex via the
+`session/new` and `session/prompt` tool calls. The branch (fetched locally as
 `upstream-pr-1707`) rewrites large portions of `codex-rs/core`, the MCP server,
 and the TypeScript CLI/TUI to accommodate the new workflow.
 
@@ -13,9 +13,9 @@ and the TypeScript CLI/TUI to accommodate the new workflow.
 - **Core** – Apply-patch execution now runs in-process with the ACP filesystem
   shim, preserving Code’s validation harness and approval prompts while
   emitting ACP tool-call metadata for downstream consumers.
-- **MCP Server** – `acp/new_session` and `acp/prompt` are available alongside
+- **MCP Server** – `session/new` and `session/prompt` are available alongside
   existing Codex tools. The new `acp_tool_runner` bridges Codex events to ACP
-  `SessionUpdate`s and reuses the existing conversation manager to track live
+  `session/update` notifications and reuses the existing conversation manager to track live
   sessions.
 - **Configuration** – `ConfigOverrides` and the TOML schema understand
   `experimental_client_tools` plus inline MCP server definitions, allowing IDE
@@ -43,8 +43,8 @@ capabilities.
 - **MCP server (`codex-rs/mcp-server`)**
   - New `acp_tool_runner.rs` that spawns Codex sessions on demand, relays MCP
     notifications, and surfaces ACP updates.
-  - `message_processor.rs` extended to expose `acp/new_session` and
-    `acp/prompt`, and to translate Codex events into ACP notifications.
+  - `message_processor.rs` extended to expose `session/new` and
+    `session/prompt`, and to translate Codex events into ACP notifications (`session/update`).
 - **CLI/TUI (Node + Rust)**
   - TypeScript terminal UI completely replaced with ACP-first experience.
   - Rust TUI and associated tests removed.

@@ -1,6 +1,6 @@
 # Using Code with Zed via ACP
 
-The Rust MCP server now exposes the Agent Client Protocol (ACP) tools (`acp/new_session`, `acp/prompt`) that Zed expects. Zed still connects over MCP/JSON-RPC, but every conversation is represented through these ACP calls. This section walks through a minimal setup.
+The Rust MCP server now exposes the Agent Client Protocol (ACP) primitives (`session/new`, `session/prompt`, plus streaming `session/update` notifications) that Zed expects. Zed still connects over MCP/JSON-RPC, but every conversation is represented through these ACP calls. This section walks through a minimal setup.
 
 ## 1. Configure Code's MCP server
 
@@ -22,11 +22,15 @@ Any existing MCP servers can remain in this table; the exiting overrides simply 
 
 ## 2. Launch the MCP server under the new name
 
-If you globally installed Code from npm (`npm install -g @just-every/code`), launch the MCP server with the built-in subcommand (`code mcp`; `code acp` is an equivalent alias and works well when `code` already points to VS Code):
+If you prefer a one-off launch without installing anything globally, run the MCP server via `npx`:
 
 ```bash
-code mcp
+npx -y @just-every/code acp
+# or pin to the latest dist-tag explicitly
+npx -y @just-every/code@latest acp
 ```
+
+Want a globally available binary instead? Install once (`npm install -g @just-every/code`) and then use the subcommand aliases (`code mcp`, `code acp`, or `coder acp`).
 
 Prefer building from source? The previous workflow still works:
 
@@ -34,7 +38,7 @@ Prefer building from source? The previous workflow still works:
 cargo run -p code-mcp-server -- --stdio
 ```
 
-The server will advertise four tools during the handshake: `codex`, `codex-reply`, `acp/new_session`, and `acp/prompt`.
+The server will advertise four tools during the handshake: `codex`, `codex-reply`, `session/new`, and `session/prompt`.
 
 ## 3. Point Zed at Code's MCP endpoint
 
@@ -44,16 +48,16 @@ Add an entry to Zed's `settings.json` under `agent_servers` (see [Zed’s extern
 {
   "agent_servers": {
     "Code": {
-      "command": "coder",
-      "args": ["acp"]
+      "command": "npx",
+      "args": ["-y", "@just-every/code", "acp"]
     }
   }
 }
 ```
 
-You can swap `coder` for an absolute path or `code` depending on your PATH preferences. Environment overrides such as `CODEX_HOME` or `RUST_LOG` are optional—set them only if you need a custom config directory or debug logging.
+Pinning explicitly to the latest dist-tag works as well: replace "@just-every/code" with "@just-every/code@latest" in the `args` array. If you already have the CLI installed globally, swap in "coder" (or any absolute path) for the command and pass ["acp"] as the arguments. Environment overrides such as `CODEX_HOME` or `RUST_LOG` are optional—set them only if you need a custom config directory or debug logging.
 
-When Zed launches this server it connects over MCP, then issues ACP tool calls (`acp/new_session`, `acp/prompt`) that we expose. Those tool invocations are bridged into full Codex sessions, and we stream ACP `session_update` notifications back so Zed can render reasoning, tool executions, and approvals.
+When Zed launches this server it connects over MCP, then issues ACP tool calls (`session/new`, `session/prompt`) that we expose. Those tool invocations are bridged into full Codex sessions, and we stream ACP `session/update` notifications back so Zed can render reasoning, tool executions, and approvals. Zed can also send `session/cancel` to interrupt a running turn, which the server now honors by propagating an interrupt to Codex and replying with `stopReason: "cancelled"`.
 
 ## 4. Permission flow summary
 

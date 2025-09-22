@@ -13,6 +13,7 @@ use codex_core::config::Config as CodexConfig;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
+use codex_protocol::protocol::TurnAbortReason;
 use mcp_types::CallToolResult;
 use mcp_types::ContentBlock;
 use mcp_types::RequestId;
@@ -68,7 +69,7 @@ pub async fn prompt(
     codex: Arc<CodexConversation>,
     prompt: Vec<acp::ContentBlock>,
     outgoing: Arc<OutgoingMessageSender>,
-) -> Result<()> {
+) -> Result<acp::StopReason> {
     let items: Vec<InputItem> = prompt
         .into_iter()
         .filter_map(acp_content_block_to_item)
@@ -78,6 +79,8 @@ pub async fn prompt(
         .submit(Op::UserInput { items })
         .await
         .context("failed to submit prompt to Codex")?;
+
+    let mut stop_reason = acp::StopReason::EndTurn;
 
     loop {
         let event = codex.next_event().await?;
@@ -97,12 +100,14 @@ pub async fn prompt(
                 let invocation = event.invocation.clone();
                 Some(acp::SessionUpdate::ToolCall(acp::ToolCall {
                     id: acp::ToolCallId(event.call_id.into()),
-                    label: format!("{}: {}", invocation.server, invocation.tool),
+                    title: format!("{}: {}", invocation.server, invocation.tool),
                     kind: acp::ToolKind::Other,
                     status: acp::ToolCallStatus::InProgress,
                     content: vec![],
                     locations: vec![],
                     raw_input: invocation.arguments,
+                    raw_output: None,
+                    meta: None,
                 }))
             }
             EventMsg::McpToolCallEnd(event) => {
@@ -117,6 +122,11 @@ pub async fn prompt(
                     ),
                     Err(err) => Some(vec![err.into()]),
                 };
+                let raw_output = event
+                    .result
+                    .as_ref()
+                    .ok()
+                    .and_then(|result| result.structured_content.clone());
                 Some(acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate {
                     id: call_id,
                     fields: ToolCallUpdateFields {
@@ -126,8 +136,10 @@ pub async fn prompt(
                             Some(acp::ToolCallStatus::Failed)
                         },
                         content,
+                        raw_output,
                         ..Default::default()
                     },
+                    meta: None,
                 }))
             }
             EventMsg::ExecApprovalRequest(_) | EventMsg::ApplyPatchApprovalRequest(_) => None,
@@ -151,6 +163,7 @@ pub async fn prompt(
                         content: Some(vec![event.stdout.into(), event.stderr.into()]),
                         ..Default::default()
                     },
+                    meta: None,
                 }))
             }
             EventMsg::PatchApplyBegin(event) => Some(acp::SessionUpdate::ToolCall(
@@ -172,9 +185,16 @@ pub async fn prompt(
                         },
                         ..Default::default()
                     },
+                    meta: None,
                 }))
             }
-            EventMsg::TaskComplete(_) => return Ok(()),
+            EventMsg::TurnAborted(event) => {
+                if matches!(event.reason, TurnAbortReason::Interrupted) {
+                    stop_reason = acp::StopReason::Cancelled;
+                }
+                None
+            }
+            EventMsg::TaskComplete(_) => return Ok(stop_reason),
             EventMsg::SessionConfigured(_)
             | EventMsg::TokenCount(_)
             | EventMsg::TaskStarted
@@ -186,11 +206,12 @@ pub async fn prompt(
 
         if let Some(update) = acp_update {
             let notification = OutgoingNotification {
-                method: acp::AGENT_METHODS.session_update.to_string(),
+                method: acp::CLIENT_METHOD_NAMES.session_update.to_string(),
                 params: Some(
                     serde_json::to_value(acp::SessionNotification {
                         session_id: acp_session_id.clone(),
                         update,
+                        meta: None,
                     })
                     .unwrap_or_default(),
                 ),
@@ -228,6 +249,7 @@ fn to_acp_annotations(annotations: mcp_types::Annotations) -> acp::Annotations {
         }),
         last_modified: annotations.last_modified,
         priority: annotations.priority,
+        meta: None,
     }
 }
 
@@ -240,6 +262,7 @@ fn to_acp_embedded_resource_resource(
                 mime_type: text_contents.mime_type,
                 text: text_contents.text,
                 uri: text_contents.uri,
+                meta: None,
             })
         }
         mcp_types::EmbeddedResourceResource::BlobResourceContents(blob_contents) => {
@@ -247,6 +270,7 @@ fn to_acp_embedded_resource_resource(
                 blob: blob_contents.blob,
                 mime_type: blob_contents.mime_type,
                 uri: blob_contents.uri,
+                meta: None,
             })
         }
     }
@@ -257,16 +281,20 @@ fn to_acp_content_block(block: mcp_types::ContentBlock) -> acp::ContentBlock {
         ContentBlock::TextContent(text_content) => acp::ContentBlock::Text(acp::TextContent {
             annotations: text_content.annotations.map(to_acp_annotations),
             text: text_content.text,
+            meta: None,
         }),
         ContentBlock::ImageContent(image_content) => acp::ContentBlock::Image(acp::ImageContent {
             annotations: image_content.annotations.map(to_acp_annotations),
             data: image_content.data,
             mime_type: image_content.mime_type,
+            uri: None,
+            meta: None,
         }),
         ContentBlock::AudioContent(audio_content) => acp::ContentBlock::Audio(acp::AudioContent {
             annotations: audio_content.annotations.map(to_acp_annotations),
             data: audio_content.data,
             mime_type: audio_content.mime_type,
+            meta: None,
         }),
         ContentBlock::ResourceLink(resource_link) => {
             acp::ContentBlock::ResourceLink(acp::ResourceLink {
@@ -277,12 +305,14 @@ fn to_acp_content_block(block: mcp_types::ContentBlock) -> acp::ContentBlock {
                 name: resource_link.name,
                 size: resource_link.size,
                 title: resource_link.title,
+                meta: None,
             })
         }
         ContentBlock::EmbeddedResource(embedded_resource) => {
             acp::ContentBlock::Resource(acp::EmbeddedResource {
                 annotations: embedded_resource.annotations.map(to_acp_annotations),
                 resource: to_acp_embedded_resource_resource(embedded_resource.resource),
+                meta: None,
             })
         }
     }

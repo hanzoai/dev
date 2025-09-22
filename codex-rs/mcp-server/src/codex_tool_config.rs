@@ -1,6 +1,7 @@
 //! Configuration object accepted by the `codex` MCP tool-call.
 
 use agent_client_protocol as acp;
+use codex_core::config_types::ClientTools;
 use codex_core::protocol::AskForApproval;
 use codex_protocol::config_types::SandboxMode;
 use mcp_types::Tool;
@@ -12,6 +13,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use serde_json::json;
 
 use crate::json_to_toml::json_to_toml;
 
@@ -134,22 +136,24 @@ pub(crate) fn create_tool_for_codex_tool_call_param() -> Tool {
 
 /// Builds a `Tool` definition for the `acp/new_session` tool-call.
 pub(crate) fn create_tool_for_acp_new_session() -> Tool {
-    #[expect(clippy::expect_used)]
-    let input_schema_value = serde_json::to_value(acp::NewSessionArguments::schema())
-        .expect("ACP new_session input schema must serialise to JSON");
-
-    #[expect(clippy::expect_used)]
-    let output_schema_value = serde_json::to_value(acp::NewSessionOutput::schema())
-        .expect("ACP new_session output schema must serialise to JSON");
-
-    let input_schema = serde_json::from_value::<ToolInputSchema>(input_schema_value)
-        .unwrap_or_else(|e| panic!("failed to create Tool input schema: {e}"));
-    let output_schema = serde_json::from_value::<ToolOutputSchema>(output_schema_value)
-        .unwrap_or_else(|e| panic!("failed to create Tool output schema: {e}"));
+    let input_schema = ToolInputSchema {
+        r#type: "object".to_string(),
+        required: Some(vec!["cwd".to_string()]),
+        properties: Some(json!({
+            "cwd": {"type": "string"},
+            "mcpServers": {"type": "array"},
+            "clientTools": {"type": "object"}
+        })),
+    };
+    let output_schema = ToolOutputSchema {
+        r#type: "object".to_string(),
+        properties: None,
+        required: None,
+    };
 
     Tool {
-        name: acp::AGENT_METHODS.new_session.to_string(),
-        title: Some(acp::AGENT_METHODS.new_session.to_string()),
+        name: acp::AGENT_METHOD_NAMES.session_new.to_string(),
+        title: Some(acp::AGENT_METHOD_NAMES.session_new.to_string()),
         input_schema,
         output_schema: Some(output_schema),
         description: Some("Start a Codex session over ACP.".to_string()),
@@ -159,21 +163,43 @@ pub(crate) fn create_tool_for_acp_new_session() -> Tool {
 
 /// Builds a `Tool` definition for the `acp/prompt` tool-call.
 pub(crate) fn create_tool_for_acp_prompt() -> Tool {
-    #[expect(clippy::expect_used)]
-    let input_schema_value = serde_json::to_value(acp::PromptArguments::schema())
-        .expect("ACP prompt input schema must serialise to JSON");
-
-    let input_schema = serde_json::from_value::<ToolInputSchema>(input_schema_value)
-        .unwrap_or_else(|e| panic!("failed to create Tool input schema: {e}"));
+    let input_schema = ToolInputSchema {
+        r#type: "object".to_string(),
+        required: Some(vec!["sessionId".to_string(), "prompt".to_string()]),
+        properties: Some(json!({
+            "sessionId": {"type": "string"},
+            "prompt": {"type": "array"},
+            "meta": {"type": "object"}
+        })),
+    };
 
     Tool {
-        name: acp::AGENT_METHODS.prompt.to_string(),
-        title: Some(acp::AGENT_METHODS.prompt.to_string()),
+        name: acp::AGENT_METHOD_NAMES.session_prompt.to_string(),
+        title: Some(acp::AGENT_METHOD_NAMES.session_prompt.to_string()),
         input_schema,
         output_schema: None,
         description: Some("Send a prompt to an existing ACP Codex session.".to_string()),
         annotations: None,
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpNewSessionToolArgs {
+    #[serde(flatten)]
+    pub request: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_tools: Option<ClientTools>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptToolArgs {
+    #[serde(rename = "sessionId")]
+    pub session_id: acp::SessionId,
+    pub prompt: Vec<acp::ContentBlock>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 impl CodexToolCallParam {
