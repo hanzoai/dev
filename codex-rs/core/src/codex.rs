@@ -3885,6 +3885,13 @@ async fn try_run_turn(
                     weekly_window_minutes: snapshot.weekly_window_minutes,
                 });
             }
+            ResponseEvent::DebugMessage(message) => {
+                let stamped = sess.make_event(
+                    &sub_id,
+                    EventMsg::BackgroundEvent(BackgroundEventEvent { message }),
+                );
+                sess.tx_event.send(stamped).await.ok();
+            }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
     }
