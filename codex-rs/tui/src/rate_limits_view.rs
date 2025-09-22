@@ -181,7 +181,7 @@ fn build_summary_lines(
     let mut lines: Vec<Line<'static>> = vec![
         "/limits".magenta().into(),
         "".into(),
-        vec!["  Tip: run `/limits` right after Codex replies for freshest numbers.".dim()].into(),
+        vec!["Usage Limits".bold()].into(),
         build_usage_line(
             "  • Hourly limit",
             &metrics.hourly_window_label,
@@ -336,12 +336,12 @@ fn build_reset_line(
     let last = last_reset?;
     let now = Utc::now();
     let since = now.signed_duration_since(last).to_std().ok()?;
-    let mut text = format!("  • {label} window reset ~{} ago", format_duration(since));
+    let mut text = format!("  • {label} window started ~{} ago", format_duration(since));
 
     let next = last + chrono::Duration::minutes(window_minutes as i64);
     if let Ok(until) = next.signed_duration_since(now).to_std() {
         if until.as_secs() > 0 {
-            text.push_str(&format!(" (next ≈ {})", format_duration(until)));
+            text.push_str(&format!(" (resets in ≈ {})", format_duration(until)));
         }
     }
 
