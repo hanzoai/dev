@@ -72,7 +72,7 @@ enum Subcommand {
     Logout(LogoutCommand),
 
     /// [experimental] Run Codex as an MCP server and manage MCP servers.
-    #[clap(alias = "acp", visible_alias = "acp")]
+    #[clap(visible_alias = "acp")]
     Mcp(McpCli),
 
     /// Run the Protocol stream via stdin/stdout
