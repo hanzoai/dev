@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.159] - 2025-09-22
+
+- Docs: streamline Zed integration guide (ceb8804c)
+- No user-facing code changes; release metadata only (2e77ed94, 323b6563)
+
 ## [0.2.158] - 2025-09-22
 
 - Core/ACP: integrate ACP support and sync protocol updates (1eeae7f8, fbe8beb5)
