@@ -145,6 +145,10 @@ pub struct Tui {
     /// Streaming/animation behavior for assistant/reasoning output
     #[serde(default)]
     pub stream: StreamConfig,
+
+    /// Whether to use alternate screen buffer
+    #[serde(default = "default_true")]
+    pub alternate_screen: bool,
 }
 
 /// Streaming behavior configuration for the TUI.
@@ -213,6 +217,14 @@ pub struct ThemeConfig {
     /// Custom color overrides (optional)
     #[serde(default)]
     pub colors: ThemeColors,
+
+    /// Label for the theme
+    #[serde(default)]
+    pub label: Option<String>,
+
+    /// Whether this is a dark theme
+    #[serde(default = "default_true")]
+    pub is_dark: bool,
 }
 
 impl Default for ThemeConfig {
@@ -220,6 +232,8 @@ impl Default for ThemeConfig {
         Self {
             name: ThemeName::default(),
             colors: ThemeColors::default(),
+            label: None,
+            is_dark: true,
         }
     }
 }

@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodexConversation {
+pub struct SimpleCodexConversation {
     pub id: String,
     pub messages: Vec<String>,
 }
 
-impl CodexConversation {
+impl SimpleCodexConversation {
     pub fn new(id: String) -> Self {
         Self {
             id,

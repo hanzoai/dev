@@ -68,6 +68,12 @@ impl InterruptManager {
         self.queue.push(QueuedInterrupt::PatchEnd { seq, ev });
     }
 
+    pub(crate) fn push_plan_update(&mut self, seq: u64, update: String, order: Option<hanzo_dev::protocol::OrderMeta>) {
+        // For now, just ignore plan updates as we don't have the proper variant
+        // TODO: Add proper PlanUpdate variant to QueuedInterrupt
+        let _ = (seq, update, order);
+    }
+
     // Plan updates are inserted near-time immediately; no interrupt queue entry needed.
 
     pub(crate) fn flush_all(&mut self, chat: &mut ChatWidget<'_>) {

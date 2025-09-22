@@ -74,4 +74,16 @@ pub struct Cli {
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
+
+    /// Debug mode
+    #[arg(long = "debug", default_value_t = false)]
+    pub debug: bool,
+
+    /// Order for something
+    #[arg(long = "order")]
+    pub order: Option<String>,
+
+    /// Timing information
+    #[arg(long = "timing", default_value_t = false)]
+    pub timing: bool,
 }

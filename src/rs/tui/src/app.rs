@@ -822,6 +822,24 @@ impl App<'_> {
                                 order: None,
                             }));
                         }
+                        SlashCommand::Branch => {
+                            // Handle branch command
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.submit_direct(command_text);
+                            }
+                        }
+                        SlashCommand::Github => {
+                            // Handle github command
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.submit_direct(command_text);
+                            }
+                        }
+                        SlashCommand::Mcp => {
+                            // Handle MCP command
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.submit_direct(command_text);
+                            }
+                        }
                     }
                 }
                 AppEvent::ResumeFrom(path) => {

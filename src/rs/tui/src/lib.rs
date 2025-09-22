@@ -64,11 +64,12 @@ mod terminal_info;
 mod text_formatting;
 mod text_processing;
 mod theme;
-// TODO: These modules don't exist yet
-// mod util {
-//     pub mod list_window;
-// }
-// mod spinner;
+mod util {
+    pub mod list_window;
+}
+mod spinner;
+mod key_hint;
+mod ui_consts;
 mod tui;
 mod user_approval_widget;
 mod height_manager;

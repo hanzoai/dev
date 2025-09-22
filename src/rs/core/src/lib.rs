@@ -19,8 +19,10 @@ pub mod slash_commands;
 pub use codex::Codex;
 pub use codex::CodexSpawnOk;
 mod codex_conversation;
+mod conversation;
 pub mod token_data;
-pub use codex_conversation::CodexConversation;
+// Export the real CodexConversation from conversation module
+pub use conversation::CodexConversation;
 pub mod config;
 pub mod config_profile;
 pub mod config_types;

@@ -79,7 +79,7 @@ impl OnboardingScreen {
                 highlighted_mode: AuthMode::ChatGPT,
                 error: None,
                 sign_in_state: SignInState::PickMode,
-                codex_home: codex_home.clone(),
+                dev_home: codex_home.clone(),
                 login_status,
                 preferred_auth_method: dev_login::AuthMode::ApiKey,
             }))

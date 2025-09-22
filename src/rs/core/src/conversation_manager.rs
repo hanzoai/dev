@@ -11,7 +11,8 @@ use uuid::Uuid;
 use crate::codex::Codex;
 use crate::codex::CodexSpawnOk;
 use crate::codex::INITIAL_SUBMIT_ID;
-use crate::codex_conversation::CodexConversation;
+use crate::codex_conversation::SimpleCodexConversation;
+use crate::conversation::CodexConversation;
 use crate::config::Config;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
@@ -105,7 +106,7 @@ impl ConversationManager {
             }
         };
 
-        let conversation = Arc::new(CodexConversation::new(conversation_id.to_string()));
+        let conversation = Arc::new(CodexConversation::new(codex));
         self.conversations
             .write()
             .await

@@ -77,6 +77,13 @@ pub(crate) enum AppEvent {
 
     /// Preview theme (no history event)
     PreviewTheme(ThemeName),
+
+    /// Insert a background event early in the event stream
+    InsertBackgroundEventEarly(String),
+
+    /// Cancel the currently running task
+    CancelRunningTask,
+
     /// Bottom composer expanded (e.g., slash command popup opened)
     ComposerExpanded,
 
