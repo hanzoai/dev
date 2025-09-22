@@ -3832,6 +3832,10 @@ impl ChatWidget<'_> {
                 self.stream_state
                     .closed_answer_ids
                     .insert(StreamId(id.clone()));
+                // Receiving a final answer means this task has finished even if we have not yet
+                // observed the corresponding TaskComplete event. Clear the active marker now so
+                // the status spinner can hide promptly when nothing else is running.
+                self.active_task_ids.remove(&id);
                 self.maybe_hide_spinner();
             }
             EventMsg::ReplayHistory(ev) => {
