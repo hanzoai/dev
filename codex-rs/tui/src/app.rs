@@ -1412,6 +1412,8 @@ impl App<'_> {
                                                 FileChange::Update {
                                                     unified_diff: "+test\n-test2".to_string(),
                                                     move_path: None,
+                                                    original_content: "test2".to_string(),
+                                                    new_content: "test".to_string(),
                                                 },
                                             ),
                                         ]),

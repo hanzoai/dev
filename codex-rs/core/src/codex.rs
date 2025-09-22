@@ -17,9 +17,10 @@ use async_channel::Sender;
 use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
-use codex_apply_patch::maybe_parse_apply_patch_verified;
+use codex_apply_patch::StdFileSystem;
 use codex_browser::BrowserConfig as CodexBrowserConfig;
 use codex_browser::BrowserManager;
+use agent_client_protocol::ClientTools;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
 use codex_protocol::protocol::TurnAbortReason;
@@ -38,6 +39,7 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 use crate::CodexAuth;
+use crate::acp::AcpFileSystem;
 use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
@@ -449,12 +451,9 @@ use crate::agent_tool::GetAgentResultParams;
 use crate::agent_tool::ListAgentsParams;
 use crate::agent_tool::RunAgentParams;
 use crate::agent_tool::WaitForAgentParams;
-use crate::apply_patch::ApplyPatchExec;
-use crate::apply_patch::CODEX_APPLY_PATCH_ARG1;
-use crate::apply_patch::InternalApplyPatchInvocation;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
-use crate::apply_patch::{self};
+use crate::apply_patch::{self, ApplyPatchResult};
 use crate::client::ModelClient;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
@@ -790,6 +789,7 @@ struct BackgroundExecState {
 ///
 /// A session has at most 1 running agent at a time, and can be interrupted by user input.
 pub(crate) struct Session {
+    id: Uuid,
     client: ModelClient,
     tx_event: Sender<Event>,
 
@@ -808,6 +808,7 @@ pub(crate) struct Session {
 
     /// Manager for external MCP servers/tools.
     mcp_connection_manager: McpConnectionManager,
+    client_tools: Option<ClientTools>,
     #[allow(dead_code)]
     session_manager: ExecSessionManager,
 
@@ -895,12 +896,24 @@ impl Session {
         &self.sandbox_policy
     }
 
+    pub(crate) fn session_uuid(&self) -> Uuid {
+        self.id
+    }
+
     pub(crate) fn get_github_config(&self) -> Arc<RwLock<crate::config_types::GithubConfig>> {
         Arc::clone(&self.github)
     }
 
     pub(crate) fn validation_config(&self) -> Arc<RwLock<crate::config_types::ValidationConfig>> {
         Arc::clone(&self.validation)
+    }
+
+    pub(crate) fn client_tools(&self) -> Option<&ClientTools> {
+        self.client_tools.as_ref()
+    }
+
+    pub(crate) fn mcp_connection_manager(&self) -> &McpConnectionManager {
+        &self.mcp_connection_manager
     }
 
     pub(crate) fn update_validation_patch_harness(&self, enabled: bool) {
@@ -936,6 +949,20 @@ impl Session {
         path.as_ref()
             .map(PathBuf::from)
             .map_or_else(|| self.cwd.clone(), |p| self.cwd.join(p))
+    }
+
+    pub(crate) async fn maybe_parse_apply_patch_verified(
+        &self,
+        argv: &[String],
+        cwd: &Path,
+    ) -> MaybeApplyPatchVerified {
+        if let Some(client_tools) = self.client_tools.as_ref() {
+            let fs = AcpFileSystem::new(self.id, client_tools, &self.mcp_connection_manager);
+            codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd, &fs).await
+        } else {
+            let fs = StdFileSystem;
+            codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd, &fs).await
+        }
     }
 
     // ────────────────────────────
@@ -2655,8 +2682,25 @@ async fn submission_loop(
 
                 // Error messages to dispatch after SessionConfigured is sent.
                 let mut mcp_connection_errors = Vec::<String>::new();
+                let mut excluded_tools = HashSet::new();
+                if let Some(client_tools) = config.experimental_client_tools.as_ref() {
+                    for tool in [
+                        client_tools.request_permission.as_ref(),
+                        client_tools.read_text_file.as_ref(),
+                        client_tools.write_text_file.as_ref(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        excluded_tools.insert((
+                            tool.mcp_server.to_string(),
+                            tool.tool_name.to_string(),
+                        ));
+                    }
+                }
+
                 let (mcp_connection_manager, failed_clients) =
-                    match McpConnectionManager::new(config.mcp_servers.clone()).await {
+                    match McpConnectionManager::new(config.mcp_servers.clone(), excluded_tools).await {
                         Ok((mgr, failures)) => (mgr, failures),
                         Err(e) => {
                             let message = format!("Failed to create MCP connection manager: {e:#}");
@@ -2690,6 +2734,7 @@ async fn submission_loop(
                     config.tools_web_search_allowed_domains.clone();
 
                 sess = Some(Arc::new(Session {
+                    id: session_id,
                     client,
                     tools_config,
                     tx_event: tx_event.clone(),
@@ -2700,8 +2745,9 @@ async fn submission_loop(
                     shell_environment_policy: config.shell_environment_policy.clone(),
                     cwd,
                     _writable_roots: writable_roots,
-                    mcp_connection_manager,
-                    session_manager: crate::exec_command::ExecSessionManager::default(),
+            mcp_connection_manager,
+            client_tools: config.experimental_client_tools.clone(),
+            session_manager: crate::exec_command::ExecSessionManager::default(),
                     agents: config.agents.clone(),
                     notify,
                     state: Mutex::new(state),
@@ -6427,7 +6473,7 @@ async fn handle_container_exec_with_params(
 
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
     let mut params = params;
-    let mut seq_hint_for_exec = seq_hint;
+    let seq_hint_for_exec = seq_hint;
     if let Some((script_index, script)) = extract_shell_script_from_wrapper(&params.command) {
         let trimmed = script.trim_start();
         let confirm_prefixes = ["confirm:", "CONFIRM:"];
@@ -6516,148 +6562,6 @@ async fn handle_container_exec_with_params(
                             call_id,
                             output: FunctionCallOutputPayload { content: guidance, success: None },
                         };
-                    }
-                }
-            }
-        }
-
-        // Detect an embedded `apply_patch <<EOF ... EOF` in a larger script and split it out
-        // so the UI can render a distinct "Updated" block before the "Run" block.
-        //
-        // If present, we will:
-        //  1) Execute the patch as a standalone apply_patch exec (with proper events)
-        //  2) Remove the statement from the script and continue with the remainder
-        //     (only if the patch succeeded)
-        if let Ok(Some(found)) = codex_apply_patch::find_embedded_apply_patch(&params.command[script_index]) {
-            // Build a synthetic minimal script for verified parsing of the patch action,
-            // preserving an optional cd path for correct path resolution.
-            let synthetic_script = if let Some(cd) = &found.cd_path {
-                format!("cd {} && apply_patch <<'EOF'\n{}\nEOF\n", cd, found.patch_body)
-            } else {
-                format!("apply_patch <<'EOF'\n{}\nEOF\n", found.patch_body)
-            };
-
-            // Resolve into an ApplyPatchAction using the verified path
-            let cwd_path = std::path::Path::new(&params.cwd);
-            let verified = codex_apply_patch::maybe_parse_apply_patch_verified(
-                &vec!["bash".to_string(), "-lc".to_string(), synthetic_script.clone()],
-                cwd_path,
-            );
-            if let codex_apply_patch::MaybeApplyPatchVerified::Body(action) = verified {
-                // First, run the patch apply as its own Exec with proper events
-                let path_to_codex = std::env::current_exe()
-                    .ok()
-                    .map(|p| p.to_string_lossy().to_string());
-                if let Some(path_to_codex) = path_to_codex {
-                    let patch_params = ExecParams {
-                        command: vec![
-                            path_to_codex,
-                            CODEX_APPLY_PATCH_ARG1.to_string(),
-                            action.patch.clone(),
-                        ],
-                        cwd: action.cwd.clone(),
-                        timeout_ms: params.timeout_ms,
-                        env: HashMap::new(),
-                        with_escalated_permissions: params.with_escalated_permissions,
-                        justification: params.justification.clone(),
-                    };
-
-                    // Safety for patch step mirrors normal patch handling
-                    let safety = assess_safety_for_untrusted_command(
-                        sess.approval_policy,
-                        &sess.sandbox_policy,
-                        patch_params.with_escalated_permissions.unwrap_or(false),
-                    );
-
-                    let exec_command_context = ExecCommandContext {
-                        sub_id: sub_id.clone(),
-                        call_id: format!("{call_id}.apply_patch"),
-                        command_for_display: vec!["apply_patch".to_string(), action.patch.clone()],
-                        cwd: patch_params.cwd.clone(),
-                        apply_patch: Some(ApplyPatchCommandContext {
-                            user_explicitly_approved_this_action: matches!(safety, SafetyCheck::AutoApprove { .. }),
-                            changes: convert_apply_patch_to_protocol(&action),
-                        }),
-                    };
-
-                    let patch_result = sess
-                        .run_exec_with_events(
-                            turn_diff_tracker,
-                            exec_command_context,
-            ExecInvokeArgs {
-                params: patch_params.clone(),
-                sandbox_type: match safety { SafetyCheck::AutoApprove { sandbox_type } => sandbox_type, SafetyCheck::AskUser => SandboxType::None, SafetyCheck::Reject { .. } => SandboxType::None },
-                sandbox_policy: &sess.sandbox_policy,
-                sandbox_cwd: sess.get_cwd(),
-                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                stdout_stream: None,
-            },
-                            seq_hint, // occupy the provided sequence range first
-                            output_index,
-                            attempt_req,
-                        )
-                        .await;
-
-                    let mut should_continue = false;
-                    if let Ok(ref out) = patch_result { should_continue = out.exit_code == 0; }
-
-                    // If patch step succeeded, strip it from the original script and proceed.
-                    if should_continue {
-                        let (start, end) = found.stmt_byte_range;
-                        let mut residual = String::new();
-                        residual.push_str(&params.command[script_index][..start]);
-                        residual.push_str(&params.command[script_index][end..]);
-                        // Clean leading/trailing separators to avoid syntax errors
-                        let mut residual = residual.trim().to_string();
-                        // Remove leading connectors like &&, ||, ; and trailing ones
-                        let trim_connectors = |s: &str| -> String {
-                            let mut s = s.trim().to_string();
-                            // Leading
-                            for _ in 0..2 {
-                                let st = s.trim_start();
-                                let new = if st.starts_with("&&") { &st[2..] } else if st.starts_with("||") { &st[2..] } else if st.starts_with(';') { &st[1..] } else { st };
-                                s = new.trim_start().to_string();
-                            }
-                            // Trailing
-                            for _ in 0..2 {
-                                let st = s.trim_end();
-                                let new = if st.ends_with("&&") { &st[..st.len()-2] } else if st.ends_with("||") { &st[..st.len()-2] } else if st.ends_with(';') { &st[..st.len()-1] } else { st };
-                                s = new.trim_end().to_string();
-                            }
-                            s
-                        };
-                        residual = trim_connectors(&residual);
-
-                        if !residual.is_empty() {
-                            params.command[script_index] = residual;
-                            // Bump the seq hint for the following run cell
-                            seq_hint_for_exec = seq_hint.map(|h| h.saturating_add(2));
-
-                            // Continue with normal flow using updated params (fallthrough below)
-                            // We overwrite `script` in local scope to avoid borrow issues
-                        } else {
-                            // No more commands to run; return the patch result as the tool output
-                            let ok = patch_result
-                                .as_ref()
-                                .map(|o| o.exit_code == 0)
-                                .unwrap_or(false);
-                            let content = match patch_result {
-                                Ok(out) => format_exec_output_with_limit(sess, &sub_id, &call_id, &out),
-                                Err(e) => get_error_message_ui(&e),
-                            };
-                            return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content, success: Some(ok) } };
-                        }
-                    } else {
-                        // Patch failed; return immediately with patch output (do not run remainder)
-                        let ok = patch_result
-                            .as_ref()
-                            .map(|o| o.exit_code == 0)
-                            .unwrap_or(false);
-                        let content = match patch_result {
-                            Ok(out) => format_exec_output_with_limit(sess, &sub_id, &call_id, &out),
-                            Err(e) => get_error_message_ui(&e),
-                        };
-                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content, success: Some(ok) } };
                     }
                 }
             }
@@ -6801,20 +6705,85 @@ async fn handle_container_exec_with_params(
         }
     }
 
-    // check if this was a patch, and apply it if so
-    let apply_patch_exec = match maybe_parse_apply_patch_verified(&params.command, &params.cwd) {
-        MaybeApplyPatchVerified::Body(changes) => {
-            match apply_patch::apply_patch(sess, &sub_id, &call_id, changes).await {
-                InternalApplyPatchInvocation::Output(item) => return item,
-                InternalApplyPatchInvocation::DelegateToExec(apply_patch_exec) => {
-                    Some(apply_patch_exec)
+    // Check if this was a patch, and apply it in-process if so.
+    match sess
+        .maybe_parse_apply_patch_verified(&params.command, &params.cwd)
+        .await
+    {
+        MaybeApplyPatchVerified::Body(action) => {
+            let changes = convert_apply_patch_to_protocol(&action);
+            turn_diff_tracker.on_patch_begin(&changes);
+
+            match apply_patch::apply_patch(sess, &sub_id, &call_id, action).await {
+                ApplyPatchResult::Reply(item) => return item,
+                ApplyPatchResult::Applied(run) => {
+                    let order_begin = crate::protocol::OrderMeta {
+                        request_ordinal: attempt_req,
+                        output_index,
+                        sequence_number: seq_hint,
+                    };
+                    let begin_event = EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
+                        call_id: call_id.clone(),
+                        auto_approved: run.auto_approved,
+                        changes,
+                    });
+                    let event = sess.make_event_with_order(&sub_id, begin_event, order_begin, seq_hint);
+                    let _ = sess.tx_event.send(event).await;
+
+                    let order_end = crate::protocol::OrderMeta {
+                        request_ordinal: attempt_req,
+                        output_index,
+                        sequence_number: seq_hint.map(|h| h.saturating_add(1)),
+                    };
+                    let end_event = EventMsg::PatchApplyEnd(PatchApplyEndEvent {
+                        call_id: call_id.clone(),
+                        stdout: run.stdout.clone(),
+                        stderr: run.stderr.clone(),
+                        success: run.success,
+                    });
+                    let event = sess.make_event_with_order(
+                        &sub_id,
+                        end_event,
+                        order_end,
+                        seq_hint.map(|h| h.saturating_add(1)),
+                    );
+                    let _ = sess.tx_event.send(event).await;
+
+                    if let Ok(Some(unified_diff)) = turn_diff_tracker.get_unified_diff() {
+                        let diff_event = sess.make_event(
+                            &sub_id,
+                            EventMsg::TurnDiff(TurnDiffEvent { unified_diff }),
+                        );
+                        let _ = sess.tx_event.send(diff_event).await;
+                    }
+
+                    let mut content = run.stdout;
+                    if !run.success && !run.stderr.is_empty() {
+                        if !content.is_empty() {
+                            content.push('\n');
+                        }
+                        content.push_str(&format!("stderr: {}", run.stderr));
+                    }
+                    if let Some(summary) = run.harness_summary_json {
+                        if !summary.is_empty() {
+                            if !content.is_empty() {
+                                content.push('\n');
+                            }
+                            content.push_str(&summary);
+                        }
+                    }
+
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content,
+                            success: Some(run.success),
+                        },
+                    };
                 }
             }
         }
         MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
-            // It looks like an invocation of `apply_patch`, but we
-            // could not resolve it into a patch that would apply
-            // cleanly. Return to model for resample.
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
@@ -6825,78 +6794,22 @@ async fn handle_container_exec_with_params(
         }
         MaybeApplyPatchVerified::ShellParseError(error) => {
             trace!("Failed to parse shell command, {error:?}");
-            None
         }
-        MaybeApplyPatchVerified::NotApplyPatch => None,
+        MaybeApplyPatchVerified::NotApplyPatch => {}
+    }
+
+    let safety = {
+        let state = sess.state.lock().unwrap();
+        assess_command_safety(
+            &params.command,
+            sess.approval_policy,
+            &sess.sandbox_policy,
+            &state.approved_commands,
+            params.with_escalated_permissions.unwrap_or(false),
+        )
     };
-
-    let (params, safety, command_for_display) = match &apply_patch_exec {
-        Some(ApplyPatchExec {
-            action: ApplyPatchAction { patch, cwd, .. },
-            user_explicitly_approved_this_action,
-            ..
-        }) => {
-            let path_to_codex = std::env::current_exe()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string());
-            let Some(path_to_codex) = path_to_codex else {
-                return ResponseInputItem::FunctionCallOutput {
-                    call_id,
-                    output: FunctionCallOutputPayload {
-                        content: "failed to determine path to codex executable".to_string(),
-                        success: None,
-                    },
-                };
-            };
-
-            let params = ExecParams {
-                command: vec![
-                    path_to_codex,
-                    CODEX_APPLY_PATCH_ARG1.to_string(),
-                    patch.clone(),
-                ],
-                cwd: cwd.clone(),
-                timeout_ms: params.timeout_ms,
-                env: HashMap::new(),
-                with_escalated_permissions: params.with_escalated_permissions,
-                justification: params.justification.clone(),
-            };
-            let safety = if *user_explicitly_approved_this_action {
-                SafetyCheck::AutoApprove {
-                    sandbox_type: SandboxType::None,
-                }
-            } else {
-                assess_safety_for_untrusted_command(
-                    sess.approval_policy,
-                    &sess.sandbox_policy,
-                    params.with_escalated_permissions.unwrap_or(false),
-                )
-            };
-            (
-                params,
-                safety,
-                vec!["apply_patch".to_string(), patch.clone()],
-            )
-        }
-        None => {
-            let safety = {
-                let state = sess.state.lock().unwrap();
-                assess_command_safety(
-                    &params.command,
-                    sess.approval_policy,
-                    &sess.sandbox_policy,
-                    &state.approved_commands,
-                    params.with_escalated_permissions.unwrap_or(false),
-                )
-            };
-            let command_for_display = params.command.clone();
-            (params, safety, command_for_display)
-        }
-    };
-
-    let harness_summary_json = apply_patch_exec
-        .as_ref()
-        .and_then(|exec| exec.harness_summary_json.clone());
+    let command_for_display = params.command.clone();
+    let harness_summary_json: Option<String> = None;
 
     let sandbox_type = match safety {
         SafetyCheck::AutoApprove { sandbox_type } => sandbox_type,
@@ -6951,16 +6864,7 @@ async fn handle_container_exec_with_params(
         call_id: call_id.clone(),
         command_for_display: command_for_display.clone(),
         cwd: params.cwd.clone(),
-        apply_patch: apply_patch_exec.map(
-            |ApplyPatchExec {
-                 action,
-                 user_explicitly_approved_this_action,
-                 ..
-             }| ApplyPatchCommandContext {
-                user_explicitly_approved_this_action,
-                changes: convert_apply_patch_to_protocol(&action),
-            },
-        ),
+        apply_patch: None,
     };
 
     let display_label = exec_command_context.command_for_display.join(" ");
