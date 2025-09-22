@@ -104,6 +104,51 @@ async function writeCacheAtomic(srcPath, cachePath) {
   renameSync(tmp, cachePath);
 }
 
+function resolveGlobalBinDir() {
+  const plt = platform();
+  const userAgent = process.env.npm_config_user_agent || '';
+
+  const fromPrefix = (prefixPath) => {
+    if (!prefixPath) return '';
+    return plt === 'win32' ? prefixPath : join(prefixPath, 'bin');
+  };
+
+  const prefixEnv = process.env.npm_config_prefix || process.env.PREFIX || '';
+  const direct = fromPrefix(prefixEnv);
+  if (direct) return direct;
+
+  const tryExec = (command) => {
+    try {
+      return execSync(command, {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        shell: true,
+      }).toString().trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const prefixFromNpm = fromPrefix(tryExec('npm prefix -g'));
+  if (prefixFromNpm) return prefixFromNpm;
+
+  const binFromNpm = tryExec('npm bin -g');
+  if (binFromNpm) return binFromNpm;
+
+  if (userAgent.includes('pnpm')) {
+    const pnpmBin = tryExec('pnpm bin --global');
+    if (pnpmBin) return pnpmBin;
+    const pnpmPrefix = fromPrefix(tryExec('pnpm env get prefix'));
+    if (pnpmPrefix) return pnpmPrefix;
+  }
+
+  if (userAgent.includes('yarn')) {
+    const yarnBin = tryExec('yarn global bin');
+    if (yarnBin) return yarnBin;
+  }
+
+  return '';
+}
+
 async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -598,12 +643,8 @@ async function main() {
       }
     } else {
       // npm/pnpm/yarn path
-      let globalBin = '';
-      try {
-        globalBin = execSync('npm bin -g', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-      } catch {}
-
-      const ourShim = join(globalBin || '', isWindows ? 'code.cmd' : 'code');
+      const globalBin = resolveGlobalBinDir();
+      const ourShim = globalBin ? join(globalBin, isWindows ? 'code.cmd' : 'code') : '';
       const candidates = resolveAllOnPath();
       const others = candidates.filter(p => p && (!ourShim || p !== ourShim));
       const collision = others.length > 0;
