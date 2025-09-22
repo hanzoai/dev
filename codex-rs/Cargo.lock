@@ -28,6 +28,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-client-protocol"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc2526e80463b9742afed4829aedd6ae5632d6db778c6cc1fecb80c960c3521b"
+dependencies = [
+ "anyhow",
+ "async-broadcast",
+ "async-trait",
+ "futures",
+ "log",
+ "parking_lot",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -312,6 +329,18 @@ dependencies = [
  "predicates-core",
  "predicates-tree",
  "wait-timeout",
+]
+
+[[package]]
+name = "async-broadcast"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "435a87a52755b8f27fcf321ac4f04b2802e337c8c4872923137471ec39c37532"
+dependencies = [
+ "event-listener",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -786,6 +815,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9b18233253483ce2f65329a24072ec414db782531bdbb7d0bbc4bd2ce6b7e21"
 
 [[package]]
+name = "code-mcp-server"
+version = "0.0.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "assert_cmd",
+ "codex-arg0",
+ "codex-common",
+ "codex-core",
+ "codex-login",
+ "codex-protocol",
+ "codex-version",
+ "mcp-types",
+ "mcp_test_support",
+ "os_info",
+ "pretty_assertions",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "tokio",
+ "toml 0.9.5",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "codex-ansi-escape"
 version = "0.0.0"
 dependencies = [
@@ -805,6 +864,7 @@ dependencies = [
  "similar",
  "tempfile",
  "thiserror 2.0.16",
+ "tokio",
  "tree-sitter",
  "tree-sitter-bash",
 ]
@@ -872,13 +932,13 @@ dependencies = [
  "assert_cmd",
  "clap",
  "clap_complete",
+ "code-mcp-server",
  "codex-arg0",
  "codex-chatgpt",
  "codex-common",
  "codex-core",
  "codex-exec",
  "codex-login",
- "codex-mcp-server",
  "codex-protocol",
  "codex-protocol-ts",
  "codex-tui",
@@ -916,6 +976,7 @@ dependencies = [
 name = "codex-core"
 version = "0.0.0"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "askama",
  "assert_cmd",
@@ -951,6 +1012,7 @@ dependencies = [
  "rand 0.9.2",
  "regex-lite",
  "reqwest",
+ "schemars 0.8.22",
  "seccompiler",
  "serde",
  "serde_bytes",
@@ -1087,35 +1149,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "codex-mcp-server"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "codex-arg0",
- "codex-common",
- "codex-core",
- "codex-login",
- "codex-protocol",
- "codex-version",
- "mcp-types",
- "mcp_test_support",
- "os_info",
- "pretty_assertions",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "toml 0.9.5",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "wiremock",
 ]
 
 [[package]]
@@ -3354,8 +3387,8 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "code-mcp-server",
  "codex-core",
- "codex-mcp-server",
  "codex-protocol",
  "mcp-types",
  "os_info",
@@ -4837,7 +4870,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
- "schemars_derive",
+ "schemars_derive 0.8.22",
  "serde",
  "serde_json",
 ]
@@ -4862,6 +4895,7 @@ checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive 1.0.4",
  "serde",
  "serde_json",
 ]
@@ -4871,6 +4905,18 @@ name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d020396d1d138dc19f1165df7545479dcd58d93810dc5d646a16e55abefa80"
 dependencies = [
  "proc-macro2",
  "quote",

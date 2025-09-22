@@ -147,21 +147,40 @@ pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
 pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
     let trimmed = message.trim();
 
-    // Check if it starts with a slash
-    if !trimmed.starts_with('/') {
+    if trimmed.is_empty() {
         return ProcessedCommand::NotCommand(message.to_string());
     }
 
-    // Parse the command and arguments
-    let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
-    let command_str = &parts[0][1..]; // Remove the leading '/'
-    let args = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+    let has_slash = trimmed.starts_with('/');
+    let command_portion = if has_slash { &trimmed[1..] } else { trimmed };
+    let parts: Vec<&str> = command_portion.splitn(2, ' ').collect();
+    let command_str = parts.first().copied().unwrap_or("");
+    let args_raw = parts.get(1).map(|s| s.trim()).unwrap_or("");
+    let canonical_command = command_str.to_ascii_lowercase();
+
+    if matches!(canonical_command.as_str(), "quit" | "exit") {
+        if !has_slash && !args_raw.is_empty() {
+            return ProcessedCommand::NotCommand(message.to_string());
+        }
+
+        let command_text = if args_raw.is_empty() {
+            format!("/{}", SlashCommand::Quit.command())
+        } else {
+            format!("/{} {}", SlashCommand::Quit.command(), args_raw)
+        };
+
+        return ProcessedCommand::RegularCommand(SlashCommand::Quit, command_text);
+    }
+
+    if !has_slash {
+        return ProcessedCommand::NotCommand(message.to_string());
+    }
 
     // Try to parse the command
-    if let Ok(command) = command_str.parse::<SlashCommand>() {
+    if let Ok(command) = canonical_command.parse::<SlashCommand>() {
         // Check if it's a prompt-expanding command
         if command.is_prompt_expanding() {
-            if args.is_empty() && command.requires_arguments() {
+            if args_raw.is_empty() && command.requires_arguments() {
                 return ProcessedCommand::Error(format!(
                     "Error: /{} requires a task description. Usage: /{} <task>",
                     command.command(),
@@ -169,13 +188,19 @@ pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
                 ));
             }
 
-            if let Some(expanded) = command.expand_prompt(&args) {
+            if let Some(expanded) = command.expand_prompt(args_raw) {
                 return ProcessedCommand::ExpandedPrompt(expanded);
             }
         }
 
-        // It's a regular command, return it as-is
-        ProcessedCommand::RegularCommand(command, args)
+        let command_text = if args_raw.is_empty() {
+            format!("/{}", command.command())
+        } else {
+            format!("/{} {}", command.command(), args_raw)
+        };
+
+        // It's a regular command, return it as-is with the canonical text
+        ProcessedCommand::RegularCommand(command, command_text)
     } else {
         // Unknown command
         ProcessedCommand::NotCommand(message.to_string())
@@ -186,7 +211,8 @@ pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
 pub enum ProcessedCommand {
     /// The message was expanded from a prompt-expanding slash command
     ExpandedPrompt(String),
-    /// A regular slash command that should be handled by the TUI
+    /// A regular slash command that should be handled by the TUI. The `String`
+    /// contains the canonical command text (with leading slash and trimmed args).
     RegularCommand(SlashCommand, String),
     /// Not a slash command, just a regular message
     #[allow(dead_code)]

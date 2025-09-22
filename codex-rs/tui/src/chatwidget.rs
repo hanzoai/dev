@@ -274,6 +274,7 @@ pub(crate) struct ChatWidget<'a> {
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     history_render: HistoryRenderState,
     config: Config,
+    latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
@@ -1989,6 +1990,7 @@ impl ChatWidget<'_> {
         enhanced_keys_supported: bool,
         terminal_info: crate::tui::TerminalInfo,
         show_order_overlay: bool,
+        latest_upgrade_version: Option<String>,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -2087,6 +2089,7 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
                 initial_images,
@@ -2220,7 +2223,10 @@ impl ChatWidget<'_> {
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
-            w.history_push_top_next_req(history_cell::new_popular_commands_notice(false)); // tag: prelude
+            w.history_push_top_next_req(history_cell::new_popular_commands_notice(
+                false,
+                w.latest_upgrade_version.as_deref(),
+            )); // tag: prelude
             if connecting_mcp {
                 // Render connecting status as a separate cell with standard gutter and spacing
                 w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
@@ -2243,6 +2249,7 @@ impl ChatWidget<'_> {
         enhanced_keys_supported: bool,
         terminal_info: crate::tui::TerminalInfo,
         show_order_overlay: bool,
+        latest_upgrade_version: Option<String>,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -2294,6 +2301,7 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
@@ -3164,7 +3172,10 @@ impl ChatWidget<'_> {
                     // Older layout: status was inside the notice cell — replace it
                     self.history_replace_at(
                         idx,
-                        Box::new(history_cell::new_popular_commands_notice(false)),
+                        Box::new(history_cell::new_popular_commands_notice(
+                            false,
+                            self.latest_upgrade_version.as_deref(),
+                        )),
                     );
                 }
                 _ => {
@@ -3392,10 +3403,10 @@ impl ChatWidget<'_> {
                         .push(InputItem::Text { text: expanded });
                 }
             }
-            crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
+            crate::slash_command::ProcessedCommand::RegularCommand(cmd, command_text) => {
                 // This is a regular slash command, dispatch it normally
                 self.app_event_tx
-                    .send(AppEvent::DispatchCommand(cmd, original_text.clone()));
+                    .send(AppEvent::DispatchCommand(cmd, command_text));
                 return;
             }
             crate::slash_command::ProcessedCommand::Error(error_msg) => {
@@ -3763,6 +3774,7 @@ impl ChatWidget<'_> {
                         &self.config,
                         event,
                         is_first,
+                        self.latest_upgrade_version.as_deref(),
                     )); // tag: prelude
                 }
 
@@ -3832,6 +3844,10 @@ impl ChatWidget<'_> {
                 self.stream_state
                     .closed_answer_ids
                     .insert(StreamId(id.clone()));
+                // Receiving a final answer means this task has finished even if we have not yet
+                // observed the corresponding TaskComplete event. Clear the active marker now so
+                // the status spinner can hide promptly when nothing else is running.
+                self.active_task_ids.remove(&id);
                 self.maybe_hide_spinner();
             }
             EventMsg::ReplayHistory(ev) => {
@@ -5202,9 +5218,26 @@ impl ChatWidget<'_> {
     }
 
     fn rate_limit_reset_info(&self) -> RateLimitResetInfo {
+        let auto_compact_limit = self
+            .config
+            .model_auto_compact_token_limit
+            .and_then(|limit| (limit > 0).then_some(limit as u64));
+        let session_tokens_used = if auto_compact_limit.is_some() {
+            Some(self.total_token_usage.total_tokens)
+        } else {
+            None
+        };
+        let context_window = self.config.model_context_window;
+        let context_tokens_used = context_window.map(|_| self.last_token_usage.tokens_in_context_window());
+
         RateLimitResetInfo {
             primary_last_reset: self.rate_limit_last_primary_reset_at,
             weekly_last_reset: self.rate_limit_last_weekly_reset_at,
+            session_tokens_used,
+            auto_compact_limit,
+            overflow_auto_compact: true,
+            context_window,
+            context_tokens_used,
         }
     }
 
@@ -6684,6 +6717,8 @@ fn update_rate_limit_resets(
                 codex_core::protocol::FileChange::Update {
                     unified_diff: unified.clone(),
                     move_path: None,
+                    original_content: baseline.clone(),
+                    new_content: current.clone(),
                 },
             );
             let detail = create_diff_details_only(&single);
@@ -7329,11 +7364,10 @@ fn update_rate_limit_resets(
         let codex_home = self.config.codex_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            let value = if enabled { "true".to_string() } else { "false".to_string() };
             if let Err(err) = codex_core::config_edit::persist_overrides(
                 &codex_home,
                 profile.as_deref(),
-                &[(&["auto_upgrade_enabled"], value.as_str())],
+                &[(&["auto_upgrade_enabled"], if enabled { "true" } else { "false" })],
             )
             .await
             {
@@ -12139,7 +12173,16 @@ mod tests {
             picker: None,
             font_size: (8, 16),
         };
-        ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term, false)
+        ChatWidget::new(
+            cfg,
+            app_event_tx,
+            None,
+            Vec::new(),
+            false,
+            term,
+            false,
+            None,
+        )
     }
 
     #[test]

@@ -367,7 +367,11 @@ async fn persist_overrides_with_behavior(
         }
         match value {
             Some(v) => {
-                let item_value = toml_edit::value(v);
+                let trimmed = v.trim();
+                let item_value = match trimmed.parse::<bool>() {
+                    Ok(parsed_bool) => toml_edit::value(parsed_bool),
+                    Err(_) => toml_edit::value(v),
+                };
                 apply_toml_edit_override_segments(&mut doc, segments_to_apply, item_value);
                 mutated = true;
             }
@@ -548,6 +552,26 @@ c = "v"
 model = "gpt-5"
 "#;
         assert_eq!(contents, expected);
+    }
+
+    #[tokio::test]
+    async fn persist_overrides_writes_boolean_literals() {
+        let tmpdir = tempdir().expect("tmp");
+        let codex_home = tmpdir.path();
+
+        persist_overrides(codex_home, None, &[(&["auto_upgrade_enabled"], "true")])
+            .await
+            .expect("persist");
+
+        let contents = read_config(codex_home).await;
+        assert!(contents.contains("auto_upgrade_enabled = true"));
+
+        persist_overrides(codex_home, None, &[(&["auto_upgrade_enabled"], "false")])
+            .await
+            .expect("persist");
+
+        let contents = read_config(codex_home).await;
+        assert!(contents.contains("auto_upgrade_enabled = false"));
     }
 
     /// Verifies a scalar key becomes a table when nested keys are written.

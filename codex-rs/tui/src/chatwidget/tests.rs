@@ -100,8 +100,20 @@ async fn helpers_are_available_and_do_not_panic() {
     let (tx_raw, _rx) = channel::<AppEvent>();
     let tx = AppEventSender::new(tx_raw);
     let cfg = test_config();
-    let conversation_manager = Arc::new(ConversationManager::default());
-    let mut w = ChatWidget::new(cfg, conversation_manager, tx, None, Vec::new(), false);
+    let term = crate::tui::TerminalInfo {
+        picker: None,
+        font_size: (8, 16),
+    };
+    let mut w = ChatWidget::new(
+        cfg,
+        tx,
+        None,
+        Vec::new(),
+        false,
+        term,
+        false,
+        None,
+    );
     // Basic construction sanity.
     let _ = &mut w;
 }
@@ -128,6 +140,7 @@ fn make_chatwidget_manual() -> (
         bottom_pane: bottom,
         active_exec_cell: None,
         config: cfg.clone(),
+        latest_upgrade_version: None,
         initial_user_message: None,
         total_token_usage: TokenUsage::default(),
         last_token_usage: TokenUsage::default(),
