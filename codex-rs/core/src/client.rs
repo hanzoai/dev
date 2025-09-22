@@ -362,17 +362,10 @@ impl ModelClient {
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
                     if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers()) {
-                        let headers_dump = format_rate_limit_headers(resp.headers());
-                        if tx_event
-                            .send(Ok(ResponseEvent::DebugMessage(format!(
-                                "Rate limit headers:\n{}",
-                                headers_dump
-                            ))))
-                            .await
-                            .is_err()
-                        {
-                            debug!("receiver dropped rate limit header debug event");
-                        }
+                        debug!(
+                            "rate limit headers:\n{}",
+                            format_rate_limit_headers(resp.headers())
+                        );
 
                         if tx_event
                             .send(Ok(ResponseEvent::RateLimits(snapshot)))
