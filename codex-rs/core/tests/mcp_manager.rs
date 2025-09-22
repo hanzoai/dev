@@ -53,7 +53,7 @@ async fn mcp_manager_skips_slow_server_on_timeout() {
     servers.insert("slow".to_string(), slow_cfg);
     servers.insert("fast".to_string(), fast_cfg);
 
-    let (mgr, errs) = McpConnectionManager::new(servers)
+    let (mgr, errs) = McpConnectionManager::new(servers, std::collections::HashSet::new())
         .await
         .expect("manager creation should not fail entirely");
 
@@ -89,7 +89,7 @@ async fn mcp_manager_respects_extended_startup_timeout() {
     let mut servers = HashMap::new();
     servers.insert("slow_ok".to_string(), slow_ok);
 
-    let (mgr, errs) = McpConnectionManager::new(servers)
+    let (mgr, errs) = McpConnectionManager::new(servers, std::collections::HashSet::new())
         .await
         .expect("manager creation should not fail");
 
@@ -97,4 +97,3 @@ async fn mcp_manager_respects_extended_startup_timeout() {
     let tools = mgr.list_all_tools();
     assert!(tools.keys().any(|k| k.starts_with("slow_ok__")));
 }
-

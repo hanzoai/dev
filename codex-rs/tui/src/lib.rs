@@ -154,6 +154,8 @@ pub async fn run_main(
         debug: Some(cli.debug),
         // Enable web search by default (no CLI flag).
         tools_web_search_request: Some(true),
+        mcp_servers: None,
+        experimental_client_tools: None,
     };
 
     // Parse `-c` overrides from the CLI.
