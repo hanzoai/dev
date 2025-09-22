@@ -192,6 +192,9 @@ pub(crate) enum AppEvent {
     /// follows previously rendered content.
     InsertBackgroundEventLate(String),
 
+    /// Background rate limit refresh failed (threaded request).
+    RateLimitFetchFailed { message: String },
+
     #[allow(dead_code)]
     StartCommitAnimation,
     #[allow(dead_code)]
