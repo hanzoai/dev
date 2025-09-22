@@ -170,12 +170,33 @@ impl PagerView {
         buf: &mut Buffer,
         wrapped: &[Line<'static>],
     ) {
-        let sep_y = content_area.bottom();
-        let sep_rect = Rect::new(full_area.x, sep_y, full_area.width, 1);
+        let area_bottom = full_area.y.saturating_add(full_area.height);
+        if full_area.width == 0 || full_area.height == 0 || area_bottom <= full_area.y {
+            return;
+        }
+
+        let mut sep_y = content_area.bottom();
+        let max_sep_y = area_bottom.saturating_sub(1);
+        if sep_y > max_sep_y {
+            sep_y = max_sep_y;
+        }
+        if sep_y < full_area.y {
+            sep_y = full_area.y;
+        }
+
+        let sep_height = area_bottom.saturating_sub(sep_y).min(1);
+        if sep_height == 0 {
+            return;
+        }
+        let sep_rect = Rect::new(full_area.x, sep_y, full_area.width, sep_height);
+        if sep_rect.width == 0 {
+            return;
+        }
 
         Span::from("─".repeat(sep_rect.width as usize))
             .dim()
             .render_ref(sep_rect, buf);
+
         let percent = if wrapped.is_empty() {
             100
         } else {
@@ -189,10 +210,15 @@ impl PagerView {
         };
         let pct_text = format!(" {percent}% ");
         let pct_w = pct_text.chars().count() as u16;
-        let pct_x = sep_rect.x + sep_rect.width - pct_w - 1;
-        Span::from(pct_text)
-            .dim()
-            .render_ref(Rect::new(pct_x, sep_rect.y, pct_w, 1), buf);
+        if pct_w < sep_rect.width {
+            let padding = sep_rect
+                .width
+                .saturating_sub(pct_w.saturating_add(1));
+            let pct_x = sep_rect.x.saturating_add(padding);
+            Span::from(pct_text)
+                .dim()
+                .render_ref(Rect::new(pct_x, sep_rect.y, pct_w, 1), buf);
+        }
     }
 
     fn handle_key_event(&mut self, _tui: &mut tui::Tui, key_event: KeyEvent) -> Result<()> {

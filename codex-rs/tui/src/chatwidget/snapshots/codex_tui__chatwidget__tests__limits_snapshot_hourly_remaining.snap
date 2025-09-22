@@ -4,8 +4,7 @@ expression: visual
 ---
 [magenta]/limits[/]
 
-[bold]Rate limit usage snapshot[/]
-[dim]  Tip: run `/limits` right after Codex replies for freshest numbers.[/]
+[bold]Usage Limits[/]
   • Hourly limit[dim] (≈5 hours window)[/]: [dark-gray+bold]0.0% used[/]
   • Weekly limit[dim] (≈1 week window)[/]: [dark-gray+bold]20.0% used[/]
 [green]  Within current limits[/]

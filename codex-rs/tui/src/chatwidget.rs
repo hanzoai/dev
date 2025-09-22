@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
@@ -42,6 +42,7 @@ mod interrupts;
 mod layout_scroll;
 mod message;
 mod perf;
+mod rate_limit_refresh;
 mod streaming;
 mod terminal_handlers;
 mod tools;
@@ -51,6 +52,7 @@ use self::agent_install::{
     start_prompt_terminal_session,
     wrap_command,
 };
+use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::HistoryRenderState;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
@@ -97,10 +99,13 @@ use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
 use std::cell::RefCell;
 use std::sync::mpsc;
+use std::fs::OpenOptions;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use tokio::sync::mpsc::UnboundedSender;
 use serde_json::Value as JsonValue;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
+use fs2::FileExt;
 // use image::GenericImageView;
 
 use crate::app_event::{
@@ -152,6 +157,8 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
 use codex_core::protocol::RateLimitSnapshotEvent;
+use crate::rate_limits_view::RateLimitResetInfo;
+use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -215,6 +222,50 @@ struct RunningCommand {
     wait_notes: Vec<(String, bool)>,
 }
 
+const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
+const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
+
+const RATE_LIMIT_RESET_FILE: &str = "state/rate_limit_resets.json";
+
+#[derive(Default)]
+struct RateLimitWarningState {
+    weekly_index: usize,
+    hourly_index: usize,
+}
+
+impl RateLimitWarningState {
+    fn take_warnings(&mut self, weekly_used_percent: f64, hourly_used_percent: f64) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && weekly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            warnings.push(format!(
+                "Weekly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+            ));
+            self.weekly_index += 1;
+        }
+
+        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && hourly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            warnings.push(format!(
+                "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+            ));
+            self.hourly_index += 1;
+        }
+
+        warnings
+    }
+
+    fn reset(&mut self) {
+        self.weekly_index = 0;
+        self.hourly_index = 0;
+    }
+}
+
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
@@ -226,7 +277,13 @@ pub(crate) struct ChatWidget<'a> {
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
-    latest_rate_limits: Option<RateLimitSnapshotEvent>,
+    rate_limit_snapshot: Option<RateLimitSnapshotEvent>,
+    rate_limit_warnings: RateLimitWarningState,
+    rate_limit_fetch_inflight: bool,
+    rate_limit_fetch_placeholder: Option<usize>,
+    rate_limit_last_fetch_at: Option<DateTime<Utc>>,
+    rate_limit_last_primary_reset_at: Option<chrono::DateTime<chrono::Utc>>,
+    rate_limit_last_weekly_reset_at: Option<chrono::DateTime<chrono::Utc>>,
     content_buffer: String,
     // Buffer for streaming assistant answer text; we do not surface partial
     // We wait for the final AgentMessage event and then emit the full text
@@ -2012,6 +2069,12 @@ impl ChatWidget<'_> {
 
         // Initialize image protocol for rendering screenshots
 
+        let reset_cache = load_rate_limit_reset_cache(&config.codex_home);
+        let RateLimitResetCache {
+            primary_last_reset,
+            weekly_last_reset,
+        } = reset_cache;
+
         let mut new_widget = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -2030,7 +2093,13 @@ impl ChatWidget<'_> {
             ),
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
-            latest_rate_limits: None,
+            rate_limit_snapshot: None,
+            rate_limit_warnings: RateLimitWarningState::default(),
+            rate_limit_fetch_inflight: false,
+            rate_limit_fetch_placeholder: None,
+            rate_limit_last_fetch_at: None,
+            rate_limit_last_primary_reset_at: primary_last_reset,
+            rate_limit_last_weekly_reset_at: weekly_last_reset,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2147,7 +2216,7 @@ impl ChatWidget<'_> {
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
-        w.standard_terminal_mode = !config.tui.alternate_screen;
+        w.set_standard_terminal_mode(!config.tui.alternate_screen);
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
@@ -2207,6 +2276,12 @@ impl ChatWidget<'_> {
         // Basic widget state mirrors `new`
         let history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
 
+        let reset_cache = load_rate_limit_reset_cache(&config.codex_home);
+        let RateLimitResetCache {
+            primary_last_reset,
+            weekly_last_reset,
+        } = reset_cache;
+
         let mut w = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -2222,7 +2297,13 @@ impl ChatWidget<'_> {
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
-            latest_rate_limits: None,
+            rate_limit_snapshot: None,
+            rate_limit_warnings: RateLimitWarningState::default(),
+            rate_limit_fetch_inflight: false,
+            rate_limit_fetch_placeholder: None,
+            rate_limit_last_fetch_at: None,
+            rate_limit_last_primary_reset_at: primary_last_reset,
+            rate_limit_last_weekly_reset_at: weekly_last_reset,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2331,6 +2412,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
         };
+        w.set_standard_terminal_mode(!config.tui.alternate_screen);
         // Welcome at top of first request for forked session too
         w.history_push_top_next_req(history_cell::new_animated_welcome());
         w
@@ -4142,7 +4224,46 @@ impl ChatWidget<'_> {
                     self.last_token_usage = info.last_token_usage.clone();
                 }
                 if let Some(snapshot) = event.rate_limits {
-                    self.latest_rate_limits = Some(snapshot);
+                    let previous_snapshot = self.rate_limit_snapshot.clone();
+                    self.update_rate_limit_resets(previous_snapshot.as_ref(), &snapshot);
+                    let warnings = self
+                        .rate_limit_warnings
+                        .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
+                    self.rate_limit_snapshot = Some(snapshot);
+                    if !warnings.is_empty() {
+                        for warning in warnings {
+                            self.history_push(history_cell::new_warning_event(warning));
+                        }
+                        self.request_redraw();
+                    }
+                    if let Some(snapshot_ref) = self.rate_limit_snapshot.as_ref() {
+                        if self.rate_limit_fetch_placeholder.is_some() || self.rate_limit_fetch_inflight {
+                            let reset_info = self.rate_limit_reset_info();
+                            if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
+                                if idx < self.history_cells.len() {
+                                    self.history_replace_at(
+                                        idx,
+                                        Box::new(history_cell::new_limits_output(
+                                            snapshot_ref,
+                                            reset_info.clone(),
+                                        )),
+                                    );
+                                } else {
+                                    self.history_push(history_cell::new_limits_output(
+                                        snapshot_ref,
+                                        reset_info.clone(),
+                                    ));
+                                }
+                            } else {
+                                self.history_push(history_cell::new_limits_output(
+                                    snapshot_ref,
+                                    reset_info,
+                                ));
+                            }
+                            self.rate_limit_last_fetch_at = Some(Utc::now());
+                            self.rate_limit_fetch_inflight = false;
+                        }
+                    }
                 }
                 self.bottom_pane.set_token_usage(
                     self.total_token_usage.clone(),
@@ -5003,6 +5124,149 @@ impl ChatWidget<'_> {
             &self.total_token_usage,
             &self.last_token_usage,
         ));
+    }
+
+    pub(crate) fn add_limits_output(&mut self) {
+        if let Some(snapshot) = self.rate_limit_snapshot.clone() {
+            let reset_info = self.rate_limit_reset_info();
+            let key = self.next_internal_key();
+            let idx = self.history_insert_with_key_global_tagged(
+                Box::new(history_cell::new_limits_output(&snapshot, reset_info)),
+                key,
+                "limits",
+            );
+
+            if self.should_refresh_limits() {
+                self.request_latest_rate_limits(Some(idx));
+            }
+        } else {
+            self.request_latest_rate_limits(None);
+        }
+    }
+
+    fn request_latest_rate_limits(&mut self, target_idx: Option<usize>) {
+        if self.rate_limit_fetch_inflight {
+            return;
+        }
+
+        if let Some(idx) = target_idx {
+            self.rate_limit_fetch_placeholder = Some(idx);
+        } else if self.rate_limit_fetch_placeholder.is_none() {
+            let key = self.next_internal_key();
+            let idx = self.history_insert_with_key_global_tagged(
+                Box::new(history_cell::new_limits_fetching()),
+                key,
+                "limits",
+            );
+            self.rate_limit_fetch_placeholder = Some(idx);
+        }
+
+        self.rate_limit_fetch_inflight = true;
+
+        start_rate_limit_refresh(
+            self.app_event_tx.clone(),
+            self.config.clone(),
+            self.config.debug,
+        );
+    }
+
+    fn should_refresh_limits(&self) -> bool {
+        if self.rate_limit_fetch_inflight {
+            return false;
+        }
+        match self.rate_limit_last_fetch_at {
+            Some(ts) => Utc::now() - ts > RATE_LIMIT_REFRESH_INTERVAL,
+            None => true,
+        }
+    }
+
+    pub(crate) fn on_rate_limit_refresh_failed(&mut self, message: String) {
+        if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
+            if self.rate_limit_snapshot.is_none() {
+                if idx < self.history_cells.len() {
+                    self.history_replace_at(
+                        idx,
+                        Box::new(history_cell::new_error_event(message.clone())),
+                    );
+                } else {
+                    self.history_push(history_cell::new_error_event(message.clone()));
+                }
+            }
+        }
+
+        self.rate_limit_fetch_inflight = false;
+
+        if self.rate_limit_snapshot.is_some() {
+            self.history_push(history_cell::new_warning_event(message));
+        }
+    }
+
+    fn rate_limit_reset_info(&self) -> RateLimitResetInfo {
+        RateLimitResetInfo {
+            primary_last_reset: self.rate_limit_last_primary_reset_at,
+            weekly_last_reset: self.rate_limit_last_weekly_reset_at,
+        }
+    }
+
+fn update_rate_limit_resets(
+        &mut self,
+        previous: Option<&RateLimitSnapshotEvent>,
+        current: &RateLimitSnapshotEvent,
+    ) {
+        let now = Utc::now();
+        let mut changed_primary = false;
+        let mut changed_weekly = false;
+
+        if let Some(prev) = previous {
+            if current.primary_used_percent + 1.0 < prev.primary_used_percent {
+                if self
+                    .rate_limit_last_primary_reset_at
+                    .map_or(true, |existing| now > existing)
+                {
+                    self.rate_limit_last_primary_reset_at = Some(now);
+                    changed_primary = true;
+                }
+            }
+            if current.weekly_used_percent + 0.5 < prev.weekly_used_percent {
+                if self
+                    .rate_limit_last_weekly_reset_at
+                    .map_or(true, |existing| now > existing)
+                {
+                    self.rate_limit_last_weekly_reset_at = Some(now);
+                    changed_weekly = true;
+                }
+            }
+        } else {
+            if current.primary_used_percent <= 1.0
+                && self.rate_limit_last_primary_reset_at.is_none()
+            {
+                self.rate_limit_last_primary_reset_at = Some(now);
+                changed_primary = true;
+            }
+            if current.weekly_used_percent <= 1.0
+                && self.rate_limit_last_weekly_reset_at.is_none()
+            {
+                self.rate_limit_last_weekly_reset_at = Some(now);
+                changed_weekly = true;
+            }
+        }
+
+        if changed_primary || changed_weekly {
+            let candidate_info = self.rate_limit_reset_info();
+            let candidate_cache = RateLimitResetCache {
+                primary_last_reset: candidate_info.primary_last_reset,
+                weekly_last_reset: candidate_info.weekly_last_reset,
+            };
+            match persist_rate_limit_reset_cache(&self.config.codex_home, candidate_cache) {
+                Ok(merged) => {
+                    self.rate_limit_last_primary_reset_at = merged.primary_last_reset;
+                    self.rate_limit_last_weekly_reset_at = merged.weekly_last_reset;
+                }
+                Err(err) => {
+                    tracing::warn!("failed to persist rate limit resets: {err:?}");
+                }
+            }
+        }
     }
 
     #[cfg(not(debug_assertions))]
@@ -8304,6 +8568,21 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn refresh_standard_terminal_hint(&mut self) {
+        if self.standard_terminal_mode {
+            let message = "Standard terminal mode active. Press Ctrl+T to return to full UI.";
+            self.bottom_pane
+                .set_standard_terminal_hint(Some(message.to_string()));
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
+        }
+    }
+
+    pub(crate) fn set_standard_terminal_mode(&mut self, enabled: bool) {
+        self.standard_terminal_mode = enabled;
+        self.refresh_standard_terminal_hint();
+    }
+
     pub(crate) fn is_reasoning_shown(&self) -> bool {
         // Check if any reasoning cell exists and if it's expanded
         for cell in &self.history_cells {
@@ -10485,6 +10764,9 @@ impl ChatWidget<'_> {
 
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
+        self.rate_limit_snapshot = None;
+        self.rate_limit_warnings.reset();
+        self.rate_limit_last_fetch_at = None;
         self.bottom_pane.set_token_usage(
             self.total_token_usage.clone(),
             self.last_token_usage.clone(),
@@ -11373,7 +11655,6 @@ impl ChatWidget<'_> {
                         &tx,
                         format!("`/merge` — handing off to agent ({})", reason_text),
                     );
-                    let _ = tx.send(AppEvent::PrepareAgents);
                     let mut preface = format!(
                         "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
                         reason_text,
@@ -12975,6 +13256,94 @@ impl ChatWidget<'_> {
 
             let sparkline = Sparkline::default().data(bars).max(max_value); // Dynamic max for better visibility
             sparkline.render(sparkline_area, buf);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+struct RateLimitResetCache {
+    #[serde(default)]
+    primary_last_reset: Option<DateTime<Utc>>,
+    #[serde(default)]
+    weekly_last_reset: Option<DateTime<Utc>>,
+}
+
+fn load_rate_limit_reset_cache(codex_home: &Path) -> RateLimitResetCache {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(RATE_LIMIT_RESET_FILE));
+    match std::fs::read_to_string(&read_path) {
+        Ok(contents) => match serde_json::from_str::<RateLimitResetCache>(&contents) {
+            Ok(cache) => cache,
+            Err(err) => {
+                tracing::debug!("failed to parse rate limit reset cache: {err:?}");
+                RateLimitResetCache::default()
+            }
+        },
+        Err(err) => {
+            if err.kind() != io::ErrorKind::NotFound {
+                tracing::debug!("failed to read rate limit reset cache: {err:?}");
+            }
+            RateLimitResetCache::default()
+        }
+    }
+}
+
+fn persist_rate_limit_reset_cache(
+    codex_home: &Path,
+    candidate: RateLimitResetCache,
+) -> io::Result<RateLimitResetCache> {
+    if candidate.primary_last_reset.is_none() && candidate.weekly_last_reset.is_none() {
+        return Ok(candidate);
+    }
+
+    let path = rate_limit_reset_cache_path(codex_home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&path)?;
+    FileExt::lock_exclusive(&file)?;
+
+    let mut buf = String::new();
+    file.seek(SeekFrom::Start(0))?;
+    file.read_to_string(&mut buf)?;
+    let mut existing: RateLimitResetCache = if buf.trim().is_empty() {
+        RateLimitResetCache::default()
+    } else {
+        serde_json::from_str(&buf).unwrap_or_default()
+    };
+
+    let mut changed = false;
+    changed |= merge_timestamp(&mut existing.primary_last_reset, candidate.primary_last_reset);
+    changed |= merge_timestamp(&mut existing.weekly_last_reset, candidate.weekly_last_reset);
+
+    if changed {
+        let serialized = serde_json::to_string_pretty(&existing)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(serialized.as_bytes())?;
+        file.flush()?;
+    }
+
+    let _ = FileExt::unlock(&file);
+    Ok(existing)
+}
+
+fn rate_limit_reset_cache_path(codex_home: &Path) -> PathBuf {
+    codex_home.join(RATE_LIMIT_RESET_FILE)
+}
+
+fn merge_timestamp(dst: &mut Option<DateTime<Utc>>, candidate: Option<DateTime<Utc>>) -> bool {
+    match (dst.as_ref(), candidate) {
+        (_, None) => false,
+        (Some(existing), Some(candidate_dt)) if *existing >= candidate_dt => false,
+        _ => {
+            *dst = candidate;
+            true
         }
     }
 }

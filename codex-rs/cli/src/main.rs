@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use anyhow::Context;
 use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::Shell;
@@ -15,14 +17,21 @@ use codex_cli::proto;
 mod llm;
 use llm::{LlmCli, run_llm};
 use codex_common::CliConfigOverrides;
+use codex_core::find_conversation_path_by_id_str;
+use codex_core::RolloutRecorder;
 use codex_exec::Cli as ExecCli;
 use codex_tui::Cli as TuiCli;
+use std::path::Path;
 use std::path::PathBuf;
+use std::process;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
 use crate::proto::ProtoCli;
+
+const CLI_COMMAND_NAME: &str = "code";
 
 /// Codex CLI
 ///
@@ -36,7 +45,7 @@ use crate::proto::ProtoCli;
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `codex` command name that users run.
+    // the generic `code` command name that users run.
     bin_name = "code"
 )]
 struct MultitoolCli {
@@ -211,6 +220,8 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         subcommand,
     } = MultitoolCli::parse();
 
+    interactive.finalize_defaults();
+
     match subcommand {
         None => {
             prepend_config_flags(
@@ -237,8 +248,9 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         Some(Subcommand::Resume(ResumeCommand {
             session_id,
             last,
-            config_overrides,
+            mut config_overrides,
         })) => {
+            config_overrides.finalize_defaults();
             interactive = finalize_resume_interactive(
                 interactive,
                 root_config_overrides.clone(),
@@ -353,15 +365,23 @@ fn prepend_config_flags(
 fn finalize_resume_interactive(
     mut interactive: TuiCli,
     root_config_overrides: CliConfigOverrides,
-    _session_id: Option<String>,
-    _last: bool,
-    resume_cli: TuiCli,
+    session_id: Option<String>,
+    last: bool,
+    mut resume_cli: TuiCli,
 ) -> TuiCli {
     // Our fork does not expose explicit resume fields on the TUI CLI.
     // We simply merge resume-scoped flags and root overrides and run the TUI.
 
+    interactive.finalize_defaults();
+    resume_cli.finalize_defaults();
+
     // Merge resume-scoped flags and overrides with highest precedence.
     merge_resume_cli_flags(&mut interactive, resume_cli);
+
+    if let Err(err) = apply_resume_directives(&mut interactive, session_id, last) {
+        eprintln!("{}", err);
+        process::exit(1);
+    }
 
     // Propagate any root-level config overrides (e.g. `-c key=value`).
     prepend_config_flags(&mut interactive.config_overrides, root_config_overrides);
@@ -404,16 +424,94 @@ fn merge_resume_cli_flags(interactive: &mut TuiCli, resume_cli: TuiCli) {
         interactive.prompt = Some(prompt);
     }
 
+    if resume_cli.enable_web_search || resume_cli.disable_web_search {
+        interactive.enable_web_search = resume_cli.enable_web_search;
+        interactive.disable_web_search = resume_cli.disable_web_search;
+        interactive.web_search = resume_cli.web_search;
+    }
+
     interactive
         .config_overrides
         .raw_overrides
         .extend(resume_cli.config_overrides.raw_overrides);
 }
 
-fn print_completion(cmd: CompletionCommand) {
+fn apply_resume_directives(
+    interactive: &mut TuiCli,
+    session_id: Option<String>,
+    last: bool,
+) -> anyhow::Result<()> {
+    interactive.resume_picker = false;
+    interactive.resume_last = false;
+    interactive.resume_session_id = None;
+
+    match (session_id, last) {
+        (Some(id), _) => {
+            let path = resolve_resume_path(Some(id.as_str()), false)?
+                .ok_or_else(|| anyhow!("No recorded session found with id {id}"))?;
+            interactive.resume_session_id = Some(id);
+            push_experimental_resume_override(interactive, &path);
+        }
+        (None, true) => {
+            let path = resolve_resume_path(None, true)?
+                .ok_or_else(|| anyhow!("No recent sessions found to resume. Start a session with `code` first."))?;
+            interactive.resume_last = true;
+            push_experimental_resume_override(interactive, &path);
+        }
+        (None, false) => {
+            interactive.resume_picker = true;
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<Option<PathBuf>> {
+    if session_id.is_none() && !last {
+        return Ok(None);
+    }
+
+    let codex_home = codex_core::config::find_codex_home()
+        .context("failed to locate Codex home directory")?;
+
+    let runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to create async runtime for resume lookup")?;
+
+    runtime.block_on(async {
+        if let Some(id) = session_id {
+            let maybe = find_conversation_path_by_id_str(&codex_home, id)
+                .await
+                .context("failed to look up session by id")?;
+            Ok(maybe)
+        } else if last {
+            let page = RolloutRecorder::list_conversations(&codex_home, 1, None)
+                .await
+                .context("failed to list recorded sessions")?;
+            Ok(page.items.first().map(|it| it.path.clone()))
+        } else {
+            Ok(None)
+        }
+    })
+}
+
+fn push_experimental_resume_override(interactive: &mut TuiCli, path: &Path) {
+    let raw = path.to_string_lossy();
+    let escaped = raw.replace('\\', "\\\\").replace('"', "\\\"");
+    interactive
+        .config_overrides
+        .raw_overrides
+        .push(format!("experimental_resume=\"{escaped}\""));
+}
+
+fn write_completion<W: std::io::Write>(shell: Shell, out: &mut W) {
     let mut app = MultitoolCli::command();
-    let name = "code";
-    generate(cmd.shell, &mut app, name, &mut std::io::stdout());
+    generate(shell, &mut app, CLI_COMMAND_NAME, out);
+}
+
+fn print_completion(cmd: CompletionCommand) {
+    write_completion(cmd.shell, &mut std::io::stdout());
 }
 
 fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
@@ -815,6 +913,15 @@ async fn doctor_main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bash_completion_uses_code_command_name() {
+        let mut buf = Vec::new();
+        write_completion(Shell::Bash, &mut buf);
+        let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
+        assert!(script.contains("_code()"), "expected bash completion function to be named _code");
+        assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
+    }
 
     fn finalize_from_args(args: &[&str]) -> TuiCli {
         let cli = MultitoolCli::try_parse_from(args).expect("parse");

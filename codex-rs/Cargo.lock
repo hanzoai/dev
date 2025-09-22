@@ -1220,6 +1220,7 @@ dependencies = [
  "color-eyre",
  "crossterm",
  "diffy",
+ "fs2",
  "futures",
  "image 0.25.8",
  "insta",
