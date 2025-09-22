@@ -91,6 +91,7 @@ syntect = { version = "5", features = ["yaml-load", "plist-load", "parsing", "de
 which = "6"
 urlencoding = "2.1"
 pulldown-cmark = "0.13"
+portable-pty = "0.9.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
