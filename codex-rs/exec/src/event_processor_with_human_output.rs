@@ -294,9 +294,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 if let Some(snapshot) = &ev.rate_limits {
                     ts_println!(
                         self,
-                        "rate limits: hourly {:.1}% • weekly {:.1}%",
+                        "rate limits: hourly {:.1}% • secondary {:.1}%",
                         snapshot.primary_used_percent,
-                        snapshot.weekly_used_percent
+                        snapshot.secondary_used_percent
                     );
                 }
             }
