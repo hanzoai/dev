@@ -314,8 +314,8 @@ async function main() {
   const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
   const version = packageJson.version;
   
-  // Download only the primary binary; we'll create wrappers for legacy names.
-  const binaries = ['code', 'code-mcp-server'];
+  // Download only the primary CLI binary; subcommands (e.g., `code mcp`) reuse it.
+  const binaries = ['code'];
   
   console.log(`Installing @just-every/code v${version} for ${targetTriple}...`);
   
