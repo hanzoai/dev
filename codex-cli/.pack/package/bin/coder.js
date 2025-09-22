@@ -12,6 +12,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const { platform, arch } = process;
+const binaryBaseName = process.env.CODE_NATIVE_BINARY || "code";
+const commandLabel = process.env.CODE_NATIVE_COMMAND || (binaryBaseName === "code" ? "code" : binaryBaseName);
 
 // Important: Never delegate to another system's `code` binary (e.g., VS Code).
 // When users run via `npx @just-every/code`, we must always execute our
@@ -73,9 +75,11 @@ if (!targetTriple) {
   throw new Error(`Unsupported platform: ${platform} (${arch})`);
 }
 
-// Prefer new 'code-*' binary names; fall back to legacy 'coder-*' if missing.
-let binaryPath = path.join(__dirname, "..", "bin", `code-${targetTriple}`);
-let legacyBinaryPath = path.join(__dirname, "..", "bin", `coder-${targetTriple}`);
+// Prefer '<binaryBaseName>-*' binary names; fall back to legacy 'coder-*' if running the main CLI.
+let binaryPath = path.join(__dirname, "..", "bin", `${binaryBaseName}-${targetTriple}`);
+const legacyBinaryPath = binaryBaseName === "code"
+  ? path.join(__dirname, "..", "bin", `coder-${targetTriple}`)
+  : null;
 
 // --- Bootstrap helper (runs if the binary is missing, e.g. Bun blocked postinstall) ---
 import { existsSync, chmodSync, statSync, openSync, readSync, closeSync, mkdirSync, copyFileSync, readFileSync, unlinkSync, createWriteStream } from "fs";
@@ -129,7 +133,7 @@ const getCachedBinaryPath = (version) => {
   // targetTriple already includes the proper extension on Windows ("...msvc.exe").
   // Do not append another suffix; just use the exact targetTriple-derived name.
   const cacheDir = getCacheDir(version);
-  return path.join(cacheDir, `code-${targetTriple}`);
+  return path.join(cacheDir, `${binaryBaseName}-${targetTriple}`);
 };
 
 let lastBootstrapError = null;
@@ -201,7 +205,7 @@ const tryBootstrapBinary = async () => {
         try {
           const pkgJson = req.resolve(`${name}/package.json`);
           const pkgDir = path.dirname(pkgJson);
-          const src = path.join(pkgDir, "bin", `code-${targetTriple}`);
+          const src = path.join(pkgDir, "bin", `${binaryBaseName}-${targetTriple}`);
           if (existsSync(src)) {
             // Always ensure cache has the binary; on Unix mirror into node_modules
             copyFileSync(src, cachePath);
@@ -218,8 +222,8 @@ const tryBootstrapBinary = async () => {
     // 4) Download from GitHub release
     const isWin = platform === "win32";
     const archiveName = isWin
-      ? `code-${targetTriple}.zip`
-      : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `code-${targetTriple}.zst`; } catch { return `code-${targetTriple}.tar.gz`; } })();
+      ? `${binaryBaseName}-${targetTriple}.zip`
+      : (() => { try { execSync("zstd --version", { stdio: "ignore", shell: true }); return `${binaryBaseName}-${targetTriple}.zst`; } catch { return `${binaryBaseName}-${targetTriple}.tar.gz`; } })();
     const url = `https://github.com/just-every/code/releases/download/v${version}/${archiveName}`;
     const tmp = path.join(binDir, `.${archiveName}.part`);
     return httpsDownload(url, tmp)
@@ -270,11 +274,11 @@ const tryBootstrapBinary = async () => {
 };
 
 // If missing, attempt to bootstrap into place (helps when Bun blocks postinstall)
-if (!existsSync(binaryPath) && !existsSync(legacyBinaryPath)) {
+if (!existsSync(binaryPath) && !(legacyBinaryPath && existsSync(legacyBinaryPath))) {
   const ok = await tryBootstrapBinary();
   if (!ok) {
     // retry legacy name in case archive provided coder-*
-    if (existsSync(legacyBinaryPath) && !existsSync(binaryPath)) {
+    if (legacyBinaryPath && existsSync(legacyBinaryPath) && !existsSync(binaryPath)) {
       binaryPath = legacyBinaryPath;
     }
   }
@@ -288,7 +292,7 @@ try {
   const v = existsSync(cached) ? validateBinary(cached) : { ok: false };
   if (v.ok) {
     binaryPath = cached;
-  } else if (!existsSync(binaryPath) && existsSync(legacyBinaryPath)) {
+  } else if (!existsSync(binaryPath) && legacyBinaryPath && existsSync(legacyBinaryPath)) {
     binaryPath = legacyBinaryPath;
   }
 } catch {
@@ -349,7 +353,7 @@ if (!validation.ok) {
 try {
   const ua = process.env.npm_config_user_agent || "";
   const isNpx = ua.includes("npx");
-  if (isNpx && process.stderr && process.stderr.isTTY) {
+  if (binaryBaseName === "code" && isNpx && process.stderr && process.stderr.isTTY) {
     // Best-effort discovery of another 'code' on PATH for user clarity
     let otherCode = "";
     try {
@@ -381,7 +385,7 @@ const { spawn } = await import("child_process");
 
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
-  env: { ...process.env, CODER_MANAGED_BY_NPM: "1", CODEX_MANAGED_BY_NPM: "1" },
+  env: { ...process.env, CODER_MANAGED_BY_NPM: "1", CODEX_MANAGED_BY_NPM: "1", CODE_NATIVE_COMMAND: commandLabel },
 });
 
 child.on("error", (err) => {
