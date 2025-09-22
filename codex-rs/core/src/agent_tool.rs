@@ -260,6 +260,12 @@ impl AgentManager {
             .collect()
     }
 
+    pub fn has_active_agents(&self) -> bool {
+        self.agents
+            .values()
+            .any(|agent| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+    }
+
     pub async fn cancel_agent(&mut self, agent_id: &str) -> bool {
         if let Some(handle) = self.handles.remove(agent_id) {
             handle.abort();
@@ -847,11 +853,11 @@ pub fn create_run_agent_tool() -> OpenAiTool {
     );
 
     properties.insert(
-        "model".to_string(),
-        JsonSchema::String {
-        description: Some(
-                "Model: 'claude', 'gemini', 'qwen', or 'code' (or array of models for batch execution)"
-                    .to_string(),
+        "models".to_string(),
+        JsonSchema::Array {
+            items: Box::new(JsonSchema::String { description: None }),
+            description: Some(
+                "Optional: Array of model names (e.g., ['claude','gemini','qwen','code'])".to_string(),
             ),
         },
     );
@@ -891,7 +897,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent_run".to_string(),
-        description: "Start a complex AI task asynchronously. Returns a agent ID immediately to check status and retrieve results.".to_string(),
+        description: "Start a complex AI task asynchronously. Returns an agent ID immediately to check status and retrieve results. Once an agent is running, enables: agent_check, agent_result, agent_cancel, agent_wait, agent_list.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -1073,11 +1079,31 @@ pub fn create_list_agents_tool() -> OpenAiTool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunAgentParams {
     pub task: String,
-    pub model: Option<serde_json::Value>, // Can be string or array
+    #[serde(default, deserialize_with = "deserialize_models_field")]
+    pub models: Vec<String>,
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
     pub read_only: Option<bool>,
+}
+
+fn deserialize_models_field<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ModelsInput {
+        Seq(Vec<String>),
+        One(String),
+    }
+
+    let parsed = Option::<ModelsInput>::deserialize(deserializer)?;
+    Ok(match parsed {
+        Some(ModelsInput::Seq(seq)) => seq,
+        Some(ModelsInput::One(single)) => vec![single],
+        None => Vec::new(),
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

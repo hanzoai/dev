@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
@@ -36,11 +36,13 @@ mod agent_install;
 mod diff_ui;
 mod exec_tools;
 mod gh_actions;
+mod history_render;
 mod help_handlers;
 mod interrupts;
 mod layout_scroll;
 mod message;
 mod perf;
+mod rate_limit_refresh;
 mod streaming;
 mod terminal_handlers;
 mod tools;
@@ -50,9 +52,12 @@ use self::agent_install::{
     start_prompt_terminal_session,
     wrap_command,
 };
+use self::rate_limit_refresh::start_rate_limit_refresh;
+use self::history_render::HistoryRenderState;
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::ApprovedCommandMatchKind;
+use codex_core::protocol::SandboxPolicy;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
 use codex_core::protocol::AgentReasoningEvent;
@@ -94,10 +99,13 @@ use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
 use std::cell::RefCell;
 use std::sync::mpsc;
+use std::fs::OpenOptions;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use tokio::sync::mpsc::UnboundedSender;
 use serde_json::Value as JsonValue;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
+use fs2::FileExt;
 // use image::GenericImageView;
 
 use crate::app_event::{
@@ -108,6 +116,8 @@ use crate::app_event::{
     TerminalRunController,
 };
 use crate::app_event_sender::AppEventSender;
+use crate::bottom_pane::validation_settings_view;
+use crate::bottom_pane::validation_settings_view::ToolStatus;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
@@ -132,16 +142,23 @@ use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
+use crate::util::buffer::fill_rect;
 use crate::user_approval_widget::ApprovalRequest;
 use codex_ansi_escape::ansi_escape_line;
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
 use codex_core::config::resolve_codex_path_for_read;
+use codex_core::config::set_github_actionlint_on_patch;
 use codex_core::config::set_github_check_on_push;
+use codex_core::config::set_validation_patch_harness;
+use codex_core::config::set_validation_tool_enabled;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
+use codex_core::protocol::RateLimitSnapshotEvent;
+use crate::rate_limits_view::RateLimitResetInfo;
+use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -200,6 +217,53 @@ struct RunningCommand {
     explore_entry: Option<(usize, usize)>,
     stdout: String,
     stderr: String,
+    wait_total: Option<Duration>,
+    wait_active: bool,
+    wait_notes: Vec<(String, bool)>,
+}
+
+const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
+const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
+
+const RATE_LIMIT_RESET_FILE: &str = "state/rate_limit_resets.json";
+
+#[derive(Default)]
+struct RateLimitWarningState {
+    weekly_index: usize,
+    hourly_index: usize,
+}
+
+impl RateLimitWarningState {
+    fn take_warnings(&mut self, weekly_used_percent: f64, hourly_used_percent: f64) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && weekly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            warnings.push(format!(
+                "Weekly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+            ));
+            self.weekly_index += 1;
+        }
+
+        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && hourly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            warnings.push(format!(
+                "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+            ));
+            self.hourly_index += 1;
+        }
+
+        warnings
+    }
+
+    fn reset(&mut self) {
+        self.weekly_index = 0;
+        self.hourly_index = 0;
+    }
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -208,10 +272,18 @@ pub(crate) struct ChatWidget<'a> {
     bottom_pane: BottomPane<'a>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
+    history_render: HistoryRenderState,
     config: Config,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
+    rate_limit_snapshot: Option<RateLimitSnapshotEvent>,
+    rate_limit_warnings: RateLimitWarningState,
+    rate_limit_fetch_inflight: bool,
+    rate_limit_fetch_placeholder: Option<usize>,
+    rate_limit_last_fetch_at: Option<DateTime<Utc>>,
+    rate_limit_last_primary_reset_at: Option<chrono::DateTime<chrono::Utc>>,
+    rate_limit_last_weekly_reset_at: Option<chrono::DateTime<chrono::Utc>>,
     content_buffer: String,
     // Buffer for streaming assistant answer text; we do not surface partial
     // We wait for the final AgentMessage event and then emit the full text
@@ -275,6 +347,7 @@ pub(crate) struct ChatWidget<'a> {
 
     // Terminal overlay state
     terminal: TerminalState,
+    pending_manual_terminal: HashMap<u64, PendingManualTerminal>,
 
     // Persisted selection for Agents overview
     agents_overview_selected_index: usize,
@@ -282,10 +355,6 @@ pub(crate) struct ChatWidget<'a> {
     #[cfg(not(debug_assertions))]
     pending_upgrade_notice: Option<(u64, String)>,
 
-    // Cache for expensive height calculations per cell and width
-    height_cache: std::cell::RefCell<std::collections::HashMap<(usize, u16), u16>>,
-    // Track last width used to opportunistically clear cache when layout changes
-    height_cache_last_width: std::cell::Cell<u16>,
     // Cached visible rows for the diff overlay body to clamp scrolling (kept within diffs)
 
     // Centralized height manager (always enabled)
@@ -296,13 +365,6 @@ pub(crate) struct ChatWidget<'a> {
 
     // True when connected to external Chrome via CDP; affects HUD titles
     browser_is_external: bool,
-
-    // Prefix sums of content heights (including spacing) for fast scroll range
-    prefix_sums: std::cell::RefCell<Vec<u16>>,
-    // Cache key for prefix_sums to avoid rebuilding on pure scroll frames
-    last_prefix_width: std::cell::Cell<u16>,
-    last_prefix_count: std::cell::Cell<usize>,
-    prefix_valid: std::cell::Cell<bool>,
 
     // Most recent theme snapshot used to retint pre-rendered lines
     last_theme: crate::theme::Theme,
@@ -491,6 +553,12 @@ fn wait_target_from_params(params: Option<&String>, call_id: &str) -> String {
         }
     }
     format!("call {}", call_id)
+}
+
+fn wait_exec_call_id_from_params(params: Option<&String>) -> Option<ExecCallId> {
+    params
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|json| json.get("call_id").and_then(|v| v.as_str()).map(|s| ExecCallId(s.to_string())))
 }
 
 fn line_text(line: &Line<'static>) -> String {
@@ -1250,10 +1318,7 @@ impl ChatWidget<'_> {
                     crate::markdown::append_markdown(text, &mut lines, &self.config);
                     let key = self.next_internal_key();
                     let _ = self.history_insert_with_key_global(
-                        Box::new(PlainHistoryCell {
-                            lines,
-                            kind: HistoryCellType::Assistant,
-                        }),
+                        Box::new(PlainHistoryCell::new(lines, HistoryCellType::Assistant)),
                         key,
                     );
                 }
@@ -1473,9 +1538,7 @@ impl ChatWidget<'_> {
 
     /// Clear memoized cell heights (called when history/content changes)
     fn invalidate_height_cache(&mut self) {
-        self.height_cache.borrow_mut().clear();
-        self.prefix_sums.borrow_mut().clear();
-        self.prefix_valid.set(false);
+        self.history_render.invalidate_height_cache();
     }
 
     /// Handle exec approval request immediately
@@ -1624,6 +1687,7 @@ impl ChatWidget<'_> {
                     plain.kind = history_cell::HistoryCellType::Patch {
                         kind: history_cell::PatchKind::ApplySuccess,
                     };
+                    plain.invalidate_layout_cache();
                     self.request_redraw();
                     return;
                 }
@@ -1825,14 +1889,16 @@ impl ChatWidget<'_> {
     fn interrupt_running_task(&mut self) {
         if self.bottom_pane.is_task_running() {
             let mut has_wait_running = false;
-            for (_, idx) in self.tools_state.running_custom_tools.iter() {
-                if let Some(cell) = self.history_cells.get(*idx).and_then(|c| c
+            for entry in self.tools_state.running_custom_tools.values() {
+                if let Some(idx) = self.resolve_running_tool_index(entry) {
+                    if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
                     .as_any()
                     .downcast_ref::<history_cell::RunningToolCallCell>())
-                {
-                    if cell.has_title("Waiting") {
-                        has_wait_running = true;
-                        break;
+                    {
+                        if cell.has_title("Waiting") {
+                            has_wait_running = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -2003,6 +2069,12 @@ impl ChatWidget<'_> {
 
         // Initialize image protocol for rendering screenshots
 
+        let reset_cache = load_rate_limit_reset_cache(&config.codex_home);
+        let RateLimitResetCache {
+            primary_last_reset,
+            weekly_last_reset,
+        } = reset_cache;
+
         let mut new_widget = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -2021,6 +2093,13 @@ impl ChatWidget<'_> {
             ),
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            rate_limit_snapshot: None,
+            rate_limit_warnings: RateLimitWarningState::default(),
+            rate_limit_fetch_inflight: false,
+            rate_limit_fetch_placeholder: None,
+            rate_limit_last_fetch_at: None,
+            rate_limit_last_primary_reset_at: primary_last_reset,
+            rate_limit_last_weekly_reset_at: weekly_last_reset,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2034,6 +2113,7 @@ impl ChatWidget<'_> {
             tools_state: ToolState {
                 running_custom_tools: HashMap::new(),
                 running_web_search: HashMap::new(),
+                running_wait_tools: HashMap::new(),
             },
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -2077,11 +2157,11 @@ impl ChatWidget<'_> {
                 body_visible_rows: std::cell::Cell::new(0),
             },
             terminal: TerminalState::default(),
+            pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
-            height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
-            height_cache_last_width: std::cell::Cell::new(0),
+            history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2098,10 +2178,6 @@ impl ChatWidget<'_> {
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
-            prefix_sums: std::cell::RefCell::new(Vec::new()),
-            last_prefix_width: std::cell::Cell::new(0),
-            last_prefix_count: std::cell::Cell::new(0),
-            prefix_valid: std::cell::Cell::new(false),
             last_theme: crate::theme::current_theme(),
             perf_state: PerfState {
                 enabled: false,
@@ -2140,7 +2216,7 @@ impl ChatWidget<'_> {
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
-        w.standard_terminal_mode = !config.tui.alternate_screen;
+        w.set_standard_terminal_mode(!config.tui.alternate_screen);
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
@@ -2200,6 +2276,12 @@ impl ChatWidget<'_> {
         // Basic widget state mirrors `new`
         let history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
 
+        let reset_cache = load_rate_limit_reset_cache(&config.codex_home);
+        let RateLimitResetCache {
+            primary_last_reset,
+            weekly_last_reset,
+        } = reset_cache;
+
         let mut w = Self {
             app_event_tx: app_event_tx.clone(),
             codex_op_tx,
@@ -2215,6 +2297,13 @@ impl ChatWidget<'_> {
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            rate_limit_snapshot: None,
+            rate_limit_warnings: RateLimitWarningState::default(),
+            rate_limit_fetch_inflight: false,
+            rate_limit_fetch_placeholder: None,
+            rate_limit_last_fetch_at: None,
+            rate_limit_last_primary_reset_at: primary_last_reset,
+            rate_limit_last_weekly_reset_at: weekly_last_reset,
             content_buffer: String::new(),
             last_assistant_message: None,
             exec: ExecState {
@@ -2228,6 +2317,7 @@ impl ChatWidget<'_> {
             tools_state: ToolState {
                 running_custom_tools: HashMap::new(),
                 running_web_search: HashMap::new(),
+                running_wait_tools: HashMap::new(),
             },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
@@ -2269,11 +2359,11 @@ impl ChatWidget<'_> {
                 body_visible_rows: std::cell::Cell::new(0),
             },
             terminal: TerminalState::default(),
+            pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
-            height_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
-            height_cache_last_width: std::cell::Cell::new(0),
+            history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2290,10 +2380,6 @@ impl ChatWidget<'_> {
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
-            prefix_sums: std::cell::RefCell::new(Vec::new()),
-            last_prefix_width: std::cell::Cell::new(0),
-            last_prefix_count: std::cell::Cell::new(0),
-            prefix_valid: std::cell::Cell::new(false),
             last_theme: crate::theme::current_theme(),
             perf_state: PerfState {
                 enabled: false,
@@ -2326,6 +2412,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
         };
+        w.set_standard_terminal_mode(!config.tui.alternate_screen);
         // Welcome at top of first request for forked session too
         w.history_push_top_next_req(history_cell::new_animated_welcome());
         w
@@ -2954,6 +3041,20 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
+        if let Some(pos) = self
+            .cell_order_seq
+            .iter()
+            .position(|key| *key == entry.order_key)
+        {
+            return Some(pos);
+        }
+        if entry.fallback_index < self.history_cells.len() {
+            return Some(entry.fallback_index);
+        }
+        None
+    }
+
     fn history_remove_at(&mut self, idx: usize) {
         if idx < self.history_cells.len() {
             self.history_cells.remove(idx);
@@ -3032,10 +3133,10 @@ impl ChatWidget<'_> {
         combined.extend(body);
         self.history_replace_at(
             idx - 1,
-            Box::new(crate::history_cell::PlainHistoryCell {
-                lines: combined,
-                kind: crate::history_cell::HistoryCellType::Plain,
-            }),
+            Box::new(crate::history_cell::PlainHistoryCell::new(
+                combined,
+                crate::history_cell::HistoryCellType::Plain,
+            )),
         );
         self.history_remove_at(idx);
     }
@@ -3213,10 +3314,10 @@ impl ChatWidget<'_> {
                         "command: {}",
                         original_text.trim()
                     )));
-                    self.history_push(crate::history_cell::PlainHistoryCell {
-                        lines: ack,
-                        kind: crate::history_cell::HistoryCellType::Notice,
-                    });
+                    self.history_push(crate::history_cell::PlainHistoryCell::new(
+                        ack,
+                        crate::history_cell::HistoryCellType::Notice,
+                    ));
 
                     message
                         .ordered_items
@@ -3268,10 +3369,10 @@ impl ChatWidget<'_> {
                         }
                     )));
                     lines.push(Line::from(format!("command: {}", original_text.trim())));
-                    self.history_push(crate::history_cell::PlainHistoryCell {
+                    self.history_push(crate::history_cell::PlainHistoryCell::new(
                         lines,
-                        kind: crate::history_cell::HistoryCellType::Notice,
-                    });
+                        crate::history_cell::HistoryCellType::Notice,
+                    ));
 
                     // Replace the message with the resolved prompt
                     message
@@ -4117,9 +4218,53 @@ impl ChatWidget<'_> {
                 }
                 self.mark_needs_redraw();
             }
-            EventMsg::TokenCount(token_usage) => {
-                self.total_token_usage = add_token_usage(&self.total_token_usage, &token_usage);
-                self.last_token_usage = token_usage;
+            EventMsg::TokenCount(event) => {
+                if let Some(info) = &event.info {
+                    self.total_token_usage = info.total_token_usage.clone();
+                    self.last_token_usage = info.last_token_usage.clone();
+                }
+                if let Some(snapshot) = event.rate_limits {
+                    let previous_snapshot = self.rate_limit_snapshot.clone();
+                    self.update_rate_limit_resets(previous_snapshot.as_ref(), &snapshot);
+                    let warnings = self
+                        .rate_limit_warnings
+                        .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
+                    self.rate_limit_snapshot = Some(snapshot);
+                    if !warnings.is_empty() {
+                        for warning in warnings {
+                            self.history_push(history_cell::new_warning_event(warning));
+                        }
+                        self.request_redraw();
+                    }
+                    if let Some(snapshot_ref) = self.rate_limit_snapshot.as_ref() {
+                        if self.rate_limit_fetch_placeholder.is_some() || self.rate_limit_fetch_inflight {
+                            let reset_info = self.rate_limit_reset_info();
+                            if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
+                                if idx < self.history_cells.len() {
+                                    self.history_replace_at(
+                                        idx,
+                                        Box::new(history_cell::new_limits_output(
+                                            snapshot_ref,
+                                            reset_info.clone(),
+                                        )),
+                                    );
+                                } else {
+                                    self.history_push(history_cell::new_limits_output(
+                                        snapshot_ref,
+                                        reset_info.clone(),
+                                    ));
+                                }
+                            } else {
+                                self.history_push(history_cell::new_limits_output(
+                                    snapshot_ref,
+                                    reset_info,
+                                ));
+                            }
+                            self.rate_limit_last_fetch_at = Some(Utc::now());
+                            self.rate_limit_fetch_inflight = false;
+                        }
+                    }
+                }
                 self.bottom_pane.set_token_usage(
                     self.total_token_usage.clone(),
                     self.last_token_usage.clone(),
@@ -4424,6 +4569,37 @@ impl ChatWidget<'_> {
                 self.flush_interrupt_queue();
                 // Show an active entry immediately for all custom tools so the user sees progress
                 let params_string = parameters.map(|p| p.to_string());
+                if tool_name == "wait" {
+                    if let Some(exec_call_id) =
+                        wait_exec_call_id_from_params(params_string.as_ref())
+                    {
+                        self.tools_state
+                            .running_wait_tools
+                            .insert(ToolCallId(call_id.clone()), exec_call_id.clone());
+
+                        if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
+                            running.wait_active = true;
+                            running.wait_notes.clear();
+                            let history_index = running.history_index;
+                            if let Some(idx) = history_index {
+                                if idx < self.history_cells.len() {
+                                    if let Some(exec_cell) = self.history_cells[idx]
+                                        .as_any_mut()
+                                        .downcast_mut::<history_cell::ExecCell>()
+                                    {
+                                        exec_cell.set_waiting(true);
+                                        exec_cell.clear_wait_notes();
+                                    }
+                                }
+                            }
+                        }
+                        self.bottom_pane
+                            .update_status_text("waiting for command".to_string());
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                        return;
+                    }
+                }
                 // Animated running cell with live timer and formatted args
                 let cell = if tool_name.starts_with("browser_") {
                     history_cell::new_running_browser_tool_call(
@@ -4451,7 +4627,7 @@ impl ChatWidget<'_> {
                 if idx < self.history_cells.len() {
                     self.tools_state
                         .running_custom_tools
-                        .insert(ToolCallId(call_id.clone()), idx);
+                        .insert(ToolCallId(call_id.clone()), RunningToolEntry::new(ok, idx));
                 }
 
                 // Update border status based on tool
@@ -4495,13 +4671,132 @@ impl ChatWidget<'_> {
                     Ok(content) => (true, content),
                     Err(error) => (false, error),
                 };
-                let entry_idx = self
+                if tool_name == "wait" {
+                    if let Some(exec_call_id) = self
+                        .tools_state
+                        .running_wait_tools
+                        .remove(&ToolCallId(call_id.clone()))
+                    {
+                        let trimmed = content.trim();
+                        let wait_still_pending = !success && trimmed != "Cancelled by user.";
+                        let mut note_lines: Vec<(String, bool)> = Vec::new();
+                        let suppress_json_notes = serde_json::from_str::<serde_json::Value>(
+                            trimmed,
+                        )
+                        .ok()
+                        .and_then(|value| {
+                            value.as_object().map(|obj| {
+                                obj.contains_key("output") || obj.contains_key("metadata")
+                            })
+                        })
+                        .unwrap_or(false);
+                        if !suppress_json_notes {
+                            for line in content.lines() {
+                                let note_text = line.trim();
+                                if note_text.is_empty() {
+                                    continue;
+                                }
+                                let is_error_note = note_text == "Cancelled by user.";
+                                note_lines.push((note_text.to_string(), is_error_note));
+                            }
+                        }
+                        let mut history_index: Option<usize> = None;
+                        if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
+                            let base = running.wait_total.unwrap_or_default();
+                            let total = base.saturating_add(duration);
+                            running.wait_total = Some(total);
+                            history_index = running.history_index;
+                            running.wait_active = wait_still_pending;
+                            for (text, is_error_note) in &note_lines {
+                                if running
+                                    .wait_notes
+                                    .last()
+                                    .map(|(existing, existing_err)| existing == text && existing_err == is_error_note)
+                                    .unwrap_or(false)
+                                {
+                                    continue;
+                                }
+                                running.wait_notes.push((text.clone(), *is_error_note));
+                            }
+                        }
+
+                        let mut updated = false;
+                        if let Some(idx) = history_index {
+                            if idx < self.history_cells.len() {
+                                if let Some(exec_cell) = self.history_cells[idx]
+                                    .as_any_mut()
+                                    .downcast_mut::<history_cell::ExecCell>()
+                                {
+                                    let total = exec_cell
+                                        .wait_total()
+                                        .unwrap_or_default()
+                                        .saturating_add(duration);
+                                    exec_cell.set_wait_total(Some(total));
+                                    if wait_still_pending {
+                                        exec_cell.set_waiting(true);
+                                    } else {
+                                        exec_cell.set_waiting(false);
+                                    }
+                                    for (text, is_error_note) in &note_lines {
+                                        exec_cell.push_wait_note(text, *is_error_note);
+                                    }
+                                    updated = true;
+                                }
+                            }
+                        }
+                        if !updated {
+                            if let Some(exec_cell) = self
+                                .history_cells
+                                .iter_mut()
+                                .rev()
+                                .find_map(|cell| {
+                                    cell.as_any_mut()
+                                        .downcast_mut::<history_cell::ExecCell>()
+                                })
+                            {
+                                let total = exec_cell
+                                    .wait_total()
+                                    .unwrap_or_default()
+                                    .saturating_add(duration);
+                                exec_cell.set_wait_total(Some(total));
+                                if wait_still_pending {
+                                    exec_cell.set_waiting(true);
+                                } else {
+                                    exec_cell.set_waiting(false);
+                                }
+                                for (text, is_error_note) in &note_lines {
+                                    exec_cell.push_wait_note(text, *is_error_note);
+                                }
+                            }
+                        }
+
+                        if success {
+                            self.remove_background_completion_message(&call_id);
+                            self.bottom_pane
+                                .update_status_text("responding".to_string());
+                            self.maybe_hide_spinner();
+                        } else if trimmed == "Cancelled by user." {
+                            self.bottom_pane
+                                .update_status_text("wait cancelled".to_string());
+                        } else {
+                            self.bottom_pane
+                                .update_status_text("waiting for command".to_string());
+                        }
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                        return;
+                    }
+                }
+                let running_entry = self
                     .tools_state
                     .running_custom_tools
                     .remove(&ToolCallId(call_id.clone()));
+                let resolved_idx = running_entry
+                    .as_ref()
+                    .and_then(|entry| self.resolve_running_tool_index(entry));
 
                 if tool_name == "apply_patch" && success {
-                    if let Some(idx) = entry_idx {
+                    if let Some(idx) = resolved_idx {
                         if idx < self.history_cells.len() {
                             let is_running_tool = self.history_cells[idx]
                                 .as_any()
@@ -4520,22 +4815,12 @@ impl ChatWidget<'_> {
 
                 if tool_name == "wait" && success {
                     let target = wait_target_from_params(params_string.as_ref(), &call_id);
-                    let message = format!("Waited for {}", target);
-                    if let Some(idx) = entry_idx {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(
-                                idx,
-                                Box::new(history_cell::new_background_event(message.clone())),
-                            );
-                        } else {
-                            let _ = self.history_insert_with_key_global(
-                                Box::new(history_cell::new_background_event(message.clone())),
-                                ok,
-                            );
-                        }
+                    let wait_cell = history_cell::new_completed_wait_tool_call(target, duration);
+                    if let Some(idx) = resolved_idx {
+                        self.history_replace_at(idx, Box::new(wait_cell));
                     } else {
                         let _ = self.history_insert_with_key_global(
-                            Box::new(history_cell::new_background_event(message.clone())),
+                            Box::new(wait_cell),
                             ok,
                         );
                     }
@@ -4546,25 +4831,18 @@ impl ChatWidget<'_> {
                     return;
                 }
                 if tool_name == "wait" && !success && content.trim() == "Cancelled by user." {
-                    let wait_cancelled_cell = PlainHistoryCell {
-                        lines: vec![Line::styled(
+                    let wait_cancelled_cell = PlainHistoryCell::new(
+                        vec![Line::styled(
                             "Wait cancelled",
                             Style::default()
                                 .fg(crate::colors::error())
                                 .add_modifier(Modifier::BOLD),
                         )],
-                        kind: HistoryCellType::Error,
-                    };
+                        HistoryCellType::Error,
+                    );
 
-                    if let Some(idx) = entry_idx {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(idx, Box::new(wait_cancelled_cell));
-                        } else {
-                            let _ = self.history_insert_with_key_global(
-                                Box::new(wait_cancelled_cell),
-                                ok,
-                            );
-                        }
+                    if let Some(idx) = resolved_idx {
+                        self.history_replace_at(idx, Box::new(wait_cancelled_cell));
                     } else {
                         let _ = self.history_insert_with_key_global(
                             Box::new(wait_cancelled_cell),
@@ -4586,12 +4864,8 @@ impl ChatWidget<'_> {
                         success,
                         content,
                     );
-                    if let Some(idx) = entry_idx {
-                        if idx < self.history_cells.len() {
-                            self.history_replace_at(idx, Box::new(completed));
-                        } else {
-                            let _ = self.history_insert_with_key_global(Box::new(completed), ok);
-                        }
+                    if let Some(idx) = resolved_idx {
+                        self.history_replace_at(idx, Box::new(completed));
                     } else {
                         let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                     }
@@ -4609,12 +4883,8 @@ impl ChatWidget<'_> {
                     success,
                     content,
                 );
-                if let Some(idx) = entry_idx {
-                    if idx < self.history_cells.len() {
-                        self.history_replace_at(idx, Box::new(completed));
-                    } else {
-                        let _ = self.history_insert_with_key_global(Box::new(completed), ok);
-                    }
+                if let Some(idx) = resolved_idx {
+                    self.history_replace_at(idx, Box::new(completed));
                 } else {
                     let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                 }
@@ -4838,10 +5108,10 @@ impl ChatWidget<'_> {
         for l in text.lines() {
             lines.push(ratatui::text::Line::from(l.to_string()))
         }
-        self.history_push(crate::history_cell::PlainHistoryCell {
+        self.history_push(crate::history_cell::PlainHistoryCell::new(
             lines,
-            kind: crate::history_cell::HistoryCellType::Notice,
-        });
+            crate::history_cell::HistoryCellType::Notice,
+        ));
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
@@ -4854,6 +5124,149 @@ impl ChatWidget<'_> {
             &self.total_token_usage,
             &self.last_token_usage,
         ));
+    }
+
+    pub(crate) fn add_limits_output(&mut self) {
+        if let Some(snapshot) = self.rate_limit_snapshot.clone() {
+            let reset_info = self.rate_limit_reset_info();
+            let key = self.next_internal_key();
+            let idx = self.history_insert_with_key_global_tagged(
+                Box::new(history_cell::new_limits_output(&snapshot, reset_info)),
+                key,
+                "limits",
+            );
+
+            if self.should_refresh_limits() {
+                self.request_latest_rate_limits(Some(idx));
+            }
+        } else {
+            self.request_latest_rate_limits(None);
+        }
+    }
+
+    fn request_latest_rate_limits(&mut self, target_idx: Option<usize>) {
+        if self.rate_limit_fetch_inflight {
+            return;
+        }
+
+        if let Some(idx) = target_idx {
+            self.rate_limit_fetch_placeholder = Some(idx);
+        } else if self.rate_limit_fetch_placeholder.is_none() {
+            let key = self.next_internal_key();
+            let idx = self.history_insert_with_key_global_tagged(
+                Box::new(history_cell::new_limits_fetching()),
+                key,
+                "limits",
+            );
+            self.rate_limit_fetch_placeholder = Some(idx);
+        }
+
+        self.rate_limit_fetch_inflight = true;
+
+        start_rate_limit_refresh(
+            self.app_event_tx.clone(),
+            self.config.clone(),
+            self.config.debug,
+        );
+    }
+
+    fn should_refresh_limits(&self) -> bool {
+        if self.rate_limit_fetch_inflight {
+            return false;
+        }
+        match self.rate_limit_last_fetch_at {
+            Some(ts) => Utc::now() - ts > RATE_LIMIT_REFRESH_INTERVAL,
+            None => true,
+        }
+    }
+
+    pub(crate) fn on_rate_limit_refresh_failed(&mut self, message: String) {
+        if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
+            if self.rate_limit_snapshot.is_none() {
+                if idx < self.history_cells.len() {
+                    self.history_replace_at(
+                        idx,
+                        Box::new(history_cell::new_error_event(message.clone())),
+                    );
+                } else {
+                    self.history_push(history_cell::new_error_event(message.clone()));
+                }
+            }
+        }
+
+        self.rate_limit_fetch_inflight = false;
+
+        if self.rate_limit_snapshot.is_some() {
+            self.history_push(history_cell::new_warning_event(message));
+        }
+    }
+
+    fn rate_limit_reset_info(&self) -> RateLimitResetInfo {
+        RateLimitResetInfo {
+            primary_last_reset: self.rate_limit_last_primary_reset_at,
+            weekly_last_reset: self.rate_limit_last_weekly_reset_at,
+        }
+    }
+
+fn update_rate_limit_resets(
+        &mut self,
+        previous: Option<&RateLimitSnapshotEvent>,
+        current: &RateLimitSnapshotEvent,
+    ) {
+        let now = Utc::now();
+        let mut changed_primary = false;
+        let mut changed_weekly = false;
+
+        if let Some(prev) = previous {
+            if current.primary_used_percent + 1.0 < prev.primary_used_percent {
+                if self
+                    .rate_limit_last_primary_reset_at
+                    .map_or(true, |existing| now > existing)
+                {
+                    self.rate_limit_last_primary_reset_at = Some(now);
+                    changed_primary = true;
+                }
+            }
+            if current.weekly_used_percent + 0.5 < prev.weekly_used_percent {
+                if self
+                    .rate_limit_last_weekly_reset_at
+                    .map_or(true, |existing| now > existing)
+                {
+                    self.rate_limit_last_weekly_reset_at = Some(now);
+                    changed_weekly = true;
+                }
+            }
+        } else {
+            if current.primary_used_percent <= 1.0
+                && self.rate_limit_last_primary_reset_at.is_none()
+            {
+                self.rate_limit_last_primary_reset_at = Some(now);
+                changed_primary = true;
+            }
+            if current.weekly_used_percent <= 1.0
+                && self.rate_limit_last_weekly_reset_at.is_none()
+            {
+                self.rate_limit_last_weekly_reset_at = Some(now);
+                changed_weekly = true;
+            }
+        }
+
+        if changed_primary || changed_weekly {
+            let candidate_info = self.rate_limit_reset_info();
+            let candidate_cache = RateLimitResetCache {
+                primary_last_reset: candidate_info.primary_last_reset,
+                weekly_last_reset: candidate_info.weekly_last_reset,
+            };
+            match persist_rate_limit_reset_cache(&self.config.codex_home, candidate_cache) {
+                Ok(merged) => {
+                    self.rate_limit_last_primary_reset_at = merged.primary_last_reset;
+                    self.rate_limit_last_weekly_reset_at = merged.weekly_last_reset;
+                }
+                Err(err) => {
+                    tracing::warn!("failed to persist rate limit resets: {err:?}");
+                }
+            }
+        }
     }
 
     #[cfg(not(debug_assertions))]
@@ -5035,10 +5448,10 @@ impl ChatWidget<'_> {
             }
         }
 
-        self.history_push(crate::history_cell::PlainHistoryCell {
+        self.history_push(crate::history_cell::PlainHistoryCell::new(
             lines,
-            kind: crate::history_cell::HistoryCellType::Notice,
-        });
+            crate::history_cell::HistoryCellType::Notice,
+        ));
         self.request_redraw();
     }
 
@@ -5097,7 +5510,7 @@ impl ChatWidget<'_> {
                 }
             }
             drop(state);
-            tx.send(AppEvent::RequestRedraw);
+            let _ = tx.send(AppEvent::RequestRedraw);
         });
     }
 
@@ -5306,6 +5719,46 @@ impl ChatWidget<'_> {
             controller: Some(controller),
             auto_close_on_success: false,
         })
+    }
+
+    pub(crate) fn launch_validation_tool_install(
+        &mut self,
+        tool_name: &str,
+        install_hint: &str,
+    ) -> Option<TerminalLaunch> {
+        let trimmed = install_hint.trim();
+        if trimmed.is_empty() {
+            self.history_push(history_cell::new_error_event(format!(
+                "No install command available for validation tool '{tool_name}'."
+            )));
+            self.request_redraw();
+            return None;
+        }
+
+        let wrapped = wrap_command(trimmed);
+        if wrapped.is_empty() {
+            self.history_push(history_cell::new_error_event(format!(
+                "Unable to build install command for validation tool '{tool_name}'."
+            )));
+            self.request_redraw();
+            return None;
+        }
+
+        let id = self.terminal.alloc_id();
+        let display = Self::truncate_with_ellipsis(trimmed, 128);
+        let launch = TerminalLaunch {
+            id,
+            title: format!("Install {tool_name}"),
+            command: wrapped,
+            command_display: display,
+            controller: None,
+            auto_close_on_success: false,
+        };
+
+        self.history_push(history_cell::new_background_event(format!(
+            "Installing validation tool '{tool_name}' with `{trimmed}`"
+        )));
+        Some(launch)
     }
 
     fn try_handle_terminal_shortcut(&mut self, raw_text: &str) -> bool {
@@ -5643,14 +6096,45 @@ impl ChatWidget<'_> {
             overlay.cancel_pending_command();
         }
 
+        if !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess) {
+            self.pending_manual_terminal.insert(
+                id,
+                PendingManualTerminal {
+                    command: trimmed.to_string(),
+                },
+            );
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.push_assistant_message("Awaiting approval to run this command…");
+                overlay.running = false;
+            }
+            self.bottom_pane.push_approval_request(ApprovalRequest::TerminalCommand {
+                id,
+                command: trimmed.to_string(),
+            });
+            self.request_redraw();
+            return;
+        }
+
+        self.start_manual_terminal_session(id, trimmed.to_string());
+    }
+
+    fn start_manual_terminal_session(&mut self, id: u64, command: String) {
+        if command.is_empty() {
+            return;
+        }
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            overlay.cancel_pending_command();
+            overlay.running = true;
+            overlay.exit_code = None;
+            overlay.duration = None;
+        }
         let (controller_tx, controller_rx) = mpsc::channel();
         let controller = TerminalRunController { tx: controller_tx };
-
         let cwd = self.config.cwd.to_string_lossy().to_string();
         start_direct_terminal_session(
             self.app_event_tx.clone(),
             id,
-            trimmed.to_string(),
+            command,
             Some(cwd),
             controller,
             controller_rx,
@@ -5747,10 +6231,44 @@ impl ChatWidget<'_> {
         reset
     }
 
+    pub(crate) fn handle_terminal_approval_decision(&mut self, id: u64, approved: bool) {
+        let pending = self.pending_manual_terminal.remove(&id);
+        if approved {
+            if let Some(entry) = pending {
+                if self
+                    .terminal
+                    .overlay()
+                    .map(|overlay| overlay.id == id)
+                    .unwrap_or(false)
+                {
+                    if let Some(overlay) = self.terminal.overlay_mut() {
+                        overlay.push_assistant_message("Approval granted. Running command…");
+                    }
+                    self.start_manual_terminal_session(id, entry.command);
+                    self.request_redraw();
+                }
+            }
+            return;
+        }
+
+        if let Some(entry) = pending {
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.push_info_message("Command was not approved. You can edit it and try again.");
+                overlay.running = false;
+                overlay.exit_code = None;
+                overlay.duration = None;
+                overlay.pending_command = Some(PendingCommand::manual_with_input(entry.command));
+            }
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn close_terminal_overlay(&mut self) {
         let mut cancel_id = None;
         let mut preserved_visible = None;
+        let mut overlay_id = None;
         if let Some(overlay) = self.terminal.overlay_mut() {
+            overlay_id = Some(overlay.id);
             if overlay.running {
                 cancel_id = Some(overlay.id);
             }
@@ -5759,6 +6277,9 @@ impl ChatWidget<'_> {
         }
         if let Some(id) = cancel_id {
             self.app_event_tx.send(AppEvent::TerminalCancel { id });
+        }
+        if let Some(id) = overlay_id {
+            self.pending_manual_terminal.remove(&id);
         }
         if let Some(visible_rows) = preserved_visible {
             self.terminal.last_visible_rows.set(visible_rows);
@@ -7111,6 +7632,7 @@ impl ChatWidget<'_> {
                 .downcast_mut::<history_cell::PlainHistoryCell>()
             {
                 history_cell::retint_lines_in_place(&mut plain.lines, &old, &new);
+                plain.invalidate_layout_cache();
             } else if let Some(tool) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::ToolCallCell>()
@@ -7126,6 +7648,11 @@ impl ChatWidget<'_> {
                 .downcast_mut::<history_cell::StreamingContentCell>()
             {
                 stream.retint(&old, &new);
+            } else if let Some(wait) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::WaitStatusCell>()
+            {
+                wait.retint(&old, &new);
             } else if let Some(assist) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::AssistantMarkdownCell>()
@@ -8039,6 +8566,21 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn refresh_standard_terminal_hint(&mut self) {
+        if self.standard_terminal_mode {
+            let message = "Standard terminal mode active. Press Ctrl+T to return to full UI.";
+            self.bottom_pane
+                .set_standard_terminal_hint(Some(message.to_string()));
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
+        }
+    }
+
+    pub(crate) fn set_standard_terminal_mode(&mut self, enabled: bool) {
+        self.standard_terminal_mode = enabled;
+        self.refresh_standard_terminal_hint();
+    }
+
     pub(crate) fn is_reasoning_shown(&self) -> bool {
         // Check if any reasoning cell exists and if it's expanded
         for cell in &self.history_cells {
@@ -8204,10 +8746,10 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell {
-            lines: vec![Line::from("✅ Chrome launched with user profile")],
-            kind: history_cell::HistoryCellType::BackgroundEvent,
-        });
+        self.history_push(history_cell::PlainHistoryCell::new(
+            vec![Line::from("✅ Chrome launched with user profile")],
+            history_cell::HistoryCellType::BackgroundEvent,
+        ));
         // Show browsing state in input border after launch
         self.bottom_pane
             .update_status_text("using browser".to_string());
@@ -8829,13 +9371,13 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell {
-            lines: vec![Line::from(format!(
+        self.history_push(history_cell::PlainHistoryCell::new(
+            vec![Line::from(format!(
                 "✅ Chrome launched with temporary profile at {}",
                 profile_dir.display()
             ))],
-            kind: history_cell::HistoryCellType::BackgroundEvent,
-        });
+            history_cell::HistoryCellType::BackgroundEvent,
+        ));
     }
 
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
@@ -8938,10 +9480,10 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.history_push(history_cell::PlainHistoryCell {
-                    lines: vec![Line::from(status_msg)],
-                    kind: history_cell::HistoryCellType::BackgroundEvent,
-                });
+                self.history_push(history_cell::PlainHistoryCell::new(
+                    vec![Line::from(status_msg)],
+                    history_cell::HistoryCellType::BackgroundEvent,
+                ));
                 // Also reflect browsing activity in the input border
                 self.bottom_pane
                     .update_status_text("using browser".to_string());
@@ -9336,10 +9878,223 @@ impl ChatWidget<'_> {
             .lines()
             .map(|line| Line::from(line.to_string()))
             .collect();
-        self.history_push(history_cell::PlainHistoryCell {
+        self.history_push(history_cell::PlainHistoryCell::new(
             lines,
-            kind: history_cell::HistoryCellType::BackgroundEvent,
-        });
+            history_cell::HistoryCellType::BackgroundEvent,
+        ));
+    }
+
+    fn validation_tool_flag_mut(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut Option<bool>> {
+        let tools = &mut self.config.validation.tools;
+        match name {
+            "shellcheck" => Some(&mut tools.shellcheck),
+            "markdownlint" => Some(&mut tools.markdownlint),
+            "hadolint" => Some(&mut tools.hadolint),
+            "yamllint" => Some(&mut tools.yamllint),
+            "cargo-check" => Some(&mut tools.cargo_check),
+            "shfmt" => Some(&mut tools.shfmt),
+            "prettier" => Some(&mut tools.prettier),
+            _ => None,
+        }
+    }
+
+    fn validation_tool_enabled(&self, name: &str) -> bool {
+        let tools = &self.config.validation.tools;
+        match name {
+            "actionlint" => self.config.github.actionlint_on_patch,
+            "shellcheck" => tools.shellcheck.unwrap_or(true),
+            "markdownlint" => tools.markdownlint.unwrap_or(true),
+            "hadolint" => tools.hadolint.unwrap_or(true),
+            "yamllint" => tools.yamllint.unwrap_or(true),
+            "cargo-check" => tools.cargo_check.unwrap_or(true),
+            "shfmt" => tools.shfmt.unwrap_or(true),
+            "prettier" => tools.prettier.unwrap_or(true),
+            _ => true,
+        }
+    }
+
+    pub(crate) fn apply_validation_patch_harness(&mut self, enabled: bool) {
+        if self.config.validation.patch_harness == enabled {
+            self.history_push(history_cell::new_background_event(format!(
+                "ℹ️ Validate New Code already {}",
+                if enabled { "enabled" } else { "disabled" }
+            )));
+            return;
+        }
+
+        self.config.validation.patch_harness = enabled;
+        if let Err(err) = self
+            .codex_op_tx
+            .send(Op::UpdateValidationPatchHarness { enabled })
+        {
+            tracing::warn!("failed to send validation patch harness update: {err}");
+        }
+
+        let persist_result = match find_codex_home() {
+            Ok(home) => set_validation_patch_harness(&home, enabled)
+                .map_err(|e| e.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+
+        match persist_result {
+            Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                "✅ Validate New Code {}",
+                if enabled { "enabled" } else { "disabled" }
+            ))),
+            Err(err) => self.history_push(history_cell::new_background_event(format!(
+                "⚠️ Validate New Code {} (persist failed: {err})",
+                if enabled { "enabled" } else { "disabled" }
+            ))),
+        }
+    }
+
+    fn apply_validation_tool_toggle(&mut self, name: &str, enable: bool) {
+        if name == "actionlint" {
+            if self.config.github.actionlint_on_patch == enable {
+                self.history_push(history_cell::new_background_event(format!(
+                    "ℹ️ {} already {}",
+                    name,
+                    if enable { "on" } else { "off" }
+                )));
+                return;
+            }
+            self.config.github.actionlint_on_patch = enable;
+            if let Err(err) = self
+                .codex_op_tx
+                .send(Op::UpdateValidationTool { name: name.to_string(), enable })
+            {
+                tracing::warn!("failed to send validation tool update: {err}");
+            }
+            let persist_result = match find_codex_home() {
+                Ok(home) => set_github_actionlint_on_patch(&home, enable)
+                    .map_err(|e| e.to_string()),
+                Err(err) => Err(err.to_string()),
+            };
+            match persist_result {
+                Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                    "✅ {}: {}",
+                    name,
+                    if enable { "enabled" } else { "disabled" }
+                ))),
+                Err(err) => self.history_push(history_cell::new_background_event(format!(
+                    "⚠️ {}: {} (persist failed: {err})",
+                    name,
+                    if enable { "enabled" } else { "disabled" }
+                ))),
+            }
+            return;
+        }
+
+        let Some(flag) = self.validation_tool_flag_mut(name) else {
+            self.history_push(history_cell::new_background_event(format!(
+                "⚠️ Unknown validation tool '{name}'"
+            )));
+            return;
+        };
+
+        if flag.unwrap_or(true) == enable {
+            self.history_push(history_cell::new_background_event(format!(
+                "ℹ️ {} already {}",
+                name,
+                if enable { "enabled" } else { "disabled" }
+            )));
+            return;
+        }
+
+        *flag = Some(enable);
+        if let Err(err) = self
+            .codex_op_tx
+            .send(Op::UpdateValidationTool { name: name.to_string(), enable })
+        {
+            tracing::warn!("failed to send validation tool update: {err}");
+        }
+        let persist_result = match find_codex_home() {
+            Ok(home) => set_validation_tool_enabled(&home, name, enable)
+                .map_err(|e| e.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+        match persist_result {
+                Ok(()) => self.history_push(history_cell::new_background_event(format!(
+                    "✅ {}: {}",
+                    name,
+                    if enable { "enabled" } else { "disabled" }
+                ))),
+                Err(err) => self.history_push(history_cell::new_background_event(format!(
+                    "⚠️ {}: {} (persist failed: {err})",
+                    name,
+                    if enable { "enabled" } else { "disabled" }
+                ))),
+        }
+    }
+
+    fn build_validation_status_message(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Validate New Code: {}",
+            if self.config.validation.patch_harness { "enabled" } else { "disabled" }
+        ));
+        lines.push("".to_string());
+        lines.push("Tools:".to_string());
+        for status in validation_settings_view::detect_tools() {
+            let enabled = self.validation_tool_enabled(status.name);
+            let suffix = if status.installed { "" } else { " (not installed)" };
+            lines.push(format!(
+                "• {} — {}{}",
+                status.name,
+                if enabled { "enabled" } else { "disabled" },
+                suffix
+            ));
+        }
+        lines.join("\n")
+    }
+
+    pub(crate) fn toggle_validation_tool(&mut self, name: &str, enable: bool) {
+        self.apply_validation_tool_toggle(name, enable);
+    }
+
+    pub(crate) fn handle_validation_command(&mut self, command_text: String) {
+        let trimmed = command_text.trim();
+        if trimmed.is_empty() {
+            let tools: Vec<(ToolStatus, bool)> = validation_settings_view::detect_tools()
+                .into_iter()
+                .map(|status| {
+                    let enabled = self.validation_tool_enabled(status.name);
+                    (status, enabled)
+                })
+                .collect();
+            self.bottom_pane
+                .show_validation_settings(self.config.validation.patch_harness, tools);
+            return;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        match parts.next().unwrap_or("") {
+            "status" => {
+                let message = self.build_validation_status_message();
+                self.history_push(history_cell::new_background_event(message));
+            }
+            "on" => self.apply_validation_patch_harness(true),
+            "off" => self.apply_validation_patch_harness(false),
+            tool => {
+                let Some(state) = parts.next() else {
+                    self.history_push(history_cell::new_background_event(
+                        "Usage: /validation <tool> on|off".to_string(),
+                    ));
+                    return;
+                };
+                match state {
+                    "on" | "enable" => self.apply_validation_tool_toggle(tool, true),
+                    "off" | "disable" => self.apply_validation_tool_toggle(tool, false),
+                    _ => self.history_push(history_cell::new_background_event(format!(
+                        "⚠️ Unknown validation command '{}'. Use on|off.",
+                        state
+                    ))),
+                }
+            }
+        }
     }
 
     /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
@@ -9836,10 +10591,10 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.history_push(history_cell::PlainHistoryCell {
+            self.history_push(history_cell::PlainHistoryCell::new(
                 lines,
-                kind: history_cell::HistoryCellType::BackgroundEvent,
-            });
+                history_cell::HistoryCellType::BackgroundEvent,
+            ));
             return;
         }
 
@@ -10007,6 +10762,9 @@ impl ChatWidget<'_> {
 
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
+        self.rate_limit_snapshot = None;
+        self.rate_limit_warnings.reset();
+        self.rate_limit_last_fetch_at = None;
         self.bottom_pane.set_token_usage(
             self.total_token_usage.clone(),
             self.last_token_usage.clone(),
@@ -10662,6 +11420,60 @@ impl ChatWidget<'_> {
         });
     }
 
+    pub(crate) fn handle_project_command(&mut self, args: String) {
+        let name = args.trim();
+        if name.is_empty() {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/cmd` — provide a project command name".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        if self.config.project_commands.is_empty() {
+            self.history_push(crate::history_cell::new_error_event(
+                "No project commands configured for this workspace.".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        if let Some(cmd) = self
+            .config
+            .project_commands
+            .iter()
+            .find(|command| command.matches(name))
+            .cloned()
+        {
+            let notice = if let Some(desc) = &cmd.description {
+                format!("Running project command `{}` — {}", cmd.name, desc)
+            } else {
+                format!("Running project command `{}`", cmd.name)
+            };
+            self.insert_background_event_early(notice);
+            self.request_redraw();
+            self.submit_op(Op::RunProjectCommand { name: cmd.name });
+        } else {
+            let available: Vec<String> = self
+                .config
+                .project_commands
+                .iter()
+                .map(|cmd| cmd.name.clone())
+                .collect();
+            let suggestion = if available.is_empty() {
+                "".to_string()
+            } else {
+                format!(" Available commands: {}", available.join(", "))
+            };
+            self.history_push(crate::history_cell::new_error_event(format!(
+                "Unknown project command `{}`.{}",
+                name,
+                suggestion
+            )));
+            self.request_redraw();
+        }
+    }
+
     pub(crate) fn switch_cwd(
         &mut self,
         new_cwd: std::path::PathBuf,
@@ -10841,7 +11653,6 @@ impl ChatWidget<'_> {
                         &tx,
                         format!("`/merge` — handing off to agent ({})", reason_text),
                     );
-                    let _ = tx.send(AppEvent::PrepareAgents);
                     let mut preface = format!(
                         "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
                         reason_text,
@@ -11329,6 +12140,83 @@ mod tests {
             font_size: (8, 16),
         };
         ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term, false)
+    }
+
+    #[test]
+    fn terminal_overlay_sanitizes_terminal_output() {
+        use std::time::Duration;
+
+        let mut overlay = TerminalOverlay::new(
+            42,
+            "Test".to_string(),
+            "$ example".to_string(),
+            false,
+        );
+
+        overlay.append_chunk(b"col1\tcol2\tcol3\n", false);
+        overlay.append_chunk(b"\x1b]0;ignored title\x07\n", false);
+        overlay.append_chunk(b"plain \x1b[31mred\x1b[0m text\n", false);
+        overlay.append_chunk(b"stderr line\x07 with control\n", true);
+        overlay.finalize(Some(0), Duration::from_millis(0));
+
+        let mut saw_colored_stdout = false;
+        let mut saw_tinted_stderr = false;
+
+        for line in overlay.lines.iter() {
+            let text: String = line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            assert!(
+                !text.chars().any(|ch| (ch < ' ' && ch != ' ')),
+                "line still has control characters: {:?}",
+                text
+            );
+            assert!(!text.contains('\t'), "line still contains a tab: {:?}", text);
+            assert!(
+                !text.contains('\u{001B}'),
+                "line still includes a raw escape sequence: {:?}",
+                text
+            );
+            assert!(
+                !text.contains('\u{0007}'),
+                "line still includes BEL/OSC terminators: {:?}",
+                text
+            );
+
+            if text.contains("col1") {
+                assert!(
+                    text.contains("col1    col2    col3"),
+                    "tabs were not expanded as expected: {:?}",
+                    text
+                );
+            }
+
+            if text.contains("red") {
+                if line
+                    .spans
+                    .iter()
+                    .any(|span| span.content.contains("red") && span.style.fg.is_some())
+                {
+                    saw_colored_stdout = true;
+                }
+            }
+
+            if text.contains("stderr line with control") {
+                if line
+                    .spans
+                    .iter()
+                    .all(|span| span.style.fg == Some(crate::colors::warning()))
+                {
+                    saw_tinted_stderr = true;
+                }
+            }
+        }
+
+        assert!(saw_colored_stdout, "expected ANSI-colored stdout to be preserved");
+        assert!(saw_tinted_stderr, "expected stderr output to retain warning tint");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -12370,6 +13258,94 @@ impl ChatWidget<'_> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+struct RateLimitResetCache {
+    #[serde(default)]
+    primary_last_reset: Option<DateTime<Utc>>,
+    #[serde(default)]
+    weekly_last_reset: Option<DateTime<Utc>>,
+}
+
+fn load_rate_limit_reset_cache(codex_home: &Path) -> RateLimitResetCache {
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(RATE_LIMIT_RESET_FILE));
+    match std::fs::read_to_string(&read_path) {
+        Ok(contents) => match serde_json::from_str::<RateLimitResetCache>(&contents) {
+            Ok(cache) => cache,
+            Err(err) => {
+                tracing::debug!("failed to parse rate limit reset cache: {err:?}");
+                RateLimitResetCache::default()
+            }
+        },
+        Err(err) => {
+            if err.kind() != io::ErrorKind::NotFound {
+                tracing::debug!("failed to read rate limit reset cache: {err:?}");
+            }
+            RateLimitResetCache::default()
+        }
+    }
+}
+
+fn persist_rate_limit_reset_cache(
+    codex_home: &Path,
+    candidate: RateLimitResetCache,
+) -> io::Result<RateLimitResetCache> {
+    if candidate.primary_last_reset.is_none() && candidate.weekly_last_reset.is_none() {
+        return Ok(candidate);
+    }
+
+    let path = rate_limit_reset_cache_path(codex_home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&path)?;
+    FileExt::lock_exclusive(&file)?;
+
+    let mut buf = String::new();
+    file.seek(SeekFrom::Start(0))?;
+    file.read_to_string(&mut buf)?;
+    let mut existing: RateLimitResetCache = if buf.trim().is_empty() {
+        RateLimitResetCache::default()
+    } else {
+        serde_json::from_str(&buf).unwrap_or_default()
+    };
+
+    let mut changed = false;
+    changed |= merge_timestamp(&mut existing.primary_last_reset, candidate.primary_last_reset);
+    changed |= merge_timestamp(&mut existing.weekly_last_reset, candidate.weekly_last_reset);
+
+    if changed {
+        let serialized = serde_json::to_string_pretty(&existing)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(serialized.as_bytes())?;
+        file.flush()?;
+    }
+
+    let _ = FileExt::unlock(&file);
+    Ok(existing)
+}
+
+fn rate_limit_reset_cache_path(codex_home: &Path) -> PathBuf {
+    codex_home.join(RATE_LIMIT_RESET_FILE)
+}
+
+fn merge_timestamp(dst: &mut Option<DateTime<Utc>>, candidate: Option<DateTime<Utc>>) -> bool {
+    match (dst.as_ref(), candidate) {
+        (_, None) => false,
+        (Some(existing), Some(candidate_dt)) if *existing >= candidate_dt => false,
+        _ => {
+            *dst = candidate;
+            true
+        }
+    }
+}
+
 impl WidgetRef for &ChatWidget<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         // Top-level widget render timing
@@ -12474,6 +13450,9 @@ impl WidgetRef for &ChatWidget<'_> {
             all_content.push(cell);
         }
 
+        let mut assistant_layouts: Vec<Option<crate::history_cell::AssistantLayoutCache>> =
+            vec![None; all_content.len()];
+
         // Append any queued user messages as sticky preview cells at the very
         // end so they always render at the bottom until they are dispatched.
         let mut queued_preview_cells: Vec<crate::history_cell::PlainHistoryCell> = Vec::new();
@@ -12488,17 +13467,17 @@ impl WidgetRef for &ChatWidget<'_> {
             }
         }
 
+        if assistant_layouts.len() < all_content.len() {
+            assistant_layouts.resize(all_content.len(), None);
+        }
+
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
         const GUTTER_WIDTH: u16 = 2; // Same as in render loop
 
         // Opportunistically clear height cache if width changed
-        if self.height_cache_last_width.get() != content_area.width {
-            self.height_cache.borrow_mut().clear();
-            self.prefix_sums.borrow_mut().clear();
-            self.prefix_valid.set(false);
-            self.height_cache_last_width.set(content_area.width);
-        }
+        self.history_render
+            .handle_width_change(content_area.width);
 
         // Perf: count a frame
         if self.perf_state.enabled {
@@ -12508,9 +13487,9 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // Detect dynamic content that requires per-frame recomputation
         let has_active_animation_early = self.history_cells.iter().any(|cell| cell.is_animating());
-        let must_rebuild_prefix = !self.prefix_valid.get()
-            || self.last_prefix_width.get() != content_area.width
-            || self.last_prefix_count.get() != all_content.len()
+        let must_rebuild_prefix = !self.history_render.prefix_valid.get()
+            || self.history_render.last_prefix_width.get() != content_area.width
+            || self.history_render.last_prefix_count.get() != all_content.len()
             || streaming_cell.is_some()
             || has_active_animation_early;
 
@@ -12521,7 +13500,7 @@ impl WidgetRef for &ChatWidget<'_> {
             } else {
                 None
             };
-            let mut ps = self.prefix_sums.borrow_mut();
+            let mut ps = self.history_render.prefix_sums.borrow_mut();
             ps.clear();
             ps.push(0);
             let mut acc = 0u16;
@@ -12531,37 +13510,35 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             for (idx, item) in all_content.iter().enumerate() {
                 let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-                // Cache heights for most items. Also allow caching for ExecCell once completed
-                // (custom_render but stable), to avoid repeated wrapping/measure.
                 let is_stable_exec = item
                     .as_any()
                     .downcast_ref::<crate::history_cell::ExecCell>()
                     .map(|e| e.output.is_some())
                     .unwrap_or(false);
-                // Assistant markdown cells are static once built; cache their heights
-                let is_assistant_static = item
+                let maybe_assistant = item
                     .as_any()
-                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
-                    .is_some();
+                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
                 let is_streaming = item
                     .as_any()
                     .downcast_ref::<crate::history_cell::StreamingContentCell>()
                     .is_some();
                 let is_cacheable =
-                    ((!item.has_custom_render()) || is_stable_exec || is_assistant_static)
+                    (maybe_assistant.is_some() || !item.has_custom_render() || is_stable_exec)
                         && !item.is_animating()
                         && !is_streaming;
+                let key = (idx, content_width);
                 let h = if is_cacheable {
-                    let key = (idx, content_width);
-                    // Take an immutable borrow in a small scope to avoid overlapping with the later mutable borrow
                     let cached_val = {
-                        let cache_ref = self.height_cache.borrow();
+                        let cache_ref = self.history_render.height_cache.borrow();
                         cache_ref.get(&key).copied()
                     };
                     if let Some(cached) = cached_val {
                         if perf_enabled {
                             let mut p = self.perf_state.stats.borrow_mut();
                             p.height_hits_total = p.height_hits_total.saturating_add(1);
+                        }
+                        if let Some(assistant) = maybe_assistant {
+                            assistant_layouts[idx] = Some(assistant.ensure_layout(content_width));
                         }
                         cached
                     } else {
@@ -12579,7 +13556,14 @@ impl WidgetRef for &ChatWidget<'_> {
                         } else {
                             None
                         };
-                        let computed = item.desired_height(content_width);
+                        let computed = if let Some(assistant) = maybe_assistant {
+                            let plan = assistant.ensure_layout(content_width);
+                            let rows = plan.total_rows();
+                            assistant_layouts[idx] = Some(plan);
+                            rows
+                        } else {
+                            item.desired_height(content_width)
+                        };
                         if let (true, Some(start)) = (perf_enabled, t0) {
                             let dt = start.elapsed().as_nanos();
                             let mut p = self.perf_state.stats.borrow_mut();
@@ -12589,16 +13573,16 @@ impl WidgetRef for &ChatWidget<'_> {
                                 dt,
                             );
                         }
-                        // Now take a mutable borrow to insert
-                        self.height_cache.borrow_mut().insert(key, computed);
+                        self.history_render
+                            .height_cache
+                            .borrow_mut()
+                            .insert(key, computed);
                         computed
                     }
                 } else {
                     item.desired_height(content_width)
                 };
                 acc = acc.saturating_add(h);
-                // Spacing rule must mirror the render path: no spacer between
-                // adjacent collapsed reasoning cells.
                 let mut should_add_spacing = idx < all_content.len() - 1 && h > 0;
                 if should_add_spacing {
                     let this_is_collapsed_reasoning = item
@@ -12624,6 +13608,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
                 ps.push(acc);
             }
+
             let total = *ps.last().unwrap_or(&0);
             if let Some(start) = total_start {
                 if self.perf_state.enabled {
@@ -12633,13 +13618,22 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
             // Update cache keys
-            self.last_prefix_width.set(content_area.width);
-            self.last_prefix_count.set(all_content.len());
-            self.prefix_valid.set(true);
+            self.history_render
+                .last_prefix_width
+                .set(content_area.width);
+            self.history_render
+                .last_prefix_count
+                .set(all_content.len());
+            self.history_render.prefix_valid.set(true);
             total
         } else {
             // Use cached prefix sums
-            *self.prefix_sums.borrow().last().unwrap_or(&0)
+            *self
+                .history_render
+                .prefix_sums
+                .borrow()
+                .last()
+                .unwrap_or(&0)
         };
 
         // Check for active animations using the trait method
@@ -12722,31 +13716,22 @@ impl WidgetRef for &ChatWidget<'_> {
             .saturating_add(history_area.width)
             .saturating_sub(right_pad_start);
         if left_pad_w > 0 {
-            for y in history_area.y..history_area.y.saturating_add(history_area.height) {
-                for x in history_area.x..history_area.x.saturating_add(left_pad_w) {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
-            }
+            let left_rect = Rect::new(history_area.x, history_area.y, left_pad_w, history_area.height);
+            fill_rect(buf, left_rect, Some(' '), clear_style);
             cleared_cells =
                 cleared_cells.saturating_add((left_pad_w as u64) * (history_area.height as u64));
         }
         if right_pad_w > 0 {
-            for y in history_area.y..history_area.y.saturating_add(history_area.height) {
-                for x in right_pad_start..right_pad_start.saturating_add(right_pad_w) {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
-            }
+            let right_rect = Rect::new(right_pad_start, history_area.y, right_pad_w, history_area.height);
+            fill_rect(buf, right_rect, Some(' '), clear_style);
             cleared_cells =
                 cleared_cells.saturating_add((right_pad_w as u64) * (history_area.height as u64));
         }
         // Top gap inside content area when content is bottom-aligned
         if start_y > content_area.y {
             let gap_h = start_y.saturating_sub(content_area.y);
-            for y in content_area.y..content_area.y.saturating_add(gap_h) {
-                for x in content_area.x..content_area.x.saturating_add(content_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
-            }
+            let gap_rect = Rect::new(content_area.x, content_area.y, content_area.width, gap_h);
+            fill_rect(buf, gap_rect, Some(' '), clear_style);
             cleared_cells =
                 cleared_cells.saturating_add((gap_h as u64) * (content_area.width as u64));
         }
@@ -12761,7 +13746,7 @@ impl WidgetRef for &ChatWidget<'_> {
         let mut screen_y = start_y; // Position on screen
         let spacing = 1u16; // Spacing between cells
         let viewport_bottom = scroll_pos.saturating_add(content_area.height);
-        let ps = self.prefix_sums.borrow();
+        let ps = self.history_render.prefix_sums.borrow();
         let mut start_idx = match ps.binary_search(&scroll_pos) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
@@ -12800,7 +13785,13 @@ impl WidgetRef for &ChatWidget<'_> {
                 && !is_streaming;
             let item_height = if is_cacheable {
                 let key = (idx, content_width);
-                if let Some(cached) = self.height_cache.borrow().get(&key).copied() {
+                if let Some(cached) = self
+                    .history_render
+                    .height_cache
+                    .borrow()
+                    .get(&key)
+                    .copied()
+                {
                     if self.perf_state.enabled {
                         let mut p = self.perf_state.stats.borrow_mut();
                         p.height_hits_render = p.height_hits_render.saturating_add(1);
@@ -12831,7 +13822,10 @@ impl WidgetRef for &ChatWidget<'_> {
                             dt,
                         );
                     }
-                    self.height_cache.borrow_mut().insert(key, computed);
+                    self.history_render
+                        .height_cache
+                        .borrow_mut()
+                        .insert(key, computed);
                     computed
                 }
             } else {
@@ -12913,13 +13907,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         None
                     };
                     let style = Style::default().bg(gutter_bg);
-                    for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
-                        // Only the first column (symbol column) needs tint; the second is spacing to content
-                        // but tint both for visual continuity with the assistant block.
-                        for x in gutter_area.x..gutter_area.x.saturating_add(gutter_area.width) {
-                            buf[(x, y)].set_char(' ').set_style(style);
-                        }
-                    }
+                    fill_rect(buf, gutter_area, Some(' '), style);
                     // Also tint the single left padding column so the assistant
                     // gutter visually reaches the outer edge. The content area
                     // is inset by a uniform padding; when present, paint that
@@ -12927,9 +13915,8 @@ impl WidgetRef for &ChatWidget<'_> {
                     // vertical span of this item.
                     if content_area.x > history_area.x {
                         let left_col_x = content_area.x.saturating_sub(1);
-                        for y in gutter_area.y..gutter_area.y.saturating_add(gutter_area.height) {
-                            buf[(left_col_x, y)].set_char(' ').set_style(style);
-                        }
+                        let left_rect = Rect::new(left_col_x, gutter_area.y, 1, gutter_area.height);
+                        fill_rect(buf, left_rect, Some(' '), style);
                     }
                     // Also tint one column immediately to the right of the content area
                     // so the assistant block is visually bookended. This column lives in the
@@ -12938,9 +13925,8 @@ impl WidgetRef for &ChatWidget<'_> {
                     let right_col_x = content_area.x.saturating_add(content_area.width);
                     let history_right = history_area.x.saturating_add(history_area.width);
                     if right_col_x < history_right {
-                        for y in item_area.y..item_area.y.saturating_add(item_area.height) {
-                            buf[(right_col_x, y)].set_char(' ').set_style(style);
-                        }
+                        let right_rect = Rect::new(right_col_x, item_area.y, 1, item_area.height);
+                        fill_rect(buf, right_rect, Some(' '), style);
                     }
                     if let Some(t0) = _perf_gutter_start {
                         let dt = t0.elapsed().as_nanos();
@@ -13077,7 +14063,29 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
 
                 // Render the cell content first
-                item.render_with_skip(item_area, buf, skip_rows);
+                let mut handled_assistant = false;
+                if let Some(assistant) = item
+                    .as_any()
+                    .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                {
+                    let plan_ref = if let Some(plan) = assistant_layouts[idx].as_ref() {
+                        plan
+                    } else {
+                        let new_plan = assistant.ensure_layout(content_width);
+                        assistant_layouts[idx] = Some(new_plan);
+                        assistant_layouts[idx].as_ref().unwrap()
+                    };
+                    if skip_rows >= plan_ref.total_rows() || item_area.height == 0 {
+                        handled_assistant = true;
+                    } else {
+                        assistant.render_with_layout(plan_ref, item_area, buf, skip_rows);
+                        handled_assistant = true;
+                    }
+                }
+
+                if !handled_assistant {
+                    item.render_with_skip(item_area, buf, skip_rows);
+                }
 
                 // Debug: overlay order info on the spacing row below (or above if needed).
                 if self.show_order_overlay {
@@ -13167,10 +14175,10 @@ impl WidgetRef for &ChatWidget<'_> {
             } else {
                 None
             };
-            for y in screen_y..content_area.y + content_area.height {
-                for x in content_area.x..content_area.x + content_area.width {
-                    buf[(x, y)].set_char(' ').set_style(clear_style);
-                }
+            let gap_height = (content_area.y + content_area.height).saturating_sub(screen_y);
+            if gap_height > 0 {
+                let gap_rect = Rect::new(content_area.x, screen_y, content_area.width, gap_height);
+                fill_rect(buf, gap_rect, Some(' '), clear_style);
             }
             if let Some(t0) = _perf_hist_clear2 {
                 let dt = t0.elapsed().as_nanos();
@@ -13233,11 +14241,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
         if self.terminal.overlay().is_some() {
             let bg_style = Style::default().bg(crate::colors::background());
-            for y in bottom_pane_area.y..bottom_pane_area.y + bottom_pane_area.height {
-                for x in bottom_pane_area.x..bottom_pane_area.x + bottom_pane_area.width {
-                    buf[(x, y)].set_style(bg_style).set_char(' ');
-                }
-            }
+            fill_rect(buf, bottom_pane_area, Some(' '), bg_style);
         } else {
             // Render the bottom pane directly without a border for now
             // The composer has its own layout with hints at the bottom
@@ -13248,11 +14252,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let scrim_style = Style::default()
                 .bg(crate::colors::overlay_scrim())
                 .fg(crate::colors::text_dim());
-            for y in area.y..area.y + area.height {
-                for x in area.x..area.x + area.width {
-                    buf[(x, y)].set_style(scrim_style);
-                }
-            }
+            fill_rect(buf, area, None, scrim_style);
 
             let padding = 1u16;
             let footer_reserved = 1.min(bottom_pane_area.height);
@@ -13437,11 +14437,7 @@ impl WidgetRef for &ChatWidget<'_> {
                         width: footer_area.width,
                         height: footer_area.height.saturating_sub(1),
                     };
-                    for y in spacer_area.y..spacer_area.y + spacer_area.height {
-                        for x in spacer_area.x..spacer_area.x + spacer_area.width {
-                            buf[(x, y)].set_char(' ').set_style(inner_bg);
-                        }
-                    }
+                    fill_rect(buf, spacer_area, Some(' '), inner_bg);
                 }
 
                 let instructions_area = Rect {
@@ -13478,13 +14474,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 } else {
                     None
                 };
-                for y in area.y..area.y + area.height {
-                    for x in area.x..area.x + area.width {
-                        // Overwrite with a dimmed style; we don't Clear so existing glyphs remain,
-                        // but foreground is muted to reduce visual competition.
-                        buf[(x, y)].set_style(scrim_bg);
-                    }
-                }
+                fill_rect(buf, area, None, scrim_bg);
                 if let Some(t0) = _perf_scrim_start {
                     let dt = t0.elapsed().as_nanos();
                     let mut p = self.perf_state.stats.borrow_mut();
@@ -13509,11 +14499,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 } else {
                     None
                 };
-                for y in area.y..area.y + area.height {
-                    for x in area.x..area.x + area.width {
-                        buf[(x, y)].set_style(bg_style);
-                    }
-                }
+                fill_rect(buf, area, None, bg_style);
                 if let Some(t0) = _perf_overlay_area_bg_start {
                     let dt = t0.elapsed().as_nanos();
                     let mut p = self.perf_state.stats.borrow_mut();
@@ -13897,34 +14883,6 @@ impl WidgetRef for &ChatWidget<'_> {
     }
 }
 
-fn add_token_usage(current_usage: &TokenUsage, new_usage: &TokenUsage) -> TokenUsage {
-    let cached_input_tokens = match (
-        current_usage.cached_input_tokens,
-        new_usage.cached_input_tokens,
-    ) {
-        (Some(current), Some(new)) => Some(current + new),
-        (Some(current), None) => Some(current),
-        (None, Some(new)) => Some(new),
-        (None, None) => None,
-    };
-    let reasoning_output_tokens = match (
-        current_usage.reasoning_output_tokens,
-        new_usage.reasoning_output_tokens,
-    ) {
-        (Some(current), Some(new)) => Some(current + new),
-        (Some(current), None) => Some(current),
-        (None, Some(new)) => Some(new),
-        (None, None) => None,
-    };
-    TokenUsage {
-        input_tokens: current_usage.input_tokens + new_usage.input_tokens,
-        cached_input_tokens,
-        output_tokens: current_usage.output_tokens + new_usage.output_tokens,
-        reasoning_output_tokens,
-        total_tokens: current_usage.total_tokens + new_usage.total_tokens,
-    }
-}
-
 // Coalesce adjacent Read entries of the same file with contiguous ranges in a rendered lines vector.
 // Expects the vector to contain a header line at index 0 (e.g., "Read"). Modifies in place.
 #[allow(dead_code)]
@@ -14053,10 +15011,26 @@ impl ExecState {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RunningToolEntry {
+    order_key: OrderKey,
+    fallback_index: usize,
+}
+
+impl RunningToolEntry {
+    fn new(order_key: OrderKey, fallback_index: usize) -> Self {
+        Self {
+            order_key,
+            fallback_index,
+        }
+    }
+}
+
 #[derive(Default)]
 struct ToolState {
-    running_custom_tools: HashMap<ToolCallId, usize>,
+    running_custom_tools: HashMap<ToolCallId, RunningToolEntry>,
     running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
+    running_wait_tools: HashMap<ToolCallId, ExecCallId>,
 }
 #[derive(Default)]
 struct StreamState {
@@ -14146,6 +15120,10 @@ impl TerminalState {
 
 const TERMINAL_MAX_LINES: usize = 10_000;
 
+struct PendingManualTerminal {
+    command: String,
+}
+
 struct TerminalOverlay {
     id: u64,
     title: String,
@@ -14192,6 +15170,14 @@ impl PendingCommand {
         Self {
             input: String::new(),
             cursor: 0,
+            ack: None,
+        }
+    }
+
+    fn manual_with_input(input: String) -> Self {
+        Self {
+            cursor: input.len(),
+            input,
             ack: None,
         }
     }

@@ -8,7 +8,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_channel::Receiver;
@@ -51,6 +52,8 @@ use self::compact::collect_user_messages;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
+const HOOK_OUTPUT_LIMIT: usize = 2048;
+const PENDING_ONLY_SENTINEL: &str = "__codex_pending_only__";
 
 #[derive(Clone, Default)]
 struct ConfirmGuardRuntime {
@@ -458,6 +461,7 @@ use crate::client_common::ResponseEvent;
 use crate::environment_context::EnvironmentContext;
 use crate::user_instructions::UserInstructions;
 use crate::config::{persist_model_selection, Config};
+use crate::config_types::ProjectHookEvent;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::conversation_history::ConversationHistory;
 use crate::error::CodexErr;
@@ -489,6 +493,7 @@ use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, D
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
 use crate::project_doc::get_user_instructions;
+use crate::project_features::{ProjectCommand, ProjectHook, ProjectHooks};
 use crate::protocol::AgentMessageDeltaEvent;
 use crate::protocol::AgentMessageEvent;
 use crate::protocol::AgentReasoningDeltaEvent;
@@ -513,6 +518,9 @@ use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
 use crate::protocol::RecordedEvent;
+use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::TokenCountEvent;
+use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
@@ -743,6 +751,8 @@ struct State {
     /// Background execs by call_id
     background_execs: std::collections::HashMap<String, BackgroundExecState>,
     next_internal_sub_id: u64,
+    token_usage_info: Option<TokenUsageInfo>,
+    latest_rate_limits: Option<RateLimitSnapshotEvent>,
 }
 
 #[derive(Clone)]
@@ -823,6 +833,30 @@ pub(crate) struct Session {
     /// Track the last screenshot path and hash to detect changes
     last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
     confirm_guard: ConfirmGuardRuntime,
+    project_hooks: ProjectHooks,
+    project_commands: Vec<ProjectCommand>,
+    hook_guard: AtomicBool,
+    github: Arc<RwLock<crate::config_types::GithubConfig>>,
+    validation: Arc<RwLock<crate::config_types::ValidationConfig>>,
+}
+
+struct HookGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> HookGuard<'a> {
+    fn try_acquire(flag: &'a AtomicBool) -> Option<Self> {
+        flag
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for HookGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -859,6 +893,43 @@ impl Session {
 
     pub(crate) fn get_sandbox_policy(&self) -> &SandboxPolicy {
         &self.sandbox_policy
+    }
+
+    pub(crate) fn get_github_config(&self) -> Arc<RwLock<crate::config_types::GithubConfig>> {
+        Arc::clone(&self.github)
+    }
+
+    pub(crate) fn validation_config(&self) -> Arc<RwLock<crate::config_types::ValidationConfig>> {
+        Arc::clone(&self.validation)
+    }
+
+    pub(crate) fn update_validation_patch_harness(&self, enabled: bool) {
+        if let Ok(mut cfg) = self.validation.write() {
+            cfg.patch_harness = enabled;
+        }
+    }
+
+    pub(crate) fn update_validation_tool(&self, name: &str, enable: bool) {
+        if name == "actionlint" {
+            if let Ok(mut github) = self.github.write() {
+                github.actionlint_on_patch = enable;
+            }
+            return;
+        }
+
+        if let Ok(mut cfg) = self.validation.write() {
+            let tools = &mut cfg.tools;
+            match name {
+                "shellcheck" => tools.shellcheck = Some(enable),
+                "markdownlint" => tools.markdownlint = Some(enable),
+                "hadolint" => tools.hadolint = Some(enable),
+                "yamllint" => tools.yamllint = Some(enable),
+                "cargo-check" => tools.cargo_check = Some(enable),
+                "shfmt" => tools.shfmt = Some(enable),
+                "prettier" => tools.prettier = Some(enable),
+                _ => {}
+            }
+        }
     }
 
     fn resolve_path(&self, path: Option<String>) -> PathBuf {
@@ -973,6 +1044,16 @@ impl Session {
         } else {
             Some(state.pending_user_input.remove(0))
         }
+    }
+
+    /// Enqueue a response item that should be surfaced to the model at the start of the
+    /// next turn. Returns `true` if no agent is currently running and a new turn should be
+    /// scheduled immediately.
+    pub fn enqueue_out_of_turn_item(&self, item: ResponseInputItem) -> bool {
+        let mut state = self.state.lock().unwrap();
+        let should_start_turn = state.current_task.is_none();
+        state.pending_input.push(item);
+        should_start_turn
     }
 
     pub(crate) fn next_internal_sub_id(&self) -> String {
@@ -1452,16 +1533,65 @@ impl Session {
         output_index: Option<u32>,
         attempt_req: u64,
     ) -> crate::error::Result<ExecToolCallOutput> {
+        self
+            .run_exec_with_events_inner(
+                turn_diff_tracker,
+                begin_ctx,
+                exec_args,
+                seq_hint,
+                output_index,
+                attempt_req,
+                true,
+            )
+            .await
+    }
+
+    async fn run_exec_with_events_inner<'a>(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        begin_ctx: ExecCommandContext,
+        exec_args: ExecInvokeArgs<'a>,
+        seq_hint: Option<u64>,
+        output_index: Option<u32>,
+        attempt_req: u64,
+        enable_hooks: bool,
+    ) -> crate::error::Result<ExecToolCallOutput> {
         let is_apply_patch = begin_ctx.apply_patch.is_some();
         let sub_id = begin_ctx.sub_id.clone();
         let call_id = begin_ctx.call_id.clone();
 
-        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
-            .await;
-
         let ExecInvokeArgs { params, sandbox_type, sandbox_policy, sandbox_cwd, codex_linux_sandbox_exe, stdout_stream } = exec_args;
         let tracking_command = params.command.clone();
         let dry_run_analysis = analyze_command(&tracking_command);
+        let params = maybe_run_with_user_profile(params, self);
+        let params_for_hooks = if enable_hooks {
+            Some(params.clone())
+        } else {
+            None
+        };
+
+        if enable_hooks {
+            if let Some(params_ref) = params_for_hooks.as_ref() {
+                let before_event = if is_apply_patch {
+                    ProjectHookEvent::FileBeforeWrite
+                } else {
+                    ProjectHookEvent::ToolBefore
+                };
+                self
+                    .run_hooks_for_exec_event(
+                        turn_diff_tracker,
+                        before_event,
+                        &begin_ctx,
+                        params_ref,
+                        None,
+                        attempt_req,
+                    )
+                    .await;
+            }
+        }
+
+        self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
+            .await;
 
         let result = process_exec_tool_call(params, sandbox_type, sandbox_policy, sandbox_cwd, codex_linux_sandbox_exe, stdout_stream)
         .await;
@@ -1494,6 +1624,26 @@ impl Session {
         )
         .await;
 
+        if enable_hooks {
+            if let Some(params_ref) = params_for_hooks.as_ref() {
+                let after_event = if is_apply_patch {
+                    ProjectHookEvent::FileAfterWrite
+                } else {
+                    ProjectHookEvent::ToolAfter
+                };
+                self
+                    .run_hooks_for_exec_event(
+                        turn_diff_tracker,
+                        after_event,
+                        &begin_ctx,
+                        params_ref,
+                        Some(borrowed),
+                        attempt_req,
+                    )
+                    .await;
+            }
+        }
+
         if let Some(analysis) = dry_run_analysis.as_ref() {
             let mut state = self.state.lock().unwrap();
             state.dry_run_guard.note_execution(analysis);
@@ -1505,7 +1655,7 @@ impl Session {
     /// Helper that emits a BackgroundEvent with the given message. This keeps
     /// the call‑sites terse so adding more diagnostics does not clutter the
     /// core agent logic.
-    async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
+    pub(crate) async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
         let event = self.make_event(
             sub_id,
             EventMsg::BackgroundEvent(BackgroundEventEvent { message: message.into() }),
@@ -1519,6 +1669,253 @@ impl Session {
             EventMsg::Error(ErrorEvent { message: message.into() }),
         );
         let _ = self.tx_event.send(event).await;
+    }
+
+    fn resolve_internal_sandbox(&self, with_escalated_permissions: bool) -> SandboxType {
+        match assess_safety_for_untrusted_command(
+            self.approval_policy,
+            &self.sandbox_policy,
+            with_escalated_permissions,
+        ) {
+            SafetyCheck::AutoApprove { sandbox_type } => sandbox_type,
+            SafetyCheck::AskUser | SafetyCheck::Reject { .. } => {
+                crate::safety::get_platform_sandbox().unwrap_or(SandboxType::None)
+            }
+        }
+    }
+
+    async fn run_hooks_for_exec_event(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        event: ProjectHookEvent,
+        exec_ctx: &ExecCommandContext,
+        params: &ExecParams,
+        output: Option<&ExecToolCallOutput>,
+        attempt_req: u64,
+    ) {
+        if self.project_hooks.is_empty() {
+            return;
+        }
+        let hooks: Vec<ProjectHook> = self.project_hooks.hooks_for(event).cloned().collect();
+        if hooks.is_empty() {
+            return;
+        }
+        let Some(_guard) = HookGuard::try_acquire(&self.hook_guard) else {
+            return;
+        };
+        let payload = build_exec_hook_payload(event, exec_ctx, params, output);
+        for (idx, hook) in hooks.into_iter().enumerate() {
+            self
+                .run_hook_command(turn_diff_tracker, &hook, event, &payload, Some(exec_ctx), attempt_req, idx)
+                .await;
+        }
+    }
+
+    async fn run_session_hooks(&self, event: ProjectHookEvent) {
+        if self.project_hooks.is_empty() {
+            return;
+        }
+        let hooks: Vec<ProjectHook> = self.project_hooks.hooks_for(event).cloned().collect();
+        if hooks.is_empty() {
+            return;
+        }
+        let Some(_guard) = HookGuard::try_acquire(&self.hook_guard) else {
+            return;
+        };
+        let payload = self.build_session_payload(event);
+        let mut tracker = TurnDiffTracker::new();
+        let attempt_req = self.current_request_ordinal();
+        for (idx, hook) in hooks.into_iter().enumerate() {
+            self
+                .run_hook_command(&mut tracker, &hook, event, &payload, None, attempt_req, idx)
+                .await;
+        }
+    }
+
+    fn build_session_payload(&self, event: ProjectHookEvent) -> Value {
+        match event {
+            ProjectHookEvent::SessionStart => json!({
+                "event": event.as_str(),
+                "cwd": self.cwd.to_string_lossy(),
+                "sandbox_policy": format!("{}", self.sandbox_policy),
+                "approval_policy": format!("{}", self.approval_policy),
+            }),
+            ProjectHookEvent::SessionEnd => json!({
+                "event": event.as_str(),
+                "cwd": self.cwd.to_string_lossy(),
+                "sandbox_policy": format!("{}", self.sandbox_policy),
+                "approval_policy": format!("{}", self.approval_policy),
+            }),
+            _ => json!({ "event": event.as_str() }),
+        }
+    }
+
+    async fn run_hook_command(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        hook: &ProjectHook,
+        event: ProjectHookEvent,
+        payload: &Value,
+        base_ctx: Option<&ExecCommandContext>,
+        attempt_req: u64,
+        index: usize,
+    ) {
+        let sub_id = base_ctx
+            .map(|ctx| ctx.sub_id.clone())
+            .unwrap_or_else(|| INITIAL_SUBMIT_ID.to_string());
+        let base_slug = base_ctx
+            .map(|ctx| sanitize_identifier(&ctx.call_id))
+            .unwrap_or_else(|| event.slug().to_string());
+        let call_id = format!("{base_slug}_hook_{}_{}", event.slug(), index + 1);
+
+        let mut env = hook.env.clone();
+        env.entry("CODE_HOOK_EVENT".to_string())
+            .or_insert_with(|| event.as_str().to_string());
+        env.entry("CODE_HOOK_TRIGGER".to_string())
+            .or_insert_with(|| event.slug().to_string());
+        env.insert("CODE_HOOK_CALL_ID".to_string(), call_id.clone());
+        env.insert("CODE_HOOK_SUB_ID".to_string(), sub_id.clone());
+        env.insert("CODE_HOOK_INDEX".to_string(), (index + 1).to_string());
+        env.insert("CODE_HOOK_PAYLOAD".to_string(), payload.to_string());
+        env.entry("CODE_SESSION_CWD".to_string())
+            .or_insert_with(|| self.cwd.to_string_lossy().to_string());
+        if let Some(name) = &hook.name {
+            env.entry("CODE_HOOK_NAME".to_string())
+                .or_insert_with(|| name.clone());
+        }
+        if let Some(ctx) = base_ctx {
+            env.entry("CODE_HOOK_SOURCE_CALL_ID".to_string())
+                .or_insert_with(|| ctx.call_id.clone());
+        }
+
+        let exec_params = ExecParams {
+            command: hook.command.clone(),
+            cwd: hook.resolved_cwd(self.get_cwd()),
+            timeout_ms: hook.timeout_ms,
+            env,
+            with_escalated_permissions: Some(false),
+            justification: None,
+        };
+
+        let exec_ctx = ExecCommandContext {
+            sub_id: sub_id.clone(),
+            call_id: call_id.clone(),
+            command_for_display: exec_params.command.clone(),
+            cwd: exec_params.cwd.clone(),
+            apply_patch: None,
+        };
+
+        let sandbox_type = self.resolve_internal_sandbox(false);
+        let exec_args = ExecInvokeArgs {
+            params: exec_params,
+            sandbox_type,
+            sandbox_policy: &self.sandbox_policy,
+            sandbox_cwd: self.get_cwd(),
+            codex_linux_sandbox_exe: &self.codex_linux_sandbox_exe,
+            stdout_stream: None,
+        };
+
+        if let Err(err) = Box::pin(self.run_exec_with_events_inner(
+            turn_diff_tracker,
+            exec_ctx,
+            exec_args,
+            None,
+            None,
+            attempt_req,
+            false,
+        ))
+        .await
+        {
+            let hook_label = hook
+                .name
+                .as_deref()
+                .unwrap_or_else(|| hook.command.first().map(String::as_str).unwrap_or("hook"));
+            self
+                .notify_background_event(
+                    &sub_id,
+                    format!("Hook `{}` failed: {}", hook_label, get_error_message_ui(&err)),
+                )
+                .await;
+        }
+    }
+
+    fn find_project_command(&self, candidate: &str) -> Option<ProjectCommand> {
+        self.project_commands
+            .iter()
+            .find(|cmd| cmd.matches(candidate))
+            .cloned()
+    }
+
+    async fn run_project_command(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        sub_id: &str,
+        name: &str,
+        attempt_req: u64,
+    ) {
+        let Some(command) = self.find_project_command(name) else {
+            self
+                .notify_background_event(
+                    sub_id,
+                    format!("Unknown project command `{}`", name.trim()),
+                )
+                .await;
+            return;
+        };
+
+        let mut env = command.env.clone();
+        env.entry("CODE_PROJECT_COMMAND_NAME".to_string())
+            .or_insert_with(|| command.name.clone());
+        if let Some(desc) = &command.description {
+            env.entry("CODE_PROJECT_COMMAND_DESCRIPTION".to_string())
+                .or_insert_with(|| desc.clone());
+        }
+        env.entry("CODE_SESSION_CWD".to_string())
+            .or_insert_with(|| self.cwd.to_string_lossy().to_string());
+
+        let exec_params = ExecParams {
+            command: command.command.clone(),
+            cwd: command.resolved_cwd(self.get_cwd()),
+            timeout_ms: command.timeout_ms,
+            env,
+            with_escalated_permissions: Some(false),
+            justification: None,
+        };
+
+        let call_id = format!("project_cmd_{}", sanitize_identifier(&command.name));
+        let exec_ctx = ExecCommandContext {
+            sub_id: sub_id.to_string(),
+            call_id: call_id.clone(),
+            command_for_display: exec_params.command.clone(),
+            cwd: exec_params.cwd.clone(),
+            apply_patch: None,
+        };
+
+        let sandbox_type = self.resolve_internal_sandbox(false);
+        let exec_args = ExecInvokeArgs {
+            params: exec_params,
+            sandbox_type,
+            sandbox_policy: &self.sandbox_policy,
+            sandbox_cwd: self.get_cwd(),
+            codex_linux_sandbox_exe: &self.codex_linux_sandbox_exe,
+            stdout_stream: None,
+        };
+
+        if let Err(err) = self
+            .run_exec_with_events(turn_diff_tracker, exec_ctx, exec_args, None, None, attempt_req)
+            .await
+        {
+            self
+                .notify_background_event(
+                    sub_id,
+                    format!(
+                        "Project command `{}` failed: {}",
+                        command.name,
+                        get_error_message_ui(&err)
+                    ),
+                )
+                .await;
+        }
     }
 
     /// Build the full turn input by concatenating the current conversation
@@ -1826,6 +2223,119 @@ pub(crate) struct ApplyPatchCommandContext {
     pub(crate) changes: HashMap<PathBuf, FileChange>,
 }
 
+fn sanitize_identifier(value: &str) -> String {
+    let mut slug = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else {
+            slug.push('_');
+        }
+    }
+    while slug.starts_with('_') {
+        slug.remove(0);
+    }
+    if slug.is_empty() {
+        slug.push_str("hook");
+    }
+    slug
+}
+
+fn truncate_payload(text: &str, limit: usize) -> String {
+    let mut iter = text.chars();
+    let truncated: String = iter.by_ref().take(limit).collect();
+    if iter.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn build_exec_hook_payload(
+    event: ProjectHookEvent,
+    ctx: &ExecCommandContext,
+    params: &ExecParams,
+    output: Option<&ExecToolCallOutput>,
+) -> Value {
+    let base = json!({
+        "event": event.as_str(),
+        "call_id": ctx.call_id,
+        "cwd": ctx.cwd.to_string_lossy(),
+        "command": params.command,
+        "timeout_ms": params.timeout_ms,
+    });
+
+    match event {
+        ProjectHookEvent::ToolBefore => base,
+        ProjectHookEvent::ToolAfter => {
+            if let Some(out) = output {
+                json!({
+                    "event": event.as_str(),
+                    "call_id": ctx.call_id,
+                    "cwd": ctx.cwd.to_string_lossy(),
+                    "command": params.command,
+                    "timeout_ms": params.timeout_ms,
+                    "exit_code": out.exit_code,
+                    "duration_ms": out.duration.as_millis(),
+                    "timed_out": out.timed_out,
+                    "stdout": truncate_payload(&out.stdout.text, HOOK_OUTPUT_LIMIT),
+                    "stderr": truncate_payload(&out.stderr.text, HOOK_OUTPUT_LIMIT),
+                })
+            } else {
+                base
+            }
+        }
+        ProjectHookEvent::FileBeforeWrite => {
+            let changes = ctx
+                .apply_patch
+                .as_ref()
+                .and_then(|p| serde_json::to_value(&p.changes).ok())
+                .unwrap_or(Value::Null);
+            json!({
+                "event": event.as_str(),
+                "call_id": ctx.call_id,
+                "cwd": ctx.cwd.to_string_lossy(),
+                "command": params.command,
+                "timeout_ms": params.timeout_ms,
+                "changes": changes,
+            })
+        }
+        ProjectHookEvent::FileAfterWrite => {
+            let changes = ctx
+                .apply_patch
+                .as_ref()
+                .and_then(|p| serde_json::to_value(&p.changes).ok())
+                .unwrap_or(Value::Null);
+            if let Some(out) = output {
+                json!({
+                    "event": event.as_str(),
+                    "call_id": ctx.call_id,
+                    "cwd": ctx.cwd.to_string_lossy(),
+                    "command": params.command,
+                    "timeout_ms": params.timeout_ms,
+                    "changes": changes,
+                    "exit_code": out.exit_code,
+                    "duration_ms": out.duration.as_millis(),
+                    "timed_out": out.timed_out,
+                    "stdout": truncate_payload(&out.stdout.text, HOOK_OUTPUT_LIMIT),
+                    "stderr": truncate_payload(&out.stderr.text, HOOK_OUTPUT_LIMIT),
+                    "success": out.exit_code == 0,
+                })
+            } else {
+                json!({
+                    "event": event.as_str(),
+                    "call_id": ctx.call_id,
+                    "cwd": ctx.cwd.to_string_lossy(),
+                    "command": params.command,
+                    "timeout_ms": params.timeout_ms,
+                    "changes": changes,
+                })
+            }
+        }
+        _ => base,
+    }
+}
+
 /// A series of Turns in response to user input.
 pub(crate) struct AgentTask {
     sess: Arc<Session>,
@@ -1940,11 +2450,17 @@ async fn submission_loop(
             Op::AddPendingInputDeveloper { text } => {
                 let sess = match sess.as_ref() { Some(s) => s.clone(), None => { send_no_session_event(sub.id).await; continue; } };
                 let dev_msg = ResponseInputItem::Message { role: "developer".to_string(), content: vec![ContentItem::InputText { text }] };
-                {
-                    let mut state = sess.state.lock().unwrap();
-                    state.pending_input.push(dev_msg);
+                let should_start_turn = sess.enqueue_out_of_turn_item(dev_msg);
+                if should_start_turn {
+                    sess.cleanup_old_status_items().await;
+                    let turn_context = sess.make_turn_context();
+                    let sub_id = sess.next_internal_sub_id();
+                    let sentinel_input = vec![InputItem::Text {
+                        text: PENDING_ONLY_SENTINEL.to_string(),
+                    }];
+                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, sentinel_input);
+                    sess.set_task(agent);
                 }
-                // No events emitted here; a follow-up empty UserInput should be sent by the caller to trigger a turn.
             }
             Op::ConfigureSession {
                 provider,
@@ -2198,6 +2714,11 @@ async fn submission_loop(
                     last_system_status: Mutex::new(None),
                     last_screenshot_info: Mutex::new(None),
                     confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
+                    project_hooks: config.project_hooks.clone(),
+                    project_commands: config.project_commands.clone(),
+                    hook_guard: AtomicBool::new(false),
+                    github: Arc::new(RwLock::new(config.github.clone())),
+                    validation: Arc::new(RwLock::new(config.validation.clone())),
                 }));
                 if let Some(sess_arc) = &sess {
                     if !config.always_allow_commands.is_empty() {
@@ -2258,6 +2779,10 @@ async fn submission_loop(
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
                     }
+                }
+
+                if let Some(sess_arc) = &sess {
+                    sess_arc.run_session_hooks(ProjectHookEvent::SessionStart).await;
                 }
 
                 // Initialize agent manager after SessionConfigured is sent
@@ -2382,6 +2907,20 @@ async fn submission_loop(
                     other => sess.notify_approval(&id, other),
                 }
             }
+            Op::UpdateValidationPatchHarness { enabled } => {
+                if let Some(sess) = sess.as_ref() {
+                    sess.update_validation_patch_harness(enabled);
+                } else {
+                    send_no_session_event(sub.id).await;
+                }
+            }
+            Op::UpdateValidationTool { name, enable } => {
+                if let Some(sess) = sess.as_ref() {
+                    sess.update_validation_tool(&name, enable);
+                } else {
+                    send_no_session_event(sub.id).await;
+                }
+            }
             Op::AddToHistory { text } => {
                 // TODO: What should we do if we got AddToHistory before ConfigureSession?
                 // currently, if ConfigureSession has resume path, this history will be ignored
@@ -2393,6 +2932,20 @@ async fn submission_loop(
                         warn!("failed to append to message history: {e}");
                     }
                 });
+            }
+
+            Op::RunProjectCommand { name } => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => sess,
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+                let mut tracker = TurnDiffTracker::new();
+                let attempt_req = sess.current_request_ordinal();
+                sess.run_project_command(&mut tracker, &sub.id, &name, attempt_req)
+                    .await;
             }
 
             Op::GetHistoryEntryRequest { offset, log_id } => {
@@ -2472,6 +3025,9 @@ async fn submission_loop(
                         }
                     }
                 }
+                if let Some(ref sess_arc) = sess {
+                    sess_arc.run_session_hooks(ProjectHookEvent::SessionEnd).await;
+                }
                 let event = match sess {
                     Some(ref sess_arc) => sess_arc.make_event(&sub.id, EventMsg::ShutdownComplete),
                     None => Event {
@@ -2514,7 +3070,12 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         return;
     }
     // Continue with our fork's history and input handling.
-    
+
+    let pending_only_turn = input.len() == 1
+        && matches!(
+            &input[0],
+            InputItem::Text { text } if text == PENDING_ONLY_SENTINEL
+        );
 
     // Debug logging for ephemeral images
     let ephemeral_count = input
@@ -2529,13 +3090,17 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         );
     }
 
-    // Convert input to ResponseInputItem
-    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
-    let initial_response_item: ResponseItem = initial_input_for_turn.clone().into();
+    let mut initial_response_item: Option<ResponseItem> = None;
 
-    // Record to history but we'll handle ephemeral images separately
-    sess.record_conversation_items(&[initial_response_item.clone()])
-        .await;
+    if !pending_only_turn {
+        // Convert input to ResponseInputItem
+        let response_item: ResponseItem = response_input_from_core_items(input.clone()).into();
+
+        // Record to history but we'll handle ephemeral images separately
+        sess.record_conversation_items(&[response_item.clone()])
+            .await;
+        initial_response_item = Some(response_item);
+    }
 
     let mut last_task_message: Option<String> = None;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Agent which contains
@@ -2554,7 +3119,21 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
-        let pending_input_tail = pending_input.clone();
+        let mut pending_input_tail = pending_input.clone();
+
+        if initial_response_item.is_none() {
+            if let Some(first_pending) = pending_input_tail.first().cloned() {
+                pending_input_tail.remove(0);
+                sess.record_conversation_items(&[first_pending.clone()])
+                    .await;
+                initial_response_item = Some(first_pending);
+            } else {
+                tracing::warn!(
+                    "pending-only turn had no queued input; skipping model invocation"
+                );
+                break;
+            }
+        }
 
         // Do not duplicate the initial input in `pending_input`.
         // It is already recorded to history above; ephemeral items are appended separately.
@@ -2762,7 +3341,7 @@ async fn run_turn(
     turn_context: &Arc<TurnContext>,
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
-    initial_user_item: ResponseItem,
+    initial_user_item: Option<ResponseItem>,
     pending_input_tail: Vec<ResponseItem>,
     mut input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
@@ -2770,10 +3349,16 @@ async fn run_turn(
     let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
 
     let tc = &**turn_context;
+    let agents_active = {
+        let manager = AGENT_MANAGER.read().await;
+        manager.has_active_agents()
+    };
+
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
         browser_enabled,
+        agents_active,
     );
 
     let mut retries = 0;
@@ -2871,7 +3456,9 @@ async fn run_turn(
                                 attempt_input = input.clone();
                             } else {
                                 let mut rebuilt = compacted_history;
-                                rebuilt.push(initial_user_item.clone());
+                                if let Some(initial_item) = initial_user_item.clone() {
+                                    rebuilt.push(initial_item);
+                                }
                                 if !pending_input_tail.is_empty() {
                                     let (missing_calls, filtered_outputs) =
                                         reconcile_pending_tool_outputs(&pending_input_tail, &rebuilt, &previous_input_snapshot);
@@ -3208,9 +3795,29 @@ async fn try_run_turn(
                 response_id: _,
                 token_usage,
             } => {
-                if let Some(token_usage) = token_usage {
+                let (new_info, rate_limits, should_emit);
+                {
+                    let mut state = sess.state.lock().unwrap();
+                    let info = TokenUsageInfo::new_or_append(
+                        &state.token_usage_info,
+                        &token_usage,
+                        sess.client.get_model_context_window(),
+                    );
+                    let limits = state.latest_rate_limits.clone();
+                    let emit = info.is_some() || limits.is_some();
+                    state.token_usage_info = info.clone();
+                    new_info = info;
+                    rate_limits = limits;
+                    should_emit = emit;
+                }
+
+                if should_emit {
+                    let payload = TokenCountEvent {
+                        info: new_info,
+                        rate_limits,
+                    };
                     sess.tx_event
-                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
+                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(payload)))
                         .await
                         .ok();
                 }
@@ -3268,8 +3875,15 @@ async fn try_run_turn(
                     sess.tx_event.send(stamped).await.ok();
                 }
             }
-            ResponseEvent::RateLimits(_rl) => {
-                // Upstream emits periodic rate limit snapshots. No-op for now.
+            ResponseEvent::RateLimits(snapshot) => {
+                let mut state = sess.state.lock().unwrap();
+                state.latest_rate_limits = Some(RateLimitSnapshotEvent {
+                    primary_used_percent: snapshot.primary_used_percent,
+                    weekly_used_percent: snapshot.weekly_used_percent,
+                    primary_to_weekly_ratio_percent: snapshot.primary_to_weekly_ratio_percent,
+                    primary_window_minutes: snapshot.primary_window_minutes,
+                    weekly_window_minutes: snapshot.weekly_window_minutes,
+                });
             }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
@@ -4718,15 +5332,28 @@ async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
         Ok(params) => {
             let mut manager = AGENT_MANAGER.write().await;
 
-            // Handle model parameter (can be string or array)
-            let models = match params.model {
-                Some(serde_json::Value::String(model)) => vec![model],
-                Some(serde_json::Value::Array(models)) => models
-                    .into_iter()
-                    .filter_map(|m| m.as_str().map(String::from))
-                    .collect(),
-                _ => vec!["code".to_string()], // Default model
-            };
+            // Collect requested models from the `models` field.
+            let raw_models: Vec<String> = params.models.clone();
+
+            // Split comma-delimited strings, trim whitespace, and deduplicate case-insensitively.
+            let mut seen_models = HashSet::new();
+            let mut models: Vec<String> = Vec::new();
+            for entry in raw_models {
+                for candidate in entry.split(',') {
+                    let trimmed = candidate.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let dedupe_key = trimmed.to_lowercase();
+                    if seen_models.insert(dedupe_key) {
+                        models.push(trimmed.to_string());
+                    }
+                }
+            }
+
+            if models.is_empty() {
+                models.push("code".to_string());
+            }
 
             // Helper: derive the command to check for a given model/config pair.
             fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
@@ -4782,10 +5409,11 @@ async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             let mut agent_ids = Vec::new();
             let mut skipped: Vec<String> = Vec::new();
             for model in models {
+                let model_key = model.to_lowercase();
                 // Check if this model is configured and enabled
                 let agent_config = sess.agents.iter().find(|a| {
-                    a.name.to_lowercase() == model.to_lowercase()
-                        || a.command.to_lowercase() == model.to_lowercase()
+                    a.name.to_lowercase() == model_key
+                        || a.command.to_lowercase() == model_key
                 });
 
                 if let Some(config) = agent_config {
@@ -6206,6 +6834,7 @@ async fn handle_container_exec_with_params(
         Some(ApplyPatchExec {
             action: ApplyPatchAction { patch, cwd, .. },
             user_explicitly_approved_this_action,
+            ..
         }) => {
             let path_to_codex = std::env::current_exe()
                 .ok()
@@ -6265,6 +6894,10 @@ async fn handle_container_exec_with_params(
         }
     };
 
+    let harness_summary_json = apply_patch_exec
+        .as_ref()
+        .and_then(|exec| exec.harness_summary_json.clone());
+
     let sandbox_type = match safety {
         SafetyCheck::AutoApprove { sandbox_type } => sandbox_type,
         SafetyCheck::AskUser => {
@@ -6322,6 +6955,7 @@ async fn handle_container_exec_with_params(
             |ApplyPatchExec {
                  action,
                  user_explicitly_approved_this_action,
+                 ..
              }| ApplyPatchCommandContext {
                 user_explicitly_approved_this_action,
                 changes: convert_apply_patch_to_protocol(&action),
@@ -6483,7 +7117,13 @@ async fn handle_container_exec_with_params(
         };
         if let Some(done) = done_opt {
             let is_success = done.exit_code == 0;
-            let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &done);
+            let mut content = format_exec_output_with_limit(sess, &sub_id, &call_id, &done);
+            if let Some(harness) = harness_summary_json.as_ref() {
+                if !harness.is_empty() {
+                    content.push('\n');
+                    content.push_str(harness);
+                }
+            }
             return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(is_success) } };
         } else {
             // Fallback (should not happen): indicate completion without detail

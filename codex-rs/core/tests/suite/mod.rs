@@ -16,3 +16,4 @@ mod rollout_resume;
 mod seatbelt;
 mod stream_error_allows_next_turn;
 mod stream_no_completed;
+mod stream_order;

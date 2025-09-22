@@ -56,6 +56,7 @@ mod render;
 mod session_log;
 mod shimmer;
 mod slash_command;
+mod rate_limits_view;
 mod resume;
 mod streaming;
 mod sanitize;
@@ -66,6 +67,7 @@ mod text_formatting;
 mod text_processing;
 mod theme;
 mod util {
+    pub mod buffer;
     pub mod list_window;
 }
 mod spinner;
@@ -95,9 +97,11 @@ pub use cli::Cli;
 // (tests access modules directly within the crate)
 
 pub async fn run_main(
-    cli: Cli,
+    mut cli: Cli,
     codex_linux_sandbox_exe: Option<PathBuf>,
 ) -> std::io::Result<codex_core::protocol::TokenUsage> {
+    cli.finalize_defaults();
+
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -151,8 +155,7 @@ pub async fn run_main(
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         debug: Some(cli.debug),
-        // Enable web search by default (no CLI flag).
-        tools_web_search_request: Some(true),
+        tools_web_search_request: Some(cli.web_search),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -236,11 +239,15 @@ pub async fn run_main(
     // Wrap file in non‑blocking writer.
     let (non_blocking, _guard) = non_blocking(log_file);
 
-    // use RUST_LOG env var, default to info for codex crates.
+    let default_filter = if cli.debug {
+        "codex_core=info,codex_tui=info,codex_browser=info"
+    } else {
+        "codex_core=warn,codex_tui=warn,codex_browser=warn"
+    };
+
+    // use RUST_LOG env var, defaulting based on debug flag.
     let env_filter = || {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("codex_core=info,codex_tui=info,codex_browser=info")
-        })
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
     };
 
     // Build layered subscriber:
@@ -382,6 +389,9 @@ fn run_ratatui_app(
         debug,
         order,
         timing,
+        resume_picker,
+        resume_last: _,
+        resume_session_id: _,
         ..
     } = cli;
     let mut app = App::new(
@@ -393,6 +403,7 @@ fn run_ratatui_app(
         order,
         terminal_info,
         timing,
+        resume_picker,
         startup_footer_notice,
     );
 

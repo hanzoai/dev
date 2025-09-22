@@ -7,10 +7,13 @@ use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
+use crate::config_types::ValidationConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
 use crate::config_types::Notifications;
+use crate::config_types::ProjectCommandConfig;
+use crate::config_types::ProjectHookConfig;
 use crate::config_types::SandboxWorkspaceWrite;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyToml;
@@ -29,6 +32,7 @@ use crate::protocol::AskForApproval;
 use crate::protocol::SandboxPolicy;
 use crate::config_types::ReasoningEffort;
 use crate::config_types::ReasoningSummary;
+use crate::project_features::{load_project_commands, ProjectCommand, ProjectHooks};
 use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
@@ -96,6 +100,12 @@ pub struct Config {
 
     /// Commands the user has permanently approved for this project/session.
     pub always_allow_commands: Vec<ApprovedCommandPattern>,
+
+    /// Project-level lifecycle hooks configured for the active workspace.
+    pub project_hooks: ProjectHooks,
+
+    /// Project-specific commands available in the active workspace.
+    pub project_commands: Vec<ProjectCommand>,
 
     pub shell_environment_policy: ShellEnvironmentPolicy,
     /// Patterns requiring an explicit confirm prefix before running.
@@ -233,6 +243,9 @@ pub struct Config {
 
     /// GitHub integration configuration.
     pub github: GithubConfig,
+
+    /// Validation harness configuration.
+    pub validation: ValidationConfig,
 
     /// Resolved subagent command configurations (including custom ones).
     /// If a command with name `plan|solve|code` exists here, it overrides
@@ -817,6 +830,70 @@ pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Res
     Ok(())
 }
 
+/// Persist `github.actionlint_on_patch = <enabled>`.
+pub fn set_github_actionlint_on_patch(
+    codex_home: &Path,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["github"]["actionlint_on_patch"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
+/// Persist `[validation].patch_harness = <enabled>`.
+pub fn set_validation_patch_harness(codex_home: &Path, enabled: bool) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["validation"]["patch_harness"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
+/// Persist `[validation.tools.<tool>] = <enabled>`.
+pub fn set_validation_tool_enabled(
+    codex_home: &Path,
+    tool: &str,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["validation"]["tools"][tool] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp.path(), doc.to_string())?;
+    tmp.persist(config_path)?;
+    Ok(())
+}
+
 /// Persist per-project access mode under `[projects."<path>"]` with
 /// `approval_policy` and `sandbox_mode`.
 pub fn set_project_access_mode(
@@ -1354,6 +1431,9 @@ pub struct ConfigToml {
     /// GitHub integration configuration.
     pub github: Option<GithubConfig>,
 
+    /// Validation harness configuration.
+    pub validation: Option<ValidationConfig>,
+
     /// Configuration for subagent commands (built-ins and custom).
     #[serde(default)]
     pub subagents: Option<crate::config_types::SubagentsToml>,
@@ -1368,6 +1448,10 @@ pub struct ProjectConfig {
     pub sandbox_mode: Option<SandboxMode>,
     #[serde(default)]
     pub always_allow_commands: Option<Vec<AllowedCommand>>,
+    #[serde(default)]
+    pub hooks: Vec<ProjectHookConfig>,
+    #[serde(default)]
+    pub commands: Vec<ProjectCommandConfig>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -1652,6 +1736,13 @@ impl Config {
             }
         }
 
+        let project_hooks = project_override
+            .map(|cfg| ProjectHooks::from_configs(&cfg.hooks, &resolved_cwd))
+            .unwrap_or_default();
+        let project_commands = project_override
+            .map(|cfg| load_project_commands(&cfg.commands, &resolved_cwd))
+            .unwrap_or_default();
+
         let tools_web_search_request = override_tools_web_search_request
             .or(cfg.tools.as_ref().and_then(|t| t.web_search))
             .unwrap_or(false);
@@ -1752,6 +1843,8 @@ impl Config {
             approval_policy: effective_approval,
             sandbox_policy,
             always_allow_commands,
+            project_hooks,
+            project_commands,
             shell_environment_policy,
             confirm_guard,
             disable_response_storage: config_profile
@@ -1810,6 +1903,7 @@ impl Config {
             // Already computed before moving codex_home
             using_chatgpt_auth,
             github: cfg.github.unwrap_or_default(),
+            validation: cfg.validation.unwrap_or_default(),
             subagent_commands: cfg
                 .subagents
                 .map(|s| s.commands)
@@ -2444,6 +2538,8 @@ model_verbosity = "high"
                 approval_policy: AskForApproval::Never,
                 sandbox_policy: SandboxPolicy::new_read_only_policy(),
                 always_allow_commands: Vec::new(),
+                project_hooks: ProjectHooks::default(),
+                project_commands: Vec::new(),
                 shell_environment_policy: ShellEnvironmentPolicy::default(),
                 disable_response_storage: false,
                 auto_upgrade_enabled: false,
@@ -2475,6 +2571,7 @@ model_verbosity = "high"
                 debug: false,
                 using_chatgpt_auth: false,
                 github: GithubConfig::default(),
+                validation: ValidationConfig::default(),
                 experimental_resume: None,
                 tui_notifications: Default::default(),
             },
@@ -2510,6 +2607,8 @@ model_verbosity = "high"
             approval_policy: AskForApproval::UnlessTrusted,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             always_allow_commands: Vec::new(),
+            project_hooks: ProjectHooks::default(),
+            project_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
             auto_upgrade_enabled: false,
@@ -2541,6 +2640,7 @@ model_verbosity = "high"
             debug: false,
             using_chatgpt_auth: false,
             github: GithubConfig::default(),
+            validation: ValidationConfig::default(),
             experimental_resume: None,
             tui_notifications: Default::default(),
         };
@@ -2591,6 +2691,8 @@ model_verbosity = "high"
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             always_allow_commands: Vec::new(),
+            project_hooks: ProjectHooks::default(),
+            project_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: true,
             auto_upgrade_enabled: false,
@@ -2657,6 +2759,9 @@ model_verbosity = "high"
             active_profile: Some("gpt5".to_string()),
             approval_policy: AskForApproval::OnFailure,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
+            always_allow_commands: Vec::new(),
+            project_hooks: ProjectHooks::default(),
+            project_commands: Vec::new(),
             shell_environment_policy: ShellEnvironmentPolicy::default(),
             disable_response_storage: false,
             auto_upgrade_enabled: false,

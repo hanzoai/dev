@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
@@ -36,6 +37,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use tokio::sync::mpsc::unbounded_channel;
+use strip_ansi_escapes::strip as strip_ansi_bytes;
 
 fn test_config() -> Config {
     // Use base defaults to avoid depending on host state.
@@ -129,6 +131,11 @@ fn make_chatwidget_manual() -> (
         initial_user_message: None,
         total_token_usage: TokenUsage::default(),
         last_token_usage: TokenUsage::default(),
+        rate_limit_snapshot: None,
+        rate_limit_warnings: Default::default(),
+        rate_limit_fetch_inflight: false,
+        rate_limit_fetch_placeholder: None,
+        rate_limit_fetch_ack_pending: false,
         stream: StreamController::new(cfg),
         last_stream_kind: None,
         running_commands: HashMap::new(),
@@ -174,6 +181,60 @@ fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
     s
 }
 
+#[derive(Clone, Copy)]
+enum ScriptStep {
+    Key(KeyCode, KeyModifiers),
+}
+
+impl ScriptStep {
+    fn key_char(c: char) -> Self {
+        ScriptStep::Key(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn enter() -> Self {
+        ScriptStep::Key(KeyCode::Enter, KeyModifiers::NONE)
+    }
+}
+
+fn run_script(chat: &mut ChatWidget<'_>, steps: &[ScriptStep], rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    for step in steps {
+        if let ScriptStep::Key(code, modifiers) = step {
+            chat.handle_key_event(KeyEvent::new(*code, *modifiers));
+            pump_app_events(chat, rx);
+        }
+    }
+    pump_app_events(chat, rx);
+}
+
+fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::PrepareAgents => chat.prepare_agents(),
+            AppEvent::DispatchCommand(SlashCommand::Agents, args) => {
+                chat.handle_agents_command(args);
+            }
+            AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
+            AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
+            _ => {}
+        }
+    }
+}
+
+fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+    let area = buffer.area();
+    let mut out = String::with_capacity((area.width as usize + 1) * area.height as usize);
+    for y in 0..area.height {
+        for x in 0..area.width {
+            out.push_str(buffer.get(x, y).symbol());
+        }
+        out.push('\n');
+    }
+    match strip_ansi_bytes(out.as_bytes()) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(_) => out,
+    }
+}
+
 fn open_fixture(name: &str) -> std::fs::File {
     // 1) Prefer fixtures within this crate
     {
@@ -196,6 +257,40 @@ fn open_fixture(name: &str) -> std::fs::File {
     }
     // 3) Last resort: CWD
     File::open(name).expect("open fixture file")
+}
+
+#[test]
+fn slash_agents_opens_overview() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('a'),
+        ScriptStep::key_char('g'),
+        ScriptStep::key_char('e'),
+        ScriptStep::key_char('n'),
+        ScriptStep::key_char('t'),
+        ScriptStep::key_char('s'),
+        ScriptStep::enter(),
+    ];
+    run_script(&mut chat, &script, &rx);
+
+    let width: u16 = 120;
+    let height = chat.desired_height(width).max(40);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw agents overview");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(lower.contains("agents"), "expected Agents heading\n{plain}");
+    assert!(lower.contains("commands"), "expected Commands section\n{plain}");
+    assert!(
+        lower.contains("add new"),
+        "expected Add new row in overview\n{plain}"
+    );
 }
 
 #[test]

@@ -152,6 +152,7 @@ pub(crate) struct ChatWidgetArgs {
     terminal_info: TerminalInfo,
     show_order_overlay: bool,
     enable_perf: bool,
+    resume_picker: bool,
 }
 
 impl App<'_> {
@@ -166,6 +167,7 @@ impl App<'_> {
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
         enable_perf: bool,
+        resume_picker: bool,
         startup_footer_notice: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
@@ -273,6 +275,7 @@ impl App<'_> {
                 terminal_info: terminal_info.clone(),
                 show_order_overlay,
                 enable_perf,
+                resume_picker,
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -296,6 +299,9 @@ impl App<'_> {
                 show_order_overlay,
             );
             chat_widget.enable_perf(enable_perf);
+            if resume_picker {
+                chat_widget.show_resume_picker();
+            }
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
             if let Some(notice) = startup_footer_notice {
@@ -697,6 +703,10 @@ impl App<'_> {
                     }
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::RateLimitFetchFailed { message } => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.on_rate_limit_refresh_failed(message),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
@@ -941,7 +951,7 @@ impl App<'_> {
                             let _ = self.toggle_screen_mode(terminal);
                             // Propagate mode to widget so it can adapt layout
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.standard_terminal_mode = !self.alt_screen_active;
+                                widget.set_standard_terminal_mode(!self.alt_screen_active);
                             }
                         }
                         KeyEvent {
@@ -1025,15 +1035,17 @@ impl App<'_> {
                 }
                 AppEvent::OpenTerminal(launch) => {
                     let mut spawn = None;
+                    let requires_immediate_command = !launch.command.is_empty();
+                    let restricted = !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess);
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        if !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess) {
+                        if restricted && requires_immediate_command {
                             widget.history_push(history_cell::new_error_event(
-                                "Terminal requires danger-full-access sandbox to run install commands.".to_string(),
+                                "Terminal requires Full Access to auto-run install commands.".to_string(),
                             ));
                             widget.show_agents_overview_ui();
                         } else {
                             widget.terminal_open(&launch);
-                            if !launch.command.is_empty() {
+                            if requires_immediate_command {
                                 spawn = Some((
                                     launch.id,
                                     launch.command.clone(),
@@ -1141,9 +1153,21 @@ impl App<'_> {
                     }
                     self.terminal_runs.remove(&id);
                 }
+                AppEvent::TerminalApprovalDecision { id, approved } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_terminal_approval_decision(id, approved);
+                    }
+                }
                 AppEvent::TerminalAfter(after) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.handle_terminal_after(after);
+                    }
+                }
+                AppEvent::RequestValidationToolInstall { name, command } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if let Some(launch) = widget.launch_validation_tool_install(&name, &command) {
+                            self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                        }
                     }
                 }
                 #[cfg(not(debug_assertions))]
@@ -1276,9 +1300,19 @@ impl App<'_> {
                                 widget.insert_str("@");
                             }
                         }
+                        SlashCommand::Cmd => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_project_command(command_args);
+                            }
+                        }
                         SlashCommand::Status => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.add_status_output();
+                            }
+                        }
+                        SlashCommand::Limits => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.add_limits_output();
                             }
                         }
                         SlashCommand::Update => {
@@ -1294,6 +1328,11 @@ impl App<'_> {
                         SlashCommand::Github => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_github_command(command_args);
+                            }
+                        }
+                        SlashCommand::Validation => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_validation_command(command_args);
                             }
                         }
                         SlashCommand::Mcp => {
@@ -1450,6 +1489,16 @@ impl App<'_> {
                 AppEvent::UpdateGithubWatcher(enabled) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_github_watcher(enabled);
+                    }
+                }
+                AppEvent::UpdateValidationPatchHarness(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_validation_patch_harness(enabled);
+                    }
+                }
+                AppEvent::UpdateValidationTool { name, enable } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.toggle_validation_tool(&name, enable);
                     }
                 }
                 AppEvent::SetTerminalTitle { title } => {
@@ -1629,6 +1678,7 @@ impl App<'_> {
                     terminal_info,
                     show_order_overlay,
                     enable_perf,
+                    resume_picker,
                 }) => {
                     let mut w = ChatWidget::new(
                         config,
@@ -1640,6 +1690,9 @@ impl App<'_> {
                         show_order_overlay,
                     );
                     w.enable_perf(enable_perf);
+                    if resume_picker {
+                        w.show_resume_picker();
+                    }
                     self.app_state = AppState::Chat { widget: Box::new(w) };
                     self.terminal_runs.clear();
                 }

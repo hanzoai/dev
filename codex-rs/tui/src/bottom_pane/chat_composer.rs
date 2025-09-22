@@ -119,6 +119,8 @@ pub(crate) struct ChatComposer {
     using_chatgpt_auth: bool,
     // Ephemeral footer notice and its expiry
     footer_notice: Option<(String, std::time::Instant)>,
+    // Persistent hint for specific modes (e.g., standard terminal mode)
+    standard_terminal_hint: Option<String>,
     // Persistent/ephemeral access-mode indicator shown on the left
     access_mode_label: Option<String>,
     access_mode_label_expiry: Option<std::time::Instant>,
@@ -174,6 +176,7 @@ impl ChatComposer {
             animation_running: None,
             using_chatgpt_auth,
             footer_notice: None,
+            standard_terminal_hint: None,
             access_mode_label: None,
             access_mode_label_expiry: None,
             access_mode_hint_expiry: None,
@@ -480,7 +483,7 @@ impl ChatComposer {
             .token_usage_info
             .as_ref()
             .map(|info| info.initial_prompt_tokens)
-            .unwrap_or_else(|| last_token_usage.cached_input_tokens.unwrap_or(0));
+            .unwrap_or_else(|| last_token_usage.cached_input_tokens);
 
         self.token_usage_info = Some(TokenUsageInfo {
             _total_token_usage: total_token_usage,
@@ -718,6 +721,10 @@ impl ChatComposer {
     pub fn set_ctrl_c_quit_hint(&mut self, show: bool, has_focus: bool) {
         self.ctrl_c_quit_hint = show;
         self.set_has_focus(has_focus);
+    }
+
+    pub fn set_standard_terminal_hint(&mut self, hint: Option<String>) {
+        self.standard_terminal_hint = hint;
     }
 
     pub(crate) fn insert_str(&mut self, text: &str) {
@@ -1703,10 +1710,22 @@ impl WidgetRef for ChatComposer {
                     left_spans.push(Span::from(" again to quit").style(label_style));
                 }
 
+                if let Some(hint) = &self.standard_terminal_hint {
+                    if left_spans.len() > 1 {
+                        left_spans.push(Span::from("   "));
+                    }
+                    left_spans.push(
+                        Span::from(hint.clone())
+                            .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
+                    );
+                }
+
                 // Append ephemeral footer notice if present and not expired
                 if let Some((msg, until)) = &self.footer_notice {
                     if std::time::Instant::now() <= *until {
-                        if !self.ctrl_c_quit_hint { left_spans.push(Span::from("   ")); }
+                        if left_spans.len() > 1 {
+                            left_spans.push(Span::from("   "));
+                        }
                         left_spans.push(Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)));
                     }
                 }
