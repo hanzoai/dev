@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use wildmatch::WildMatchPattern;
 
+use shlex::split as shlex_split;
+
+use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
@@ -217,6 +220,60 @@ pub struct GithubConfig {
     /// `[github]` with `check_workflows_on_push = false`.
     #[serde(default = "default_true")]
     pub check_workflows_on_push: bool,
+
+    /// When true, run `actionlint` on modified workflows during apply_patch.
+    #[serde(default)]
+    pub actionlint_on_patch: bool,
+
+    /// Optional explicit executable path for actionlint.
+    #[serde(default)]
+    pub actionlint_path: Option<PathBuf>,
+
+    /// Treat actionlint findings as blocking when composing approval text.
+    #[serde(default)]
+    pub actionlint_strict: bool,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ValidationConfig {
+    /// Master toggle for the patch validation harness.
+    #[serde(default)]
+    pub patch_harness: bool,
+
+    /// Optional allowlist restricting which external tools may run.
+    #[serde(default)]
+    pub tools_allowlist: Option<Vec<String>>,
+
+    /// Timeout (seconds) for each external tool invocation.
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+
+    /// Per-tool enable flags (unset implies enabled).
+    #[serde(default)]
+    pub tools: ValidationTools,
+}
+
+impl Default for ValidationConfig {
+    fn default() -> Self {
+        Self {
+            patch_harness: false,
+            tools_allowlist: None,
+            timeout_seconds: None,
+            tools: ValidationTools::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct ValidationTools {
+    pub shellcheck: Option<bool>,
+    pub markdownlint: Option<bool>,
+    pub hadolint: Option<bool>,
+    pub yamllint: Option<bool>,
+    #[serde(rename = "cargo-check")]
+    pub cargo_check: Option<bool>,
+    pub shfmt: Option<bool>,
+    pub prettier: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -769,6 +826,103 @@ pub enum TextVerbosity {
     #[default]
     Medium,
     High,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CommandField {
+    List(Vec<String>),
+    String(String),
+}
+
+fn deserialize_command_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = CommandField::deserialize(deserializer)?;
+    match value {
+        CommandField::List(items) => Ok(items),
+        CommandField::String(text) => {
+            if text.trim().is_empty() {
+                Ok(Vec::new())
+            } else {
+                shlex_split(&text).ok_or_else(|| de::Error::custom("failed to parse command string"))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectHookEvent {
+    #[serde(rename = "session.start")]
+    SessionStart,
+    #[serde(rename = "session.end")]
+    SessionEnd,
+    #[serde(rename = "tool.before")]
+    ToolBefore,
+    #[serde(rename = "tool.after")]
+    ToolAfter,
+    #[serde(rename = "file.before_write")]
+    FileBeforeWrite,
+    #[serde(rename = "file.after_write")]
+    FileAfterWrite,
+}
+
+impl ProjectHookEvent {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProjectHookEvent::SessionStart => "session.start",
+            ProjectHookEvent::SessionEnd => "session.end",
+            ProjectHookEvent::ToolBefore => "tool.before",
+            ProjectHookEvent::ToolAfter => "tool.after",
+            ProjectHookEvent::FileBeforeWrite => "file.before_write",
+            ProjectHookEvent::FileAfterWrite => "file.after_write",
+        }
+    }
+
+    pub fn slug(&self) -> &'static str {
+        match self {
+            ProjectHookEvent::SessionStart => "session_start",
+            ProjectHookEvent::SessionEnd => "session_end",
+            ProjectHookEvent::ToolBefore => "tool_before",
+            ProjectHookEvent::ToolAfter => "tool_after",
+            ProjectHookEvent::FileBeforeWrite => "file_before_write",
+            ProjectHookEvent::FileAfterWrite => "file_after_write",
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ProjectHookConfig {
+    pub event: ProjectHookEvent,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(alias = "run", deserialize_with = "deserialize_command_vec")]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub run_in_background: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ProjectCommandConfig {
+    pub name: String,
+    #[serde(alias = "run", deserialize_with = "deserialize_command_vec")]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 impl From<codex_protocol::config_types::ReasoningEffort> for ReasoningEffort {

@@ -137,6 +137,17 @@ pub enum Op {
         decision: ReviewDecision,
     },
 
+    /// Update the validation harness toggle in the running session.
+    UpdateValidationPatchHarness {
+        enabled: bool,
+    },
+
+    /// Update a specific validation tool toggle for the session.
+    UpdateValidationTool {
+        name: String,
+        enable: bool,
+    },
+
     /// Append an entry to the persistent cross-session message history.
     ///
     /// Note the entry is not guaranteed to be logged if the user has
@@ -144,6 +155,11 @@ pub enum Op {
     AddToHistory {
         /// The message text to be stored.
         text: String,
+    },
+
+    /// Execute a project-scoped custom command defined in configuration.
+    RunProjectCommand {
+        name: String,
     },
 
     /// Internally queue a developer-role message to be included in the next turn.
@@ -544,8 +560,8 @@ pub enum EventMsg {
     TaskComplete(TaskCompleteEvent),
 
     /// Token count event, sent periodically to report the number of tokens
-    /// used in the current session.
-    TokenCount(TokenUsage),
+    /// used in the current session and the latest rate limit snapshot.
+    TokenCount(TokenCountEvent),
 
     /// Agent text output message
     AgentMessage(AgentMessageEvent),
@@ -656,9 +672,9 @@ pub struct TaskCompleteEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TokenUsage {
     pub input_tokens: u64,
-    pub cached_input_tokens: Option<u64>,
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
-    pub reasoning_output_tokens: Option<u64>,
+    pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
 }
 
@@ -668,7 +684,7 @@ impl TokenUsage {
     }
 
     pub fn cached_input(&self) -> u64 {
-        self.cached_input_tokens.unwrap_or(0)
+        self.cached_input_tokens
     }
 
     pub fn non_cached_input(&self) -> u64 {
@@ -686,8 +702,97 @@ impl TokenUsage {
     /// This will be off for the current turn and pending function calls.
     pub fn tokens_in_context_window(&self) -> u64 {
         self.total_tokens
-            .saturating_sub(self.reasoning_output_tokens.unwrap_or(0))
+            .saturating_sub(self.reasoning_output_tokens)
     }
+
+    /// Estimate the remaining user-controllable percentage of the model's context window.
+    pub fn percent_of_context_window_remaining(&self, context_window: u64) -> u8 {
+        if context_window <= BASELINE_TOKENS {
+            return 0;
+        }
+
+        let effective_window = context_window - BASELINE_TOKENS;
+        let used = self
+            .tokens_in_context_window()
+            .saturating_sub(BASELINE_TOKENS);
+        let remaining = effective_window.saturating_sub(used);
+        ((remaining as f32 / effective_window as f32) * 100.0).clamp(0.0, 100.0) as u8
+    }
+
+    /// In-place element-wise sum of token counts.
+    pub fn add_assign(&mut self, other: &TokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.cached_input_tokens += other.cached_input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.reasoning_output_tokens += other.reasoning_output_tokens;
+        self.total_tokens += other.total_tokens;
+    }
+}
+
+/// Includes prompts, tools and space to call compact.
+const BASELINE_TOKENS: u64 = 12_000;
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TokenUsageInfo {
+    pub total_token_usage: TokenUsage,
+    pub last_token_usage: TokenUsage,
+    pub model_context_window: Option<u64>,
+}
+
+impl TokenUsageInfo {
+    pub fn new_or_append(
+        info: &Option<TokenUsageInfo>,
+        last: &Option<TokenUsage>,
+        model_context_window: Option<u64>,
+    ) -> Option<Self> {
+        if info.is_none() && last.is_none() {
+            return None;
+        }
+
+        let mut info = match info {
+            Some(info) => info.clone(),
+            None => Self {
+                total_token_usage: TokenUsage::default(),
+                last_token_usage: TokenUsage::default(),
+                model_context_window,
+            },
+        };
+
+        if let Some(last) = last {
+            info.append_last_usage(last);
+        }
+
+        if info.model_context_window.is_none() {
+            info.model_context_window = model_context_window;
+        }
+
+        Some(info)
+    }
+
+    pub fn append_last_usage(&mut self, last: &TokenUsage) {
+        self.total_token_usage.add_assign(last);
+        self.last_token_usage = last.clone();
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RateLimitSnapshotEvent {
+    /// Percentage (0-100) of the primary window that has been consumed.
+    pub primary_used_percent: f64,
+    /// Percentage (0-100) of the protection window that has been consumed.
+    pub weekly_used_percent: f64,
+    /// Size of the primary window relative to weekly (0-100).
+    pub primary_to_weekly_ratio_percent: f64,
+    /// Rolling window duration for the primary limit, in minutes.
+    pub primary_window_minutes: u64,
+    /// Rolling window duration for the weekly limit, in minutes.
+    pub weekly_window_minutes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TokenCountEvent {
+    pub info: Option<TokenUsageInfo>,
+    pub rate_limits: Option<RateLimitSnapshotEvent>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -740,10 +845,11 @@ impl fmt::Display for FinalOutput {
                 String::new()
             },
             token_usage.output_tokens,
-            token_usage
-                .reasoning_output_tokens
-                .map(|r| format!(" (reasoning {r})"))
-                .unwrap_or_default()
+            if token_usage.reasoning_output_tokens > 0 {
+                format!(" (reasoning {})", token_usage.reasoning_output_tokens)
+            } else {
+                String::new()
+            }
         )
     }
 }
