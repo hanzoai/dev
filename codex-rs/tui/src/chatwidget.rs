@@ -274,6 +274,7 @@ pub(crate) struct ChatWidget<'a> {
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     history_render: HistoryRenderState,
     config: Config,
+    latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
     last_token_usage: TokenUsage,
@@ -1989,6 +1990,7 @@ impl ChatWidget<'_> {
         enhanced_keys_supported: bool,
         terminal_info: crate::tui::TerminalInfo,
         show_order_overlay: bool,
+        latest_upgrade_version: Option<String>,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -2087,6 +2089,7 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
                 initial_images,
@@ -2220,7 +2223,10 @@ impl ChatWidget<'_> {
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
-            w.history_push_top_next_req(history_cell::new_popular_commands_notice(false)); // tag: prelude
+            w.history_push_top_next_req(history_cell::new_popular_commands_notice(
+                false,
+                w.latest_upgrade_version.as_deref(),
+            )); // tag: prelude
             if connecting_mcp {
                 // Render connecting status as a separate cell with standard gutter and spacing
                 w.history_push_top_next_req(history_cell::new_connecting_mcp_status());
@@ -2243,6 +2249,7 @@ impl ChatWidget<'_> {
         enhanced_keys_supported: bool,
         terminal_info: crate::tui::TerminalInfo,
         show_order_overlay: bool,
+        latest_upgrade_version: Option<String>,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -2294,6 +2301,7 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
@@ -3164,7 +3172,10 @@ impl ChatWidget<'_> {
                     // Older layout: status was inside the notice cell — replace it
                     self.history_replace_at(
                         idx,
-                        Box::new(history_cell::new_popular_commands_notice(false)),
+                        Box::new(history_cell::new_popular_commands_notice(
+                            false,
+                            self.latest_upgrade_version.as_deref(),
+                        )),
                     );
                 }
                 _ => {
@@ -3763,6 +3774,7 @@ impl ChatWidget<'_> {
                         &self.config,
                         event,
                         is_first,
+                        self.latest_upgrade_version.as_deref(),
                     )); // tag: prelude
                 }
 
@@ -12145,7 +12157,16 @@ mod tests {
             picker: None,
             font_size: (8, 16),
         };
-        ChatWidget::new(cfg, app_event_tx, None, Vec::new(), false, term, false)
+        ChatWidget::new(
+            cfg,
+            app_event_tx,
+            None,
+            Vec::new(),
+            false,
+            term,
+            false,
+            None,
+        )
     }
 
     #[test]
