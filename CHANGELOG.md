@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.162] - 2025-09-22
+
+- CLI/Resume: fix --last to reliably select the most recent session under active runtimes. (1a2521ff)
+- Stability: avoid nested Tokio runtime creation during resume lookup to prevent sporadic failures. (1a2521ff)
+
 ## [0.2.161] - 2025-09-22
 
 - TUI/Slash: add more /review options for richer reviews (5996ee0e)
