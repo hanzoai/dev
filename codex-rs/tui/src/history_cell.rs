@@ -3,7 +3,7 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
-use crate::rate_limits_view::{build_limits_view, LimitsView, DEFAULT_GRID_CONFIG};
+use crate::rate_limits_view::{build_limits_view, LimitsView, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use crate::slash_command::SlashCommand;
 use crate::util::buffer::{fill_rect, write_line};
 use crate::insert_history::word_wrap_lines;
@@ -9688,9 +9688,12 @@ pub(crate) fn new_status_output(
     PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
-pub(crate) fn new_limits_output(snapshot: &RateLimitSnapshotEvent) -> LimitsHistoryCell {
+pub(crate) fn new_limits_output(
+    snapshot: &RateLimitSnapshotEvent,
+    reset_info: RateLimitResetInfo,
+) -> LimitsHistoryCell {
     LimitsHistoryCell {
-        view: build_limits_view(snapshot, DEFAULT_GRID_CONFIG),
+        view: build_limits_view(snapshot, reset_info, DEFAULT_GRID_CONFIG),
     }
 }
 

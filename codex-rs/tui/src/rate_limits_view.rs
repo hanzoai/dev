@@ -1,4 +1,6 @@
 use crate::colors;
+use chrono::{DateTime, Utc};
+use codex_common::elapsed::format_duration;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
@@ -34,6 +36,12 @@ pub(crate) struct GridConfig {
     pub(crate) weekly_slots: usize,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RateLimitResetInfo {
+    pub(crate) primary_last_reset: Option<DateTime<Utc>>,
+    pub(crate) weekly_last_reset: Option<DateTime<Utc>>,
+}
+
 /// Default gauge configuration used by the TUI.
 pub(crate) const DEFAULT_GRID_CONFIG: GridConfig = GridConfig {
     weekly_slots: 100,
@@ -42,6 +50,7 @@ pub(crate) const DEFAULT_GRID_CONFIG: GridConfig = GridConfig {
 /// Build the lines and optional gauge used by the `/limits` view.
 pub(crate) fn build_limits_view(
     snapshot: &RateLimitSnapshotEvent,
+    reset_info: RateLimitResetInfo,
     grid_config: GridConfig,
 ) -> LimitsView {
     let metrics = RateLimitMetrics::from_snapshot(snapshot);
@@ -50,7 +59,7 @@ pub(crate) fn build_limits_view(
         .map(|state| scale_grid_state(state, grid_config));
 
     LimitsView {
-        summary_lines: build_summary_lines(&metrics),
+        summary_lines: build_summary_lines(&metrics, snapshot, reset_info),
         legend_lines: build_legend_lines(grid_state.is_some()),
         grid_state,
         grid: grid_config,
@@ -65,8 +74,6 @@ struct RateLimitMetrics {
     weekly_remaining: f64,
     hourly_window_label: String,
     weekly_window_label: String,
-    hourly_reset_hint: String,
-    weekly_reset_hint: String,
 }
 
 impl RateLimitMetrics {
@@ -80,8 +87,6 @@ impl RateLimitMetrics {
             weekly_remaining: (100.0 - weekly_used).max(0.0),
             hourly_window_label: format_window_label(Some(snapshot.primary_window_minutes)),
             weekly_window_label: format_window_label(Some(snapshot.weekly_window_minutes)),
-            hourly_reset_hint: format_reset_hint(Some(snapshot.primary_window_minutes)),
-            weekly_reset_hint: format_reset_hint(Some(snapshot.weekly_window_minutes)),
         }
     }
 
@@ -98,12 +103,6 @@ fn format_window_label(minutes: Option<u64>) -> String {
     approximate_duration(minutes)
         .map(|(value, unit)| format!("≈{value} {} window", pluralize_unit(unit, value)))
         .unwrap_or_else(|| "window unknown".to_string())
-}
-
-fn format_reset_hint(minutes: Option<u64>) -> String {
-    approximate_duration(minutes)
-        .map(|(value, unit)| format!("≈{value} {}", pluralize_unit(unit, value)))
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn approximate_duration(minutes: Option<u64>) -> Option<(u64, DurationUnit)> {
@@ -174,7 +173,11 @@ struct GridState {
     hourly_remaining_ratio: f64,
 }
 
-fn build_summary_lines(metrics: &RateLimitMetrics) -> Vec<Line<'static>> {
+fn build_summary_lines(
+    metrics: &RateLimitMetrics,
+    snapshot: &RateLimitSnapshotEvent,
+    reset_info: RateLimitResetInfo,
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = vec![
         "/limits".magenta().into(),
         "".into(),
@@ -191,6 +194,20 @@ fn build_summary_lines(metrics: &RateLimitMetrics) -> Vec<Line<'static>> {
             metrics.weekly_used,
         ),
     ];
+    if let Some(line) = build_reset_line(
+        "Hourly",
+        snapshot.primary_window_minutes,
+        reset_info.primary_last_reset,
+    ) {
+        lines.push(line);
+    }
+    if let Some(line) = build_reset_line(
+        "Weekly",
+        snapshot.weekly_window_minutes,
+        reset_info.weekly_last_reset,
+    ) {
+        lines.push(line);
+    }
     lines.push(build_status_line(metrics));
     lines
 }
@@ -215,14 +232,6 @@ fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
             (false, false) => unreachable!(),
         };
         spans.push(reason.red());
-        if metrics.hourly_exhausted() {
-            spans.push(" — hourly resets in ".into());
-            spans.push(metrics.hourly_reset_hint.clone().dim());
-        }
-        if metrics.weekly_exhausted() {
-            spans.push(" — weekly resets in ".into());
-            spans.push(metrics.weekly_reset_hint.clone().dim());
-        }
     } else {
         spans.push("  Within current limits".green());
     }
@@ -318,6 +327,26 @@ fn render_limit_grid(state: GridState, grid_config: GridConfig, width: u16) -> V
     GridLayout::new(grid_config, width)
         .map(|layout| layout.render(state))
         .unwrap_or_default()
+}
+
+fn build_reset_line(
+    label: &str,
+    window_minutes: u64,
+    last_reset: Option<DateTime<Utc>>,
+) -> Option<Line<'static>> {
+    let last = last_reset?;
+    let now = Utc::now();
+    let since = now.signed_duration_since(last).to_std().ok()?;
+    let mut text = format!("  • {label} window reset ~{} ago", format_duration(since));
+
+    let next = last + chrono::Duration::minutes(window_minutes as i64);
+    if let Ok(until) = next.signed_duration_since(now).to_std() {
+        if until.as_secs() > 0 {
+            text.push_str(&format!(" (next ≈ {})", format_duration(until)));
+        }
+    }
+
+    Some(Line::from(text))
 }
 
 /// Precomputed layout information for the usage grid.
@@ -483,7 +512,11 @@ mod tests {
 
     #[test]
     fn build_display_constructs_summary_and_gauge() {
-        let display = build_limits_view(&snapshot(), DEFAULT_GRID_CONFIG);
+        let display = build_limits_view(
+            &snapshot(),
+            RateLimitResetInfo::default(),
+            DEFAULT_GRID_CONFIG,
+        );
         assert!(display.summary_lines.iter().any(|line| {
             line.spans
                 .iter()
@@ -499,7 +532,11 @@ mod tests {
 
     #[test]
     fn hourly_and_weekly_percentages_are_not_swapped() {
-        let display = build_limits_view(&snapshot(), DEFAULT_GRID_CONFIG);
+        let display = build_limits_view(
+            &snapshot(),
+            RateLimitResetInfo::default(),
+            DEFAULT_GRID_CONFIG,
+        );
         let summary = display
             .summary_lines
             .iter()
@@ -520,7 +557,7 @@ mod tests {
     fn build_display_without_ratio_skips_gauge() {
         let mut s = snapshot();
         s.primary_to_weekly_ratio_percent = f64::NAN;
-        let display = build_limits_view(&s, DEFAULT_GRID_CONFIG);
+        let display = build_limits_view(&s, RateLimitResetInfo::default(), DEFAULT_GRID_CONFIG);
         assert!(display.gauge_lines(80).is_empty());
         assert!(display.legend_lines.is_empty());
     }
