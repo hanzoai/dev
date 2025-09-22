@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::config_types::{ClientTools, McpToolId};
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::protocol::FileChange;
 use crate::protocol::ReviewDecision;
@@ -20,13 +21,13 @@ use crate::util::strip_bash_lc_and_escape;
 pub(crate) struct AcpFileSystem<'a> {
     session_id: Uuid,
     mcp_connection_manager: &'a McpConnectionManager,
-    tools: &'a acp::ClientTools,
+    tools: &'a ClientTools,
 }
 
 impl<'a> AcpFileSystem<'a> {
     pub fn new(
         session_id: Uuid,
-        tools: &'a acp::ClientTools,
+        tools: &'a ClientTools,
         mcp_connection_manager: &'a McpConnectionManager,
     ) -> Self {
         Self {
@@ -38,14 +39,15 @@ impl<'a> AcpFileSystem<'a> {
 
     async fn read_text_file_impl(
         &self,
-        tool: &acp::McpToolId,
+        tool: &McpToolId,
         path: &Path,
     ) -> Result<String> {
-        let arguments = acp::ReadTextFileArguments {
+        let arguments = acp::ReadTextFileRequest {
             session_id: acp::SessionId(self.session_id.to_string().into()),
             path: path.to_path_buf(),
             line: None,
             limit: None,
+            meta: None,
         };
 
         let CallToolResult {
@@ -66,7 +68,7 @@ impl<'a> AcpFileSystem<'a> {
             anyhow::bail!("Error reading text file: {:?}", structured_content);
         }
 
-        let output = serde_json::from_value::<acp::ReadTextFileOutput>(
+        let output = serde_json::from_value::<acp::ReadTextFileResponse>(
             structured_content.context("No output from read_text_file tool")?,
         )?;
 
@@ -75,14 +77,15 @@ impl<'a> AcpFileSystem<'a> {
 
     async fn write_text_file_impl(
         &self,
-        tool: &acp::McpToolId,
+        tool: &McpToolId,
         path: &Path,
         content: String,
     ) -> Result<()> {
-        let arguments = acp::WriteTextFileArguments {
+        let arguments = acp::WriteTextFileRequest {
             session_id: acp::SessionId(self.session_id.to_string().into()),
             path: path.to_path_buf(),
             content,
+            meta: None,
         };
 
         let CallToolResult {
@@ -130,8 +133,8 @@ impl<'a> FileSystem for AcpFileSystem<'a> {
 }
 
 pub(crate) async fn request_permission(
-    permission_tool: &acp::McpToolId,
-    tool_call: acp::ToolCall,
+    permission_tool: &McpToolId,
+    tool_call: acp::ToolCallUpdate,
     session_id: Uuid,
     mcp_connection_manager: &McpConnectionManager,
 ) -> Result<ReviewDecision> {
@@ -139,26 +142,30 @@ pub(crate) async fn request_permission(
     let approve_id = acp::PermissionOptionId("approve".into());
     let deny_id = acp::PermissionOptionId("deny".into());
 
-    let arguments = acp::RequestPermissionArguments {
+    let arguments = acp::RequestPermissionRequest {
         session_id: acp::SessionId(session_id.to_string().into()),
         tool_call,
         options: vec![
             acp::PermissionOption {
                 id: approve_for_session_id.clone(),
-                label: "Approve for Session".into(),
+                name: "Approve for Session".into(),
                 kind: acp::PermissionOptionKind::AllowAlways,
+                meta: None,
             },
             acp::PermissionOption {
                 id: approve_id.clone(),
-                label: "Approve".into(),
+                name: "Approve".into(),
                 kind: acp::PermissionOptionKind::AllowOnce,
+                meta: None,
             },
             acp::PermissionOption {
                 id: deny_id.clone(),
-                label: "Deny".into(),
+                name: "Deny".into(),
                 kind: acp::PermissionOptionKind::RejectOnce,
+                meta: None,
             },
         ],
+        meta: None,
     };
 
     let CallToolResult {
@@ -173,7 +180,7 @@ pub(crate) async fn request_permission(
         .await?;
 
     let result = structured_content.context("No output from permission tool")?;
-    let result = serde_json::from_value::<acp::RequestPermissionOutput>(result)?;
+    let result = serde_json::from_value::<acp::RequestPermissionResponse>(result)?;
 
     use acp::RequestPermissionOutcome::*;
     let decision = match result.outcome {
@@ -188,7 +195,7 @@ pub(crate) async fn request_permission(
                 anyhow::bail!("Unexpected permission option: {}", option_id);
             }
         }
-        Canceled => ReviewDecision::Abort,
+        Cancelled => ReviewDecision::Abort,
     };
 
     Ok(decision)
@@ -201,12 +208,14 @@ pub fn new_execute_tool_call(
 ) -> acp::ToolCall {
     acp::ToolCall {
         id: acp::ToolCallId(call_id.into()),
-        label: format!("`{}`", strip_bash_lc_and_escape(command)),
+        title: format!("`{}`", strip_bash_lc_and_escape(command)),
         kind: acp::ToolKind::Execute,
         status,
         content: vec![],
         locations: vec![],
         raw_input: None,
+        raw_output: None,
+        meta: None,
     }
 }
 
@@ -215,7 +224,7 @@ pub fn new_patch_tool_call(
     changes: &HashMap<PathBuf, FileChange>,
     status: acp::ToolCallStatus,
 ) -> acp::ToolCall {
-    let label = if changes.len() == 1
+    let title = if changes.len() == 1
         && let Some((path, change)) = changes.iter().next()
     {
         let file_name = path.file_name().unwrap_or_default().display().to_string();
@@ -224,12 +233,14 @@ pub fn new_patch_tool_call(
             FileChange::Delete => {
                 return acp::ToolCall {
                     id: acp::ToolCallId(call_id.into()),
-                    label: format!("Delete “`{file_name}`”"),
+                    title: format!("Delete “`{file_name}`”"),
                     kind: acp::ToolKind::Delete,
                     status,
                     content: vec![],
                     locations: vec![],
                     raw_input: None,
+                    raw_output: None,
+                    meta: None,
                 };
             }
             FileChange::Update {
@@ -240,12 +251,14 @@ pub fn new_patch_tool_call(
             } if original_content == new_content => {
                 return acp::ToolCall {
                     id: acp::ToolCallId(call_id.into()),
-                    label: move_path_label(path, new_path),
+                    title: move_path_label(path, new_path),
                     kind: acp::ToolKind::Move,
                     status,
                     content: vec![],
                     locations: vec![],
                     raw_input: None,
+                    raw_output: None,
+                    meta: None,
                 };
             }
             _ => {}
@@ -267,12 +280,14 @@ pub fn new_patch_tool_call(
                         path: path.clone(),
                         old_text: None,
                         new_text: new_content.clone(),
+                        meta: None,
                     },
                 });
 
                 locations.push(acp::ToolCallLocation {
                     path: path.clone(),
                     line: None,
+                    meta: None,
                 });
             }
             FileChange::Delete => {
@@ -299,17 +314,20 @@ pub fn new_patch_tool_call(
                         locations.push(acp::ToolCallLocation {
                             path: new_path.clone(),
                             line: None,
+                            meta: None,
                         });
                     } else {
                         locations.push(acp::ToolCallLocation {
                             path: path.clone(),
                             line: None,
+                            meta: None,
                         });
                     }
                 } else {
                     locations.push(acp::ToolCallLocation {
                         path: path.clone(),
                         line: None,
+                        meta: None,
                     });
                 }
 
@@ -319,6 +337,7 @@ pub fn new_patch_tool_call(
                             path: path.clone(),
                             old_text: Some(original_content.clone()),
                             new_text: new_content.clone(),
+                            meta: None,
                         },
                     });
                 }
@@ -328,12 +347,14 @@ pub fn new_patch_tool_call(
 
     acp::ToolCall {
         id: acp::ToolCallId(call_id.into()),
-        label,
+        title,
         kind: acp::ToolKind::Edit,
         status,
         content,
         locations,
         raw_input: None,
+        raw_output: None,
+        meta: None,
     }
 }
 

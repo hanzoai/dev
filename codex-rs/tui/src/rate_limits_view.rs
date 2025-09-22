@@ -13,9 +13,43 @@ const UNUSED_CELL: &str = "░░";
 const BAR_SLOTS: usize = 20;
 const BAR_FILLED: &str = "▰";
 const BAR_EMPTY: &str = "▱";
-const SECTION_INDENT: &str = "     ";
-const FIELD_INDENT: &str = "       ";
-const CHART_INDENT: &str = "     ";
+struct IndentSpec {
+    header: &'static str,
+    label_extra: &'static str,
+    chart_extra: &'static str,
+    label_target_width: usize,
+    label_gap: usize,
+}
+
+const INDENTS: IndentSpec = IndentSpec {
+    header: "",
+    label_extra: "   ",
+    chart_extra: "  ",
+    label_target_width: 7,
+    label_gap: 2,
+};
+
+fn header_indent() -> &'static str {
+    INDENTS.header
+}
+
+fn label_indent() -> String {
+    format!("{}{}", INDENTS.header, INDENTS.label_extra)
+}
+
+fn chart_indent() -> String {
+    format!("{}{}", INDENTS.header, INDENTS.chart_extra)
+}
+
+fn chart_indent_width() -> usize {
+    INDENTS.header.len() + INDENTS.chart_extra.len()
+}
+
+fn label_text(text: &str) -> String {
+    let mut result = label_indent();
+    result.push_str(text);
+    result
+}
 
 /// Aggregated output used by the `/limits` command.
 /// It contains the rendered summary lines, optional legend,
@@ -177,8 +211,11 @@ fn build_footer_lines(metrics: &RateLimitMetrics) -> Vec<Line<'static>> {
 }
 
 fn section_header(title: &str) -> Line<'static> {
+    let mut text = String::with_capacity(header_indent().len() + title.len());
+    text.push_str(header_indent());
+    text.push_str(title);
     Line::from(vec![Span::styled(
-        format!("{SECTION_INDENT}{title}"),
+        text,
         Style::default().add_modifier(Modifier::BOLD),
     )])
 }
@@ -252,31 +289,34 @@ fn build_hourly_reset_line(
     last_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     if let (Some(last), true) = (last_reset, window_minutes > 0) {
+        let prefix = field_prefix("Resets");
         if let Some(timing) = compute_window_timing(window_minutes, last) {
             let remaining = format_duration(timing.remaining);
-            return Line::from(vec![
-                Span::raw(format!("{FIELD_INDENT}Resets:")),
-                Span::raw("   "),
-                Span::raw("at "),
-                Span::raw(format!("{}", timing.next_reset_local)),
-                Span::styled(
-                    format!(" (in {remaining})"),
-                    Style::default().fg(colors::dim()),
-                ),
-            ]);
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            spans.push(Span::raw(prefix.clone()));
+            spans.push(Span::raw("at "));
+            spans.push(Span::raw(timing.next_reset_local));
+            spans.push(Span::styled(
+                format!(" (in {remaining})"),
+                Style::default().fg(colors::dim()),
+            ));
+            return Line::from(spans);
         }
-        return Line::from(vec![Span::raw(format!(
-            "{FIELD_INDENT}Reset timing updating…"
-        ))]);
+        return Line::from(vec![
+            Span::raw(prefix),
+            Span::styled(
+                "timing updating…".to_string(),
+                Style::default().fg(colors::dim()),
+            ),
+        ]);
     }
-    Line::from(vec![
-        Span::raw(format!("{FIELD_INDENT}Resets:")),
-        Span::raw("   "),
-        Span::styled(
-            "shown once next window detected".to_string(),
-            Style::default().fg(colors::dim()),
-        ),
-    ])
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(field_prefix("Resets")));
+    spans.push(Span::styled(
+        "shown once next window detected".to_string(),
+        Style::default().fg(colors::dim()),
+    ));
+    Line::from(spans)
 }
 
 fn build_weekly_window_line(
@@ -335,31 +375,34 @@ fn build_weekly_reset_line(
     last_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     if let (Some(last), true) = (last_reset, window_minutes > 0) {
+        let prefix = field_prefix("Resets");
         if let Some(timing) = compute_window_timing(window_minutes, last) {
             let remaining = format_duration(timing.remaining);
-            return Line::from(vec![
-                Span::raw(format!("{FIELD_INDENT}Resets:")),
-                Span::raw("   "),
-                Span::raw("at "),
-                Span::raw(format!("{}", timing.next_reset_local)),
-                Span::styled(
-                    format!(" (in {remaining})"),
-                    Style::default().fg(colors::dim()),
-                ),
-            ]);
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            spans.push(Span::raw(prefix.clone()));
+            spans.push(Span::raw("at "));
+            spans.push(Span::raw(timing.next_reset_local));
+            spans.push(Span::styled(
+                format!(" (in {remaining})"),
+                Style::default().fg(colors::dim()),
+            ));
+            return Line::from(spans);
         }
-        return Line::from(vec![Span::raw(format!(
-            "{FIELD_INDENT}Reset timing updating…"
-        ))]);
+        return Line::from(vec![
+            Span::raw(prefix),
+            Span::styled(
+                "timing updating…".to_string(),
+                Style::default().fg(colors::dim()),
+            ),
+        ]);
     }
-    Line::from(vec![
-        Span::raw(format!("{FIELD_INDENT}Resets:")),
-        Span::raw("   "),
-        Span::styled(
-            "shown once next window detected".to_string(),
-            Style::default().fg(colors::dim()),
-        ),
-    ])
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(field_prefix("Resets")));
+    spans.push(Span::styled(
+        "shown once next window detected".to_string(),
+        Style::default().fg(colors::dim()),
+    ));
+    Line::from(spans)
 }
 
 fn build_compact_lines(reset_info: &RateLimitResetInfo) -> Vec<Line<'static>> {
@@ -373,7 +416,7 @@ fn build_compact_lines(reset_info: &RateLimitResetInfo) -> Vec<Line<'static>> {
                 lines.push(build_compact_status_line(used, limit));
             } else {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("{FIELD_INDENT}Session usage updating…"),
+                    label_text("Session usage updating…"),
                     Style::default().fg(colors::dim()),
                 )]));
             }
@@ -390,12 +433,12 @@ fn build_compact_lines(reset_info: &RateLimitResetInfo) -> Vec<Line<'static>> {
                 ));
             } else if reset_info.overflow_auto_compact {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("{FIELD_INDENT}Auto-compaction runs after overflow errors"),
+                    label_text("Auto-compaction runs after overflow errors"),
                     Style::default().fg(colors::dim()),
                 )]));
             } else {
                 lines.push(Line::from(vec![Span::styled(
-                    format!("{FIELD_INDENT}Auto-compaction unavailable"),
+                    label_text("Auto-compaction unavailable"),
                     Style::default().fg(colors::dim()),
                 )]));
             }
@@ -597,7 +640,6 @@ fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
             (false, false) => unreachable!(),
         };
         Line::from(vec![
-            Span::raw(SECTION_INDENT),
             Span::styled(
                 format!("✕ Rate limited: {reason}"),
                 Style::default().fg(colors::error()),
@@ -605,7 +647,6 @@ fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
         ])
     } else {
         Line::from(vec![
-            Span::raw(SECTION_INDENT),
             Span::styled(
                 "✓ Within current limits".to_string(),
                 Style::default().fg(colors::success()),
@@ -620,9 +661,10 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
     }
 
     let mut lines = Vec::new();
+    let indent = chart_indent();
     lines.push(Line::from(vec![
         Span::styled(
-            CHART_INDENT.to_string(),
+            indent.clone(),
             Style::default().fg(colors::dim()),
         ),
         Span::styled(
@@ -638,7 +680,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
     ]));
     lines.push(Line::from(vec![
         Span::styled(
-            CHART_INDENT.to_string(),
+            indent.clone(),
             Style::default().fg(colors::dim()),
         ),
         Span::styled(
@@ -654,7 +696,7 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
     ]));
     lines.push(Line::from(vec![
         Span::styled(
-            CHART_INDENT.to_string(),
+            indent,
             Style::default().fg(colors::dim()),
         ),
         Span::styled(
@@ -672,10 +714,17 @@ fn build_legend_lines(show_gauge: bool) -> Vec<Line<'static>> {
 }
 
 fn field_prefix(label: &str) -> String {
-    let target_width = 7usize;
-    let padding = 2 + target_width.saturating_sub(label.len());
+    let padding = INDENTS
+        .label_gap
+        .saturating_add(INDENTS.label_target_width.saturating_sub(label.len()));
     let spaces = " ".repeat(padding);
-    format!("{FIELD_INDENT}{label}:{spaces}")
+    let indent = label_indent();
+    let mut text = String::with_capacity(indent.len() + label.len() + 1 + spaces.len());
+    text.push_str(&indent);
+    text.push_str(label);
+    text.push(':');
+    text.push_str(&spaces);
+    text
 }
 
 fn render_percent_bar(percent: f64) -> Vec<Span<'static>> {
@@ -813,7 +862,7 @@ impl GridLayout {
         }
         let cell_width = WEEKLY_CELL.chars().count();
 
-        let indent_width = CHART_INDENT.chars().count() as u16;
+        let indent_width = chart_indent_width() as u16;
         let available_inner = width.saturating_sub(indent_width) as usize;
         if available_inner < cell_width {
             return None;
@@ -846,9 +895,10 @@ impl GridLayout {
         let counts = self.cell_counts(state);
         let mut lines = Vec::new();
         let mut cell_index = 0isize;
+        let indent = chart_indent();
         for _ in 0..self.size {
             let mut spans: Vec<Span<'static>> = Vec::new();
-            spans.push(Span::raw(CHART_INDENT));
+            spans.push(Span::raw(indent.clone()));
 
             for col in 0..self.size {
                 if col > 0 {

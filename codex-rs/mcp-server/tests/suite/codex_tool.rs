@@ -65,8 +65,8 @@ async fn tools_list_exposes_acp_entries() -> anyhow::Result<()> {
     for required in [
         "codex",
         "codex-reply",
-        acp::AGENT_METHODS.new_session,
-        acp::AGENT_METHODS.prompt,
+        acp::AGENT_METHOD_NAMES.session_new,
+        acp::AGENT_METHOD_NAMES.session_prompt,
     ] {
         assert!(
             tool_names.contains(required),
@@ -232,20 +232,15 @@ async fn acp_prompt_round_trip() -> anyhow::Result<()> {
         dir: _dir,
     } = create_mcp_process(responses).await?;
 
-    let new_session_args = acp::NewSessionArguments {
-        mcp_servers: Vec::new(),
-        client_tools: acp::ClientTools {
-            request_permission: None,
-            write_text_file: None,
-            read_text_file: None,
-        },
-        cwd: temp_cwd.path().to_path_buf(),
-    };
+    let new_session_args = json!({
+        "cwd": temp_cwd.path(),
+        "mcpServers": []
+    });
 
     let new_session_request_id = process
         .send_tool_call(
-            acp::AGENT_METHODS.new_session,
-            Some(serde_json::to_value(new_session_args)?),
+            acp::AGENT_METHOD_NAMES.session_new,
+            Some(new_session_args),
         )
         .await?;
 
@@ -258,19 +253,27 @@ async fn acp_prompt_round_trip() -> anyhow::Result<()> {
     let structured = new_session_result
         .structured_content
         .context("new_session should return structured content")?;
-    let new_session_output: acp::NewSessionOutput = serde_json::from_value(structured)?;
+    let new_session_output: serde_json::Value = serde_json::from_value(structured)?;
+    let session_id_value = new_session_output
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .context("sessionId should be present")?
+        .to_string();
+    let session_id = acp::SessionId(session_id_value.clone().into());
 
-    let prompt_args = acp::PromptArguments {
-        session_id: new_session_output.session_id.clone(),
+    let prompt_args = acp::PromptRequest {
+        session_id: session_id.clone(),
         prompt: vec![acp::ContentBlock::Text(acp::TextContent {
             annotations: None,
             text: "Hello from ACP".to_string(),
+            meta: None,
         })],
+        meta: None,
     };
 
     let prompt_request_id = process
         .send_tool_call(
-            acp::AGENT_METHODS.prompt,
+            acp::AGENT_METHOD_NAMES.session_prompt,
             Some(serde_json::to_value(prompt_args)?),
         )
         .await?;
@@ -281,7 +284,7 @@ async fn acp_prompt_round_trip() -> anyhow::Result<()> {
         let message = timeout(DEFAULT_READ_TIMEOUT, process.read_jsonrpc_message()).await??;
         match message {
             JSONRPCMessage::Notification(notification) => {
-                if notification.method == acp::AGENT_METHODS.session_update {
+                if notification.method == acp::CLIENT_METHOD_NAMES.session_update {
                     saw_session_update = true;
                 }
             }
