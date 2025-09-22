@@ -872,9 +872,6 @@ where
                 Poll::Ready(Some(Ok(ResponseEvent::RateLimits(snapshot)))) => {
                     return Poll::Ready(Some(Ok(ResponseEvent::RateLimits(snapshot))));
                 }
-                Poll::Ready(Some(Ok(ResponseEvent::DebugMessage(message)))) => {
-                    return Poll::Ready(Some(Ok(ResponseEvent::DebugMessage(message))));
-                }
                 Poll::Ready(Some(Ok(ResponseEvent::Completed {
                     response_id,
                     token_usage,
