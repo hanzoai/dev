@@ -1398,13 +1398,13 @@ pub(crate) struct ExecCell {
     pub(crate) output: Option<CommandOutput>,
     pub(crate) start_time: Option<Instant>,
     pub(crate) stream_preview: Option<CommandOutput>,
-    pub(crate) stream_status_line: std::cell::RefCell<Option<Line<'static>>>,
     // Caches to avoid recomputing expensive line construction for completed execs
     cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     // Cached per-width layout (wrapped rows + totals) while content is stable
     cached_layout: std::cell::RefCell<Option<Rc<ExecLayoutCache>>>,
+    cached_command_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     has_bold_command: bool,
     wait_state: std::cell::RefCell<ExecWaitState>,
 }
@@ -1414,10 +1414,8 @@ struct ExecLayoutCache {
     width: u16,
     pre_lines: Vec<Line<'static>>,
     out_lines: Vec<Line<'static>>,
-    status_line: Option<Line<'static>>,
     pre_total: u16,
     out_block_total: u16,
-    out_total_with_status: u16,
 }
 
 // ==================== AssistantMarkdownCell ====================
@@ -1914,15 +1912,15 @@ impl HistoryCell for ExecCell {
             .min(remaining_height);
         remaining_height = remaining_height.saturating_sub(block_height);
 
-        let status_line_to_render = if plan_ref.status_line.is_some()
+        let status_line_to_render = if self.output.is_none()
             && after_block_skip == 0
             && remaining_height > 0
         {
-            plan_ref.status_line.as_ref().cloned()
+            self.streaming_status_line()
         } else {
             None
         };
-        let status_height = if status_line_to_render.is_some() { 1 } else { 0 };
+        let status_height = status_line_to_render.is_some().then_some(1).unwrap_or(0);
 
         let mut cur_y = area.y;
 
@@ -2021,7 +2019,6 @@ impl ExecCell {
         self.cached_pre_lines.borrow_mut().take();
         self.cached_out_lines.borrow_mut().take();
         self.cached_layout.borrow_mut().take();
-        self.stream_status_line.borrow_mut().take();
     }
 
     pub(crate) fn set_waiting(&self, waiting: bool) {
@@ -2175,31 +2172,35 @@ impl ExecCell {
         self.command = command;
         self.parsed = parsed;
         self.has_bold_command = command_has_bold_token(&self.command);
+        self.cached_command_lines.borrow_mut().take();
         self.invalidate_render_caches();
     }
     /// Compute wrapped row totals for the preamble and the output at the given width.
     /// Delegates to the per-width layout cache to avoid redundant reflow work.
     fn ensure_wrap_totals(&self, width: u16) -> (u16, u16, u16) {
         let layout = self.ensure_layout(width);
+        let status_height = if self.output.is_none() {
+            self.streaming_status_line().map(|_| 1).unwrap_or(0)
+        } else {
+            0
+        };
         (
             layout.pre_total,
             layout.out_block_total,
-            layout.out_total_with_status,
+            layout
+                .out_block_total
+                .saturating_add(status_height),
         )
     }
 
     fn ensure_layout(&self, width: u16) -> Rc<ExecLayoutCache> {
-        if self.output.is_some() {
-            if let Some(layout) = self.cached_layout.borrow().as_ref() {
-                if layout.width == width {
-                    return layout.clone();
-                }
+        if let Some(layout) = self.cached_layout.borrow().as_ref() {
+            if layout.width == width {
+                return layout.clone();
             }
-        } else {
-            self.cached_layout.borrow_mut().take();
         }
 
-        let (pre_lines_raw, out_lines_raw, status_line_opt) = self.exec_render_parts();
+        let (pre_lines_raw, out_lines_raw, _status_line_opt) = self.exec_render_parts();
         let pre_trimmed = trim_empty_lines(pre_lines_raw);
         let out_trimmed = trim_empty_lines(out_lines_raw);
 
@@ -2220,29 +2221,15 @@ impl ExecCell {
         let clamp_len = |len: usize| -> u16 { len.min(u16::MAX as usize) as u16 };
         let pre_total = clamp_len(pre_wrapped.len());
         let out_block_total = clamp_len(out_wrapped.len());
-        let status_line = if self.output.is_none() {
-            status_line_opt
-        } else {
-            None
-        };
-        let out_total_with_status = out_block_total.saturating_add(if status_line.is_some() {
-            1
-        } else {
-            0
-        });
 
         let layout = Rc::new(ExecLayoutCache {
             width,
             pre_lines: pre_wrapped,
             out_lines: out_wrapped,
-            status_line,
             pre_total,
             out_block_total,
-            out_total_with_status,
         });
-        if self.output.is_some() {
-            *self.cached_layout.borrow_mut() = Some(layout.clone());
-        }
+        *self.cached_layout.borrow_mut() = Some(layout.clone());
         layout
     }
     // Build separate segments: (preamble lines, output lines)
@@ -2264,15 +2251,31 @@ impl ExecCell {
 
         let wait_state = self.wait_state_snapshot();
         let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+
         let (pre, mut out, status) = if self.parsed.is_empty() {
-            exec_render_parts_generic(
-                &self.command,
-                self.output.as_ref(),
-                self.stream_preview.as_ref(),
-                self.start_time,
-                status_label,
-            )
+            if let (Some(pre_cached), Some(out_cached)) = (
+                self.cached_pre_lines.borrow().as_ref(),
+                self.cached_out_lines.borrow().as_ref(),
+            ) {
+                let status_cached = if self.output.is_none() {
+                    self.streaming_status_line_for_label(status_label)
+                } else {
+                    None
+                };
+                return (pre_cached.clone(), out_cached.clone(), status_cached);
+            }
+
+            self.exec_render_parts_generic(status_label)
         } else {
+            if self.output.is_some() {
+                if let (Some(pre_cached), Some(out_cached)) = (
+                    self.cached_pre_lines.borrow().as_ref(),
+                    self.cached_out_lines.borrow().as_ref(),
+                ) {
+                    return (pre_cached.clone(), out_cached.clone(), None);
+                }
+            }
+
             exec_render_parts_parsed(
                 &self.parsed,
                 self.output.as_ref(),
@@ -2323,9 +2326,9 @@ impl ExecCell {
             }
             *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
             *self.cached_out_lines.borrow_mut() = Some(out.clone());
-            self.stream_status_line.borrow_mut().take();
-        } else {
-            *self.stream_status_line.borrow_mut() = status.clone();
+        } else if self.parsed.is_empty() {
+            *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
+            *self.cached_out_lines.borrow_mut() = Some(out.clone());
         }
         (pre, out, status)
     }
@@ -2344,6 +2347,127 @@ impl ExecCell {
             });
         }
         self.invalidate_render_caches();
+    }
+
+    fn exec_render_parts_generic(
+        &self,
+        status_label: &str,
+    ) -> (
+        Vec<Line<'static>>,
+        Vec<Line<'static>>,
+        Option<Line<'static>>,
+    ) {
+        let mut pre = self.generic_command_lines();
+        let display_output = self
+            .output
+            .as_ref()
+            .or(self.stream_preview.as_ref());
+        let mut out = output_lines(display_output, false, false);
+        let has_output = !trim_empty_lines(out.clone()).is_empty();
+
+        if self.output.is_none() && has_output {
+            if let Some(last) = pre.last_mut() {
+                last.spans.insert(
+                    0,
+                    Span::styled(
+                        "┌ ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                );
+            }
+        }
+
+        let mut status = None;
+        if self.output.is_none() {
+            let status_line = self.streaming_status_line_for_label(status_label);
+            if status_line.is_some() {
+                if let Some(last) = out.last() {
+                    let is_blank = last
+                        .spans
+                        .iter()
+                        .all(|sp| sp.content.as_ref().trim().is_empty());
+                    if is_blank {
+                        out.pop();
+                    }
+                }
+            }
+            status = status_line;
+        }
+
+        (pre, out, status)
+    }
+
+    fn generic_command_lines(&self) -> Vec<Line<'static>> {
+        if let Some(cached) = self.cached_command_lines.borrow().as_ref() {
+            return cached.clone();
+        }
+
+        let command_escaped = strip_bash_lc_and_escape(&self.command);
+        let formatted = format_inline_script_for_display(&command_escaped);
+        let normalized = normalize_shell_command_display(&formatted);
+        let command_display = insert_line_breaks_after_double_ampersand(&normalized);
+
+        let mut highlighted_cmd =
+            crate::syntax_highlight::highlight_code_block(&command_display, Some("bash"));
+        for (idx, line) in highlighted_cmd.iter_mut().enumerate() {
+            emphasize_shell_command_name(line);
+            if idx > 0 {
+                line.spans.insert(
+                    0,
+                    Span::styled(
+                        "  ",
+                        Style::default().fg(crate::colors::text()),
+                    ),
+                );
+            }
+        }
+
+        let owned: Vec<Line<'static>> = highlighted_cmd;
+        *self.cached_command_lines.borrow_mut() = Some(owned.clone());
+        owned
+    }
+
+    fn streaming_status_line(&self) -> Option<Line<'static>> {
+        if self.output.is_some() {
+            return None;
+        }
+        let wait_state = self.wait_state_snapshot();
+        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+        self.streaming_status_line_for_label(status_label)
+    }
+
+    fn streaming_status_line_for_label(&self, status_label: &str) -> Option<Line<'static>> {
+        if self.output.is_some() {
+            return None;
+        }
+
+        if self.parsed.is_empty() {
+            let mut message = format!("{status_label}...");
+            if let Some(start) = self.start_time {
+                let elapsed = start.elapsed();
+                if !elapsed.is_zero() {
+                    message = format!("{message} ({})", format_duration(elapsed));
+                }
+            }
+            return Some(running_status_line(message));
+        }
+
+        let action = action_enum_from_parsed(&self.parsed.to_vec());
+        if !matches!(action, ExecAction::Run) {
+            return None;
+        }
+
+        let mut message = match first_context_path(&self.parsed) {
+            Some(p) => format!("{status_label}... in {p}"),
+            None => format!("{status_label}..."),
+        };
+        if let Some(start) = self.start_time {
+            let elapsed = start.elapsed();
+            if !elapsed.is_zero() {
+                message = format!("{message} ({})", format_duration(elapsed));
+            }
+        }
+        Some(running_status_line(message))
     }
 }
 
@@ -3325,78 +3449,6 @@ impl HistoryCell for MergedExecCell {
             skip_rows = skip_rows.saturating_sub(consumed);
         }
     }
-}
-
-fn exec_render_parts_generic(
-    command: &[String],
-    output: Option<&CommandOutput>,
-    stream_preview: Option<&CommandOutput>,
-    start_time: Option<Instant>,
-    status_label: &str,
-) -> (
-    Vec<Line<'static>>,
-    Vec<Line<'static>>,
-    Option<Line<'static>>,
-) {
-    let mut pre: Vec<Line<'static>> = Vec::new();
-    let command_escaped = strip_bash_lc_and_escape(command);
-    let formatted = format_inline_script_for_display(&command_escaped);
-    let normalized = normalize_shell_command_display(&formatted);
-    let command_display = insert_line_breaks_after_double_ampersand(&normalized);
-    // Highlight the full command as a bash snippet; we will append
-    // the running duration (when applicable) to the first visual line.
-    let mut highlighted_cmd: Vec<Line<'static>> =
-        crate::syntax_highlight::highlight_code_block(&command_display, Some("bash"));
-
-    for (idx, line) in highlighted_cmd.iter_mut().enumerate() {
-        emphasize_shell_command_name(line);
-        if idx > 0 {
-            line.spans.insert(
-                0,
-                Span::styled("  ", Style::default().fg(crate::colors::text())),
-            );
-        }
-    }
-
-    let render_running_header = output.is_none();
-    let display_output = output.or(stream_preview);
-    let mut running_status = None;
-
-    // Compute output first so we know whether to draw a downward corner on the command.
-    let mut out = output_lines(display_output, false, false);
-    let has_output = !trim_empty_lines(out.clone()).is_empty();
-
-    if render_running_header {
-        let mut message = format!("{}...", status_label);
-        if let Some(start) = start_time {
-            let elapsed = start.elapsed();
-            message = format!("{message} ({})", format_duration(elapsed));
-        }
-        running_status = Some(running_status_line(message));
-    }
-
-    if render_running_header && has_output {
-        if let Some(last) = highlighted_cmd.last_mut() {
-            last.spans.insert(
-                0,
-                Span::styled("┌ ", Style::default().fg(crate::colors::text_dim())),
-            );
-        }
-    }
-    pre.extend(highlighted_cmd);
-
-    if running_status.is_some() {
-        if let Some(last) = out.last() {
-            let is_blank = last
-                .spans
-                .iter()
-                .all(|sp| sp.content.as_ref().trim().is_empty());
-            if is_blank {
-                out.pop();
-            }
-        }
-    }
-    (pre, out, running_status)
 }
 
 fn exec_render_parts_parsed(
@@ -6321,11 +6373,11 @@ fn new_exec_cell(
         output,
         start_time,
         stream_preview: None,
-        stream_status_line: std::cell::RefCell::new(None),
         cached_display_lines: std::cell::RefCell::new(None),
         cached_pre_lines: std::cell::RefCell::new(None),
         cached_out_lines: std::cell::RefCell::new(None),
         cached_layout: std::cell::RefCell::new(None),
+        cached_command_lines: std::cell::RefCell::new(None),
         has_bold_command,
         wait_state: std::cell::RefCell::new(ExecWaitState::default()),
     }
