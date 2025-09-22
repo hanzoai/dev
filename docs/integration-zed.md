@@ -22,7 +22,7 @@ Any existing MCP servers can remain in this table; the exiting overrides simply 
 
 ## 2. Launch the MCP server under the new name
 
-If you globally installed Code from npm (`npm install -g @just-every/code`), launch the MCP server with the built-in subcommand (`code mcp`; `code acp` is an equivalent alias):
+If you globally installed Code from npm (`npm install -g @just-every/code`), launch the MCP server with the built-in subcommand (`code mcp`; `code acp` is an equivalent alias and works well when `code` already points to VS Code):
 
 ```bash
 code mcp
@@ -38,22 +38,20 @@ The server will advertise four tools during the handshake: `codex`, `codex-reply
 
 ## 3. Point Zed at Code's MCP endpoint
 
-Add an entry to Zed's `settings.json` under `agent_servers` (see [Zed’s external agents guide](https://zed.dev/docs/ai/external-agents#add-custom-agents)):
+Add an entry to Zed's `settings.json` under `agent_servers` (see [Zed’s external agents guide](https://zed.dev/docs/ai/external-agents#add-custom-agents)). The minimal configuration looks like:
 
 ```jsonc
 {
   "agent_servers": {
     "Code": {
-      "command": "/usr/local/bin/code",
-      "args": ["mcp"], // or "acp"
-      "env": {
-        "CODEX_HOME": "/Users/you/.code",
-        "RUST_LOG": "info"
-      }
+      "command": "coder",
+      "args": ["acp"]
     }
   }
 }
 ```
+
+You can swap `coder` for an absolute path or `code` depending on your PATH preferences. Environment overrides such as `CODEX_HOME` or `RUST_LOG` are optional—set them only if you need a custom config directory or debug logging.
 
 When Zed launches this server it connects over MCP, then issues ACP tool calls (`acp/new_session`, `acp/prompt`) that we expose. Those tool invocations are bridged into full Codex sessions, and we stream ACP `session_update` notifications back so Zed can render reasoning, tool executions, and approvals.
 
@@ -63,4 +61,4 @@ When Zed launches this server it connects over MCP, then issues ACP tool calls (
 - Explicit approvals (for shell commands or apply_patch) are raised via `permission/request`.
 - Code retains confirm guards, sandbox policies, and validation harnesses; the server simply forwards the resulting events over ACP.
 
-Once configured, Zed users can work with Code without any terminal interaction beyond starting `code mcp` (or `coder mcp` if the `code` alias is unavailable).
+Once configured, Zed users can work with Code without any terminal interaction beyond starting `coder acp` (or `code mcp`, whichever alias you prefer).
