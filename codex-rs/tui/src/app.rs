@@ -152,6 +152,7 @@ pub(crate) struct ChatWidgetArgs {
     terminal_info: TerminalInfo,
     show_order_overlay: bool,
     enable_perf: bool,
+    resume_picker: bool,
 }
 
 impl App<'_> {
@@ -166,6 +167,7 @@ impl App<'_> {
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
         enable_perf: bool,
+        resume_picker: bool,
         startup_footer_notice: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
@@ -273,6 +275,7 @@ impl App<'_> {
                 terminal_info: terminal_info.clone(),
                 show_order_overlay,
                 enable_perf,
+                resume_picker,
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -296,6 +299,9 @@ impl App<'_> {
                 show_order_overlay,
             );
             chat_widget.enable_perf(enable_perf);
+            if resume_picker {
+                chat_widget.show_resume_picker();
+            }
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
             if let Some(notice) = startup_footer_notice {
@@ -697,6 +703,10 @@ impl App<'_> {
                     }
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::RateLimitFetchFailed { message } => match &mut self.app_state {
+                    AppState::Chat { widget } => widget.on_rate_limit_refresh_failed(message),
+                    AppState::Onboarding { .. } => {}
+                },
                 AppEvent::RequestRedraw => {
                     self.schedule_redraw();
                 }
@@ -941,7 +951,7 @@ impl App<'_> {
                             let _ = self.toggle_screen_mode(terminal);
                             // Propagate mode to widget so it can adapt layout
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.standard_terminal_mode = !self.alt_screen_active;
+                                widget.set_standard_terminal_mode(!self.alt_screen_active);
                             }
                         }
                         KeyEvent {
@@ -1298,6 +1308,11 @@ impl App<'_> {
                         SlashCommand::Status => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.add_status_output();
+                            }
+                        }
+                        SlashCommand::Limits => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.add_limits_output();
                             }
                         }
                         SlashCommand::Update => {
@@ -1665,6 +1680,7 @@ impl App<'_> {
                     terminal_info,
                     show_order_overlay,
                     enable_perf,
+                    resume_picker,
                 }) => {
                     let mut w = ChatWidget::new(
                         config,
@@ -1676,6 +1692,9 @@ impl App<'_> {
                         show_order_overlay,
                     );
                     w.enable_perf(enable_perf);
+                    if resume_picker {
+                        w.show_resume_picker();
+                    }
                     self.app_state = AppState::Chat { widget: Box::new(w) };
                     self.terminal_runs.clear();
                 }
