@@ -6200,6 +6200,7 @@ pub(crate) fn new_session_info(
     config: &Config,
     event: SessionConfiguredEvent,
     is_first_event: bool,
+    latest_version: Option<&str>,
 ) -> PlainHistoryCell {
     let SessionConfiguredEvent {
         model,
@@ -6212,7 +6213,7 @@ pub(crate) fn new_session_info(
     if is_first_event {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("notice".dim()));
-        lines.extend(popular_commands_lines());
+        lines.extend(popular_commands_lines(latest_version));
         PlainHistoryCell::new(lines, HistoryCellType::Notice)
     } else if config.model == model {
         PlainHistoryCell::new(Vec::new(), HistoryCellType::Notice)
@@ -6231,7 +6232,7 @@ pub(crate) fn new_session_info(
 
 /// Build the common lines for the "Popular commands" section (without the leading
 /// "notice" marker). Shared between the initial session info and the startup prelude.
-fn popular_commands_lines() -> Vec<Line<'static>> {
+fn popular_commands_lines(latest_version: Option<&str>) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::styled(
         "Popular commands:",
@@ -6291,16 +6292,34 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::from(SlashCommand::Resume.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
+
+    if let Some(version) = latest_version {
+        let primary = Style::default()
+            .fg(crate::colors::primary())
+            .add_modifier(Modifier::BOLD);
+        lines.push(Line::from(vec![
+            Span::styled("★ Update Available!", primary),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("   Use "),
+            Span::styled("/update", Style::default().fg(crate::colors::primary())),
+            Span::raw(format!(" to install version {version}")),
+        ]));
+    }
+
     lines
 }
 
 /// Create a notice cell that shows the "Popular commands" immediately.
 /// If `connecting_mcp` is true, include a dim status line to inform users
 /// that external MCP servers are being connected in the background.
-pub(crate) fn new_popular_commands_notice(_connecting_mcp: bool) -> PlainHistoryCell {
+pub(crate) fn new_popular_commands_notice(
+    _connecting_mcp: bool,
+    latest_version: Option<&str>,
+) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("notice".dim()));
-    lines.extend(popular_commands_lines());
+    lines.extend(popular_commands_lines(latest_version));
     // Connecting status is now rendered as a separate BackgroundEvent cell
     // with its own gutter icon and spacing. Keep this notice focused.
     PlainHistoryCell::new(lines, HistoryCellType::Notice)
