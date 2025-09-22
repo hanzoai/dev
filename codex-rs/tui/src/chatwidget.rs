@@ -7364,11 +7364,10 @@ fn update_rate_limit_resets(
         let codex_home = self.config.codex_home.clone();
         let profile = self.config.active_profile.clone();
         tokio::spawn(async move {
-            let value = if enabled { "true".to_string() } else { "false".to_string() };
             if let Err(err) = codex_core::config_edit::persist_overrides(
                 &codex_home,
                 profile.as_deref(),
-                &[(&["auto_upgrade_enabled"], value.as_str())],
+                &[(&["auto_upgrade_enabled"], if enabled { "true" } else { "false" })],
             )
             .await
             {
