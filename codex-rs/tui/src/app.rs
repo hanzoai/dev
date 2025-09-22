@@ -45,6 +45,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::process::Command;
 use tokio::sync::oneshot;
+use shlex::try_join;
 
 /// Time window for debouncing redraw requests.
 ///
@@ -69,6 +70,7 @@ enum AppState<'a> {
 
 struct TerminalRunState {
     command: Vec<String>,
+    display: String,
     cancel_tx: Option<oneshot::Sender<()>>,
     running: bool,
     controller: Option<TerminalRunController>,
@@ -84,6 +86,9 @@ pub(crate) struct App<'a> {
 
     /// Config is stored here so we can recreate ChatWidgets as needed.
     config: Config,
+
+    /// Latest available release version (if detected) so new widgets can surface it.
+    latest_upgrade_version: Option<String>,
 
     file_search: FileSearchManager,
 
@@ -153,6 +158,7 @@ pub(crate) struct ChatWidgetArgs {
     show_order_overlay: bool,
     enable_perf: bool,
     resume_picker: bool,
+    latest_upgrade_version: Option<String>,
 }
 
 impl App<'_> {
@@ -169,6 +175,7 @@ impl App<'_> {
         enable_perf: bool,
         resume_picker: bool,
         startup_footer_notice: Option<String>,
+        latest_upgrade_version: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
             config.codex_home.clone(),
@@ -276,6 +283,7 @@ impl App<'_> {
                 show_order_overlay,
                 enable_perf,
                 resume_picker,
+                latest_upgrade_version: latest_upgrade_version.clone(),
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -297,6 +305,7 @@ impl App<'_> {
                 enhanced_keys_supported,
                 terminal_info.clone(),
                 show_order_overlay,
+                latest_upgrade_version.clone(),
             );
             chat_widget.enable_perf(enable_perf);
             if resume_picker {
@@ -321,6 +330,7 @@ impl App<'_> {
             app_event_rx_bulk,
             app_state,
             config,
+            latest_upgrade_version,
             file_search,
             pending_redraw,
             scheduled_frame_armed,
@@ -403,6 +413,7 @@ impl App<'_> {
         &mut self,
         id: u64,
         command: Vec<String>,
+        display: Option<String>,
         controller: Option<TerminalRunController>,
     ) {
         if command.is_empty() {
@@ -419,6 +430,20 @@ impl App<'_> {
             return;
         }
 
+        let joined_display = try_join(command.iter().map(|s| s.as_str()))
+            .ok()
+            .or(display.clone())
+            .unwrap_or_else(|| command.join(" "));
+
+        if !joined_display.trim().is_empty() {
+            let line = format!("$ {joined_display}\n");
+            self.app_event_tx.send(AppEvent::TerminalChunk {
+                id,
+                chunk: line.into_bytes(),
+                _is_stderr: false,
+            });
+        }
+
         let stored_command = command.clone();
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let controller_clone = controller.clone();
@@ -426,6 +451,7 @@ impl App<'_> {
             id,
             TerminalRunState {
                 command: stored_command,
+                display: joined_display.clone(),
                 cancel_tx: Some(cancel_tx),
                 running: true,
                 controller: controller_clone,
@@ -1049,13 +1075,14 @@ impl App<'_> {
                                 spawn = Some((
                                     launch.id,
                                     launch.command.clone(),
+                                    Some(launch.command_display.clone()),
                                     launch.controller.clone(),
                                 ));
                             }
                         }
                     }
-                    if let Some((id, command, controller)) = spawn {
-                        self.start_terminal_run(id, command, controller);
+                    if let Some((id, command, display, controller)) = spawn {
+                        self.start_terminal_run(id, command, display, controller);
                     }
                 }
                 AppEvent::TerminalChunk {
@@ -1112,12 +1139,20 @@ impl App<'_> {
                     let command_and_controller = self
                         .terminal_runs
                         .get(&id)
-                        .and_then(|run| (!run.running).then(|| (run.command.clone(), run.controller.clone())));
-                    if let Some((command, controller)) = command_and_controller {
+                        .and_then(|run| {
+                            (!run.running).then(|| {
+                                (
+                                    run.command.clone(),
+                                    run.display.clone(),
+                                    run.controller.clone(),
+                                )
+                            })
+                        });
+                    if let Some((command, display, controller)) = command_and_controller {
                         if let AppState::Chat { widget } = &mut self.app_state {
                             widget.terminal_mark_running(id);
                         }
-                        self.start_terminal_run(id, command, controller);
+                        self.start_terminal_run(id, command, Some(display), controller);
                     }
                 }
                 AppEvent::TerminalRunCommand {
@@ -1130,7 +1165,7 @@ impl App<'_> {
                         widget.terminal_set_command_display(id, command_display.clone());
                         widget.terminal_mark_running(id);
                     }
-                    self.start_terminal_run(id, command, controller);
+                    self.start_terminal_run(id, command, Some(command_display), controller);
                 }
                 AppEvent::TerminalUpdateMessage { id, message } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1250,6 +1285,7 @@ impl App<'_> {
                                 self.enhanced_keys_supported,
                                 self.terminal_info.clone(),
                                 self.show_order_overlay,
+                                self.latest_upgrade_version.clone(),
                             );
                             new_widget.enable_perf(self.timing_enabled);
                             self.app_state = AppState::Chat { widget: Box::new(new_widget) };
@@ -1459,6 +1495,7 @@ impl App<'_> {
                             self.enhanced_keys_supported,
                             self.terminal_info.clone(),
                             self.show_order_overlay,
+                            self.latest_upgrade_version.clone(),
                         );
                         new_widget.enable_perf(self.timing_enabled);
                         self.app_state = AppState::Chat { widget: Box::new(new_widget) };
@@ -1679,6 +1716,7 @@ impl App<'_> {
                     show_order_overlay,
                     enable_perf,
                     resume_picker,
+                    latest_upgrade_version,
                 }) => {
                     let mut w = ChatWidget::new(
                         config,
@@ -1688,6 +1726,7 @@ impl App<'_> {
                         enhanced_keys_supported,
                         terminal_info,
                         show_order_overlay,
+                        latest_upgrade_version,
                     );
                     w.enable_perf(enable_perf);
                     if resume_picker {
@@ -1772,6 +1811,7 @@ impl App<'_> {
                         self.enhanced_keys_supported,
                         self.terminal_info.clone(),
                         self.show_order_overlay,
+                        self.latest_upgrade_version.clone(),
                     );
                     new_widget.enable_perf(self.timing_enabled);
                     // Ensure any initial animations or status are set up on the fresh widget
