@@ -89,18 +89,12 @@ struct RateLimitMetrics {
     weekly_remaining: f64,
     primary_window_minutes: u64,
     weekly_window_minutes: u64,
-    primary_to_weekly_ratio_percent: Option<f64>,
 }
 
 impl RateLimitMetrics {
     fn from_snapshot(snapshot: &RateLimitSnapshotEvent) -> Self {
         let hourly_used = snapshot.primary_used_percent.clamp(0.0, 100.0);
         let weekly_used = snapshot.weekly_used_percent.clamp(0.0, 100.0);
-        let ratio = if snapshot.primary_to_weekly_ratio_percent.is_finite() {
-            Some(snapshot.primary_to_weekly_ratio_percent.clamp(0.0, 100.0))
-        } else {
-            None
-        };
         Self {
             hourly_used,
             weekly_used,
@@ -108,7 +102,6 @@ impl RateLimitMetrics {
             weekly_remaining: (100.0 - weekly_used).max(0.0),
             primary_window_minutes: snapshot.primary_window_minutes,
             weekly_window_minutes: snapshot.weekly_window_minutes,
-            primary_to_weekly_ratio_percent: ratio,
         }
     }
 
@@ -259,9 +252,13 @@ fn build_hourly_reset_line(
     last_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     if let (Some(last), true) = (last_reset, window_minutes > 0) {
-        if let Some((remaining, timestamp)) = compute_reset_eta(window_minutes, last) {
+        if let Some(timing) = compute_window_timing(window_minutes, last) {
+            let remaining = format_duration(timing.remaining);
             return Line::from(vec![
-                Span::raw(format!("{FIELD_INDENT}Resets at ≈{timestamp} ")),
+                Span::raw(format!(
+                    "{FIELD_INDENT}Resets at ≈{} ",
+                    timing.next_reset_local
+                )),
                 Span::styled(
                     format!("({remaining})"),
                     Style::default().fg(colors::dim()),
@@ -301,9 +298,13 @@ fn build_weekly_reset_line(
     last_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     if let (Some(last), true) = (last_reset, window_minutes > 0) {
-        if let Some((remaining, timestamp)) = compute_reset_eta(window_minutes, last) {
+        if let Some(timing) = compute_window_timing(window_minutes, last) {
+            let remaining = format_duration(timing.remaining);
             return Line::from(vec![
-                Span::raw(format!("{FIELD_INDENT}Resets at ≈{timestamp} ")),
+                Span::raw(format!(
+                    "{FIELD_INDENT}Resets at ≈{} ",
+                    timing.next_reset_local
+                )),
                 Span::styled(
                     format!("({remaining})"),
                     Style::default().fg(colors::dim()),
@@ -479,30 +480,50 @@ fn build_context_status_line(overflow_auto_compact: bool) -> Line<'static> {
     ])
 }
 
-fn compute_reset_eta(
+#[derive(Debug)]
+struct WindowTiming {
+    remaining: Duration,
+    window: Duration,
+    next_reset_local: String,
+}
+
+impl WindowTiming {
+    fn elapsed(&self) -> Duration {
+        self.window
+            .checked_sub(self.remaining)
+            .unwrap_or(Duration::ZERO)
+    }
+}
+
+fn compute_window_timing(
     window_minutes: u64,
     last_reset: DateTime<Utc>,
-) -> Option<(String, String)> {
+) -> Option<WindowTiming> {
     let window_seconds = (window_minutes as i64).checked_mul(60)?;
     if window_seconds <= 0 {
         return None;
     }
+
     let now = Utc::now();
-    let elapsed = now.signed_duration_since(last_reset);
-    let mut periods = 0i64;
-    if elapsed.num_seconds() > 0 {
-        periods = elapsed.num_seconds() / window_seconds;
-    }
-    let mut next_reset = last_reset + chrono::Duration::seconds(window_seconds);
-    if periods > 0 {
-        next_reset = last_reset + chrono::Duration::seconds(window_seconds * (periods + 1));
-    }
-    if next_reset <= now {
-        next_reset = now + chrono::Duration::seconds(window_seconds);
-    }
-    let remaining = next_reset.signed_duration_since(now).to_std().ok()?;
-    let local_time = next_reset.with_timezone(&Local).format("%I:%M%P").to_string();
-    Some((format_duration(remaining), local_time))
+    let elapsed_secs = now.signed_duration_since(last_reset).num_seconds();
+    let elapsed_within_window = if elapsed_secs <= 0 {
+        0
+    } else {
+        elapsed_secs.rem_euclid(window_seconds)
+    };
+    let remaining_secs = (window_seconds - elapsed_within_window).max(0);
+
+    let window = Duration::from_secs(window_seconds as u64);
+    let remaining = Duration::from_secs(remaining_secs as u64);
+    let next_reset = now + chrono::Duration::seconds(remaining_secs);
+    Some(WindowTiming {
+        remaining,
+        window,
+        next_reset_local: next_reset
+            .with_timezone(&Local)
+            .format("%I:%M%P")
+            .to_string(),
+    })
 }
 
 fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
