@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.158] - 2025-09-22
+
+- Core/ACP: integrate ACP support and sync protocol updates (1eeae7f8, fbe8beb5)
+- CLI: expose MCP via code subcommand and add acp alias; ship code-mcp-server on install (f15d2e2f, d41e9064, 33f498e1)
+- TUI/Limits: refresh layout, show compact usage, align hourly/weekly windows (20aaecb3, 06bcddfd, fecaf661)
+- TUI/Limits: fix hourly window display and reset timing (388975ac)
+- Stability: respect web search flag; clear spinner after final answer; accept numeric MCP protocolVersion (c5dfc88d, d95c24b1, 763e08c5)
+
 ## [0.2.157] - 2025-09-22
 
 - CLI: restore coder resume support. (b46786d3)
