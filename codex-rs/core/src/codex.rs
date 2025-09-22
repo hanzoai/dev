@@ -113,10 +113,12 @@ impl ConfirmGuardPatternRuntime {
     }
 }
 
+#[allow(dead_code)]
 trait MutexExt<T> {
     fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T>;
 }
 
+#[allow(dead_code)]
 impl<T> MutexExt<T> for Mutex<T> {
     fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T> {
         #[expect(clippy::expect_used)]
