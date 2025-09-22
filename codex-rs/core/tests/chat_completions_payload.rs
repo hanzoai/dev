@@ -11,6 +11,7 @@ use codex_core::Prompt;
 use codex_core::ReasoningItemContent;
 use codex_core::ResponseItem;
 use codex_core::WireApi;
+use codex_core::debug_logger::DebugLogger;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use core_test_support::load_default_config_for_test;
 use futures::StreamExt;
@@ -81,7 +82,11 @@ async fn run_request(input: Vec<ResponseItem>) -> Value {
         summary,
         verbosity,
         Uuid::new_v4(),
+<<<<<<< HEAD
         Arc::clone(&debug_logger),
+=======
+        debug_logger,
+>>>>>>> refs/heads/main
     );
 
     let mut prompt = Prompt::default();
