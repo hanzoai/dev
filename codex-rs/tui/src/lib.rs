@@ -97,9 +97,11 @@ pub use cli::Cli;
 // (tests access modules directly within the crate)
 
 pub async fn run_main(
-    cli: Cli,
+    mut cli: Cli,
     codex_linux_sandbox_exe: Option<PathBuf>,
 ) -> std::io::Result<codex_core::protocol::TokenUsage> {
+    cli.finalize_defaults();
+
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -153,8 +155,7 @@ pub async fn run_main(
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         debug: Some(cli.debug),
-        // Enable web search by default (no CLI flag).
-        tools_web_search_request: Some(true),
+        tools_web_search_request: Some(cli.web_search),
     };
 
     // Parse `-c` overrides from the CLI.
@@ -388,6 +389,9 @@ fn run_ratatui_app(
         debug,
         order,
         timing,
+        resume_picker,
+        resume_last: _,
+        resume_session_id: _,
         ..
     } = cli;
     let mut app = App::new(
@@ -399,6 +403,7 @@ fn run_ratatui_app(
         order,
         terminal_info,
         timing,
+        resume_picker,
         startup_footer_notice,
     );
 
