@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.160] - 2025-09-22
+
+- Core/Config: coerce auto-upgrade booleans for correct behavior (158cb551)
+- TUI/Slash: route exit aliases through quit for consistency (f527c1d1)
+- Core/Exec: block redundant cd and Python file writer commands (e8c78311)
+
 ## [0.2.159] - 2025-09-22
 
 - Docs: streamline Zed integration guide (ceb8804c)
