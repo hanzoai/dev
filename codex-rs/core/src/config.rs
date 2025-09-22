@@ -5,6 +5,7 @@ use crate::config_types::AgentConfig;
 use crate::config_types::AllowedCommand;
 use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
+use crate::config_types::ClientTools;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
 use crate::config_types::ValidationConfig;
@@ -37,6 +38,7 @@ use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use dirs::home_dir;
 use serde::Deserialize;
+use serde::de::{self, Unexpected};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -171,6 +173,9 @@ pub struct Config {
 
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     pub mcp_servers: HashMap<String, McpServerConfig>,
+
+    /// Optional ACP client tool identifiers supplied by the host IDE.
+    pub experimental_client_tools: Option<ClientTools>,
 
     /// Configuration for available agent models
     pub agents: Vec<AgentConfig>,
@@ -1341,6 +1346,7 @@ pub struct ConfigToml {
     pub disable_response_storage: Option<bool>,
 
     /// Enable silent upgrades during startup when a newer release is available.
+    #[serde(default, deserialize_with = "deserialize_option_bool_from_maybe_string")]
     pub auto_upgrade_enabled: Option<bool>,
 
     /// Optional external command to spawn for end-user notifications.
@@ -1353,6 +1359,10 @@ pub struct ConfigToml {
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+
+    /// Optional ACP client tool identifiers supplied by the host IDE.
+    #[serde(default)]
+    pub experimental_client_tools: Option<ClientTools>,
 
     /// Configuration for available agent models
     #[serde(default)]
@@ -1439,6 +1449,37 @@ pub struct ConfigToml {
     pub subagents: Option<crate::config_types::SubagentsToml>,
     /// Experimental path to a rollout file to resume from.
     pub experimental_resume: Option<PathBuf>,
+}
+
+fn deserialize_option_bool_from_maybe_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolOrString {
+        Bool(bool),
+        String(String),
+    }
+
+    let value = Option::<BoolOrString>::deserialize(deserializer)?;
+    match value {
+        Some(BoolOrString::Bool(b)) => Ok(Some(b)),
+        Some(BoolOrString::String(s)) => {
+            let normalized = s.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "true" => Ok(Some(true)),
+                "false" => Ok(Some(false)),
+                _ => Err(de::Error::invalid_value(
+                    Unexpected::Str(&s),
+                    &"a boolean or string 'true'/'false'",
+                )),
+            }
+        }
+        None => Ok(None),
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -1569,6 +1610,8 @@ pub struct ConfigOverrides {
     pub show_raw_agent_reasoning: Option<bool>,
     pub debug: Option<bool>,
     pub tools_web_search_request: Option<bool>,
+    pub mcp_servers: Option<HashMap<String, McpServerConfig>>,
+    pub experimental_client_tools: Option<ClientTools>,
 }
 
 impl Config {
@@ -1580,6 +1623,8 @@ impl Config {
         codex_home: PathBuf,
     ) -> std::io::Result<Self> {
         let user_instructions = Self::load_instructions(Some(&codex_home));
+
+        let mut cfg = cfg;
 
         // Destructure ConfigOverrides fully to ensure all overrides are applied.
         let ConfigOverrides {
@@ -1599,7 +1644,17 @@ impl Config {
             show_raw_agent_reasoning,
             debug,
             tools_web_search_request: override_tools_web_search_request,
+            mcp_servers,
+            experimental_client_tools,
         } = overrides;
+
+        if let Some(mcp_servers) = mcp_servers {
+            cfg.mcp_servers = mcp_servers;
+        }
+
+        if let Some(client_tools) = experimental_client_tools {
+            cfg.experimental_client_tools = Some(client_tools);
+        }
 
         let (active_profile_name, config_profile) =
             match config_profile_key.as_ref().or(cfg.profile.as_ref()) {
@@ -1857,6 +1912,7 @@ impl Config {
             user_instructions,
             base_instructions,
             mcp_servers: cfg.mcp_servers,
+            experimental_client_tools: cfg.experimental_client_tools.clone(),
             agents,
             model_providers,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
@@ -2133,6 +2189,24 @@ persistence = "none"
             }),
             history_no_persistence_cfg.history
         );
+    }
+
+    #[test]
+    fn auto_upgrade_enabled_accepts_string_boolean() {
+        let cfg_true = r#"auto_upgrade_enabled = "true""#;
+        let parsed_true = toml::from_str::<ConfigToml>(cfg_true)
+            .expect("string boolean should deserialize");
+        assert_eq!(parsed_true.auto_upgrade_enabled, Some(true));
+
+        let cfg_false = r#"auto_upgrade_enabled = "false""#;
+        let parsed_false = toml::from_str::<ConfigToml>(cfg_false)
+            .expect("string boolean should deserialize");
+        assert_eq!(parsed_false.auto_upgrade_enabled, Some(false));
+
+        let cfg_bool = r#"auto_upgrade_enabled = true"#;
+        let parsed_bool = toml::from_str::<ConfigToml>(cfg_bool)
+            .expect("boolean should deserialize");
+        assert_eq!(parsed_bool.auto_upgrade_enabled, Some(true));
     }
 
     #[test]
@@ -2547,6 +2621,7 @@ model_verbosity = "high"
                 notify: None,
                 cwd: fixture.cwd(),
                 mcp_servers: HashMap::new(),
+                experimental_client_tools: None,
                 model_providers: fixture.model_provider_map.clone(),
                 project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
                 codex_home: fixture.codex_home(),
@@ -2616,6 +2691,7 @@ model_verbosity = "high"
             notify: None,
             cwd: fixture.cwd(),
             mcp_servers: HashMap::new(),
+            experimental_client_tools: None,
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             codex_home: fixture.codex_home(),
@@ -2700,6 +2776,7 @@ model_verbosity = "high"
             notify: None,
             cwd: fixture.cwd(),
             mcp_servers: HashMap::new(),
+            experimental_client_tools: None,
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             codex_home: fixture.codex_home(),
@@ -2769,6 +2846,7 @@ model_verbosity = "high"
             notify: None,
             cwd: fixture.cwd(),
             mcp_servers: HashMap::new(),
+            experimental_client_tools: None,
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
             codex_home: fixture.codex_home(),

@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::io::Write;
+use tokio::runtime::Runtime;
 
 pub fn main() -> ! {
     let exit_code = run_main();
@@ -48,7 +49,9 @@ pub fn run_main() -> i32 {
 
     let mut stdout = std::io::stdout();
     let mut stderr = std::io::stderr();
-    match crate::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
+    let fs = crate::StdFileSystem;
+    let runtime = Runtime::new().expect("failed to create tokio runtime for apply_patch");
+    match runtime.block_on(crate::apply_patch(&patch_arg, &mut stdout, &mut stderr, &fs)) {
         Ok(()) => {
             // Flush to ensure output ordering when used in pipelines.
             let _ = stdout.flush();

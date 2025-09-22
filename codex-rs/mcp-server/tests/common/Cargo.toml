@@ -10,7 +10,7 @@ path = "lib.rs"
 anyhow = "1"
 assert_cmd = "2"
 codex-core = { path = "../../../core" }
-codex-mcp-server = { path = "../.." }
+code-mcp-server = { path = "../.." }
 codex-protocol = { path = "../../../protocol" }
 mcp-types = { path = "../../../mcp-types" }
 os_info = "3.12.0"

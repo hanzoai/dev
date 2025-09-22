@@ -1,19 +1,18 @@
-## @just-every/code v0.2.157
+## @just-every/code v0.2.162
 
-This release polishes TUI UX and fixes key CLI behaviors.
+This release improves CLI resume reliability and hardens runtime handling.
 
 ### Changes
-- CLI: restore coder resume support.
-- CLI: generate completion scripts with code command name.
-- TUI: avoid showing agents HUD on handoff.
-- TUI/Limits: refresh usage header copy; move rate‑limit polling off main thread.
-- TUI: show Ctrl+T exit hint in standard mode.
+
+- CLI/Resume: fix --last to reliably select the most recent session under active runtimes.
+- Stability: avoid nested Tokio runtime creation during resume lookup to prevent sporadic failures.
 
 ### Install
+
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.156...v0.2.157
+Compare: https://github.com/just-every/code/compare/v0.2.161...v0.2.162
 

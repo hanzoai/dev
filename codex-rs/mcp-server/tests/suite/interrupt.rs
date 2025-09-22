@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use codex_core::protocol::TurnAbortReason;
+use codex_protocol::protocol::TurnAbortReason;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_protocol::mcp_protocol::AddConversationListenerParams;
 use codex_protocol::mcp_protocol::InterruptConversationParams;
