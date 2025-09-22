@@ -3403,10 +3403,10 @@ impl ChatWidget<'_> {
                         .push(InputItem::Text { text: expanded });
                 }
             }
-            crate::slash_command::ProcessedCommand::RegularCommand(cmd, _args) => {
+            crate::slash_command::ProcessedCommand::RegularCommand(cmd, command_text) => {
                 // This is a regular slash command, dispatch it normally
                 self.app_event_tx
-                    .send(AppEvent::DispatchCommand(cmd, original_text.clone()));
+                    .send(AppEvent::DispatchCommand(cmd, command_text));
                 return;
             }
             crate::slash_command::ProcessedCommand::Error(error_msg) => {
