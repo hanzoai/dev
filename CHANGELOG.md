@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.157] - 2025-09-22
+
+- CLI: restore coder resume support. (b46786d3)
+- CLI: generate completion scripts with code command name. (b8961ec0)
+- TUI: avoid showing agents HUD on handoff. (8ab7367c)
+- TUI/Limits: refresh usage header copy; move rate‑limit polling off main thread. (ddc23f6a, 2d3a9f55)
+- TUI: show Ctrl+T exit hint in standard mode. (6243cf27)
+
 ## [0.2.156] - 2025-09-22
 
 - TUI/Limits: add /limits view with live snapshots and persisted reset times. (70ee0986, a9fc289a, b2567a0e)
