@@ -24,6 +24,8 @@ mod mcp_cmd;
 use crate::mcp_cmd::McpCli;
 use crate::proto::ProtoCli;
 
+const CLI_COMMAND_NAME: &str = "code";
+
 /// Codex CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
@@ -36,7 +38,7 @@ use crate::proto::ProtoCli;
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `codex` command name that users run.
+    // the generic `code` command name that users run.
     bin_name = "code"
 )]
 struct MultitoolCli {
@@ -410,10 +412,13 @@ fn merge_resume_cli_flags(interactive: &mut TuiCli, resume_cli: TuiCli) {
         .extend(resume_cli.config_overrides.raw_overrides);
 }
 
-fn print_completion(cmd: CompletionCommand) {
+fn write_completion<W: std::io::Write>(shell: Shell, out: &mut W) {
     let mut app = MultitoolCli::command();
-    let name = "code";
-    generate(cmd.shell, &mut app, name, &mut std::io::stdout());
+    generate(shell, &mut app, CLI_COMMAND_NAME, out);
+}
+
+fn print_completion(cmd: CompletionCommand) {
+    write_completion(cmd.shell, &mut std::io::stdout());
 }
 
 fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
@@ -815,6 +820,15 @@ async fn doctor_main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bash_completion_uses_code_command_name() {
+        let mut buf = Vec::new();
+        write_completion(Shell::Bash, &mut buf);
+        let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
+        assert!(script.contains("_code()"), "expected bash completion function to be named _code");
+        assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
+    }
 
     fn finalize_from_args(args: &[&str]) -> TuiCli {
         let cli = MultitoolCli::try_parse_from(args).expect("parse");
