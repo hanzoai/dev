@@ -461,8 +461,18 @@ async fn apply_bespoke_event_handling(
                         codex_core::protocol::FileChange::Delete => {
                             codex_protocol::protocol::FileChange::Delete { content: String::new() }
                         }
-                        codex_core::protocol::FileChange::Update { unified_diff, move_path } => {
-                            codex_protocol::protocol::FileChange::Update { unified_diff, move_path }
+                        codex_core::protocol::FileChange::Update {
+                            unified_diff,
+                            move_path,
+                            original_content,
+                            new_content,
+                        } => {
+                            codex_protocol::protocol::FileChange::Update {
+                                unified_diff,
+                                move_path,
+                                original_content,
+                                new_content,
+                            }
                         }
                     };
                     (p, mapped)
@@ -531,7 +541,7 @@ fn derive_config_from_params(
         include_plan_tool,
         ..
     } = params;
-        let overrides = ConfigOverrides {
+    let overrides = ConfigOverrides {
         model,
         review_model: None,
         config_profile: profile,
@@ -548,6 +558,8 @@ fn derive_config_from_params(
         show_raw_agent_reasoning: None,
         debug: None,
         tools_web_search_request: None,
+        mcp_servers: None,
+        experimental_client_tools: None,
     };
 
     let cli_overrides = cli_overrides

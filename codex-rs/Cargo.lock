@@ -28,6 +28,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-client-protocol"
+version = "0.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4255a06cc2414033d1fe4baf1968bcc8f16d7e5814f272b97779b5806d129142"
+dependencies = [
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -786,6 +797,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9b18233253483ce2f65329a24072ec414db782531bdbb7d0bbc4bd2ce6b7e21"
 
 [[package]]
+name = "code-mcp-server"
+version = "0.0.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "assert_cmd",
+ "codex-arg0",
+ "codex-common",
+ "codex-core",
+ "codex-login",
+ "codex-protocol",
+ "codex-version",
+ "mcp-types",
+ "mcp_test_support",
+ "os_info",
+ "pretty_assertions",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "tokio",
+ "toml 0.9.5",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "codex-ansi-escape"
 version = "0.0.0"
 dependencies = [
@@ -805,6 +846,7 @@ dependencies = [
  "similar",
  "tempfile",
  "thiserror 2.0.16",
+ "tokio",
  "tree-sitter",
  "tree-sitter-bash",
 ]
@@ -872,13 +914,13 @@ dependencies = [
  "assert_cmd",
  "clap",
  "clap_complete",
+ "code-mcp-server",
  "codex-arg0",
  "codex-chatgpt",
  "codex-common",
  "codex-core",
  "codex-exec",
  "codex-login",
- "codex-mcp-server",
  "codex-protocol",
  "codex-protocol-ts",
  "codex-tui",
@@ -916,6 +958,7 @@ dependencies = [
 name = "codex-core"
 version = "0.0.0"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "askama",
  "assert_cmd",
@@ -1087,35 +1130,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "codex-mcp-server"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "codex-arg0",
- "codex-common",
- "codex-core",
- "codex-login",
- "codex-protocol",
- "codex-version",
- "mcp-types",
- "mcp_test_support",
- "os_info",
- "pretty_assertions",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "toml 0.9.5",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "wiremock",
 ]
 
 [[package]]
@@ -3354,8 +3368,8 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "code-mcp-server",
  "codex-core",
- "codex-mcp-server",
  "codex-protocol",
  "mcp-types",
  "os_info",
@@ -4837,7 +4851,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
- "schemars_derive",
+ "schemars_derive 0.8.22",
  "serde",
  "serde_json",
 ]
@@ -4862,6 +4876,7 @@ checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
 dependencies = [
  "dyn-clone",
  "ref-cast",
+ "schemars_derive 1.0.4",
  "serde",
  "serde_json",
 ]
@@ -4871,6 +4886,18 @@ name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d020396d1d138dc19f1165df7545479dcd58d93810dc5d646a16e55abefa80"
 dependencies = [
  "proc-macro2",
  "quote",
