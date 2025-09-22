@@ -2213,7 +2213,7 @@ impl ChatWidget<'_> {
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
-        w.standard_terminal_mode = !config.tui.alternate_screen;
+        w.set_standard_terminal_mode(!config.tui.alternate_screen);
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
@@ -2409,6 +2409,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
         };
+        w.set_standard_terminal_mode(!config.tui.alternate_screen);
         // Welcome at top of first request for forked session too
         w.history_push_top_next_req(history_cell::new_animated_welcome());
         w
@@ -8534,6 +8535,21 @@ fn update_rate_limit_resets(
             self.app_event_tx
                 .send(crate::app_event::AppEvent::InsertHistory(lines));
         }
+    }
+
+    fn refresh_standard_terminal_hint(&mut self) {
+        if self.standard_terminal_mode {
+            let message = "Standard terminal mode active. Press Ctrl+T to return to full UI.";
+            self.bottom_pane
+                .set_standard_terminal_hint(Some(message.to_string()));
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
+        }
+    }
+
+    pub(crate) fn set_standard_terminal_mode(&mut self, enabled: bool) {
+        self.standard_terminal_mode = enabled;
+        self.refresh_standard_terminal_hint();
     }
 
     pub(crate) fn is_reasoning_shown(&self) -> bool {
