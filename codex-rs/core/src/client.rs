@@ -361,13 +361,26 @@ impl ModelClient {
                     }
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
 
-                    if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers())
-                        && tx_event
+                    if let Some(snapshot) = parse_rate_limit_snapshot(resp.headers()) {
+                        let headers_dump = format_rate_limit_headers(resp.headers());
+                        if tx_event
+                            .send(Ok(ResponseEvent::DebugMessage(format!(
+                                "Rate limit headers:\n{}",
+                                headers_dump
+                            ))))
+                            .await
+                            .is_err()
+                        {
+                            debug!("receiver dropped rate limit header debug event");
+                        }
+
+                        if tx_event
                             .send(Ok(ResponseEvent::RateLimits(snapshot)))
                             .await
                             .is_err()
-                    {
-                        debug!("receiver dropped rate limit snapshot event");
+                        {
+                            debug!("receiver dropped rate limit snapshot event");
+                        }
                     }
 
                     // spawn task to process SSE
@@ -670,6 +683,18 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEve
         primary_window_minutes,
         weekly_window_minutes,
     })
+}
+
+fn format_rate_limit_headers(headers: &HeaderMap) -> String {
+    let mut pairs: Vec<String> = headers
+        .iter()
+        .map(|(name, value)| {
+            let value_str = value.to_str().unwrap_or("<invalid>");
+            format!("{}: {}", name, value_str)
+        })
+        .collect();
+    pairs.sort();
+    pairs.join("\n")
 }
 
 fn parse_header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
