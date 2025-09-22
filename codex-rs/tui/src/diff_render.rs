@@ -259,6 +259,7 @@ pub(super) fn create_diff_summary_with_width(
             FileChange::Update {
                 unified_diff,
                 move_path,
+                ..
             } => {
                 let (added, removed) = count_from_unified(unified_diff);
                 let display_path = if let Some(new_path) = move_path {
@@ -415,6 +416,7 @@ fn render_patch_details_with_width(
             FileChange::Update {
                 unified_diff,
                 move_path: _,
+                ..
             } => {
                 if let Ok(patch) = diffy::Patch::from_str(unified_diff) {
                     let mut is_first_hunk = true;
@@ -730,6 +732,8 @@ mod tests {
             FileChange::Update {
                 unified_diff: patch,
                 move_path: Some(PathBuf::from("src/lib_new.rs")),
+                original_content: original.to_string(),
+                new_content: modified.to_string(),
             },
         );
 
@@ -771,6 +775,8 @@ mod tests {
             FileChange::Update {
                 unified_diff: patch,
                 move_path: None,
+                original_content: original.to_string(),
+                new_content: modified.to_string(),
             },
         );
 
@@ -793,6 +799,8 @@ mod tests {
             FileChange::Update {
                 unified_diff: patch,
                 move_path: None,
+                original_content: original.to_string(),
+                new_content: modified.to_string(),
             },
         );
 
@@ -816,6 +824,8 @@ mod tests {
             FileChange::Update {
                 unified_diff: patch,
                 move_path: None,
+                original_content: original.to_string(),
+                new_content: modified.to_string(),
             },
         );
 

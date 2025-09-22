@@ -21,6 +21,7 @@ thiserror = "2.0.16"
 tree-sitter = "0.25.9"
 tree-sitter-bash = "0.25.0"
 once_cell = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 assert_cmd = "2"

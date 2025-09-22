@@ -23,7 +23,7 @@ expression: visible_after
   Main Causes
 
   - Static linking style: Each bin (codex, codex-tui, codex-exec,
-  codex-mcp-server, etc.) statically links its full dependency graph, so common
+  code-mcp-server, etc.) statically links its full dependency graph, so common
   code isn’t shared at runtime across executables.
   - Heavy deps (HTTP/TLS): reqwest brings in Hyper, HTTP/2, compressors,
   and a TLS stack (rustls by default; OpenSSL on musl). In core, login, tui,

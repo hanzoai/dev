@@ -1,9 +1,11 @@
 //! Configuration object accepted by the `codex` MCP tool-call.
 
+use agent_client_protocol as acp;
 use codex_core::protocol::AskForApproval;
 use codex_protocol::config_types::SandboxMode;
 use mcp_types::Tool;
 use mcp_types::ToolInputSchema;
+use mcp_types::ToolOutputSchema;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaSettings;
 use serde::Deserialize;
@@ -130,6 +132,50 @@ pub(crate) fn create_tool_for_codex_tool_call_param() -> Tool {
     }
 }
 
+/// Builds a `Tool` definition for the `acp/new_session` tool-call.
+pub(crate) fn create_tool_for_acp_new_session() -> Tool {
+    #[expect(clippy::expect_used)]
+    let input_schema_value = serde_json::to_value(acp::NewSessionArguments::schema())
+        .expect("ACP new_session input schema must serialise to JSON");
+
+    #[expect(clippy::expect_used)]
+    let output_schema_value = serde_json::to_value(acp::NewSessionOutput::schema())
+        .expect("ACP new_session output schema must serialise to JSON");
+
+    let input_schema = serde_json::from_value::<ToolInputSchema>(input_schema_value)
+        .unwrap_or_else(|e| panic!("failed to create Tool input schema: {e}"));
+    let output_schema = serde_json::from_value::<ToolOutputSchema>(output_schema_value)
+        .unwrap_or_else(|e| panic!("failed to create Tool output schema: {e}"));
+
+    Tool {
+        name: acp::AGENT_METHODS.new_session.to_string(),
+        title: Some(acp::AGENT_METHODS.new_session.to_string()),
+        input_schema,
+        output_schema: Some(output_schema),
+        description: Some("Start a Codex session over ACP.".to_string()),
+        annotations: None,
+    }
+}
+
+/// Builds a `Tool` definition for the `acp/prompt` tool-call.
+pub(crate) fn create_tool_for_acp_prompt() -> Tool {
+    #[expect(clippy::expect_used)]
+    let input_schema_value = serde_json::to_value(acp::PromptArguments::schema())
+        .expect("ACP prompt input schema must serialise to JSON");
+
+    let input_schema = serde_json::from_value::<ToolInputSchema>(input_schema_value)
+        .unwrap_or_else(|e| panic!("failed to create Tool input schema: {e}"));
+
+    Tool {
+        name: acp::AGENT_METHODS.prompt.to_string(),
+        title: Some(acp::AGENT_METHODS.prompt.to_string()),
+        input_schema,
+        output_schema: None,
+        description: Some("Send a prompt to an existing ACP Codex session.".to_string()),
+        annotations: None,
+    }
+}
+
 impl CodexToolCallParam {
     /// Returns the initial user prompt to start the Codex conversation and the
     /// effective Config object generated from the supplied parameters.
@@ -167,6 +213,8 @@ impl CodexToolCallParam {
             show_raw_agent_reasoning: None,
             debug: None,
             tools_web_search_request: None,
+            mcp_servers: None,
+            experimental_client_tools: None,
         };
 
         let cli_overrides = cli_overrides
