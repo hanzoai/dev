@@ -28,6 +28,16 @@ codex-mcp-server = { workspace = true }
 codex-protocol = { workspace = true }
 codex-protocol-ts = { workspace = true }
 codex-tui = { workspace = true }
+codex-version = { path = "../codex-version" }
+futures = { workspace = true }
+reqwest = { workspace = true }
+regex = "1"
+tar = "0.4"
+flate2 = "1"
+zip = "0.6"
+tempfile = { workspace = true }
+uuid = { workspace = true }
+which = { workspace = true }
 owo-colors = { workspace = true }
 serde_json = { workspace = true }
 supports-color = { workspace = true }
@@ -45,4 +55,3 @@ tracing-subscriber = { workspace = true }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 pretty_assertions = { workspace = true }
-tempfile = { workspace = true }
