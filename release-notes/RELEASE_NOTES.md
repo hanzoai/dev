@@ -1,12 +1,11 @@
-## @just-every/code v0.2.160
+## @just-every/code v0.2.162
 
-This release delivers focused fixes and guardrails across config, slash commands, and exec safety.
+This release improves CLI resume reliability and hardens runtime handling.
 
 ### Changes
 
-- Core/Config: coerce auto-upgrade booleans for correct behavior
-- TUI/Slash: route exit aliases through quit for consistency
-- Core/Exec: block redundant cd and Python file writer commands
+- CLI/Resume: fix --last to reliably select the most recent session under active runtimes.
+- Stability: avoid nested Tokio runtime creation during resume lookup to prevent sporadic failures.
 
 ### Install
 
@@ -15,5 +14,5 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.159...v0.2.160
+Compare: https://github.com/just-every/code/compare/v0.2.161...v0.2.162
 
