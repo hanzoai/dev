@@ -1095,6 +1095,7 @@ impl LimitsHistoryCell {
         let mut lines = self.view.summary_lines.clone();
         lines.extend(self.view.gauge_lines(width));
         lines.extend(self.view.legend_lines.clone());
+        lines.extend(self.view.footer_lines.clone());
         lines
     }
 }
