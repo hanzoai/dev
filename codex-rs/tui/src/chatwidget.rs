@@ -242,7 +242,7 @@ impl RateLimitWarningState {
         {
             let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
             warnings.push(format!(
-                "Weekly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+                "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
             ));
             self.weekly_index += 1;
         }
@@ -4244,7 +4244,7 @@ impl ChatWidget<'_> {
                     self.update_rate_limit_resets(previous_snapshot.as_ref(), &snapshot);
                     let warnings = self
                         .rate_limit_warnings
-                        .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
+                        .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
                     self.rate_limit_snapshot = Some(snapshot);
                     if !warnings.is_empty() {
                         for warning in warnings {
@@ -5260,7 +5260,7 @@ fn update_rate_limit_resets(
                     changed_primary = true;
                 }
             }
-            if current.weekly_used_percent + 0.5 < prev.weekly_used_percent {
+            if current.secondary_used_percent + 0.5 < prev.secondary_used_percent {
                 if self
                     .rate_limit_last_weekly_reset_at
                     .map_or(true, |existing| now > existing)
@@ -5276,7 +5276,7 @@ fn update_rate_limit_resets(
                 self.rate_limit_last_primary_reset_at = Some(now);
                 changed_primary = true;
             }
-            if current.weekly_used_percent <= 1.0
+            if current.secondary_used_percent <= 1.0
                 && self.rate_limit_last_weekly_reset_at.is_none()
             {
                 self.rate_limit_last_weekly_reset_at = Some(now);

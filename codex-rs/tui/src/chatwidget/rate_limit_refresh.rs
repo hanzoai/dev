@@ -82,10 +82,10 @@ fn run_refresh(
 
         let snapshot = CoreRateLimitSnapshotEvent {
             primary_used_percent: proto_snapshot.primary_used_percent,
-            weekly_used_percent: proto_snapshot.weekly_used_percent,
-            primary_to_weekly_ratio_percent: proto_snapshot.primary_to_weekly_ratio_percent,
+            secondary_used_percent: proto_snapshot.secondary_used_percent,
+            primary_to_secondary_ratio_percent: proto_snapshot.primary_to_secondary_ratio_percent,
             primary_window_minutes: proto_snapshot.primary_window_minutes,
-            weekly_window_minutes: proto_snapshot.weekly_window_minutes,
+            secondary_window_minutes: proto_snapshot.secondary_window_minutes,
         };
 
         let event = Event {
