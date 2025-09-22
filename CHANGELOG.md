@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.161] - 2025-09-22
+
+- TUI/Slash: add more /review options for richer reviews (5996ee0e)
+- TUI: fix merge fallout and remove unused const to eliminate warnings (cf031b67)
+
 ## [0.2.160] - 2025-09-22
 
 - Core/Config: coerce auto-upgrade booleans for correct behavior (158cb551)
