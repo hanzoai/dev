@@ -1,6 +1,5 @@
 /// Asymmetric cryptography module
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey, Signature};
-use x25519_dalek::{EphemeralSecret, PublicKey as X25519PublicKey};
 use rand::{rngs::OsRng, Rng};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use thiserror::Error;

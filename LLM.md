@@ -29,6 +29,88 @@ Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise fea
    - Full test suite with 7 passing tests
    - Zero-copy design with `zeroize` for secure memory handling
 
+## Hanzo Node Integration (September 2025)
+
+### Local Inference Infrastructure
+The dev project now integrates with Hanzo Node for local AI capabilities:
+
+1. **Hanzo Node Connection**
+   - **Port**: 3690 (corrected from 11434 which is Ollama's port)
+   - **Engine Port**: 36900 for Hanzo Engine
+   - **Configuration**: `hanzo_integration.rs` and `hanzo_inference.rs`
+   - **Model**: Default to `gpt-oss:20b` for local inference
+
+2. **HanzoInferenceManager** (`/src/rs/core/src/hanzo_inference.rs`)
+   - Manages local hanzod process lifecycle
+   - Provides OpenAI-compatible API interface
+   - Supports:
+     - LLM inference without external APIs
+     - Local embeddings generation
+     - Vector search capabilities
+   - Auto-backgrounding for long-running processes
+
+3. **Provider Fallback Chain**
+   - Primary: Hanzo Local (port 3690)
+   - Fallback 1: OpenAI (if API key present)
+   - Fallback 2: Claude/Anthropic (if API key present)
+   - Fallback 3: Custom API endpoints
+
+### Pure Rust Cryptography Migration
+Replaced C-based OQS with pure-Rust saorsa-pqc v0.3.13:
+- **ML-KEM-768** (FIPS 203) for key encapsulation
+- **ML-DSA-65** (FIPS 204) for digital signatures
+- Improved compilation (no C dependencies)
+- All 7 cryptographic tests passing
+
+### Agent SDK Enhancement
+Created `HanzoNodeProvider` in the agent library:
+```python
+from agents import HanzoNodeProvider, create_hanzo_node_provider
+
+# Direct connection to Hanzo node
+provider = create_hanzo_node_provider(port=3690)
+model = provider.get_model("gpt-oss:20b")
+```
+
+### TUI Compilation Fixes
+Resolved major compilation issues after merge:
+- Added `standard_terminal_mode` field
+- Implemented `maybe_show_history_nav_hint_on_first_scroll` method
+- Fixed pulldown-cmark API compatibility for v0.9
+- Added missing spinner and list_window utility functions
+- Fixed PlanUpdate event handling with proper serialization
+- Resolved FrameRequester trait dyn-compatibility with DefaultFrameRequester
+- Fixed ConfigOverrides field names (`codex_linux_sandbox_exe`)
+
+### Running with Hanzo Node
+
+1. **Start the Hanzo Node**:
+   ```bash
+   cd /Users/z/work/hanzo/node
+   cargo run --release --bin hanzod
+   ```
+
+2. **Run Dev with Local Inference**:
+   ```bash
+   cd /Users/z/work/hanzo/dev
+   ./target/debug/dev-exec --oss "Your prompt here"
+   ```
+
+3. **Test Agent SDK Integration**:
+   ```bash
+   cd /Users/z/work/hanzo/agent
+   python test_hanzo_node.py
+   ```
+
+### Environment Configuration
+```bash
+# Hanzo Node settings
+HANZO_NODE_URL=http://localhost:3690/v1
+HANZO_ENGINE_URL=http://localhost:36900
+HANZO_ENABLE_QWEN3=true
+HANZO_ENABLE_RERANKER=true
+```
+
 3. **Testing Infrastructure**
    - Created comprehensive integration tests for core modules
    - Added TUI-specific test suite

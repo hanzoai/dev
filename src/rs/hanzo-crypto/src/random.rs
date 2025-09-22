@@ -1,8 +1,6 @@
 /// Cryptographically secure random number generation
 use rand::{Rng, RngCore};
 use rand::rngs::OsRng;
-use rand_chacha::ChaCha20Rng;
-use rand::SeedableRng;
 
 /// Secure random number generator
 pub struct SecureRandom {
