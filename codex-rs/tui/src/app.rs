@@ -152,6 +152,7 @@ pub(crate) struct ChatWidgetArgs {
     terminal_info: TerminalInfo,
     show_order_overlay: bool,
     enable_perf: bool,
+    resume_picker: bool,
 }
 
 impl App<'_> {
@@ -166,6 +167,7 @@ impl App<'_> {
         show_order_overlay: bool,
         terminal_info: TerminalInfo,
         enable_perf: bool,
+        resume_picker: bool,
         startup_footer_notice: Option<String>,
     ) -> Self {
         let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared(
@@ -273,6 +275,7 @@ impl App<'_> {
                 terminal_info: terminal_info.clone(),
                 show_order_overlay,
                 enable_perf,
+                resume_picker,
             };
             AppState::Onboarding {
                 screen: OnboardingScreen::new(OnboardingScreenArgs {
@@ -296,6 +299,9 @@ impl App<'_> {
                 show_order_overlay,
             );
             chat_widget.enable_perf(enable_perf);
+            if resume_picker {
+                chat_widget.show_resume_picker();
+            }
             // Check for initial animations after widget is created
             chat_widget.check_for_initial_animations();
             if let Some(notice) = startup_footer_notice {
@@ -1668,6 +1674,7 @@ impl App<'_> {
                     terminal_info,
                     show_order_overlay,
                     enable_perf,
+                    resume_picker,
                 }) => {
                     let mut w = ChatWidget::new(
                         config,
@@ -1679,6 +1686,9 @@ impl App<'_> {
                         show_order_overlay,
                     );
                     w.enable_perf(enable_perf);
+                    if resume_picker {
+                        w.show_resume_picker();
+                    }
                     self.app_state = AppState::Chat { widget: Box::new(w) };
                     self.terminal_runs.clear();
                 }
