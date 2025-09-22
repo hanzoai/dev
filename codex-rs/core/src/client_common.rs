@@ -253,6 +253,7 @@ pub enum ResponseEvent {
         query: Option<String>,
     },
     RateLimits(RateLimitSnapshotEvent),
+    DebugMessage(String),
 }
 
 #[derive(Debug, Serialize)]

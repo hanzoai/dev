@@ -9547,23 +9547,21 @@ pub(crate) fn new_limits_output(snapshot: &RateLimitSnapshotEvent) -> LimitsHist
     }
 }
 
-pub(crate) fn new_limits_unavailable() -> PlainHistoryCell {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from("/limits").fg(crate::colors::keyword()));
-    lines.push(Line::from(""));
-    lines.push(Line::from("Rate limit usage snapshot".bold()));
-    lines.push(Line::from("  Tip: run `/limits` right after Codex replies for freshest numbers.".dim()));
-    lines.push(Line::from("  Real usage data is not available yet."));
-    lines.push(Line::from("  Send a message to Codex, then run /limits again.".dim()));
-    PlainHistoryCell::new(lines, HistoryCellType::Notice)
-}
-
 pub(crate) fn new_warning_event(message: String) -> PlainHistoryCell {
     let warn_style = Style::default().fg(crate::colors::warning());
     PlainHistoryCell::new(
         vec![Line::from(vec![Span::styled(format!("⚠ {message}"), warn_style)])],
         HistoryCellType::Notice,
     )
+}
+
+pub(crate) fn new_limits_fetching() -> PlainHistoryCell {
+    let lines: Vec<Line<'static>> = vec![
+        Line::from("/limits").fg(crate::colors::keyword()),
+        Line::from(""),
+        Line::from("Requesting latest rate limit data…".dim()),
+    ];
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {
