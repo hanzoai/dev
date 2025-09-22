@@ -23,7 +23,7 @@ impl Default for HanzoInferenceConfig {
     fn default() -> Self {
         Self {
             hanzod_path: Some("/Users/z/work/hanzo/node/target/release/hanzod".to_string()),
-            inference_port: 11434,
+            inference_port: 3690,  // Hanzo node default port
             enable_embeddings: true,
             enable_vector_search: true,
             model: "gpt-oss:20b".to_string(),
