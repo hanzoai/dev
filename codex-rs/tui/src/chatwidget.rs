@@ -5218,9 +5218,21 @@ impl ChatWidget<'_> {
     }
 
     fn rate_limit_reset_info(&self) -> RateLimitResetInfo {
+        let auto_compact_limit = self
+            .config
+            .model_auto_compact_token_limit
+            .and_then(|limit| (limit > 0).then_some(limit as u64));
+        let session_tokens_used = if auto_compact_limit.is_some() {
+            Some(self.total_token_usage.total_tokens)
+        } else {
+            None
+        };
+
         RateLimitResetInfo {
             primary_last_reset: self.rate_limit_last_primary_reset_at,
             weekly_last_reset: self.rate_limit_last_weekly_reset_at,
+            session_tokens_used,
+            auto_compact_limit,
         }
     }
 
