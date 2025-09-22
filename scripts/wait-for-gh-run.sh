@@ -18,6 +18,7 @@ Options:
   -w, --workflow NAME    Workflow name or filename to pick the latest run.
   -b, --branch BRANCH    Branch to filter when selecting a run (default: main).
   -i, --interval SECONDS Polling interval in seconds (default: 8).
+  -L, --failure-logs     Print logs for any job that does not finish successfully.
   -h, --help             Show this help message.
 
 Either --run or --workflow must be supplied.
@@ -35,6 +36,7 @@ RUN_ID=""
 WORKFLOW=""
 BRANCH="main"
 INTERVAL="8"
+PRINT_FAILURE_LOGS=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +55,10 @@ while [[ $# -gt 0 ]]; do
     -i|--interval)
       INTERVAL="${2:-}"
       shift 2
+      ;;
+    -L|--failure-logs)
+      PRINT_FAILURE_LOGS=true
+      shift
       ;;
     -h|--help)
       usage
@@ -142,6 +148,18 @@ while true; do
       echo "Run $RUN_ID succeeded." >&2
       exit 0
     else
+      if [[ "$PRINT_FAILURE_LOGS" == true ]]; then
+        echo "Collecting logs for failed jobs..." >&2
+        jq -r '.jobs[]? | select((.conclusion // "") != "success") | "\(.databaseId)\t\(.name // "(no name)")"' <<<"$json" \
+          | while IFS=$'\t' read -r job_id job_name; do
+              [[ -z "$job_id" ]] && continue
+              echo "--- Logs for job: $job_name (ID $job_id) ---" >&2
+              if ! gh run view "$RUN_ID" --log --job "$job_id" 2>&1; then
+                echo "(failed to fetch logs for job $job_id)" >&2
+              fi
+              echo "--- End logs for job: $job_name ---" >&2
+            done
+      fi
       echo "Run $RUN_ID finished with conclusion '$conclusion'." >&2
       exit 1
     fi

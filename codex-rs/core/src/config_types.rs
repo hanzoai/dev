@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use schemars::JsonSchema;
 use wildmatch::WildMatchPattern;
 
 use shlex::split as shlex_split;
@@ -155,6 +156,26 @@ pub struct SubagentCommandConfig {
 pub struct SubagentsToml {
     #[serde(default)]
     pub commands: Vec<SubagentCommandConfig>,
+}
+
+/// MCP tool identifiers that the client exposes to the agent.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientTools {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_permission: Option<McpToolId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_text_file: Option<McpToolId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_text_file: Option<McpToolId>,
+}
+
+/// Identifier for a client-hosted MCP tool.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolId {
+    pub mcp_server: String,
+    pub tool_name: String,
 }
 
 /// Configuration for external agent models
