@@ -15,6 +15,7 @@ use std::time::Instant;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 
+use codex_common::elapsed::format_duration;
 use codex_common::model_presets::ModelPreset;
 use codex_common::model_presets::builtin_model_presets;
 use codex_core::ConversationManager;
@@ -6175,12 +6176,21 @@ fn update_rate_limit_resets(
         );
     }
 
+    pub(crate) fn terminal_send_input(&mut self, id: u64, data: Vec<u8>) {
+        if data.is_empty() {
+            return;
+        }
+        self.app_event_tx
+            .send(AppEvent::TerminalSendInput { id, data });
+    }
+
     pub(crate) fn terminal_mark_running(&mut self, id: u64) {
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
                 overlay.running = true;
                 overlay.exit_code = None;
                 overlay.duration = None;
+                overlay.start_time = Some(Instant::now());
                 self.request_redraw();
             }
         }
@@ -6345,6 +6355,9 @@ fn update_rate_limit_resets(
     }
 
     pub(crate) fn terminal_handle_pending_key(&mut self, key_event: KeyEvent) -> bool {
+        if self.terminal_is_running() {
+            return false;
+        }
         if !self.terminal_has_pending_command() {
             return false;
         }
@@ -14363,7 +14376,112 @@ impl WidgetRef for &ChatWidget<'_> {
                     header_area
                 };
 
-                // Header intentionally left blank to avoid duplicating status text.
+                if header_height > 0 {
+                    fill_rect(buf, header_area, Some(' '), inner_bg);
+                    let width_limit = header_area.width as usize;
+                    let mut header_spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+                    let mut consumed_width: usize = 0;
+
+                    if overlay.running {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        let frame = crate::spinner::frame_at_time(
+                            crate::spinner::current_spinner(),
+                            now_ms,
+                        );
+                        if !frame.is_empty() {
+                            consumed_width += frame.chars().count();
+                            header_spans.push(ratatui::text::Span::styled(
+                                frame,
+                                Style::default().fg(crate::colors::spinner()),
+                            ));
+                            header_spans.push(ratatui::text::Span::raw(" "));
+                            consumed_width = consumed_width.saturating_add(1);
+                        }
+
+                        let status_text = overlay
+                            .start_time
+                            .map(|start| format!("Running… ({})", format_duration(start.elapsed())))
+                            .unwrap_or_else(|| "Running…".to_string());
+                        consumed_width = consumed_width
+                            .saturating_add(UnicodeWidthStr::width(status_text.as_str()));
+                        header_spans.push(ratatui::text::Span::styled(
+                            status_text,
+                            Style::default().fg(crate::colors::text_dim()),
+                        ));
+
+                        let interval = crate::spinner::current_spinner().interval_ms.max(50);
+                        self.app_event_tx
+                            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+                    } else {
+                        let (icon, color, status_text) = match overlay.exit_code {
+                            Some(0) => (
+                                "✔",
+                                crate::colors::success(),
+                                overlay
+                                    .duration
+                                    .map(|d| format!("Completed in {}", format_duration(d)))
+                                    .unwrap_or_else(|| "Completed".to_string()),
+                            ),
+                            Some(code) => (
+                                "✖",
+                                crate::colors::error(),
+                                overlay
+                                    .duration
+                                    .map(|d| format!("Exit {code} in {}", format_duration(d)))
+                                    .unwrap_or_else(|| format!("Exit {code}")),
+                            ),
+                            None => (
+                                "⚠",
+                                crate::colors::warning(),
+                                overlay
+                                    .duration
+                                    .map(|d| format!("Stopped after {}", format_duration(d)))
+                                    .unwrap_or_else(|| "Stopped".to_string()),
+                            ),
+                        };
+
+                        header_spans.push(ratatui::text::Span::styled(
+                            format!("{icon} "),
+                            Style::default().fg(color),
+                        ));
+                        consumed_width = consumed_width.saturating_add(icon.chars().count() + 1);
+
+                        consumed_width = consumed_width
+                            .saturating_add(UnicodeWidthStr::width(status_text.as_str()));
+                        header_spans.push(ratatui::text::Span::styled(
+                            status_text,
+                            Style::default().fg(crate::colors::text_dim()),
+                        ));
+                    }
+
+                    if !overlay.command_display.is_empty() && width_limit > consumed_width + 5 {
+                        let remaining = width_limit.saturating_sub(consumed_width + 5);
+                        if remaining > 0 {
+                            let truncated = ChatWidget::truncate_with_ellipsis(
+                                &overlay.command_display,
+                                remaining,
+                            );
+                            if !truncated.is_empty() {
+                                header_spans.push(ratatui::text::Span::styled(
+                                    "  •  ",
+                                    Style::default().fg(crate::colors::text_dim()),
+                                ));
+                                header_spans.push(ratatui::text::Span::styled(
+                                    truncated,
+                                    Style::default().fg(crate::colors::text()),
+                                ));
+                            }
+                        }
+                    }
+
+                    let header_line = ratatui::text::Line::from(header_spans);
+                    Paragraph::new(RtText::from(vec![header_line]))
+                        .wrap(ratatui::widgets::Wrap { trim: true })
+                        .render(header_area, buf);
+                }
 
                 let mut body_space = content
                     .height
@@ -15177,6 +15295,7 @@ struct TerminalOverlay {
     running: bool,
     exit_code: Option<i32>,
     duration: Option<Duration>,
+    start_time: Option<Instant>,
     truncated: bool,
     pending_utf8: Vec<u8>,
     pending_line: String,
@@ -15252,6 +15371,7 @@ impl TerminalOverlay {
             running: true,
             exit_code: None,
             duration: None,
+            start_time: None,
             truncated: false,
             pending_utf8: Vec::new(),
             pending_line: String::new(),
@@ -15308,6 +15428,7 @@ impl TerminalOverlay {
         self.running = true;
         self.exit_code = None;
         self.duration = None;
+        self.start_time = None;
         self.truncated = false;
         self.pending_utf8.clear();
         self.pending_line.clear();
@@ -15513,6 +15634,7 @@ impl TerminalOverlay {
         self.running = false;
         self.exit_code = exit_code;
         self.duration = Some(duration);
+        self.start_time = None;
     }
 
     fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {

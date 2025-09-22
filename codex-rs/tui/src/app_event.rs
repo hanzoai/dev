@@ -264,6 +264,10 @@ pub(crate) enum AppEvent {
         command_display: String,
         controller: Option<TerminalRunController>,
     },
+    TerminalSendInput {
+        id: u64,
+        data: Vec<u8>,
+    },
     TerminalRerun { id: u64 },
     TerminalUpdateMessage { id: u64, message: String },
     TerminalForceClose { id: u64 },
