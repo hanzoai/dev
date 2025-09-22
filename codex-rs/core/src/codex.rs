@@ -20,7 +20,7 @@ use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_apply_patch::StdFileSystem;
 use codex_browser::BrowserConfig as CodexBrowserConfig;
 use codex_browser::BrowserManager;
-use agent_client_protocol::ClientTools;
+use crate::config_types::ClientTools;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
 use codex_protocol::protocol::TurnAbortReason;

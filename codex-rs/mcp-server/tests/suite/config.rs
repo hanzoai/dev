@@ -1,16 +1,11 @@
-use std::collections::HashMap;
 use std::path::Path;
 
-use codex_core::protocol::AskForApproval;
-use codex_protocol::config_types::ConfigProfile;
-use codex_protocol::config_types::ReasoningEffort;
-use codex_protocol::config_types::SandboxMode;
-use codex_protocol::mcp_protocol::GetConfigTomlResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::to_response;
 use mcp_types::JSONRPCResponse;
 use mcp_types::RequestId;
 use pretty_assertions::assert_eq;
+use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
@@ -60,21 +55,20 @@ async fn get_config_toml_returns_subset() {
     .expect("getConfigToml timeout")
     .expect("getConfigToml response");
 
-    let config: GetConfigTomlResponse = to_response(resp).expect("deserialize config");
-    let expected = GetConfigTomlResponse {
-        approval_policy: Some(AskForApproval::OnRequest),
-        sandbox_mode: Some(SandboxMode::WorkspaceWrite),
-        model_reasoning_effort: Some(ReasoningEffort::High),
-        profile: Some("test".to_string()),
-        profiles: Some(HashMap::from([(
-            "test".into(),
-            ConfigProfile {
-                model: Some("gpt-4o".into()),
-                approval_policy: Some(AskForApproval::OnRequest),
-                model_reasoning_effort: Some(ReasoningEffort::High),
-            },
-        )])),
-    };
+    let config: serde_json::Value = to_response(resp).expect("deserialize config");
+    let expected = json!({
+        "approval_policy": "on-request",
+        "sandbox_mode": "workspace-write",
+        "model_reasoning_effort": "high",
+        "profile": "test",
+        "profiles": {
+            "test": {
+                "model": "gpt-4o",
+                "approval_policy": "on-request",
+                "model_reasoning_effort": "high"
+            }
+        }
+    });
 
     assert_eq!(expected, config);
 }
