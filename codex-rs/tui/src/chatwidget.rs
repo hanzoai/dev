@@ -5227,12 +5227,17 @@ impl ChatWidget<'_> {
         } else {
             None
         };
+        let context_window = self.config.model_context_window;
+        let context_tokens_used = context_window.map(|_| self.last_token_usage.tokens_in_context_window());
 
         RateLimitResetInfo {
             primary_last_reset: self.rate_limit_last_primary_reset_at,
             weekly_last_reset: self.rate_limit_last_weekly_reset_at,
             session_tokens_used,
             auto_compact_limit,
+            overflow_auto_compact: true,
+            context_window,
+            context_tokens_used,
         }
     }
 
