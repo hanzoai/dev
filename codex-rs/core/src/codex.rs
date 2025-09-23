@@ -7198,6 +7198,21 @@ async fn handle_container_exec_with_params(
         };
     }
 
+    if let Some(cat_guard) = detect_cat_write(&params.command) {
+        let guidance = guidance_for_cat_write(&cat_guard);
+        sess
+            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .await;
+
+        return ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: guidance,
+                success: None,
+            },
+        };
+    }
+
     if let Some(python_guard) = detect_python_write(&params.command) {
         let guidance = guidance_for_python_write(&python_guard);
         sess
@@ -9388,6 +9403,96 @@ fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct CatWriteSuggestion {
+    label: &'static str,
+    original_value: String,
+}
+
+fn detect_cat_write(argv: &[String]) -> Option<CatWriteSuggestion> {
+    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+        if script_contains_cat_write(&script) {
+            return Some(CatWriteSuggestion {
+                label: "original_script",
+                original_value: script,
+            });
+        }
+    }
+
+    None
+}
+
+fn script_contains_cat_write(script: &str) -> bool {
+    script
+        .lines()
+        .any(|line| line_contains_cat_heredoc_write(line))
+}
+
+fn line_contains_cat_heredoc_write(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return false;
+    }
+
+    let lower = line.to_ascii_lowercase();
+    if !lower.contains("<<") || !lower.contains('>') {
+        return false;
+    }
+
+    let bytes = lower.as_bytes();
+    let mut idx = 0;
+    while idx + 3 <= bytes.len() {
+        if bytes[idx..].starts_with(b"cat") {
+            if idx > 0 {
+                let prev = bytes[idx - 1];
+                if prev.is_ascii_alphanumeric() || prev == b'_' {
+                    idx += 1;
+                    continue;
+                }
+            }
+
+            let after = &lower[idx + 3..];
+            let after_trimmed = after.trim_start();
+            if after_trimmed.starts_with("<<") {
+                let heredoc_offset_in_after = after.find("<<").unwrap_or(0);
+                let heredoc_offset = idx + 3 + heredoc_offset_in_after;
+                let redirect_section = &lower[heredoc_offset..];
+                if let Some(rel_redirect_idx) = redirect_section.find('>') {
+                    let redirect_idx = heredoc_offset + rel_redirect_idx;
+                    if redirect_idx > heredoc_offset {
+                        let redirect_slice = &lower[redirect_idx..];
+                        if redirect_slice.starts_with(">&") {
+                            idx += 1;
+                            continue;
+                        }
+                        let after_gt = redirect_slice[1..].trim_start();
+                        if after_gt.starts_with('&') {
+                            idx += 1;
+                            continue;
+                        }
+                        if after_gt.starts_with('(') {
+                            idx += 1;
+                            continue;
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        idx += 1;
+    }
+
+    false
+}
+
+fn guidance_for_cat_write(suggestion: &CatWriteSuggestion) -> String {
+    format!(
+        "Blocked cat heredoc that writes files directly. Use apply_patch to edit files so changes stay reviewable.\n\n{}: {}",
+        suggestion.label,
+        suggestion.original_value
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PythonWriteSuggestion {
     label: &'static str,
     original_value: String,
@@ -9691,6 +9796,43 @@ mod command_guard_detection_tests {
         ];
 
         assert!(detect_redundant_cd(&argv, &cwd).is_none());
+    }
+
+    #[test]
+    fn detects_cat_heredoc_write() {
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cat <<'EOF' > codex-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
+        ];
+
+        let suggestion = detect_cat_write(&argv).expect("should flag cat write");
+        assert_eq!(suggestion.label, "original_script");
+        assert!(suggestion
+            .original_value
+            .contains("cat <<'EOF' > codex-rs/git-tooling/Cargo.toml"));
+    }
+
+    #[test]
+    fn allows_cat_heredoc_without_redirect() {
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cat <<'EOF'\nhello\nEOF".to_string(),
+        ];
+
+        assert!(detect_cat_write(&argv).is_none());
+    }
+
+    #[test]
+    fn allows_cat_redirect_to_fd() {
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cat <<'EOF' >&2\nwarn\nEOF".to_string(),
+        ];
+
+        assert!(detect_cat_write(&argv).is_none());
     }
 
     #[test]
