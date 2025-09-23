@@ -2246,10 +2246,12 @@ impl ChatWidget<'_> {
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
-            if let Some(upgrade_cell) =
-                history_cell::new_upgrade_prelude(w.latest_upgrade_version.as_deref())
-            {
-                w.history_push_top_next_req(upgrade_cell);
+            if !w.config.auto_upgrade_enabled {
+                if let Some(upgrade_cell) =
+                    history_cell::new_upgrade_prelude(w.latest_upgrade_version.as_deref())
+                {
+                    w.history_push_top_next_req(upgrade_cell);
+                }
             }
             w.history_push_top_next_req(history_cell::new_popular_commands_notice(
                 false,
@@ -2265,6 +2267,7 @@ impl ChatWidget<'_> {
         } else {
             w.welcome_shown = true;
         }
+        w.maybe_start_auto_upgrade_task();
         w
     }
 
@@ -2458,6 +2461,7 @@ impl ChatWidget<'_> {
         w.set_standard_terminal_mode(!config.tui.alternate_screen);
         // Welcome at top of first request for forked session too
         w.history_push_top_next_req(history_cell::new_animated_welcome());
+        w.maybe_start_auto_upgrade_task();
         w
     }
 
@@ -5549,6 +5553,13 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn on_auto_upgrade_completed(&mut self, version: String) {
+        self.latest_upgrade_version = None;
+        self.bottom_pane
+            .flash_footer_notice(format!("Upgraded to version {version}"));
+        self.request_redraw();
+    }
+
     pub(crate) fn on_rate_limit_refresh_failed(&mut self, message: String) {
         if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
             if self.rate_limit_snapshot.is_none() {
@@ -7877,6 +7888,29 @@ fn update_rate_limit_resets(
     pub(crate) fn debug_notice(&mut self, text: String) {
         self.bottom_pane.flash_footer_notice(text);
         self.request_redraw();
+    }
+
+    fn maybe_start_auto_upgrade_task(&self) {
+        if !crate::updates::auto_upgrade_runtime_enabled() {
+            return;
+        }
+        if !self.config.auto_upgrade_enabled {
+            return;
+        }
+
+        let cfg = self.config.clone();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            match crate::updates::auto_upgrade_if_enabled(&cfg).await {
+                Ok(Some(version)) => {
+                    tx.send(AppEvent::AutoUpgradeCompleted { version });
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::warn!("auto-upgrade: background task failed: {err:?}");
+                }
+            }
+        });
     }
 
     pub(crate) fn set_theme(&mut self, new_theme: codex_core::config_types::ThemeName) {

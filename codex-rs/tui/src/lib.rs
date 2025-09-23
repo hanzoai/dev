@@ -182,14 +182,7 @@ pub async fn run_main(
         }
     };
 
-    let startup_footer_notice = if crate::updates::auto_upgrade_runtime_enabled() {
-        crate::updates::auto_upgrade_if_enabled(&config)
-            .await
-            .unwrap_or(None)
-            .map(|version| format!("Upgraded to {version}"))
-    } else {
-        None
-    };
+    let startup_footer_notice = None;
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
