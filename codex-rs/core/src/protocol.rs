@@ -49,6 +49,14 @@ pub struct Submission {
     pub op: Op,
 }
 
+/// High-level toggles for validation checks.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationGroup {
+    Functional,
+    Stylistic,
+}
+
 /// Submission operation
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -144,14 +152,15 @@ pub enum Op {
         decision: ReviewDecision,
     },
 
-    /// Update the validation harness toggle in the running session.
-    UpdateValidationPatchHarness {
-        enabled: bool,
-    },
-
     /// Update a specific validation tool toggle for the session.
     UpdateValidationTool {
         name: String,
+        enable: bool,
+    },
+
+    /// Update a validation group toggle for the session.
+    UpdateValidationGroup {
+        group: ValidationGroup,
         enable: bool,
     },
 

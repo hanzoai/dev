@@ -126,7 +126,7 @@ use crate::app_event::{
 };
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::validation_settings_view;
-use crate::bottom_pane::validation_settings_view::ToolStatus;
+use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
@@ -159,13 +159,15 @@ use codex_core::config::find_codex_home;
 use codex_core::config::resolve_codex_path_for_read;
 use codex_core::config::set_github_actionlint_on_patch;
 use codex_core::config::set_github_check_on_push;
-use codex_core::config::set_validation_patch_harness;
+use codex_core::config::set_validation_group_enabled;
 use codex_core::config::set_validation_tool_enabled;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
+use codex_core::config_types::{validation_tool_category, ValidationCategory};
 use codex_core::protocol::RateLimitSnapshotEvent;
+use codex_core::protocol::ValidationGroup;
 use crate::rate_limits_view::RateLimitResetInfo;
 use codex_core::review_format::format_review_findings_block;
 use chrono::{DateTime, Local, Utc};
@@ -10258,11 +10260,32 @@ fn update_rate_limit_resets(
             "cargo-check" => Some(&mut tools.cargo_check),
             "shfmt" => Some(&mut tools.shfmt),
             "prettier" => Some(&mut tools.prettier),
+            "tsc" => Some(&mut tools.tsc),
+            "eslint" => Some(&mut tools.eslint),
+            "phpstan" => Some(&mut tools.phpstan),
+            "psalm" => Some(&mut tools.psalm),
+            "mypy" => Some(&mut tools.mypy),
+            "pyright" => Some(&mut tools.pyright),
+            "golangci-lint" => Some(&mut tools.golangci_lint),
             _ => None,
         }
     }
 
-    fn validation_tool_enabled(&self, name: &str) -> bool {
+    fn validation_group_label(group: ValidationGroup) -> &'static str {
+        match group {
+            ValidationGroup::Functional => "Functional checks",
+            ValidationGroup::Stylistic => "Stylistic checks",
+        }
+    }
+
+    fn validation_group_enabled(&self, group: ValidationGroup) -> bool {
+        match group {
+            ValidationGroup::Functional => self.config.validation.groups.functional,
+            ValidationGroup::Stylistic => self.config.validation.groups.stylistic,
+        }
+    }
+
+    fn validation_tool_requested(&self, name: &str) -> bool {
         let tools = &self.config.validation.tools;
         match name {
             "actionlint" => self.config.github.actionlint_on_patch,
@@ -10273,53 +10296,68 @@ fn update_rate_limit_resets(
             "cargo-check" => tools.cargo_check.unwrap_or(true),
             "shfmt" => tools.shfmt.unwrap_or(true),
             "prettier" => tools.prettier.unwrap_or(true),
+            "tsc" => tools.tsc.unwrap_or(true),
+            "eslint" => tools.eslint.unwrap_or(true),
+            "phpstan" => tools.phpstan.unwrap_or(true),
+            "psalm" => tools.psalm.unwrap_or(true),
+            "mypy" => tools.mypy.unwrap_or(true),
+            "pyright" => tools.pyright.unwrap_or(true),
+            "golangci-lint" => tools.golangci_lint.unwrap_or(true),
             _ => true,
         }
     }
 
-    pub(crate) fn apply_validation_patch_harness(&mut self, enabled: bool) {
-        if self.config.validation.patch_harness == enabled {
-            self.history_push(history_cell::new_background_event(format!(
-                "ℹ️ Validate New Code already {}",
-                if enabled { "enabled" } else { "disabled" }
-            )));
+    fn validation_tool_enabled(&self, name: &str) -> bool {
+        let requested = self.validation_tool_requested(name);
+        let category = validation_tool_category(name);
+        let group_enabled = match category {
+            ValidationCategory::Functional => self.config.validation.groups.functional,
+            ValidationCategory::Stylistic => self.config.validation.groups.stylistic,
+        };
+        requested && group_enabled
+    }
+
+    fn apply_validation_group_toggle(&mut self, group: ValidationGroup, enable: bool) {
+        if self.validation_group_enabled(group) == enable {
             return;
         }
 
-        self.config.validation.patch_harness = enabled;
-        if let Err(err) = self
-            .codex_op_tx
-            .send(Op::UpdateValidationPatchHarness { enabled })
-        {
-            tracing::warn!("failed to send validation patch harness update: {err}");
+        match group {
+            ValidationGroup::Functional => self.config.validation.groups.functional = enable,
+            ValidationGroup::Stylistic => self.config.validation.groups.stylistic = enable,
         }
 
-        let persist_result = match find_codex_home() {
-            Ok(home) => set_validation_patch_harness(&home, enabled)
-                .map_err(|e| e.to_string()),
+        if let Err(err) = self
+            .codex_op_tx
+            .send(Op::UpdateValidationGroup { group, enable })
+        {
+            tracing::warn!("failed to send validation group update: {err}");
+        }
+
+        let result = match find_codex_home() {
+            Ok(home) => {
+                let key = match group {
+                    ValidationGroup::Functional => "functional",
+                    ValidationGroup::Stylistic => "stylistic",
+                };
+                set_validation_group_enabled(&home, key, enable).map_err(|e| e.to_string())
+            }
             Err(err) => Err(err.to_string()),
         };
 
-        match persist_result {
-            Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                "✅ Validate New Code {}",
-                if enabled { "enabled" } else { "disabled" }
-            ))),
-            Err(err) => self.history_push(history_cell::new_background_event(format!(
-                "⚠️ Validate New Code {} (persist failed: {err})",
-                if enabled { "enabled" } else { "disabled" }
-            ))),
+        let label = Self::validation_group_label(group);
+        if let Err(err) = result {
+            self.history_push(history_cell::new_background_event(format!(
+                "⚠️ {} {} (persist failed: {err})",
+                label,
+                if enable { "enabled" } else { "disabled" }
+            )));
         }
     }
 
     fn apply_validation_tool_toggle(&mut self, name: &str, enable: bool) {
         if name == "actionlint" {
             if self.config.github.actionlint_on_patch == enable {
-                self.history_push(history_cell::new_background_event(format!(
-                    "ℹ️ {} already {}",
-                    name,
-                    if enable { "on" } else { "off" }
-                )));
                 return;
             }
             self.config.github.actionlint_on_patch = enable;
@@ -10334,17 +10372,12 @@ fn update_rate_limit_resets(
                     .map_err(|e| e.to_string()),
                 Err(err) => Err(err.to_string()),
             };
-            match persist_result {
-                Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                    "✅ {}: {}",
-                    name,
-                    if enable { "enabled" } else { "disabled" }
-                ))),
-                Err(err) => self.history_push(history_cell::new_background_event(format!(
+            if let Err(err) = persist_result {
+                self.history_push(history_cell::new_background_event(format!(
                     "⚠️ {}: {} (persist failed: {err})",
                     name,
                     if enable { "enabled" } else { "disabled" }
-                ))),
+                )));
             }
             return;
         }
@@ -10357,11 +10390,6 @@ fn update_rate_limit_resets(
         };
 
         if flag.unwrap_or(true) == enable {
-            self.history_push(history_cell::new_background_event(format!(
-                "ℹ️ {} already {}",
-                name,
-                if enable { "enabled" } else { "disabled" }
-            )));
             return;
         }
 
@@ -10377,37 +10405,40 @@ fn update_rate_limit_resets(
                 .map_err(|e| e.to_string()),
             Err(err) => Err(err.to_string()),
         };
-        match persist_result {
-                Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                    "✅ {}: {}",
-                    name,
-                    if enable { "enabled" } else { "disabled" }
-                ))),
-                Err(err) => self.history_push(history_cell::new_background_event(format!(
-                    "⚠️ {}: {} (persist failed: {err})",
-                    name,
-                    if enable { "enabled" } else { "disabled" }
-                ))),
+        if let Err(err) = persist_result {
+            self.history_push(history_cell::new_background_event(format!(
+                "⚠️ {}: {} (persist failed: {err})",
+                name,
+                if enable { "enabled" } else { "disabled" }
+            )));
         }
     }
 
     fn build_validation_status_message(&self) -> String {
         let mut lines = Vec::new();
-        lines.push(format!(
-            "Validate New Code: {}",
-            if self.config.validation.patch_harness { "enabled" } else { "disabled" }
-        ));
+        lines.push("Validation groups:".to_string());
+        for group in [ValidationGroup::Functional, ValidationGroup::Stylistic] {
+            let enabled = self.validation_group_enabled(group);
+            lines.push(format!(
+                "• {} — {}",
+                Self::validation_group_label(group),
+                if enabled { "enabled" } else { "disabled" }
+            ));
+        }
         lines.push("".to_string());
         lines.push("Tools:".to_string());
         for status in validation_settings_view::detect_tools() {
-            let enabled = self.validation_tool_enabled(status.name);
-            let suffix = if status.installed { "" } else { " (not installed)" };
-            lines.push(format!(
-                "• {} — {}{}",
-                status.name,
-                if enabled { "enabled" } else { "disabled" },
-                suffix
-            ));
+            let requested = self.validation_tool_requested(status.name);
+            let effective = self.validation_tool_enabled(status.name);
+            let mut state = if requested {
+                if effective { "enabled".to_string() } else { "disabled (group off)".to_string() }
+            } else {
+                "disabled".to_string()
+            };
+            if !status.installed {
+                state.push_str(" (not installed)");
+            }
+            lines.push(format!("• {} — {}", status.name, state));
         }
         lines.join("\n")
     }
@@ -10416,18 +10447,44 @@ fn update_rate_limit_resets(
         self.apply_validation_tool_toggle(name, enable);
     }
 
+    pub(crate) fn toggle_validation_group(&mut self, group: ValidationGroup, enable: bool) {
+        self.apply_validation_group_toggle(group, enable);
+    }
+
     pub(crate) fn handle_validation_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
-            let tools: Vec<(ToolStatus, bool)> = validation_settings_view::detect_tools()
+            let groups = vec![
+                (
+                    GroupStatus {
+                        group: ValidationGroup::Functional,
+                        name: "Functional checks",
+                    },
+                    self.config.validation.groups.functional,
+                ),
+                (
+                    GroupStatus {
+                        group: ValidationGroup::Stylistic,
+                        name: "Stylistic checks",
+                    },
+                    self.config.validation.groups.stylistic,
+                ),
+            ];
+
+            let tool_rows: Vec<ToolRow> = validation_settings_view::detect_tools()
                 .into_iter()
                 .map(|status| {
-                    let enabled = self.validation_tool_enabled(status.name);
-                    (status, enabled)
+                    let group = match status.category {
+                        ValidationCategory::Functional => ValidationGroup::Functional,
+                        ValidationCategory::Stylistic => ValidationGroup::Stylistic,
+                    };
+                    let requested = self.validation_tool_requested(status.name);
+                    let group_enabled = self.validation_group_enabled(group);
+                    ToolRow { status, enabled: requested, group_enabled }
                 })
                 .collect();
-            self.bottom_pane
-                .show_validation_settings(self.config.validation.patch_harness, tools);
+
+            self.bottom_pane.show_validation_settings(groups, tool_rows);
             return;
         }
 
@@ -10437,12 +10494,44 @@ fn update_rate_limit_resets(
                 let message = self.build_validation_status_message();
                 self.history_push(history_cell::new_background_event(message));
             }
-            "on" => self.apply_validation_patch_harness(true),
-            "off" => self.apply_validation_patch_harness(false),
+            "on" => {
+                if !self.validation_group_enabled(ValidationGroup::Functional) {
+                    self.apply_validation_group_toggle(ValidationGroup::Functional, true);
+                }
+            }
+            "off" => {
+                if self.validation_group_enabled(ValidationGroup::Functional) {
+                    self.apply_validation_group_toggle(ValidationGroup::Functional, false);
+                }
+                if self.validation_group_enabled(ValidationGroup::Stylistic) {
+                    self.apply_validation_group_toggle(ValidationGroup::Stylistic, false);
+                }
+            }
+            group @ ("functional" | "stylistic") => {
+                let Some(state) = parts.next() else {
+                    self.history_push(history_cell::new_background_event(
+                        "Usage: /validation <tool|group> on|off".to_string(),
+                    ));
+                    return;
+                };
+                let group = if group == "functional" {
+                    ValidationGroup::Functional
+                } else {
+                    ValidationGroup::Stylistic
+                };
+                match state {
+                    "on" | "enable" => self.apply_validation_group_toggle(group, true),
+                    "off" | "disable" => self.apply_validation_group_toggle(group, false),
+                    _ => self.history_push(history_cell::new_background_event(format!(
+                        "⚠️ Unknown validation command '{}'. Use on|off.",
+                        state
+                    ))),
+                }
+            }
             tool => {
                 let Some(state) = parts.next() else {
                     self.history_push(history_cell::new_background_event(
-                        "Usage: /validation <tool> on|off".to_string(),
+                        "Usage: /validation <tool|group> on|off".to_string(),
                     ));
                     return;
                 };
