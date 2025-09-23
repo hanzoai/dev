@@ -45,7 +45,7 @@ use crate::model_family::ModelFamily;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::openai_tools::create_tools_json_for_responses_api;
-use codex_protocol::protocol::RateLimitSnapshotEvent;
+use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
 use crate::util::backoff;
 use std::sync::Arc;
