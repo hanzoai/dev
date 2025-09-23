@@ -442,6 +442,16 @@ impl LoginAccountsState {
                     Span::styled(account.label.clone(), label_style),
                 ];
 
+                if account.is_active {
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        "(current)",
+                        Style::default()
+                            .fg(crate::colors::success())
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+
                 if let Some(detail) = &account.detail {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
