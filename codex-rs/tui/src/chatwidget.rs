@@ -30,8 +30,6 @@ use codex_login::AuthManager;
 use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
 
-#[cfg(not(debug_assertions))]
-use crate::updates::{resolve_upgrade_resolution, UpgradeResolution, CODE_RELEASE_URL};
 
 mod diff_handlers;
 mod agent_install;
@@ -137,7 +135,6 @@ use crate::bottom_pane::LoginAccountsState;
 use crate::bottom_pane::LoginAccountsView;
 use crate::bottom_pane::LoginAddAccountState;
 use crate::bottom_pane::LoginAddAccountView;
-#[cfg(not(debug_assertions))]
 use crate::bottom_pane::UpdateSharedState;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
@@ -377,7 +374,6 @@ pub(crate) struct ChatWidget<'a> {
     // Persisted selection for Agents overview
     agents_overview_selected_index: usize,
 
-    #[cfg(not(debug_assertions))]
     pending_upgrade_notice: Option<(u64, String)>,
 
     // Cached visible rows for the diff overlay body to clamp scrolling (kept within diffs)
@@ -2189,7 +2185,6 @@ impl ChatWidget<'_> {
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
-            #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
@@ -2251,6 +2246,11 @@ impl ChatWidget<'_> {
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
             let connecting_mcp = !w.config.mcp_servers.is_empty();
+            if let Some(upgrade_cell) =
+                history_cell::new_upgrade_prelude(w.latest_upgrade_version.as_deref())
+            {
+                w.history_push_top_next_req(upgrade_cell);
+            }
             w.history_push_top_next_req(history_cell::new_popular_commands_notice(
                 false,
                 w.latest_upgrade_version.as_deref(),
@@ -2404,7 +2404,6 @@ impl ChatWidget<'_> {
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
-            #[cfg(not(debug_assertions))]
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
@@ -5656,15 +5655,16 @@ fn update_rate_limit_resets(
         }
     }
 
-    #[cfg(not(debug_assertions))]
     pub(crate) fn handle_update_command(&mut self) {
-        self.show_update_settings_ui();
-    }
+        if crate::updates::upgrade_ui_enabled() {
+            self.show_update_settings_ui();
+            return;
+        }
 
-    #[cfg(debug_assertions)]
-    pub(crate) fn handle_update_command(&mut self) {
-        self.app_event_tx
-            .send_background_event("`/update` — updates are disabled in debug builds.".to_string());
+        self.app_event_tx.send_background_event(
+            "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
+                to_string(),
+        );
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -5931,9 +5931,16 @@ fn update_rate_limit_resets(
         self.bottom_pane.set_using_chatgpt_auth(using);
     }
 
-    #[cfg(not(debug_assertions))]
     fn show_update_settings_ui(&mut self) {
         use crate::bottom_pane::UpdateSettingsView;
+
+        if !crate::updates::upgrade_ui_enabled() {
+            self.app_event_tx.send_background_event(
+                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
+                    to_string(),
+            );
+            return;
+        }
 
         let shared_state = std::sync::Arc::new(std::sync::Mutex::new(UpdateSharedState {
             checking: true,
@@ -5941,14 +5948,16 @@ fn update_rate_limit_resets(
             error: None,
         }));
 
-        let resolution = resolve_upgrade_resolution();
+        let resolution = crate::updates::resolve_upgrade_resolution();
         let (command, display, instructions) = match &resolution {
-            UpgradeResolution::Command { command, display } => (
+            crate::updates::UpgradeResolution::Command { command, display } => (
                 Some(command.clone()),
                 Some(display.clone()),
                 None,
             ),
-            UpgradeResolution::Manual { instructions } => (None, None, Some(instructions.clone())),
+            crate::updates::UpgradeResolution::Manual { instructions } => {
+                (None, None, Some(instructions.clone()))
+            }
         };
 
         let view = UpdateSettingsView::new(
@@ -6351,13 +6360,21 @@ fn update_rate_limit_resets(
         out
     }
 
-    #[cfg(not(debug_assertions))]
     pub(crate) fn launch_update_command(
         &mut self,
         command: Vec<String>,
         display: String,
         latest_version: Option<String>,
     ) -> Option<TerminalLaunch> {
+        if !crate::updates::upgrade_ui_enabled() {
+            self.history_push(history_cell::new_error_event(
+                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
+                    to_string(),
+            ));
+            self.request_redraw();
+            return None;
+        }
+
         self.pending_upgrade_notice = None;
         if command.is_empty() {
             self.history_push(history_cell::new_error_event(
@@ -6676,8 +6693,7 @@ fn update_rate_limit_resets(
             self.request_redraw();
         }
         if success {
-            #[cfg(not(debug_assertions))]
-            {
+            if crate::updates::upgrade_ui_enabled() {
                 if let Some((pending_id, version)) = self.pending_upgrade_notice.take() {
                     if pending_id == id {
                         self.bottom_pane
@@ -7806,8 +7822,16 @@ fn update_rate_limit_resets(
         self.push_background_tail(message);
     }
 
-    #[cfg(not(debug_assertions))]
     pub(crate) fn set_auto_upgrade_enabled(&mut self, enabled: bool) {
+        if !crate::updates::upgrade_ui_enabled() {
+            self.bottom_pane.flash_footer_notice(
+                "Automatic upgrades are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
+                    to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
+
         if self.config.auto_upgrade_enabled == enabled {
             return;
         }
