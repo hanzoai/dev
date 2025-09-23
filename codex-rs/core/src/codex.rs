@@ -862,6 +862,7 @@ pub(crate) struct Session {
     pro_observer_last_trigger_at: Mutex<Option<Instant>>,
     pro_observer_activity_since_last: AtomicU64,
     self_handle: Weak<Session>,
+    active_review: Mutex<Option<ReviewRequest>>,
 }
 
 struct HookGuard<'a> {
@@ -933,6 +934,15 @@ impl Session {
 
     pub(crate) fn client_tools(&self) -> Option<&ClientTools> {
         self.client_tools.as_ref()
+    }
+
+    fn set_active_review(&self, review_request: ReviewRequest) {
+        let mut guard = self.active_review.lock().unwrap();
+        *guard = Some(review_request);
+    }
+
+    fn take_active_review(&self) -> Option<ReviewRequest> {
+        self.active_review.lock().unwrap().take()
     }
 
     fn upgrade_self(&self) -> Option<Arc<Self>> {
@@ -3035,6 +3045,7 @@ async fn submission_loop(
                     pro_observer_last_trigger_at: Mutex::new(None),
                     pro_observer_activity_since_last: AtomicU64::new(0),
                     self_handle: Weak::new(),
+                    active_review: Mutex::new(None),
                 });
                 let weak_handle = Arc::downgrade(&new_session);
                 if let Some(inner) = Arc::get_mut(&mut new_session) {
@@ -3558,6 +3569,7 @@ async fn spawn_review_thread(
     }];
 
     let task = AgentTask::review(Arc::clone(&sess), Arc::clone(&review_turn_context), sub_id.clone(), review_input);
+    sess.set_active_review(review_request.clone());
     sess.set_task(task);
 
     let event = sess.make_event(
@@ -3574,6 +3586,8 @@ async fn exit_review_mode(
 ) {
     let event = session.make_event(&task_sub_id, EventMsg::ExitedReviewMode(review_output.clone()));
     session.send_event(event).await;
+
+    let active_request = session.take_active_review();
 
     let developer_text = match review_output.clone() {
         Some(output) => {
@@ -3619,8 +3633,43 @@ async fn exit_review_mode(
         role: "user".to_string(),
         content: vec![ContentItem::InputText { text: developer_text }],
     };
+    let status = if review_output.is_some() {
+        "complete"
+    } else {
+        "no_output"
+    };
+
+    let mut metadata_payload = json!({
+        "type": "code_review_metadata",
+        "status": status,
+    });
+
+    if let Some(request) = active_request {
+        metadata_payload["prompt"] = json!(request.prompt);
+        metadata_payload["user_facing_hint"] = json!(request.user_facing_hint);
+        if let Some(meta) = request.metadata {
+            metadata_payload["review_context"] = serde_json::to_value(meta).unwrap_or(json!({}));
+        }
+    }
+
+    if let Some(ref output) = review_output {
+        metadata_payload["overall_correctness"] = json!(output.overall_correctness);
+        metadata_payload["overall_confidence_score"] = json!(output.overall_confidence_score);
+        metadata_payload["finding_count"] = json!(output.findings.len());
+        metadata_payload["findings"] = serde_json::to_value(&output.findings).unwrap_or(json!([]));
+    }
+
+    let metadata_text = serde_json::to_string_pretty(&metadata_payload)
+        .unwrap_or_else(|_| metadata_payload.to_string());
+
+    let metadata_message = ResponseItem::Message {
+        id: None,
+        role: "developer".to_string(),
+        content: vec![ContentItem::InputText { text: metadata_text }],
+    };
+
     session
-        .record_conversation_items(&[developer_message])
+        .record_conversation_items(&[developer_message, metadata_message])
         .await;
 }
 

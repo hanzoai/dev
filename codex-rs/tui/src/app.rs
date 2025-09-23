@@ -1703,9 +1703,10 @@ impl App<'_> {
                     prompt,
                     hint,
                     preparation_label,
+                    metadata,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.start_review_with_scope(prompt, hint, preparation_label);
+                        widget.start_review_with_scope(prompt, hint, preparation_label, metadata);
                     }
                 }
                 AppEvent::OpenReviewCustomPrompt => {
