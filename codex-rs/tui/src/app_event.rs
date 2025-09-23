@@ -2,6 +2,7 @@ use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
+use codex_core::protocol::ValidationGroup;
 use codex_core::protocol::ApprovedCommandMatchKind;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
@@ -127,10 +128,10 @@ pub(crate) enum AppEvent {
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
-    /// Update validation harness master toggle
-    UpdateValidationPatchHarness(bool),
     /// Enable/disable a specific validation tool
     UpdateValidationTool { name: String, enable: bool },
+    /// Enable/disable an entire validation group
+    UpdateValidationGroup { group: ValidationGroup, enable: bool },
     /// Start installing a validation tool through the terminal overlay
     RequestValidationToolInstall { name: String, command: String },
 

@@ -534,6 +534,7 @@ use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenCountEvent;
 use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
+use crate::protocol::ValidationGroup;
 use crate::protocol::ReviewOutputEvent;
 use crate::protocol::ReviewRequest;
 use crate::protocol::SandboxPolicy;
@@ -1123,12 +1124,6 @@ impl Session {
         &self.mcp_connection_manager
     }
 
-    pub(crate) fn update_validation_patch_harness(&self, enabled: bool) {
-        if let Ok(mut cfg) = self.validation.write() {
-            cfg.patch_harness = enabled;
-        }
-    }
-
     pub(crate) fn update_validation_tool(&self, name: &str, enable: bool) {
         if name == "actionlint" {
             if let Ok(mut github) = self.github.write() {
@@ -1148,6 +1143,15 @@ impl Session {
                 "shfmt" => tools.shfmt = Some(enable),
                 "prettier" => tools.prettier = Some(enable),
                 _ => {}
+            }
+        }
+    }
+
+    pub(crate) fn update_validation_group(&self, group: ValidationGroup, enable: bool) {
+        if let Ok(mut cfg) = self.validation.write() {
+            match group {
+                ValidationGroup::Functional => cfg.groups.functional = enable,
+                ValidationGroup::Stylistic => cfg.groups.stylistic = enable,
             }
         }
     }
@@ -3251,16 +3255,16 @@ async fn submission_loop(
                     other => sess.notify_approval(&id, other),
                 }
             }
-            Op::UpdateValidationPatchHarness { enabled } => {
+            Op::UpdateValidationTool { name, enable } => {
                 if let Some(sess) = sess.as_ref() {
-                    sess.update_validation_patch_harness(enabled);
+                    sess.update_validation_tool(&name, enable);
                 } else {
                     send_no_session_event(sub.id).await;
                 }
             }
-            Op::UpdateValidationTool { name, enable } => {
+            Op::UpdateValidationGroup { group, enable } => {
                 if let Some(sess) = sess.as_ref() {
-                    sess.update_validation_tool(&name, enable);
+                    sess.update_validation_group(group, enable);
                 } else {
                     send_no_session_event(sub.id).await;
                 }
