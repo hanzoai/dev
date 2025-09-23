@@ -144,7 +144,6 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
-use crate::history_cell::normalize_overwrite_sequences;
 use crate::live_wrap::RowBuilder;
 use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
@@ -154,6 +153,7 @@ use crate::streaming::controller::AppEventHistorySink;
 use crate::util::buffer::fill_rect;
 use crate::user_approval_widget::ApprovalRequest;
 use codex_ansi_escape::ansi_escape_line;
+use vt100::Parser as VtParser;
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
 use codex_core::config::resolve_codex_path_for_read;
@@ -6276,8 +6276,15 @@ fn update_rate_limit_resets(
     pub(crate) fn terminal_append_chunk(&mut self, id: u64, chunk: &[u8], is_stderr: bool) {
         let mut needs_redraw = false;
         let visible = self.terminal.last_visible_rows.get();
+        let visible_cols = self.terminal.last_visible_cols.get();
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
+                if visible > 0 {
+                    overlay.pty_rows = visible;
+                }
+                if visible_cols > 0 {
+                    overlay.pty_cols = visible_cols;
+                }
                 if visible != overlay.visible_rows {
                     overlay.visible_rows = visible;
                     overlay.clamp_scroll();
@@ -6288,6 +6295,24 @@ fn update_rate_limit_resets(
         }
         if needs_redraw {
             self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_dimensions_hint(&self) -> Option<(u16, u16)> {
+        let rows = self.terminal.last_visible_rows.get();
+        let cols = self.terminal.last_visible_cols.get();
+        if rows > 0 && cols > 0 {
+            Some((rows, cols))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn terminal_apply_resize(&mut self, id: u64, rows: u16, cols: u16) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id && overlay.update_pty_dimensions(rows, cols) {
+                self.request_redraw();
+            }
         }
     }
 
@@ -15154,6 +15179,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let content = inner.inner(ratatui::layout::Margin::new(1, 0));
             if content.height == 0 || content.width == 0 {
                 self.terminal.last_visible_rows.set(0);
+                self.terminal.last_visible_cols.set(0);
             } else {
                 let header_height = 1.min(content.height);
                 let footer_height = if content.height >= 2 { 2 } else { 0 };
@@ -15319,25 +15345,36 @@ impl WidgetRef for &ChatWidget<'_> {
                 };
 
                 // Body content
-                self.terminal.last_visible_rows.set(body_area.height);
-                if body_area.height > 0 && body_area.width > 0 {
-                    let mut rows: Vec<RtLine<'static>> = Vec::new();
+                let rows = body_area.height;
+                let cols = body_area.width;
+                let prev_rows = self.terminal.last_visible_rows.replace(rows);
+                let prev_cols = self.terminal.last_visible_cols.replace(cols);
+                if rows > 0 && cols > 0 && (prev_rows != rows || prev_cols != cols) {
+                    self.app_event_tx.send(AppEvent::TerminalResize {
+                        id: overlay.id,
+                        rows,
+                        cols,
+                    });
+                }
+
+                if rows > 0 && cols > 0 {
+                    let mut rendered_rows: Vec<RtLine<'static>> = Vec::new();
                     if overlay.truncated {
-                        rows.push(ratatui::text::Line::from(vec![
+                        rendered_rows.push(ratatui::text::Line::from(vec![
                             ratatui::text::Span::styled(
                                 "… output truncated (showing last 10,000 lines)",
                                 Style::default().fg(crate::colors::text_dim()),
                             ),
                         ]));
                     }
-                    rows.extend(overlay.lines.iter().cloned());
-                    let total = rows.len();
-                    let visible = body_area.height as usize;
+                    rendered_rows.extend(overlay.lines.iter().cloned());
+                    let total = rendered_rows.len();
+                    let visible = rows as usize;
                     if visible > 0 {
                         let max_scroll = total.saturating_sub(visible);
                         let scroll = (overlay.scroll as usize).min(max_scroll);
                         let end = (scroll + visible).min(total);
-                        let window = rows.get(scroll..end).unwrap_or(&[]);
+                        let window = rendered_rows.get(scroll..end).unwrap_or(&[]);
                         Paragraph::new(RtText::from(window.to_vec()))
                             .wrap(ratatui::widgets::Wrap { trim: false })
                             .render(body_area, buf);
@@ -16176,6 +16213,7 @@ struct TerminalState {
     next_id: u64,
     after: Option<TerminalAfter>,
     last_visible_rows: std::cell::Cell<u16>,
+    last_visible_cols: std::cell::Cell<u16>,
 }
 
 impl TerminalState {
@@ -16200,6 +16238,10 @@ impl TerminalState {
 }
 
 const TERMINAL_MAX_LINES: usize = 10_000;
+const TERMINAL_MAX_RAW: usize = 1_048_576;
+const TERMINAL_PTY_ROWS: u16 = 24;
+const TERMINAL_PTY_COLS: u16 = 80;
+const TERMINAL_SCROLLBACK: usize = TERMINAL_MAX_LINES;
 
 struct PendingManualTerminal {
     command: String,
@@ -16210,6 +16252,11 @@ struct TerminalOverlay {
     title: String,
     command_display: String,
     lines: VecDeque<RtLine<'static>>,
+    terminal_lines: Vec<RtLine<'static>>,
+    terminal_plain_lines: Vec<String>,
+    info_lines: Vec<RtLine<'static>>,
+    parser: VtParser,
+    raw_stream: Vec<u8>,
     scroll: u16,
     visible_rows: u16,
     running: bool,
@@ -16217,13 +16264,11 @@ struct TerminalOverlay {
     duration: Option<Duration>,
     start_time: Option<Instant>,
     truncated: bool,
-    pending_utf8: Vec<u8>,
-    pending_line: String,
-    pending_line_is_stderr: bool,
     auto_close_on_success: bool,
     pending_command: Option<PendingCommand>,
     last_info_message: Option<String>,
-    last_info_line_count: usize,
+    pty_rows: u16,
+    pty_cols: u16,
 }
 
 struct PendingCommand {
@@ -16286,6 +16331,11 @@ impl TerminalOverlay {
             title,
             command_display,
             lines: VecDeque::new(),
+            terminal_lines: Vec::new(),
+            terminal_plain_lines: Vec::new(),
+            info_lines: Vec::new(),
+            parser: VtParser::new(TERMINAL_PTY_ROWS, TERMINAL_PTY_COLS, TERMINAL_SCROLLBACK),
+            raw_stream: Vec::new(),
             scroll: 0,
             visible_rows: 0,
             running: true,
@@ -16293,13 +16343,11 @@ impl TerminalOverlay {
             duration: None,
             start_time: None,
             truncated: false,
-            pending_utf8: Vec::new(),
-            pending_line: String::new(),
-            pending_line_is_stderr: false,
             auto_close_on_success,
             pending_command: None,
             last_info_message: None,
-            last_info_line_count: 0,
+            pty_rows: TERMINAL_PTY_ROWS,
+            pty_cols: TERMINAL_PTY_COLS,
         }
     }
 
@@ -16343,6 +16391,21 @@ impl TerminalOverlay {
 
     fn reset_for_rerun(&mut self) {
         self.lines.clear();
+        self.terminal_lines.clear();
+        self.terminal_plain_lines.clear();
+        self.info_lines.clear();
+        let rows = if self.pty_rows == 0 {
+            TERMINAL_PTY_ROWS
+        } else {
+            self.pty_rows
+        };
+        let cols = if self.pty_cols == 0 {
+            TERMINAL_PTY_COLS
+        } else {
+            self.pty_cols
+        };
+        self.parser = VtParser::new(rows, cols, TERMINAL_SCROLLBACK);
+        self.raw_stream.clear();
         self.scroll = 0;
         self.visible_rows = 0;
         self.running = true;
@@ -16350,12 +16413,9 @@ impl TerminalOverlay {
         self.duration = None;
         self.start_time = None;
         self.truncated = false;
-        self.pending_utf8.clear();
-        self.pending_line.clear();
-        self.pending_line_is_stderr = false;
         self.pending_command = None;
         self.last_info_message = None;
-        self.last_info_line_count = 0;
+        self.rebuild_lines();
     }
 
     fn set_pending_command(&mut self, suggestion: String, ack: Sender<TerminalCommandGate>) {
@@ -16399,24 +16459,16 @@ impl TerminalOverlay {
 
         if self.last_info_message.as_deref() == Some(trimmed) {
             if was_following {
-                self.scroll = self.max_scroll();
+                self.auto_follow(true);
             } else {
                 self.clamp_scroll();
             }
             return;
         }
 
-        if self.last_info_line_count > 0 {
-            for _ in 0..self.last_info_line_count {
-                self.lines.pop_back();
-            }
-            self.last_info_line_count = 0;
-        }
-
-        let mut added = 0usize;
-        if !self.last_line_is_blank() {
-            self.push_line(blank_line());
-            added += 1;
+        let mut block: Vec<RtLine<'static>> = Vec::new();
+        if !self.terminal_last_line_is_blank() {
+            block.push(blank_line());
         }
 
         let sanitized = sanitize_for_tui(
@@ -16440,165 +16492,193 @@ impl TerminalOverlay {
                 span.style = span.style.add_modifier(Modifier::BOLD);
             }
         }
-        self.push_line(line);
-        added += 1;
-        self.push_line(blank_line());
-        added += 1;
+        block.push(line);
+        block.push(blank_line());
 
+        self.info_lines = block;
         self.last_info_message = Some(trimmed.to_string());
-        self.last_info_line_count = added;
+        self.rebuild_lines();
 
         if was_following {
-            self.scroll = self.max_scroll();
+            self.auto_follow(true);
         } else {
             self.clamp_scroll();
         }
     }
 
-    fn push_line(&mut self, line: RtLine<'static>) {
-        self.lines.push_back(line);
-        if self.lines.len() > TERMINAL_MAX_LINES {
-            self.lines.pop_front();
-            self.truncated = true;
-        }
-    }
-
-    fn last_line_is_blank(&self) -> bool {
-        self.lines
-            .back()
-            .map(|line| line.spans.iter().all(|span| span.content.trim().is_empty()))
+    fn terminal_last_line_is_blank(&self) -> bool {
+        self.terminal_lines
+            .last()
+            .map(line_is_blank)
             .unwrap_or(true)
     }
 
     fn append_chunk(&mut self, chunk: &[u8], is_stderr: bool) {
-        if chunk.is_empty() && self.pending_utf8.is_empty() && self.pending_line.is_empty() {
+        if chunk.is_empty() {
             return;
         }
+        self.raw_stream.extend_from_slice(chunk);
+        if self.raw_stream.len() > TERMINAL_MAX_RAW {
+            let excess = self.raw_stream.len() - TERMINAL_MAX_RAW;
+            self.raw_stream.drain(..excess);
+        }
         let was_following = self.is_following();
-        let mut appended = false;
-        if self.pending_line_is_stderr != is_stderr && !self.pending_line.is_empty() {
-            appended |= self.flush_pending_line();
-        }
-        self.pending_line_is_stderr = is_stderr;
-        self.pending_utf8.extend_from_slice(chunk);
-
-        loop {
-            match std::str::from_utf8(&self.pending_utf8) {
-                Ok(valid) => {
-                    self.pending_line.push_str(valid);
-                    self.pending_utf8.clear();
-                    break;
-                }
-                Err(err) => {
-                    let valid_up_to = err.valid_up_to();
-                    if valid_up_to > 0 {
-                        if let Ok(valid) = std::str::from_utf8(&self.pending_utf8[..valid_up_to]) {
-                            self.pending_line.push_str(valid);
-                        } else {
-                            let slice = &self.pending_utf8[..valid_up_to];
-                            let owned = String::from_utf8_lossy(slice);
-                            self.pending_line.push_str(&owned);
-                        }
-                        self.pending_utf8.drain(..valid_up_to);
-                    }
-                    if let Some(err_len) = err.error_len() {
-                        self.pending_line.push('�');
-                        let drain_len = err_len.min(self.pending_utf8.len());
-                        self.pending_utf8.drain(..drain_len);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-
-        while let Some(pos) = self.pending_line.find('\n') {
-            let mut segment = self.pending_line[..pos].to_string();
-            self.pending_line.drain(..=pos);
-            segment.push('\n');
-            appended |= self.push_segment(&segment, is_stderr);
-        }
-
-        if appended {
-            self.auto_follow(was_following);
+        let previous_plain = if is_stderr {
+            Some(self.terminal_plain_lines.clone())
+        } else {
+            None
+        };
+        self.parser.process(chunk);
+        self.refresh_terminal_lines(is_stderr, previous_plain);
+        if was_following {
+            self.auto_follow(true);
+        } else {
+            self.clamp_scroll();
         }
     }
 
-    fn flush_pending_line(&mut self) -> bool {
-        let was_following = self.is_following();
-        let mut appended = false;
+    fn refresh_terminal_lines(
+        &mut self,
+        is_stderr: bool,
+        previous_plain: Option<Vec<String>>,
+    ) {
         self.last_info_message = None;
-        self.last_info_line_count = 0;
-        if !self.pending_utf8.is_empty() {
-            if let Ok(valid) = std::str::from_utf8(&self.pending_utf8) {
-                self.pending_line.push_str(valid);
-            } else {
-                let owned = String::from_utf8_lossy(&self.pending_utf8);
-                self.pending_line.push_str(&owned);
-            }
-            self.pending_utf8.clear();
-        }
-        if self.pending_line.is_empty() {
-            return false;
-        }
-        let segment = std::mem::take(&mut self.pending_line);
-        appended |= self.push_segment(&segment, self.pending_line_is_stderr);
-        if appended {
-            self.auto_follow(was_following);
-        }
-        appended
-    }
 
-    fn finalize(&mut self, exit_code: Option<i32>, duration: Duration) {
-        let _ = self.flush_pending_line();
-        self.running = false;
-        self.exit_code = exit_code;
-        self.duration = Some(duration);
-        self.start_time = None;
-    }
+        let screen = self.parser.screen();
+        let (_, cols) = screen.size();
+        let rows: Vec<Vec<u8>> = screen.rows_formatted(0, cols).collect();
 
-    fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {
-        self.last_info_message = None;
-        self.last_info_line_count = 0;
-        let mut appended = false;
-        let normalized = normalize_overwrite_sequences(segment);
-        for raw_line in normalized.split_inclusive('\n') {
-            let line_text = raw_line.trim_end_matches('\n');
+        let mut new_lines: Vec<RtLine<'static>> = Vec::with_capacity(rows.len());
+        let mut new_plain: Vec<String> = Vec::with_capacity(rows.len());
+
+        for row_bytes in rows {
+            let row_string = String::from_utf8_lossy(&row_bytes);
+            let filtered = strip_non_sgr_csi(&row_string);
+
             let sanitized = sanitize_for_tui(
-                line_text,
+                &filtered,
                 SanitizeMode::AnsiPreserving,
                 SanitizeOptions {
                     expand_tabs: true,
                     ..Default::default()
                 },
             );
-            let mut line = ansi_escape_line(&sanitized);
-            let is_command_line = !is_stderr && line_text.starts_with("$ ");
-            if is_stderr {
-                let warn = crate::colors::warning();
-                for span in line.spans.iter_mut() {
-                    if span.style.fg.is_none() {
-                        span.style.fg = Some(warn);
-                    }
-                }
-            } else if is_command_line {
-                let primary = crate::colors::primary();
-                for span in line.spans.iter_mut() {
-                    if span.style.fg.is_none() {
-                        span.style.fg = Some(primary);
-                    } else {
-                        span.style.fg = Some(primary);
-                    }
-                }
+            let plain = sanitize_for_tui(
+                &filtered,
+                SanitizeMode::Plain,
+                SanitizeOptions {
+                    expand_tabs: true,
+                    ..Default::default()
+                },
+            );
+            let plain_trimmed = plain.trim_end_matches(' ').to_string();
+
+            let mut line = if sanitized.trim().is_empty() {
+                blank_line()
+            } else {
+                ansi_escape_line(&sanitized)
+            };
+
+            if is_command_plain(&plain_trimmed) {
+                tint_command_line(&mut line);
             }
-            self.lines.push_back(line);
-            appended = true;
-            if self.lines.len() > TERMINAL_MAX_LINES {
-                self.lines.pop_front();
-                self.truncated = true;
+
+            new_plain.push(plain_trimmed);
+            new_lines.push(line);
+        }
+
+        while new_lines.len() > 1
+            && new_lines
+                .last()
+                .map(|line| line_is_blank(line))
+                .unwrap_or(false)
+            && new_plain.last().map(|s| s.is_empty()).unwrap_or(false)
+        {
+            new_lines.pop();
+            new_plain.pop();
+        }
+
+        let mut truncated = false;
+        if new_lines.len() > TERMINAL_MAX_LINES {
+            truncated = true;
+            let start = new_lines.len() - TERMINAL_MAX_LINES;
+            new_lines.drain(..start);
+            new_plain.drain(..start);
+        }
+
+        if let (true, Some(prev)) = (is_stderr, previous_plain.as_ref()) {
+            let changed = diff_changed_indices(prev, &new_plain);
+            for idx in changed {
+                if let Some(line) = new_lines.get_mut(idx) {
+                    tint_stderr_line(line);
+                }
             }
         }
-        appended
+
+        self.terminal_plain_lines = new_plain;
+        self.terminal_lines = new_lines;
+        if truncated {
+            self.truncated = true;
+        }
+        self.rebuild_lines();
+    }
+
+    fn rebuild_lines(&mut self) {
+        let mut combined: VecDeque<RtLine<'static>> =
+            self.terminal_lines.iter().cloned().collect();
+        for info in &self.info_lines {
+            combined.push_back(info.clone());
+        }
+
+        let mut dropped = 0usize;
+        while combined.len() > TERMINAL_MAX_LINES {
+            combined.pop_front();
+            dropped += 1;
+        }
+
+        if dropped > 0 {
+            self.truncated = true;
+            if dropped >= self.terminal_lines.len() {
+                self.terminal_lines.clear();
+                self.terminal_plain_lines.clear();
+            } else {
+                self.terminal_lines.drain(..dropped);
+                self.terminal_plain_lines.drain(..dropped);
+            }
+        }
+
+        self.lines = combined;
+    }
+
+    fn update_pty_dimensions(&mut self, rows: u16, cols: u16) -> bool {
+        if rows == 0 || cols == 0 {
+            return false;
+        }
+        if self.pty_rows == rows && self.pty_cols == cols {
+            return false;
+        }
+        self.pty_rows = rows;
+        self.pty_cols = cols;
+        let mut parser = VtParser::new(self.pty_rows, self.pty_cols, TERMINAL_SCROLLBACK);
+        if !self.raw_stream.is_empty() {
+            parser.process(&self.raw_stream);
+        }
+        self.parser = parser;
+        let was_following = self.is_following();
+        self.refresh_terminal_lines(false, None);
+        if was_following {
+            self.auto_follow(true);
+        } else {
+            self.clamp_scroll();
+        }
+        true
+    }
+
+    fn finalize(&mut self, exit_code: Option<i32>, duration: Duration) {
+        self.running = false;
+        self.exit_code = exit_code;
+        self.duration = Some(duration);
+        self.start_time = None;
     }
 }
 
@@ -16693,6 +16773,73 @@ impl PendingCommand {
 
 fn blank_line() -> RtLine<'static> {
     ratatui::text::Line::from(vec![ratatui::text::Span::raw(String::new())])
+}
+
+fn line_is_blank(line: &RtLine<'_>) -> bool {
+    line
+        .spans
+        .iter()
+        .all(|span| span.content.trim().is_empty())
+}
+
+fn strip_non_sgr_csi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{001B}' {
+            if matches!(chars.peek(), Some('[')) {
+                chars.next();
+                let mut seq = String::from("\u{001B}[");
+                while let Some(next) = chars.next() {
+                    seq.push(next);
+                    let final_byte = next as u32;
+                    if (0x40..=0x7E).contains(&final_byte) {
+                        if next == 'm' {
+                            out.push_str(&seq);
+                        }
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn diff_changed_indices(prev: &[String], next: &[String]) -> Vec<usize> {
+    let mut changed = Vec::new();
+    let shared = prev.len().min(next.len());
+    for idx in 0..shared {
+        if prev[idx] != next[idx] {
+            changed.push(idx);
+        }
+    }
+    if next.len() > prev.len() {
+        changed.extend(prev.len()..next.len());
+    }
+    changed
+}
+
+fn is_command_plain(plain: &str) -> bool {
+    plain.trim_start().starts_with("$ ")
+}
+
+fn tint_command_line(line: &mut RtLine<'_>) {
+    let primary = crate::colors::primary();
+    for span in line.spans.iter_mut() {
+        span.style.fg = Some(primary);
+    }
+}
+
+fn tint_stderr_line(line: &mut RtLine<'_>) {
+    let warn = crate::colors::warning();
+    for span in line.spans.iter_mut() {
+        if span.style.fg.is_none() {
+            span.style.fg = Some(warn);
+        }
+    }
 }
 
 struct CommandDisplayLine {
