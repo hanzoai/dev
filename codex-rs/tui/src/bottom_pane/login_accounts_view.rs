@@ -248,9 +248,7 @@ impl LoginAccountsState {
                         if self.activate_account(account.id.clone(), mode) {
                             self.mode = ViewMode::List;
                             self.app_event_tx
-                                .send(AppEvent::InsertBackgroundEventLate(format!(
-                                    "Switched to {label}"
-                                )));
+                                .send_background_event(format!("Switched to {label}"));
                             self.is_complete = true;
                         }
                     }
@@ -624,7 +622,7 @@ impl LoginAddAccountState {
                                     is_error: false,
                                 });
                                 self.app_event_tx
-                                    .send(AppEvent::InsertBackgroundEventLate("Added API key account".to_string()));
+                                    .send_background_event("Added API key account");
                                 self.app_event_tx
                                     .send(AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth: false });
                                 self.finish_and_show_accounts();
@@ -792,7 +790,7 @@ impl LoginAddAccountState {
             Ok(()) => {
                 self.feedback = Some(Feedback { message: "ChatGPT account connected".to_string(), is_error: false });
                 self.app_event_tx
-                    .send(AppEvent::InsertBackgroundEventLate("ChatGPT account connected".to_string()));
+                    .send_background_event("ChatGPT account connected");
                 self.app_event_tx
                     .send(AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth: true });
                 self.finish_and_show_accounts();
