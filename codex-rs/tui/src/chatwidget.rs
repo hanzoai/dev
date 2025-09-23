@@ -11125,9 +11125,7 @@ fn update_rate_limit_resets(
             }
             group @ ("functional" | "stylistic") => {
                 let Some(state) = parts.next() else {
-                    self.history_push(history_cell::new_background_event(
-                        "Usage: /validation <tool|group> on|off".to_string(),
-                    ));
+                    self.push_background_tail("Usage: /validation <tool|group> on|off".to_string());
                     return;
                 };
                 let group = if group == "functional" {
@@ -11138,10 +11136,10 @@ fn update_rate_limit_resets(
                 match state {
                     "on" | "enable" => self.apply_validation_group_toggle(group, true),
                     "off" | "disable" => self.apply_validation_group_toggle(group, false),
-                    _ => self.history_push(history_cell::new_background_event(format!(
+                    _ => self.push_background_tail(format!(
                         "⚠️ Unknown validation command '{}'. Use on|off.",
                         state
-                    ))),
+                    )),
                 }
             }
             tool => {
