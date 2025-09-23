@@ -42,6 +42,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use crate::AuthManager;
 use crate::CodexAuth;
 use crate::acp::AcpFileSystem;
 use crate::agent_tool::AgentStatusUpdatePayload;
@@ -582,6 +583,14 @@ pub struct CodexSpawnOk {
 impl Codex {
     /// Spawn a new [`Codex`] and initialize the session.
     pub async fn spawn(config: Config, auth: Option<CodexAuth>) -> CodexResult<CodexSpawnOk> {
+        let auth_manager = auth.map(crate::AuthManager::from_auth_for_testing);
+        Self::spawn_with_auth_manager(config, auth_manager).await
+    }
+
+    pub async fn spawn_with_auth_manager(
+        config: Config,
+        auth_manager: Option<Arc<AuthManager>>,
+    ) -> CodexResult<CodexSpawnOk> {
         // experimental resume path (undocumented)
         let resume_path = config.experimental_resume.clone();
         info!("resume_path: {resume_path:?}");
@@ -614,7 +623,13 @@ impl Codex {
         let session_id = Uuid::new_v4();
 
         // This task will run until Op::Shutdown is received.
-        tokio::spawn(submission_loop(session_id, config, auth, rx_sub, tx_event));
+        tokio::spawn(submission_loop(
+            session_id,
+            config,
+            auth_manager,
+            rx_sub,
+            tx_event,
+        ));
         let codex = Codex {
             next_id: AtomicU64::new(0),
             tx_sub,
@@ -2707,7 +2722,7 @@ impl AgentTask {
 async fn submission_loop(
     mut session_id: Uuid,
     config: Arc<Config>,
-    auth: Option<CodexAuth>,
+    auth_manager: Option<Arc<AuthManager>>,
     rx_sub: Receiver<Submission>,
     tx_event: Sender<Event>,
 ) {
@@ -2918,12 +2933,9 @@ async fn submission_loop(
                 };
 
                 // Wrap provided auth (if any) in a minimal AuthManager for client usage.
-                let auth_manager = auth
-                    .as_ref()
-                    .map(|a| crate::AuthManager::from_auth_for_testing(a.clone()));
                 let client = ModelClient::new(
                     config.clone(),
-                    auth_manager,
+                    auth_manager.clone(),
                     provider.clone(),
                     model_reasoning_effort,
                     model_reasoning_summary,
