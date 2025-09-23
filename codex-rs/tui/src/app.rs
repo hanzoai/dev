@@ -1,9 +1,11 @@
 use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::ChatWidget;
+use crate::exec_command::strip_bash_lc_and_escape;
 use crate::file_search::FileSearchManager;
 use crate::get_git_diff::get_git_diff;
 use crate::get_login_status;
+use crate::history_cell;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
@@ -11,38 +13,38 @@ use crate::slash_command::SlashCommand;
 use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
-use crate::history_cell;
-use crate::exec_command::strip_bash_lc_and_escape;
-use codex_core::ConversationManager;
-use codex_login::{AuthManager, AuthMode, ServerOptions};
 use codex_core::config::add_project_allowed_command;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
+use codex_core::ConversationManager;
+use codex_login::{AuthManager, AuthMode, ServerOptions};
 use color_eyre::eyre::Result;
-use futures::FutureExt;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 use crossterm::SynchronizedUpdate; // trait for stdout().sync_update
-use std::collections::HashMap;
-use std::path::PathBuf;
+use futures::FutureExt;
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
+use ratatui::buffer::Buffer;
 use ratatui::prelude::Rect;
 use ratatui::text::Line;
+use ratatui::CompletedFrame;
+use shlex::try_join;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, Sender as StdSender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender as StdSender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::oneshot;
-use shlex::try_join;
 
 /// Time window for debouncing redraw requests.
 ///
@@ -149,6 +151,8 @@ pub(crate) struct App<'a> {
     /// If true, enable lightweight timing collection and report on exit.
     timing_enabled: bool,
     timing: TimingStats,
+
+    buffer_diff_profiler: BufferDiffProfiler,
 
     /// True when TUI is currently rendering in the terminal's alternate screen.
     alt_screen_active: bool,
@@ -365,6 +369,7 @@ impl App<'_> {
             last_esc_time: None,
             timing_enabled: enable_perf,
             timing: TimingStats::default(),
+            buffer_diff_profiler: BufferDiffProfiler::new_from_env(),
             alt_screen_active: start_in_alt,
             terminal_runs: HashMap::new(),
             terminal_title_override: None,
@@ -2397,7 +2402,7 @@ impl App<'_> {
         }
         self.last_frame_size = Some(screen_size);
 
-        terminal.draw(|frame| {
+        let completed_frame = terminal.draw(|frame| {
             match &mut self.app_state {
                 AppState::Chat { widget } => {
                     if let Some((x, y)) = widget.cursor_pos(frame.area()) {
@@ -2408,6 +2413,7 @@ impl App<'_> {
                 AppState::Onboarding { screen } => frame.render_widget_ref(&*screen, frame.area()),
             }
         })?;
+        self.buffer_diff_profiler.record(&completed_frame);
         Ok(())
     }
 
@@ -2450,6 +2456,113 @@ impl App<'_> {
         }
     }
 
+}
+
+struct BufferDiffProfiler {
+    enabled: bool,
+    prev: Option<Buffer>,
+    frame_seq: u64,
+    log_every: usize,
+}
+
+impl BufferDiffProfiler {
+    fn new_from_env() -> Self {
+        match std::env::var("CODE_BUFFER_DIFF_METRICS") {
+            Ok(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() || trimmed == "0" {
+                    Self::disabled()
+                } else {
+                    let log_every = trimmed.parse::<usize>().unwrap_or(1).max(1);
+                    Self {
+                        enabled: true,
+                        prev: None,
+                        frame_seq: 0,
+                        log_every,
+                    }
+                }
+            }
+            Err(_) => Self::disabled(),
+        }
+    }
+
+    fn disabled() -> Self {
+        Self { enabled: false, prev: None, frame_seq: 0, log_every: 1 }
+    }
+
+    fn record(&mut self, frame: &CompletedFrame<'_>) {
+        if !self.enabled {
+            return;
+        }
+
+        let current_buffer = frame.buffer.clone();
+        self.frame_seq = self.frame_seq.saturating_add(1);
+
+        if let Some(prev_buffer) = &self.prev {
+            if self.should_log_frame() {
+                if prev_buffer.area != current_buffer.area {
+                    tracing::info!(
+                        target: "codex_tui::buffer_diff",
+                        frame = self.frame_seq,
+                        prev_width = prev_buffer.area.width,
+                        prev_height = prev_buffer.area.height,
+                        width = current_buffer.area.width,
+                        height = current_buffer.area.height,
+                        "Buffer area changed; skipping diff metrics for this frame"
+                    );
+                } else {
+                    let inspected = prev_buffer.content.len().min(current_buffer.content.len());
+                    let updates = prev_buffer.diff(&current_buffer);
+                    let changed = updates.len();
+                    let percent = if inspected > 0 {
+                        (changed as f64 / inspected as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+                    let mut rows = BTreeSet::new();
+                    let mut longest_run = 0usize;
+                    let mut current_run = 0usize;
+                    let mut last_cell = None;
+                    for (x, y, _) in &updates {
+                        rows.insert(*y);
+                        match last_cell {
+                            Some((last_x, last_y)) if *y == last_y && *x == last_x + 1 => {
+                                current_run += 1;
+                            }
+                            _ => {
+                                current_run = 1;
+                            }
+                        }
+                        if current_run > longest_run {
+                            longest_run = current_run;
+                        }
+                        last_cell = Some((*x, *y));
+                    }
+                    let skipped_cells = current_buffer.content.iter().filter(|cell| cell.skip).count();
+                    tracing::info!(
+                        target: "codex_tui::buffer_diff",
+                        frame = self.frame_seq,
+                        inspected,
+                        changed,
+                        percent = format!("{percent:.2}"),
+                        width = current_buffer.area.width,
+                        height = current_buffer.area.height,
+                        dirty_rows = rows.len(),
+                        longest_run,
+                        skipped_cells,
+                        "Buffer diff metrics"
+                    );
+                }
+            }
+        }
+
+        self.prev = Some(current_buffer);
+    }
+
+    fn should_log_frame(&self) -> bool {
+        let interval = self.log_every.max(1) as u64;
+        interval == 1 || self.frame_seq % interval == 0
+    }
 }
 
 fn should_show_onboarding(
