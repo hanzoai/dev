@@ -216,8 +216,8 @@ lto = "off"
 
 [profile.perf]
 inherits = "release"
-incremental = false
-codegen-units = 16
+incremental = true
+codegen-units = 256
 lto = "thin"
 debug = 2
 strip = "none"
