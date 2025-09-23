@@ -1295,20 +1295,22 @@ impl App<'_> {
                         }
                     }
                 }
-                #[cfg(not(debug_assertions))]
                 AppEvent::RunUpdateCommand { command, display, latest_version } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        if let Some(launch) = widget.launch_update_command(command, display, latest_version.clone()) {
-                            self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                    if crate::updates::upgrade_ui_enabled() {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            if let Some(launch) = widget.launch_update_command(command, display, latest_version) {
+                                self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                            }
                         }
                     }
                 }
-                #[cfg(not(debug_assertions))]
                 AppEvent::SetAutoUpgradeEnabled(enabled) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.set_auto_upgrade_enabled(enabled);
+                    if crate::updates::upgrade_ui_enabled() {
+                        if let AppState::Chat { widget } = &mut self.app_state {
+                            widget.set_auto_upgrade_enabled(enabled);
+                        }
+                        self.config.auto_upgrade_enabled = enabled;
                     }
-                    self.config.auto_upgrade_enabled = enabled;
                 }
                 AppEvent::RequestAgentInstall { name, selected_index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
