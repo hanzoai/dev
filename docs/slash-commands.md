@@ -25,13 +25,16 @@ Notes
 
 - `/init`: create an `AGENTS.md` file with instructions for Codex.
 - `/diff`: show `git diff` (including untracked files).
+- `/undo`: restore the workspace to the most recent Code snapshot.
 - `/branch [task]`: create a worktree branch and switch to it. If a
   task/description is provided, it is used when naming the branch. Must be run
   from the repository root (not inside another branch worktree).
 - `/merge`: merge the current worktree branch back into the default branch and
   remove the worktree. Run this from inside the worktree created by `/branch`.
-- `/review [focus]`: start a code review using the configured review model. Add
-  optional guidance to steer what the reviewer should focus on.
+- `/review [focus]`: without arguments, opens a review picker so you can audit
+  the workspace, a specific commit, compare against another branch, or enter
+  custom instructions. With a focus argument, skips the picker and uses your
+  text directly.
 - `/cmd <name>`: run a project command defined for the current workspace.
 
 ## UX & Display

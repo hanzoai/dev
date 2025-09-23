@@ -21,6 +21,7 @@ use codex_common::model_presets::ModelPreset;
 use codex_common::model_presets::builtin_model_presets;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
+use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
@@ -83,7 +84,7 @@ use codex_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
 use codex_core::protocol::Op;
 use codex_core::protocol::ReviewOutputEvent;
-use codex_core::protocol::ReviewRequest;
+use codex_core::protocol::{ReviewContextMetadata, ReviewRequest};
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
@@ -94,6 +95,13 @@ use codex_core::protocol::ProEvent;
 use codex_core::protocol::ProPhase;
 use codex_core::protocol::ProStats;
 use codex_core::protocol::ProCategory;
+use codex_git_tooling::{
+    create_ghost_commit,
+    restore_ghost_commit,
+    CreateGhostCommitOptions,
+    GhostCommit,
+    GitToolingError,
+};
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use image::imageops::FilterType;
@@ -126,6 +134,8 @@ use crate::app_event::{
     TerminalRunController,
 };
 use crate::app_event_sender::AppEventSender;
+use crate::bottom_pane::CustomPromptView;
+use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionItem};
 use crate::bottom_pane::validation_settings_view;
 use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
 use crate::bottom_pane::BottomPane;
@@ -148,6 +158,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
@@ -244,6 +255,7 @@ const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
 const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
 
 const RATE_LIMIT_RESET_FILE: &str = "state/rate_limit_resets.json";
+const MAX_TRACKED_GHOST_COMMITS: usize = 20;
 
 #[derive(Default)]
 struct RateLimitWarningState {
@@ -416,6 +428,8 @@ pub(crate) struct ChatWidget<'a> {
     // a new turn; used to anchor the next turn window so assistant output
     // appears after them.
     pending_user_prompts_for_next_turn: usize,
+    ghost_snapshots: Vec<GhostCommit>,
+    ghost_snapshots_disabled: bool,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -648,12 +662,13 @@ impl AsRef<str> for StreamId {
 // ---- System notice ordering helpers ----
 #[derive(Copy, Clone)]
 enum SystemPlacement {
-    /// Place before the next user prompt (used for pre-turn confirmations).
-    BeforePrompt,
-    /// Place immediately before the next provider/tool output for the active request.
-    BeforeNextOutput,
-    /// Append to the end of the current request window.
-    Tail,
+    /// Place near the top of the current request (before most provider output)
+    EarlyInCurrent,
+    /// Place at the end of the current request window (after provider output)
+    EndOfCurrent,
+    /// Place before the first user prompt of the very first request
+    /// (used for pre-turn UI confirmations like theme/spinner changes)
+    PrePromptInCurrent,
 }
 
 impl ChatWidget<'_> {
@@ -766,6 +781,8 @@ impl ChatWidget<'_> {
         // Derive a stable request bucket for system notices when OrderMeta is absent.
         // Default to the current provider request if known; else use a sticky
         // pre-turn synthetic req=1 to group UI confirmations before the first turn.
+        // If a user prompt for the next turn is already queued, attach new
+        // system notices to the upcoming request to avoid retroactive inserts.
         let mut req = if self.last_seen_request_index > 0 {
             self.last_seen_request_index
         } else {
@@ -774,23 +791,23 @@ impl ChatWidget<'_> {
             }
             self.synthetic_system_req.unwrap_or(1)
         };
-
-        if self.pending_user_prompts_for_next_turn > 0 {
+        if order.is_none() && self.pending_user_prompts_for_next_turn > 0 {
             req = req.saturating_add(1);
         }
 
         self.internal_seq = self.internal_seq.saturating_add(1);
-        let out = match placement {
-            SystemPlacement::BeforePrompt => i32::MIN,
-            SystemPlacement::BeforeNextOutput => {
-                if self.pending_user_prompts_for_next_turn > 0 {
-                    i32::MIN
-                } else {
-                    i32::MIN + 2
-                }
-            }
-            SystemPlacement::Tail => i32::MAX,
+        let mut out = match placement {
+            SystemPlacement::EarlyInCurrent => i32::MIN + 2,
+            SystemPlacement::EndOfCurrent => i32::MAX,
+            SystemPlacement::PrePromptInCurrent => i32::MIN,
         };
+
+        if order.is_none()
+            && self.pending_user_prompts_for_next_turn > 0
+            && matches!(placement, SystemPlacement::EarlyInCurrent)
+        {
+            out = i32::MIN;
+        }
 
         OrderKey {
             req,
@@ -823,13 +840,13 @@ impl ChatWidget<'_> {
     }
 
     /// Decide where to place a UI confirmation right now.
-    /// If we're truly pre‑turn (no provider traffic yet, and no queued prompt),
+    /// If we're truly pre-turn (no provider traffic yet, and no queued prompt),
     /// place before the first user prompt. Otherwise, append to end of current.
     fn ui_placement_for_now(&self) -> SystemPlacement {
         if self.last_seen_request_index == 0 && self.pending_user_prompts_for_next_turn == 0 {
-            SystemPlacement::BeforePrompt
+            SystemPlacement::PrePromptInCurrent
         } else {
-            SystemPlacement::Tail
+            SystemPlacement::EndOfCurrent
         }
     }
     pub(crate) fn enable_perf(&mut self, enable: bool) {
@@ -2218,6 +2235,8 @@ impl ChatWidget<'_> {
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
+            ghost_snapshots: Vec::new(),
+            ghost_snapshots_disabled: false,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2440,6 +2459,8 @@ impl ChatWidget<'_> {
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
+            ghost_snapshots: Vec::new(),
+            ghost_snapshots_disabled: false,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3179,6 +3200,14 @@ impl ChatWidget<'_> {
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
     }
+    /// Insert a background event near the top of the current request so it appears
+    /// before imminent provider output (e.g. Exec begin).
+    pub(crate) fn insert_background_event_early(&mut self, message: String) {
+        self.insert_background_event_with_placement(
+            message,
+            BackgroundPlacement::BeforeNextOutput,
+        );
+    }
     /// Insert a background event using the specified placement semantics.
     pub(crate) fn insert_background_event_with_placement(
         &mut self,
@@ -3186,8 +3215,14 @@ impl ChatWidget<'_> {
         placement: BackgroundPlacement,
     ) {
         let system_placement = match placement {
-            BackgroundPlacement::Tail => SystemPlacement::Tail,
-            BackgroundPlacement::BeforeNextOutput => SystemPlacement::BeforeNextOutput,
+            BackgroundPlacement::Tail => SystemPlacement::EndOfCurrent,
+            BackgroundPlacement::BeforeNextOutput => {
+                if self.pending_user_prompts_for_next_turn > 0 {
+                    SystemPlacement::EarlyInCurrent
+                } else {
+                    SystemPlacement::PrePromptInCurrent
+                }
+            }
         };
         self.push_system_cell(
             history_cell::new_background_event(message),
@@ -3585,6 +3620,10 @@ impl ChatWidget<'_> {
                 }
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, command_text) => {
+                if cmd == SlashCommand::Undo {
+                    self.undo_last_snapshot();
+                    return;
+                }
                 // This is a regular slash command, dispatch it normally
                 self.app_event_tx
                     .send(AppEvent::DispatchCommand(cmd, command_text));
@@ -3750,6 +3789,8 @@ impl ChatWidget<'_> {
             return;
         }
 
+        self.capture_ghost_snapshot();
+
         let turn_active = self.is_task_running()
             || !self.active_task_ids.is_empty()
             || self.stream.is_write_cycle_active()
@@ -3790,6 +3831,60 @@ impl ChatWidget<'_> {
         self.send_user_messages_to_agent(batch);
 
         // (debug watchdog removed)
+    }
+
+    fn capture_ghost_snapshot(&mut self) {
+        if self.ghost_snapshots_disabled {
+            return;
+        }
+
+        let options = CreateGhostCommitOptions::new(&self.config.cwd);
+        match create_ghost_commit(&options) {
+            Ok(commit) => {
+                self.ghost_snapshots.push(commit);
+                if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
+                    self.ghost_snapshots.remove(0);
+                }
+            }
+            Err(err) => {
+                self.ghost_snapshots_disabled = true;
+                let (message, hint) = match &err {
+                    GitToolingError::NotAGitRepository { .. } => (
+                        "Snapshots disabled: this workspace is not inside a Git repository.".to_string(),
+                        None,
+                    ),
+                    _ => (
+                        format!("Snapshots disabled after Git error: {err}"),
+                        Some(
+                            "Restart Code after resolving the issue to re-enable snapshots.".to_string(),
+                        ),
+                    ),
+                };
+                self.push_background_tail(message);
+                if let Some(hint) = hint {
+                    self.push_background_tail(hint);
+                }
+                tracing::warn!("failed to create ghost snapshot: {err}");
+            }
+        }
+    }
+
+    fn undo_last_snapshot(&mut self) {
+        let Some(commit) = self.ghost_snapshots.pop() else {
+            self.push_background_tail("No snapshot is available to restore.".to_string());
+            return;
+        };
+
+        if let Err(err) = restore_ghost_commit(&self.config.cwd, &commit) {
+            self.history_push(history_cell::new_error_event(format!(
+                "Failed to restore snapshot: {err}",
+            )));
+            self.ghost_snapshots.push(commit);
+            return;
+        }
+
+        let short_id: String = commit.id().chars().take(8).collect();
+        self.push_background_tail(format!("Restored workspace to snapshot {short_id}"));
     }
 
     fn flush_pending_agent_notes(&mut self) {
@@ -5230,9 +5325,9 @@ impl ChatWidget<'_> {
                 // provider output; else append to the tail. Use the event.id for
                 // in-place replacement.
                 let placement = if event.order.as_ref().is_some() {
-                    SystemPlacement::BeforeNextOutput
+                    SystemPlacement::EarlyInCurrent
                 } else {
-                    SystemPlacement::Tail
+                    SystemPlacement::EndOfCurrent
                 };
                 let id_for_replace = Some(id.clone());
                 self.push_system_cell(
@@ -8844,6 +8939,30 @@ fn update_rate_limit_resets(
             lines.len()
         );
         tracing::info!("[order] final Answer id={:?}", id);
+        if self.is_review_flow_active() {
+            if let Some(ref want) = id {
+                if let Some(idx) = self.history_cells.iter().rposition(|c| {
+                    c.as_any()
+                        .downcast_ref::<history_cell::StreamingContentCell>()
+                        .and_then(|sc| sc.id.as_ref())
+                        .map(|existing| existing == want)
+                        .unwrap_or(false)
+                }) {
+                    self.history_remove_at(idx);
+                }
+                self.stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()));
+            } else if let Some(idx) = self.history_cells.iter().rposition(|c| {
+                c.as_any()
+                    .downcast_ref::<history_cell::StreamingContentCell>()
+                    .is_some()
+            }) {
+                self.history_remove_at(idx);
+            }
+            self.last_assistant_message = Some(source);
+            return;
+        }
         // Debug: list last few history cell kinds so we can see what's present
         let tail_kinds: String = self
             .history_cells
@@ -11967,6 +12086,299 @@ fn update_rate_limit_resets(
 }
 
 impl ChatWidget<'_> {
+    pub(crate) fn open_review_dialog(&mut self) {
+        if self.is_task_running() {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/review` — complete or cancel the current task before starting a new review.".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+
+        items.push(SelectionItem {
+            name: "Review current workspace changes".to_string(),
+            description: Some("Include staged, unstaged, and untracked files".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::RunReviewCommand(String::new()));
+            })],
+        });
+
+        items.push(SelectionItem {
+            name: "Review a specific commit".to_string(),
+            description: Some("Pick from recent commits".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::StartReviewCommitPicker);
+            })],
+        });
+
+        items.push(SelectionItem {
+            name: "Review against a base branch".to_string(),
+            description: Some("Diff current branch against another".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::StartReviewBranchPicker);
+            })],
+        });
+
+        items.push(SelectionItem {
+            name: "Custom review instructions".to_string(),
+            description: Some("Describe exactly what to audit".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::OpenReviewCustomPrompt);
+            })],
+        });
+
+        let view: ListSelectionView = ListSelectionView::new(
+            " Review options ".to_string(),
+            Some("Choose what scope to review".to_string()),
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            6,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Review options".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn show_review_custom_prompt(&mut self) {
+        let submit_tx = self.app_event_tx.clone();
+        let on_submit: Box<dyn Fn(String) + Send + Sync> = Box::new(move |text: String| {
+            submit_tx.send(crate::app_event::AppEvent::RunReviewCommand(text));
+        });
+        let view = CustomPromptView::new(
+            "Custom review instructions".to_string(),
+            "Describe the files or changes you want reviewed".to_string(),
+            Some("Press Enter to submit · Esc cancel".to_string()),
+            self.app_event_tx.clone(),
+            None,
+            on_submit,
+        );
+        self.bottom_pane.show_custom_prompt(view);
+    }
+
+    pub(crate) fn show_review_commit_loading(&mut self) {
+        let loading_item = SelectionItem {
+            name: "Loading recent commits…".to_string(),
+            description: None,
+            is_current: true,
+            actions: Vec::new(),
+        };
+        let view = ListSelectionView::new(
+            " Select a commit ".to_string(),
+            Some("Fetching recent commits from git".to_string()),
+            Some("Esc cancel".to_string()),
+            vec![loading_item],
+            self.app_event_tx.clone(),
+            6,
+        );
+        self.bottom_pane.show_list_selection(
+            "Select a commit".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn present_review_commit_picker(&mut self, commits: Vec<CommitLogEntry>) {
+        if commits.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No recent commits found for review".to_string());
+            self.request_redraw();
+            return;
+        }
+
+        let mut items: Vec<SelectionItem> = Vec::with_capacity(commits.len());
+        for entry in commits {
+            let subject = entry.subject.trim().to_string();
+            let sha = entry.sha.trim().to_string();
+            if sha.is_empty() {
+                continue;
+            }
+            let short_sha: String = sha.chars().take(7).collect();
+            let title = if subject.is_empty() {
+                short_sha.clone()
+            } else {
+                format!("{short_sha} — {subject}")
+            };
+            let prompt = if subject.is_empty() {
+                format!(
+                    "Review the code changes introduced by commit {sha}. Provide prioritized, actionable findings."
+                )
+            } else {
+                format!(
+                    "Review the code changes introduced by commit {sha} (\"{subject}\"). Provide prioritized, actionable findings."
+                )
+            };
+            let hint = format!("commit {short_sha}");
+            let preparation = format!("Preparing code review for commit {short_sha}");
+            let prompt_closure = prompt.clone();
+            let hint_closure = hint.clone();
+            let prep_closure = preparation.clone();
+            let metadata_option = Some(ReviewContextMetadata {
+                scope: Some("commit".to_string()),
+                commit: Some(sha.clone()),
+                ..Default::default()
+            });
+            items.push(SelectionItem {
+                name: title,
+                description: None,
+                is_current: false,
+                actions: vec![Box::new(move |tx: &crate::app_event_sender::AppEventSender| {
+                    tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                        prompt: prompt_closure.clone(),
+                        hint: hint_closure.clone(),
+                        preparation_label: Some(prep_closure.clone()),
+                        metadata: metadata_option.clone(),
+                    });
+                })],
+            });
+        }
+
+        if items.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No recent commits found for review".to_string());
+            self.request_redraw();
+            return;
+        }
+
+        let view = ListSelectionView::new(
+            " Select a commit ".to_string(),
+            Some("Choose a commit to review".to_string()),
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            10,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Select a commit to review".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn show_review_branch_loading(&mut self) {
+        let loading_item = SelectionItem {
+            name: "Loading local branches…".to_string(),
+            description: None,
+            is_current: true,
+            actions: Vec::new(),
+        };
+        let view = ListSelectionView::new(
+            " Select a base branch ".to_string(),
+            Some("Fetching local branches".to_string()),
+            Some("Esc cancel".to_string()),
+            vec![loading_item],
+            self.app_event_tx.clone(),
+            6,
+        );
+        self.bottom_pane.show_list_selection(
+            "Select a base branch".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn present_review_branch_picker(
+        &mut self,
+        current_branch: Option<String>,
+        branches: Vec<String>,
+    ) {
+        let current_trimmed = current_branch.as_ref().map(|s| s.trim().to_string());
+        let mut items: Vec<SelectionItem> = Vec::new();
+        for branch in branches {
+            let branch_trimmed = branch.trim();
+            if branch_trimmed.is_empty() {
+                continue;
+            }
+            if current_trimmed
+                .as_ref()
+                .is_some_and(|current| current == branch_trimmed)
+            {
+                continue;
+            }
+
+            let title = if let Some(current) = current_trimmed.as_ref() {
+                format!("{current} → {branch_trimmed}")
+            } else {
+                format!("Compare against {branch_trimmed}")
+            };
+
+            let prompt = if let Some(current) = current_trimmed.as_ref() {
+                format!(
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                )
+            } else {
+                format!(
+                    "Review the code changes that would merge into '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merge."
+                )
+            };
+            let hint = format!("against {branch_trimmed}");
+            let preparation = format!("Preparing code review against {branch_trimmed}");
+            let prompt_closure = prompt.clone();
+            let hint_closure = hint.clone();
+            let prep_closure = preparation.clone();
+            let metadata_option = Some(ReviewContextMetadata {
+                scope: Some("branch_diff".to_string()),
+                base_branch: Some(branch_trimmed.to_string()),
+                current_branch: current_trimmed.clone(),
+                ..Default::default()
+            });
+            items.push(SelectionItem {
+                name: title,
+                description: None,
+                is_current: false,
+                actions: vec![Box::new(move |tx: &crate::app_event_sender::AppEventSender| {
+                    tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                        prompt: prompt_closure.clone(),
+                        hint: hint_closure.clone(),
+                        preparation_label: Some(prep_closure.clone()),
+                        metadata: metadata_option.clone(),
+                    });
+                })],
+            });
+        }
+
+        if items.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No alternative branches found for review".to_string());
+            self.request_redraw();
+            return;
+        }
+
+        let subtitle = current_trimmed
+            .as_ref()
+            .map(|current| format!("Current branch: {current}"));
+
+        let view = ListSelectionView::new(
+            " Select a base branch ".to_string(),
+            subtitle,
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            10,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Compare against a branch".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
     /// Handle `/review [focus]` command by starting a dedicated review session.
     pub(crate) fn handle_review_command(&mut self, args: String) {
         if self.is_task_running() {
@@ -11978,36 +12390,61 @@ impl ChatWidget<'_> {
         }
 
         let trimmed = args.trim();
-        let (prompt, hint) = if trimmed.is_empty() {
-            (
+        if trimmed.is_empty() {
+            let metadata = ReviewContextMetadata {
+                scope: Some("workspace".to_string()),
+                ..Default::default()
+            };
+            self.start_review_with_scope(
                 "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
                 "current workspace changes".to_string(),
-            )
+                Some("Preparing code review request...".to_string()),
+                Some(metadata),
+            );
         } else {
             let value = trimmed.to_string();
-            (value.clone(), value)
-        };
+            let preparation = format!("Preparing code review for {value}");
+            let metadata = ReviewContextMetadata {
+                scope: Some("custom".to_string()),
+                ..Default::default()
+            };
+            self.start_review_with_scope(value.clone(), value, Some(preparation), Some(metadata));
+        }
+    }
 
+    pub(crate) fn start_review_with_scope(
+        &mut self,
+        prompt: String,
+        hint: String,
+        preparation_label: Option<String>,
+        metadata: Option<ReviewContextMetadata>,
+    ) {
         self.active_review_hint = None;
         self.active_review_prompt = None;
 
-        let preparation_notice = if trimmed.is_empty() {
-            "Preparing code review request...".to_string()
-        } else {
-            format!("Preparing code review for {hint}")
-        };
-        self.insert_background_event_with_placement(
-            preparation_notice,
-            BackgroundPlacement::BeforeNextOutput,
-        );
+        let trimmed_hint = hint.trim();
+        let preparation_notice = preparation_label.unwrap_or_else(|| {
+            if trimmed_hint.is_empty() {
+                "Preparing code review request...".to_string()
+            } else {
+                format!("Preparing code review for {trimmed_hint}")
+            }
+        });
+
+        self.insert_background_event_early(preparation_notice);
         self.request_redraw();
 
         let review_request = ReviewRequest {
             prompt,
             user_facing_hint: hint,
+            metadata,
         };
 
         self.submit_op(Op::Review { review_request });
+    }
+
+    fn is_review_flow_active(&self) -> bool {
+        self.active_review_hint.is_some() || self.active_review_prompt.is_some()
     }
 
     fn build_review_summary_cell(
@@ -12015,66 +12452,51 @@ impl ChatWidget<'_> {
         hint: Option<&str>,
         prompt: Option<&str>,
         output: &ReviewOutputEvent,
-    ) -> history_cell::PlainHistoryCell {
-        let mut lines: Vec<Line<'static>> = Vec::new();
+    ) -> history_cell::AssistantMarkdownCell {
+        let mut sections: Vec<String> = Vec::new();
         let title = match hint {
             Some(h) if !h.trim().is_empty() => {
                 let trimmed = h.trim();
-                format!("Review summary — {trimmed}")
+                format!("**Review summary — {trimmed}**")
             }
-            _ => "Review summary".to_string(),
+            _ => "**Review summary**".to_string(),
         };
-        lines.push(Line::from(vec![RtSpan::styled(
-            title,
-            Style::default().add_modifier(Modifier::BOLD),
-        )]));
+        sections.push(title);
 
         if let Some(p) = prompt {
             let trimmed_prompt = p.trim();
             if !trimmed_prompt.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![
-                    RtSpan::styled(
-                        "Prompt:",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    RtSpan::raw(" "),
-                    RtSpan::raw(trimmed_prompt.to_string()),
-                ]));
+                sections.push(format!("**Prompt:** {trimmed_prompt}"));
             }
         }
 
-        let mut sections: Vec<String> = Vec::new();
         let explanation = output.overall_explanation.trim();
         if !explanation.is_empty() {
             sections.push(explanation.to_string());
         }
         if !output.findings.is_empty() {
-            sections.push(format_review_findings_block(&output.findings, None));
+            sections.push(format_review_findings_block(&output.findings, None).trim().to_string());
         }
         let correctness = output.overall_correctness.trim();
         if !correctness.is_empty() {
-            sections.push(format!("Overall correctness: {correctness}"));
+            sections.push(format!("**Overall correctness:** {correctness}"));
         }
         if output.overall_confidence_score > 0.0 {
             let score = output.overall_confidence_score;
-            sections.push(format!("Confidence score: {score:.1}"));
+            sections.push(format!("**Confidence score:** {score:.1}"));
         }
-        if sections.is_empty() {
+        if sections.len() == 1 {
             sections.push("No detailed findings were provided.".to_string());
         }
 
-        lines.push(Line::from(""));
-        for (idx, section) in sections.iter().enumerate() {
-            if idx > 0 {
-                lines.push(Line::from(""));
-            }
-            for line in section.lines() {
-                lines.push(Line::from(line.to_string()));
-            }
-        }
+        let markdown = sections
+            .into_iter()
+            .map(|part| part.trim().to_string())
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
-        history_cell::PlainHistoryCell::new(lines, history_cell::HistoryCellType::Assistant)
+        history_cell::AssistantMarkdownCell::new(markdown, &self.config)
     }
 
     /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
