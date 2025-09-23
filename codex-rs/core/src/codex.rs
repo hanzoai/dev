@@ -3444,6 +3444,7 @@ async fn run_turn(
             text_format: None,
             model_override: None,
             model_family_override: None,
+            output_schema: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
