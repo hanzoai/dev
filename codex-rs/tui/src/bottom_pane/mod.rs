@@ -41,7 +41,6 @@ pub mod form_text_field;
 mod theme_selection_view;
 mod verbosity_selection_view;
 pub(crate) mod validation_settings_view;
-#[cfg(not(debug_assertions))]
 mod update_settings_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +58,6 @@ pub(crate) use login_accounts_view::{
     LoginAddAccountView,
 };
 
-#[cfg(not(debug_assertions))]
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 
 use codex_core::protocol::Op;
@@ -147,8 +145,12 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-    #[cfg(not(debug_assertions))]
     pub fn show_update_settings(&mut self, view: update_settings_view::UpdateSettingsView) {
+        if !crate::updates::upgrade_ui_enabled() {
+            self.request_redraw();
+            return;
+        }
+
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();
