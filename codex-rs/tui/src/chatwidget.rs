@@ -94,6 +94,13 @@ use codex_core::protocol::ProEvent;
 use codex_core::protocol::ProPhase;
 use codex_core::protocol::ProStats;
 use codex_core::protocol::ProCategory;
+use codex_git_tooling::{
+    create_ghost_commit,
+    restore_ghost_commit,
+    CreateGhostCommitOptions,
+    GhostCommit,
+    GitToolingError,
+};
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use image::imageops::FilterType;
@@ -148,6 +155,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
@@ -244,6 +252,7 @@ const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
 const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
 
 const RATE_LIMIT_RESET_FILE: &str = "state/rate_limit_resets.json";
+const MAX_TRACKED_GHOST_COMMITS: usize = 20;
 
 #[derive(Default)]
 struct RateLimitWarningState {
@@ -416,6 +425,8 @@ pub(crate) struct ChatWidget<'a> {
     // a new turn; used to anchor the next turn window so assistant output
     // appears after them.
     pending_user_prompts_for_next_turn: usize,
+    ghost_snapshots: Vec<GhostCommit>,
+    ghost_snapshots_disabled: bool,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2218,6 +2229,8 @@ impl ChatWidget<'_> {
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
+            ghost_snapshots: Vec::new(),
+            ghost_snapshots_disabled: false,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2440,6 +2453,8 @@ impl ChatWidget<'_> {
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
             pending_user_prompts_for_next_turn: 0,
+            ghost_snapshots: Vec::new(),
+            ghost_snapshots_disabled: false,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3585,6 +3600,10 @@ impl ChatWidget<'_> {
                 }
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, command_text) => {
+                if cmd == SlashCommand::Undo {
+                    self.undo_last_snapshot();
+                    return;
+                }
                 // This is a regular slash command, dispatch it normally
                 self.app_event_tx
                     .send(AppEvent::DispatchCommand(cmd, command_text));
@@ -3750,6 +3769,8 @@ impl ChatWidget<'_> {
             return;
         }
 
+        self.capture_ghost_snapshot();
+
         let turn_active = self.is_task_running()
             || !self.active_task_ids.is_empty()
             || self.stream.is_write_cycle_active()
@@ -3790,6 +3811,60 @@ impl ChatWidget<'_> {
         self.send_user_messages_to_agent(batch);
 
         // (debug watchdog removed)
+    }
+
+    fn capture_ghost_snapshot(&mut self) {
+        if self.ghost_snapshots_disabled {
+            return;
+        }
+
+        let options = CreateGhostCommitOptions::new(&self.config.cwd);
+        match create_ghost_commit(&options) {
+            Ok(commit) => {
+                self.ghost_snapshots.push(commit);
+                if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
+                    self.ghost_snapshots.remove(0);
+                }
+            }
+            Err(err) => {
+                self.ghost_snapshots_disabled = true;
+                let (message, hint) = match &err {
+                    GitToolingError::NotAGitRepository { .. } => (
+                        "Snapshots disabled: this workspace is not inside a Git repository.".to_string(),
+                        None,
+                    ),
+                    _ => (
+                        format!("Snapshots disabled after Git error: {err}"),
+                        Some(
+                            "Restart Code after resolving the issue to re-enable snapshots.".to_string(),
+                        ),
+                    ),
+                };
+                self.push_background_tail(message);
+                if let Some(hint) = hint {
+                    self.push_background_tail(hint);
+                }
+                tracing::warn!("failed to create ghost snapshot: {err}");
+            }
+        }
+    }
+
+    fn undo_last_snapshot(&mut self) {
+        let Some(commit) = self.ghost_snapshots.pop() else {
+            self.push_background_tail("No snapshot is available to restore.".to_string());
+            return;
+        };
+
+        if let Err(err) = restore_ghost_commit(&self.config.cwd, &commit) {
+            self.history_push(history_cell::new_error_event(format!(
+                "Failed to restore snapshot: {err}",
+            )));
+            self.ghost_snapshots.push(commit);
+            return;
+        }
+
+        let short_id: String = commit.id().chars().take(8).collect();
+        self.push_background_tail(format!("Restored workspace to snapshot {short_id}"));
     }
 
     fn flush_pending_agent_notes(&mut self) {
