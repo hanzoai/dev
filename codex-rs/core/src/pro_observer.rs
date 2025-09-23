@@ -4,7 +4,12 @@ use std::time::{Duration, Instant};
 use futures::StreamExt;
 use tokio::time::sleep;
 
-use codex_protocol::models::{ContentItem, ResponseItem};
+use codex_protocol::models::{
+    ContentItem,
+    ReasoningItemContent,
+    ReasoningItemReasoningSummary,
+    ResponseItem,
+};
 use codex_protocol::models::{FunctionCallOutputPayload, ResponseInputItem};
 
 use crate::agent_tool::{create_run_agent_tool, AgentStatus, AGENT_MANAGER};
@@ -345,18 +350,11 @@ fn build_observer_inputs(sess: &Session) -> (Vec<ResponseItem>, Vec<ResponseItem
     let mut core = Vec::new();
     let mut used = 0usize;
     for item in history.iter().rev() {
-        if let ResponseItem::Message { role, content, .. } = item {
-            if role == "assistant" {
-                let text = collect_text(content);
-                used += text.len();
-                core.push(ResponseItem::Message {
-                    id: None,
-                    role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text }],
-                });
-                if used >= core_budget {
-                    break;
-                }
+        if let Some((len, converted)) = clone_for_prompt(item) {
+            used += len;
+            core.push(converted);
+            if used >= core_budget {
+                break;
             }
         }
     }
@@ -370,11 +368,12 @@ fn build_observer_inputs(sess: &Session) -> (Vec<ResponseItem>, Vec<ResponseItem
         .expect("poisoned lock")
         .clone();
     for item in log.iter().rev() {
-        let (len, converted) = clone_for_prompt(item);
-        used_obs += len;
-        observer.push(converted);
-        if used_obs >= observer_budget {
-            break;
+        if let Some((len, converted)) = clone_for_prompt(item) {
+            used_obs += len;
+            observer.push(converted);
+            if used_obs >= observer_budget {
+                break;
+            }
         }
     }
     observer.reverse();
@@ -382,54 +381,175 @@ fn build_observer_inputs(sess: &Session) -> (Vec<ResponseItem>, Vec<ResponseItem
     (core, observer)
 }
 
-fn collect_text(content: &[ContentItem]) -> String {
-    let mut text = String::new();
-    for item in content {
-        if let ContentItem::OutputText { text: value } = item {
-            text.push_str(value);
-        }
-    }
-    text
+fn clone_for_prompt(item: &ResponseItem) -> Option<(usize, ResponseItem)> {
+    summarize_item(item).map(|text| {
+        let len = text.len().max(1);
+        (
+            len,
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText { text }],
+            },
+        )
+    })
 }
 
-fn clone_for_prompt(item: &ResponseItem) -> (usize, ResponseItem) {
+fn summarize_item(item: &ResponseItem) -> Option<String> {
     match item {
-        ResponseItem::Message { content, .. } => {
-            let text = collect_text(content);
-            (
-                text.len(),
-                ResponseItem::Message {
-                    id: None,
-                    role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text }],
-                },
-            )
-        }
+        ResponseItem::Message { role, content, .. } => summarize_message(role, content),
+        ResponseItem::Reasoning {
+            summary,
+            content,
+            encrypted_content,
+            ..
+        } => summarize_reasoning(summary, content, encrypted_content.as_deref()),
         ResponseItem::FunctionCall { name, arguments, .. } => {
-            let snippet = arguments.chars().take(400).collect::<String>();
-            let text = format!("call {}({})", name, snippet);
-            (
-                text.len(),
-                ResponseItem::Message {
-                    id: None,
-                    role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text }],
-                },
-            )
+            let snippet = truncate_text(arguments, 300);
+            let body = format!("{name}({snippet})");
+            Some(format_prefixed("assistant tool_call", &body))
         }
         ResponseItem::FunctionCallOutput { call_id, output } => {
-            let snippet = output.content.chars().take(400).collect::<String>();
-            let text = format!("result {}: {}", call_id, snippet);
-            (
-                text.len(),
-                ResponseItem::Message {
-                    id: None,
-                    role: "user".to_string(),
-                    content: vec![ContentItem::InputText { text }],
-                },
-            )
+            let snippet = truncate_text(&output.content, 300);
+            let status = output.success.map(|s| if s { "ok" } else { "error" });
+            let body = match status {
+                Some(label) => format!("{call_id} [{label}] {snippet}"),
+                None => format!("{call_id} {snippet}"),
+            };
+            Some(format_prefixed("tool result", &body))
         }
-        _ => (16, item.clone()),
+        ResponseItem::LocalShellCall { status, action, .. } => summarize_shell_call(status, action),
+        ResponseItem::CustomToolCall {
+            name,
+            input,
+            status,
+            call_id,
+            ..
+        } => {
+            let mut body = format!("{name}#{call_id}");
+            if let Some(status) = status {
+                body.push_str(&format!(" [{status}]"));
+            }
+            let snippet = truncate_text(input, 200);
+            if !snippet.is_empty() {
+                body.push(' ');
+                body.push_str(&snippet);
+            }
+            Some(format_prefixed("assistant custom_tool", &body))
+        }
+        ResponseItem::CustomToolCallOutput { call_id, output } => {
+            let snippet = truncate_text(output, 300);
+            let body = format!("{call_id} {snippet}");
+            Some(format_prefixed("tool custom_output", &body))
+        }
+        ResponseItem::WebSearchCall { action, .. } => match action {
+            codex_protocol::models::WebSearchAction::Search { query } => {
+                Some(format_prefixed("assistant web_search", query))
+            }
+            codex_protocol::models::WebSearchAction::Other => None,
+        },
+        ResponseItem::Other => None,
+    }
+}
+
+fn summarize_message(role: &str, content: &[ContentItem]) -> Option<String> {
+    let (mut segments, mut has_image) = (Vec::new(), false);
+    for item in content {
+        match item {
+            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                if !text.is_empty() {
+                    segments.push(text.clone());
+                }
+            }
+            ContentItem::InputImage { image_url } => {
+                has_image = true;
+                segments.push(format!("[image] {image_url}"));
+            }
+        }
+    }
+
+    if segments.is_empty() && !has_image {
+        return None;
+    }
+
+    let body = segments.join("\n");
+    Some(format_prefixed(role, &body))
+}
+
+fn summarize_reasoning(
+    summary: &[ReasoningItemReasoningSummary],
+    content: &Option<Vec<ReasoningItemContent>>,
+    encrypted: Option<&str>,
+) -> Option<String> {
+    let mut segments = Vec::new();
+    for ReasoningItemReasoningSummary::SummaryText { text } in summary {
+        if !text.is_empty() {
+            segments.push(truncate_text(text, 400));
+        }
+    }
+
+    if let Some(items) = content {
+        for entry in items {
+            let text = match entry {
+                ReasoningItemContent::ReasoningText { text }
+                | ReasoningItemContent::Text { text } => text,
+            };
+            if !text.is_empty() {
+                segments.push(truncate_text(text, 200));
+            }
+        }
+    }
+
+    if encrypted.is_some() {
+        segments.push("<encrypted reasoning omitted>".to_string());
+    }
+
+    if segments.is_empty() {
+        return None;
+    }
+
+    let body = segments.join("\n");
+    Some(format_prefixed("assistant reasoning", &body))
+}
+
+fn summarize_shell_call(
+    status: &codex_protocol::models::LocalShellStatus,
+    action: &codex_protocol::models::LocalShellAction,
+) -> Option<String> {
+    match action {
+        codex_protocol::models::LocalShellAction::Exec(exec) => {
+            let joined = exec.command.join(" ");
+            let mut body = format!("{joined}");
+            if let Some(timeout) = exec.timeout_ms {
+                body.push_str(&format!(" (timeout={}ms)", timeout));
+            }
+            if let Some(dir) = &exec.working_directory {
+                body.push_str(&format!(" [cwd={dir}]"));
+            }
+            let status_label = format!("{status:?}").to_lowercase();
+            let prefix = format!("assistant shell_{status_label}");
+            let truncated = truncate_text(&body, 300);
+            Some(format_prefixed(&prefix, &truncated))
+        }
+    }
+}
+
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        text.to_string()
+    } else {
+        let truncated: String = text.chars().take(max_len).collect();
+        format!("{truncated}...")
+    }
+}
+
+fn format_prefixed(prefix: &str, body: &str) -> String {
+    if body.is_empty() {
+        format!("[{prefix}]")
+    } else if body.contains('\n') {
+        format!("[{prefix}]\n{body}")
+    } else {
+        format!("[{prefix}] {body}")
     }
 }
 
