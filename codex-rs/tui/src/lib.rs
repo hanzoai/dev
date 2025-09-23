@@ -89,7 +89,6 @@ mod agent_install_helpers;
 #[cfg(all(test, feature = "legacy_tests"))]
 mod chatwidget_stream_tests;
 
-#[cfg(not(debug_assertions))]
 mod updates;
 
 pub use cli::Cli;
@@ -183,14 +182,14 @@ pub async fn run_main(
         }
     };
 
-    #[cfg(not(debug_assertions))]
-    let startup_footer_notice = crate::updates::auto_upgrade_if_enabled(&config)
-        .await
-        .unwrap_or(None)
-        .map(|version| format!("Upgraded to {version}"));
-
-    #[cfg(debug_assertions)]
-    let startup_footer_notice: Option<String> = None;
+    let startup_footer_notice = if crate::updates::auto_upgrade_runtime_enabled() {
+        crate::updates::auto_upgrade_if_enabled(&config)
+            .await
+            .unwrap_or(None)
+            .map(|version| format!("Upgraded to {version}"))
+    } else {
+        None
+    };
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
@@ -267,11 +266,11 @@ pub async fn run_main(
 
     let _ = tracing_subscriber::registry().with(file_layer).try_init();
 
-    #[cfg(not(debug_assertions))]
-    let latest_upgrade_version = updates::get_upgrade_version(&config);
-
-    #[cfg(debug_assertions)]
-    let latest_upgrade_version: Option<String> = None;
+    let latest_upgrade_version = if crate::updates::upgrade_ui_enabled() {
+        updates::get_upgrade_version(&config)
+    } else {
+        None
+    };
 
     run_ratatui_app(
         cli,

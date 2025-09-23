@@ -279,13 +279,11 @@ pub(crate) enum AppEvent {
         ack: Redacted<StdSender<TerminalCommandGate>>,
     },
     TerminalApprovalDecision { id: u64, approved: bool },
-    #[cfg(not(debug_assertions))]
     RunUpdateCommand {
         command: Vec<String>,
         display: String,
         latest_version: Option<String>,
     },
-    #[cfg(not(debug_assertions))]
     SetAutoUpgradeEnabled(bool),
     RequestAgentInstall { name: String, selected_index: usize },
     AgentsOverviewSelectionChanged { index: usize },
