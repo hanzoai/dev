@@ -265,7 +265,8 @@ pub struct GithubConfig {
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ValidationConfig {
-    /// Master toggle for the patch validation harness.
+    /// Legacy master toggle for the validation harness (kept for config compatibility).
+    /// `run_patch_harness` now relies solely on the functional/stylistic group toggles.
     #[serde(default)]
     pub patch_harness: bool,
 
