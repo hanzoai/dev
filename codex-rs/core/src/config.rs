@@ -857,8 +857,12 @@ pub fn set_github_actionlint_on_patch(
     Ok(())
 }
 
-/// Persist `[validation].patch_harness = <enabled>`.
-pub fn set_validation_patch_harness(codex_home: &Path, enabled: bool) -> anyhow::Result<()> {
+/// Persist `[validation.groups.<group>] = <enabled>`.
+pub fn set_validation_group_enabled(
+    codex_home: &Path,
+    group: &str,
+    enabled: bool,
+) -> anyhow::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
     let mut doc = match std::fs::read_to_string(&read_path) {
@@ -867,7 +871,7 @@ pub fn set_validation_patch_harness(codex_home: &Path, enabled: bool) -> anyhow:
         Err(e) => return Err(e.into()),
     };
 
-    doc["validation"]["patch_harness"] = toml_edit::value(enabled);
+    doc["validation"]["groups"][group] = toml_edit::value(enabled);
 
     std::fs::create_dir_all(codex_home)?;
     let tmp = NamedTempFile::new_in(codex_home)?;
