@@ -3007,9 +3007,9 @@ impl ChatWidget<'_> {
         key: OrderKey,
         tag: &'static str,
     ) -> usize {
-        let cell_kind = cell.kind();
         #[cfg(debug_assertions)]
         {
+            let cell_kind = cell.kind();
             if cell_kind == HistoryCellType::BackgroundEvent {
                 debug_assert!(
                     tag == "background",
@@ -14622,6 +14622,14 @@ impl WidgetRef for &ChatWidget<'_> {
             height: history_area.height,
         };
 
+        // Reset the full history region to the baseline theme background once per frame.
+        // Individual cells only repaint when their visuals differ (e.g., assistant tint),
+        // which keeps overdraw minimal while ensuring stale characters disappear.
+        let base_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        fill_rect(buf, history_area, Some(' '), base_style);
+
         // Collect all content items into a single list
         let mut all_content: Vec<&dyn HistoryCell> = Vec::new();
         for cell in self.history_cells.iter() {
@@ -14899,49 +14907,11 @@ impl WidgetRef for &ChatWidget<'_> {
             .last_history_viewport_height
             .set(content_area.height);
 
-        // Targeted clears: only pad stripes and any top gap inside content area.
-        let clear_style = Style::default()
-            .bg(crate::colors::background())
-            .fg(crate::colors::text());
         let _perf_hist_clear_start = if self.perf_state.enabled {
             Some(std::time::Instant::now())
         } else {
             None
         };
-        let mut cleared_cells: u64 = 0;
-        // Left/right padding stripes
-        let left_pad_w = content_area.x.saturating_sub(history_area.x);
-        let right_pad_start = content_area.x.saturating_add(content_area.width);
-        let right_pad_w = history_area
-            .x
-            .saturating_add(history_area.width)
-            .saturating_sub(right_pad_start);
-        if left_pad_w > 0 {
-            let left_rect = Rect::new(history_area.x, history_area.y, left_pad_w, history_area.height);
-            fill_rect(buf, left_rect, Some(' '), clear_style);
-            cleared_cells =
-                cleared_cells.saturating_add((left_pad_w as u64) * (history_area.height as u64));
-        }
-        if right_pad_w > 0 {
-            let right_rect = Rect::new(right_pad_start, history_area.y, right_pad_w, history_area.height);
-            fill_rect(buf, right_rect, Some(' '), clear_style);
-            cleared_cells =
-                cleared_cells.saturating_add((right_pad_w as u64) * (history_area.height as u64));
-        }
-        // Top gap inside content area when content is bottom-aligned
-        if start_y > content_area.y {
-            let gap_h = start_y.saturating_sub(content_area.y);
-            let gap_rect = Rect::new(content_area.x, content_area.y, content_area.width, gap_h);
-            fill_rect(buf, gap_rect, Some(' '), clear_style);
-            cleared_cells =
-                cleared_cells.saturating_add((gap_h as u64) * (content_area.width as u64));
-        }
-        if let Some(t0) = _perf_hist_clear_start {
-            let dt = t0.elapsed().as_nanos();
-            let mut p = self.perf_state.stats.borrow_mut();
-            p.ns_history_clear = p.ns_history_clear.saturating_add(dt);
-            p.cells_history_clear = p.cells_history_clear.saturating_add(cleared_cells);
-        }
 
         // Render the scrollable content with spacing using prefix sums
         let mut screen_y = start_y; // Position on screen
@@ -15108,17 +15078,14 @@ impl WidgetRef for &ChatWidget<'_> {
                         None
                     };
                     let style = Style::default().bg(gutter_bg);
-                    fill_rect(buf, gutter_area, Some(' '), style);
-                    // Also tint the single left padding column so the assistant
-                    // gutter visually reaches the outer edge. The content area
-                    // is inset by a uniform padding; when present, paint that
-                    // one column with the same assistant background for the
-                    // vertical span of this item.
+                    let mut tint_x = gutter_area.x;
+                    let mut tint_width = gutter_area.width;
                     if content_area.x > history_area.x {
-                        let left_col_x = content_area.x.saturating_sub(1);
-                        let left_rect = Rect::new(left_col_x, gutter_area.y, 1, gutter_area.height);
-                        fill_rect(buf, left_rect, Some(' '), style);
+                        tint_x = content_area.x.saturating_sub(1);
+                        tint_width = tint_width.saturating_add(1);
                     }
+                    let tint_rect = Rect::new(tint_x, gutter_area.y, tint_width, gutter_area.height);
+                    fill_rect(buf, tint_rect, Some(' '), style);
                     // Also tint one column immediately to the right of the content area
                     // so the assistant block is visually bookended. This column lives in the
                     // right padding stripe; when the scrollbar is visible it will draw over
@@ -15379,7 +15346,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let gap_height = (content_area.y + content_area.height).saturating_sub(screen_y);
             if gap_height > 0 {
                 let gap_rect = Rect::new(content_area.x, screen_y, content_area.width, gap_height);
-                fill_rect(buf, gap_rect, Some(' '), clear_style);
+                fill_rect(buf, gap_rect, Some(' '), base_style);
             }
             if let Some(t0) = _perf_hist_clear2 {
                 let dt = t0.elapsed().as_nanos();

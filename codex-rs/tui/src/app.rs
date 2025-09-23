@@ -100,6 +100,12 @@ pub(crate) struct App<'a> {
 
     /// True when a redraw has been scheduled but not yet executed (debounce window).
     pending_redraw: Arc<AtomicBool>,
+    /// Tracks whether a frame is currently queued or being drawn. Used to coalesce
+    /// rapid-fire redraw requests without dropping the final state.
+    redraw_inflight: Arc<AtomicBool>,
+    /// Set if a redraw request arrived while another frame was in flight. Ensures we
+    /// queue one more frame immediately after the current draw completes.
+    post_frame_redraw: Arc<AtomicBool>,
     /// True while a one-shot timer for a future animation frame is armed.
     /// This prevents arming multiple timers at once, while allowing timers
     /// to run independently of the short debounce used for immediate redraws.
@@ -195,6 +201,8 @@ impl App<'_> {
         let (bulk_tx, app_event_rx_bulk) = channel();
         let app_event_tx = AppEventSender::new_dual(high_tx.clone(), bulk_tx.clone());
         let pending_redraw = Arc::new(AtomicBool::new(false));
+        let redraw_inflight = Arc::new(AtomicBool::new(false));
+        let post_frame_redraw = Arc::new(AtomicBool::new(false));
         let scheduled_frame_armed = Arc::new(AtomicBool::new(false));
 
         let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
@@ -340,6 +348,8 @@ impl App<'_> {
             latest_upgrade_version,
             file_search,
             pending_redraw,
+            redraw_inflight,
+            post_frame_redraw,
             scheduled_frame_armed,
             input_running,
             _transcript_overlay: None,
@@ -380,8 +390,17 @@ impl App<'_> {
     /// to keep keypress echo latency low.
     #[allow(clippy::unwrap_used)]
     fn schedule_redraw(&self) {
-        // Always issue a leading-edge redraw for responsiveness.
-        self.app_event_tx.send(AppEvent::Redraw);
+        // Only queue a new frame when one is not already in flight; otherwise record
+        // that we owe a follow-up immediately after the active frame completes.
+        let should_send = self
+            .redraw_inflight
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok();
+        if should_send {
+            self.app_event_tx.send(AppEvent::Redraw);
+        } else {
+            self.post_frame_redraw.store(true, Ordering::Release);
+        }
 
         // Arm debounce window if not already armed.
         if self
@@ -413,7 +432,7 @@ impl App<'_> {
             thread::sleep(duration);
             // Allow a subsequent timer to be armed.
             scheduled.store(false, Ordering::Release);
-            tx.send(AppEvent::Redraw);
+            tx.send(AppEvent::RequestRedraw);
         });
     }
 
@@ -911,7 +930,13 @@ impl App<'_> {
                 AppEvent::Redraw => {
                     if self.timing_enabled { self.timing.on_redraw_begin(); }
                     let t0 = Instant::now();
-                    std::io::stdout().sync_update(|_| self.draw_next_frame(terminal))??;
+                    let draw_result = std::io::stdout().sync_update(|_| self.draw_next_frame(terminal));
+                    self.redraw_inflight.store(false, Ordering::Release);
+                    let needs_follow_up = self.post_frame_redraw.swap(false, Ordering::AcqRel);
+                    if needs_follow_up {
+                        self.schedule_redraw();
+                    }
+                    draw_result??;
                     if self.timing_enabled { self.timing.on_redraw_end(t0); }
                 }
                 AppEvent::StartCommitAnimation => {
