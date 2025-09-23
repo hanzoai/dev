@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::rc::Weak;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
@@ -131,6 +132,10 @@ use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
+use crate::bottom_pane::LoginAccountsState;
+use crate::bottom_pane::LoginAccountsView;
+use crate::bottom_pane::LoginAddAccountState;
+use crate::bottom_pane::LoginAddAccountView;
 #[cfg(not(debug_assertions))]
 use crate::bottom_pane::UpdateSharedState;
 use crate::height_manager::HeightEvent;
@@ -280,6 +285,9 @@ pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
     bottom_pane: BottomPane<'a>,
+    auth_manager: Arc<AuthManager>,
+    login_view_state: Option<Weak<RefCell<LoginAccountsState>>>,
+    login_add_view_state: Option<Weak<RefCell<LoginAddAccountState>>>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     history_render: HistoryRenderState,
@@ -2005,26 +2013,27 @@ impl ChatWidget<'_> {
         show_order_overlay: bool,
         latest_upgrade_version: Option<String>,
     ) -> Self {
-        let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
+        let (codex_op_tx, codex_op_rx) = unbounded_channel::<Op>();
+
+        let auth_manager = AuthManager::shared(
+            config.codex_home.clone(),
+            AuthMode::ApiKey,
+            config.responses_originator_header.clone(),
+        );
 
         let app_event_tx_clone = app_event_tx.clone();
-        // Create the Code asynchronously so the UI loads as quickly as possible.
+        let auth_manager_for_spawn = auth_manager.clone();
         let config_for_agent_loop = config.clone();
         tokio::spawn(async move {
-            // Use ConversationManager with an AuthManager (API key by default)
-            let auth_manager = AuthManager::shared(
-                config_for_agent_loop.codex_home.clone(),
-                AuthMode::ApiKey,
-                config_for_agent_loop.responses_originator_header.clone(),
-            );
-            let conversation_manager = ConversationManager::new(auth_manager.clone());
+            let mut codex_op_rx = codex_op_rx;
+            let conversation_manager = ConversationManager::new(auth_manager_for_spawn.clone());
             let resume_path = config_for_agent_loop.experimental_resume.clone();
             let new_conversation = match resume_path {
                 Some(path) => conversation_manager
                     .resume_conversation_from_rollout(
                         config_for_agent_loop,
                         path,
-                        auth_manager,
+                        auth_manager_for_spawn,
                     )
                     .await,
                 None => conversation_manager.new_conversation(config_for_agent_loop).await,
@@ -2099,6 +2108,9 @@ impl ChatWidget<'_> {
                 enhanced_keys_supported,
                 using_chatgpt_auth: config.using_chatgpt_auth,
             }),
+            auth_manager: auth_manager.clone(),
+            login_view_state: None,
+            login_add_view_state: None,
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
@@ -2267,6 +2279,7 @@ impl ChatWidget<'_> {
         terminal_info: crate::tui::TerminalInfo,
         show_order_overlay: bool,
         latest_upgrade_version: Option<String>,
+        auth_manager: Arc<AuthManager>,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -2315,6 +2328,9 @@ impl ChatWidget<'_> {
                 enhanced_keys_supported,
                 using_chatgpt_auth: config.using_chatgpt_auth,
             }),
+            auth_manager: auth_manager.clone(),
+            login_view_state: None,
+            login_add_view_state: None,
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
@@ -5806,6 +5822,90 @@ fn update_rate_limit_resets(
     pub(crate) fn handle_agents_command(&mut self, _args: String) {
         // Open the new overview combining Agents and Commands
         self.show_agents_overview_ui();
+    }
+
+    pub(crate) fn handle_login_command(&mut self) {
+        self.show_login_accounts_view();
+    }
+
+    pub(crate) fn auth_manager(&self) -> Arc<AuthManager> {
+        self.auth_manager.clone()
+    }
+
+    pub(crate) fn reload_auth(&self) -> bool {
+        self.auth_manager.reload()
+    }
+
+    pub(crate) fn show_login_accounts_view(&mut self) {
+        let (view, state_rc) = LoginAccountsView::new(
+            self.config.codex_home.clone(),
+            self.app_event_tx.clone(),
+        );
+        self.login_view_state = Some(LoginAccountsState::weak_handle(&state_rc));
+        self.login_add_view_state = None;
+        self.bottom_pane.show_login_accounts(view);
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_login_add_account_view(&mut self) {
+        let (view, state_rc) = LoginAddAccountView::new(
+            self.config.codex_home.clone(),
+            self.app_event_tx.clone(),
+        );
+        self.login_add_view_state = Some(LoginAddAccountState::weak_handle(&state_rc));
+        self.login_view_state = None;
+        self.bottom_pane.show_login_add_account(view);
+        self.request_redraw();
+    }
+
+    fn with_login_add_view<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&mut LoginAddAccountState),
+    {
+        if let Some(weak) = &self.login_add_view_state {
+            if let Some(state_rc) = weak.upgrade() {
+                f(&mut state_rc.borrow_mut());
+                self.request_redraw();
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(crate) fn notify_login_chatgpt_started(&mut self, auth_url: String) {
+        if self.with_login_add_view(|state| state.acknowledge_chatgpt_started(auth_url.clone())) {
+            return;
+        }
+    }
+
+    pub(crate) fn notify_login_chatgpt_failed(&mut self, error: String) {
+        if self.with_login_add_view(|state| state.acknowledge_chatgpt_failed(error.clone())) {
+            return;
+        }
+    }
+
+    pub(crate) fn notify_login_chatgpt_complete(&mut self, result: Result<(), String>) {
+        if self.with_login_add_view(|state| state.on_chatgpt_complete(result.clone())) {
+            return;
+        }
+    }
+
+    pub(crate) fn notify_login_chatgpt_cancelled(&mut self) {
+        if self.with_login_add_view(|state| state.cancel_chatgpt_wait()) {
+            return;
+        }
+    }
+
+    pub(crate) fn login_add_view_active(&self) -> bool {
+        self.login_add_view_state
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .is_some()
+    }
+
+    pub(crate) fn set_using_chatgpt_auth(&mut self, using: bool) {
+        self.config.using_chatgpt_auth = using;
+        self.bottom_pane.set_using_chatgpt_auth(using);
     }
 
     #[cfg(not(debug_assertions))]

@@ -469,12 +469,23 @@ async fn persist_tokens_async(
         {
             tokens.account_id = Some(acc.to_string());
         }
+        let tokens_for_store = tokens.clone();
+        let last_refresh = Utc::now();
         let auth = AuthDotJson {
             openai_api_key: api_key,
             tokens: Some(tokens),
-            last_refresh: Some(Utc::now()),
+            last_refresh: Some(last_refresh),
         };
-        codex_core::auth::write_auth_json(&auth_file, &auth)
+        codex_core::auth::write_auth_json(&auth_file, &auth)?;
+        let email_for_store = tokens_for_store.id_token.email.clone();
+        let _ = codex_core::auth_accounts::upsert_chatgpt_account(
+            &codex_home,
+            tokens_for_store,
+            last_refresh,
+            email_for_store,
+            true,
+        )?;
+        Ok(())
     })
     .await
     .map_err(|e| io::Error::other(format!("persist task failed: {e}")))?
