@@ -198,7 +198,9 @@ pub(crate) trait HistoryCell {
             _ => crate::colors::background(),
         };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-        fill_rect(buf, area, Some(' '), bg_style);
+        if matches!(self.kind(), HistoryCellType::Assistant) {
+            fill_rect(buf, area, Some(' '), bg_style);
+        }
 
         // Ensure the entire allocated area is painted with the theme background
         // by attaching a background-styled Block to the Paragraph as well.
@@ -1129,8 +1131,6 @@ impl HistoryCell for LimitsHistoryCell {
         let text = Text::from(lines);
 
         let cell_bg = crate::colors::background();
-        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-        fill_rect(buf, area, Some(' '), bg_style);
 
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
@@ -1358,8 +1358,10 @@ impl HistoryCell for PlainHistoryCell {
             HistoryCellType::Assistant => crate::colors::assistant_bg(),
             _ => crate::colors::background(),
         };
-        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-        fill_rect(buf, area, Some(' '), bg_style);
+        if matches!(self.kind, HistoryCellType::Assistant) {
+            let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+            fill_rect(buf, area, Some(' '), bg_style);
+        }
 
         if requested_width == 0 || effective_width == 0 {
             return;
