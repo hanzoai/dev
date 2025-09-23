@@ -164,6 +164,11 @@ pub(crate) enum AppEvent {
     /// Bottom composer expanded (e.g., slash command popup opened)
     ComposerExpanded,
 
+    /// Show the main account picker view for /login
+    ShowLoginAccounts,
+    /// Show the add-account flow for /login
+    ShowLoginAddAccount,
+
     /// Kick off an asynchronous file search for the given query (text after
     /// the `@`). Previous searches may be cancelled by the app layer so there
     /// is at most one in-flight search.
@@ -204,6 +209,15 @@ pub(crate) enum AppEvent {
     /// Onboarding: result of login_with_chatgpt.
     OnboardingAuthComplete(Result<(), String>),
     OnboardingComplete(ChatWidgetArgs),
+
+    /// Begin ChatGPT login flow from the in-app login manager.
+    LoginStartChatGpt,
+    /// Cancel an in-progress ChatGPT login flow triggered via `/login`.
+    LoginCancelChatGpt,
+    /// ChatGPT login flow has completed (success or failure).
+    LoginChatGptComplete { result: Result<(), String> },
+    /// The active authentication mode changed (e.g., switched accounts).
+    LoginUsingChatGptChanged { using_chatgpt_auth: bool },
 
     /// Show Chrome launch options dialog
     #[allow(dead_code)]
