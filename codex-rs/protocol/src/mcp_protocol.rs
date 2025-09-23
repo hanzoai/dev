@@ -722,7 +722,7 @@ mod tests {
         let request = ClientRequest::NewConversation {
             request_id: RequestId::Integer(42),
             params: NewConversationParams {
-                model: Some("gpt-5".to_string()),
+                model: Some("gpt-5-codex".to_string()),
                 profile: None,
                 cwd: None,
                 approval_policy: Some(AskForApproval::OnRequest),
@@ -738,7 +738,7 @@ mod tests {
                 "method": "newConversation",
                 "id": 42,
                 "params": {
-                    "model": "gpt-5",
+                    "model": "gpt-5-codex",
                     "approvalPolicy": "on-request"
                 }
             }),
