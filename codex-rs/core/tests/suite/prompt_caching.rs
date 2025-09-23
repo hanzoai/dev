@@ -656,6 +656,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() {
             model: "o3".to_string(),
             effort: Some(ReasoningEffort::High),
             summary: ReasoningSummary::Detailed,
+            final_output_json_schema: None,
         })
         .await
         .unwrap();
@@ -761,6 +762,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() {
             model: default_model.clone(),
             effort: default_effort,
             summary: default_summary,
+            final_output_json_schema: None,
         })
         .await
         .unwrap();
@@ -777,6 +779,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() {
             model: default_model.clone(),
             effort: default_effort,
             summary: default_summary,
+            final_output_json_schema: None,
         })
         .await
         .unwrap();
@@ -872,6 +875,7 @@ async fn send_user_turn_with_changes_sends_environment_context() {
             model: default_model,
             effort: default_effort,
             summary: default_summary,
+            final_output_json_schema: None,
         })
         .await
         .unwrap();
@@ -888,6 +892,7 @@ async fn send_user_turn_with_changes_sends_environment_context() {
             model: "o3".to_string(),
             effort: Some(ReasoningEffort::High),
             summary: ReasoningSummary::Detailed,
+            final_output_json_schema: None,
         })
         .await
         .unwrap();
