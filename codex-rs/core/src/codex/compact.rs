@@ -26,8 +26,7 @@ use codex_protocol::protocol::RolloutItem;
 use base64::Engine;
 use futures::prelude::*;
 
-pub(super) const COMPACT_TRIGGER_TEXT: &str = "Start Summarization";
-const SUMMARIZATION_PROMPT: &str = include_str!("../../templates/compact/prompt.md");
+pub const SUMMARIZATION_PROMPT: &str = include_str!("../../templates/compact/prompt.md");
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 
 #[derive(Template)]
@@ -59,9 +58,7 @@ pub(super) async fn run_inline_auto_compact_task(
     turn_context: Arc<TurnContext>,
 ) -> Vec<ResponseItem> {
     let sub_id = sess.next_internal_sub_id();
-    let input = vec![InputItem::Text {
-        text: COMPACT_TRIGGER_TEXT.to_string(),
-    }];
+    let input = vec![InputItem::Text { text: SUMMARIZATION_PROMPT.to_string() }];
     run_compact_task_inner_inline(
         sess,
         turn_context,
