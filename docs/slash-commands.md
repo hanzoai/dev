@@ -19,6 +19,7 @@ Notes
 - `/resume`: resume a past session for this folder.
 - `/quit`: exit Codex.
 - `/logout`: log out of Codex.
+- `/login`: manage Code sign-ins (select, add, or disconnect accounts).
 
 ## Workspace & Git
 
