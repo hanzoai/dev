@@ -2,6 +2,7 @@ use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
+use codex_core::protocol::ValidationGroup;
 use codex_core::protocol::ApprovedCommandMatchKind;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
@@ -57,6 +58,14 @@ pub(crate) enum TerminalCommandGate {
 #[derive(Debug, Clone)]
 pub(crate) enum TerminalAfter {
     RefreshAgentsAndClose { selected_index: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackgroundPlacement {
+    /// Default: append to the end of the current request/history window.
+    Tail,
+    /// Display immediately before the next provider/tool output for the active request.
+    BeforeNextOutput,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -119,10 +128,10 @@ pub(crate) enum AppEvent {
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
-    /// Update validation harness master toggle
-    UpdateValidationPatchHarness(bool),
     /// Enable/disable a specific validation tool
     UpdateValidationTool { name: String, enable: bool },
+    /// Enable/disable an entire validation group
+    UpdateValidationGroup { group: ValidationGroup, enable: bool },
     /// Start installing a validation tool through the terminal overlay
     RequestValidationToolInstall { name: String, command: String },
 
@@ -190,12 +199,11 @@ pub(crate) enum AppEvent {
     InsertHistoryWithKind { id: Option<String>, kind: StreamKind, lines: Vec<Line<'static>> },
     /// Finalized assistant answer with raw markdown for re-rendering under theme changes.
     InsertFinalAnswer { id: Option<String>, lines: Vec<Line<'static>>, source: String },
-    /// Insert a background event near the top of the current request so it
-    /// appears above imminent provider output (e.g. above Exec begin).
-    InsertBackgroundEventEarly(String),
-    /// Insert a background event at the end of the current request so it
-    /// follows previously rendered content.
-    InsertBackgroundEventLate(String),
+    /// Insert a background event with explicit placement semantics.
+    InsertBackgroundEvent {
+        message: String,
+        placement: BackgroundPlacement,
+    },
 
     /// Background rate limit refresh failed (threaded request).
     RateLimitFetchFailed { message: String },
