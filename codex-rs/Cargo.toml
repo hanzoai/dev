@@ -206,15 +206,20 @@ ratatui = { git = "https://github.com/nornagon/ratatui", branch = "nornagon-v0.2
 # Custom build profiles used by build-fast.sh
 [profile.dev-fast]
 inherits = "dev"
-opt-level = 0
+opt-level = 1
 debug = 1
 incremental = true
+codegen-units = 256
 lto = "off"
 
 [profile.perf]
 inherits = "release"
+incremental = false
+codegen-units = 16
+lto = "thin"
 debug = 2
 strip = "none"
+split-debuginfo = "packed"
 
 [profile.release-prod]
 inherits = "release"
