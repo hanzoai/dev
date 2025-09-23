@@ -83,6 +83,7 @@ async fn review_op_emits_lifecycle_and_review_output() {
             review_request: ReviewRequest {
                 prompt: "Please review my changes".to_string(),
                 user_facing_hint: "my changes".to_string(),
+                metadata: None,
             },
         })
         .await
@@ -185,6 +186,7 @@ async fn review_op_with_plain_text_emits_review_fallback() {
             review_request: ReviewRequest {
                 prompt: "Plain text review".to_string(),
                 user_facing_hint: "plain text review".to_string(),
+                metadata: None,
             },
         })
         .await
@@ -254,6 +256,7 @@ async fn review_does_not_emit_agent_message_on_structured_output() {
             review_request: ReviewRequest {
                 prompt: "check structured".to_string(),
                 user_facing_hint: "check structured".to_string(),
+                metadata: None,
             },
         })
         .await
@@ -308,6 +311,7 @@ async fn review_uses_custom_review_model_from_config() {
             review_request: ReviewRequest {
                 prompt: "use custom model".to_string(),
                 user_facing_hint: "use custom model".to_string(),
+                metadata: None,
             },
         })
         .await
@@ -424,6 +428,7 @@ async fn review_input_isolated_from_parent_history() {
             review_request: ReviewRequest {
                 prompt: review_prompt.clone(),
                 user_facing_hint: review_prompt.clone(),
+                metadata: None,
             },
         })
         .await
@@ -537,6 +542,7 @@ async fn review_history_does_not_leak_into_parent_session() {
             review_request: ReviewRequest {
                 prompt: "Start a review".to_string(),
                 user_facing_hint: "Start a review".to_string(),
+                metadata: None,
             },
         })
         .await
