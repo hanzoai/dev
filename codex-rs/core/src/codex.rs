@@ -3446,7 +3446,7 @@ async fn submission_loop(
 
                 // Attempt to inject input into current task
                 if let Err(items) = sess.inject_input(vec![InputItem::Text {
-                    text: "Start Summarization".to_string(),
+                    text: compact::SUMMARIZATION_PROMPT.to_string(),
                 }]) {
                     let turn_context = sess.make_turn_context();
                     compact::spawn_compact_task(sess.clone(), turn_context, sub.id.clone(), items);
@@ -4119,6 +4119,7 @@ async fn run_turn(
             text_format: None,
             model_override: None,
             model_family_override: None,
+            output_schema: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
