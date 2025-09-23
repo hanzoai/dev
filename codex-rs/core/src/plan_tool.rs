@@ -108,14 +108,153 @@ fn parse_update_plan_arguments(
 }
 
 fn normalize_plan_name(name: Option<String>) -> Option<String> {
-    let Some(name) = name else {
+    let Some(name) = name.map(|value| value.trim().to_string()) else {
         return None;
     };
 
-    let words: Vec<&str> = name.split_whitespace().collect();
+    if name.is_empty() {
+        return None;
+    }
+
+    let canonicalized = canonicalize_word_boundaries(&name);
+    let words: Vec<&str> = canonicalized.split_whitespace().collect();
     if words.is_empty() {
         return None;
     }
 
-    Some(words.join(" "))
+    Some(
+        words
+            .into_iter()
+            .map(format_plan_word)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn canonicalize_word_boundaries(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut previous_kind = CharKind::Start;
+
+    for ch in input.chars() {
+        let kind = CharKind::from(ch);
+
+        match kind {
+            CharKind::Separator => {
+                if !result.ends_with(' ') && !result.is_empty() {
+                    result.push(' ');
+                }
+                previous_kind = CharKind::Separator;
+            }
+            _ => {
+                if should_insert_space(previous_kind, kind) && !result.ends_with(' ') {
+                    result.push(' ');
+                }
+                result.push(ch);
+                previous_kind = kind;
+            }
+        }
+    }
+
+    result.trim().to_string()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharKind {
+    Start,
+    Upper,
+    Lower,
+    Digit,
+    Other,
+    Separator,
+}
+
+impl From<char> for CharKind {
+    fn from(value: char) -> Self {
+        if value.is_whitespace() || matches!(value, '_' | '-' | '/' | ':' | '.' ) {
+            return CharKind::Separator;
+        }
+
+        if value.is_ascii_uppercase() {
+            return CharKind::Upper;
+        }
+        if value.is_ascii_lowercase() {
+            return CharKind::Lower;
+        }
+        if value.is_ascii_digit() {
+            return CharKind::Digit;
+        }
+
+        CharKind::Other
+    }
+}
+
+fn should_insert_space(previous: CharKind, current: CharKind) -> bool {
+    matches!(
+        (previous, current),
+        (CharKind::Upper, CharKind::Lower)
+            | (CharKind::Lower, CharKind::Upper)
+            | (CharKind::Digit, CharKind::Upper)
+            | (CharKind::Digit, CharKind::Lower)
+            | (CharKind::Upper, CharKind::Digit)
+            | (CharKind::Lower, CharKind::Digit)
+            | (CharKind::Other, CharKind::Upper)
+            | (CharKind::Other, CharKind::Lower)
+            | (CharKind::Other, CharKind::Digit)
+    )
+}
+
+const KNOWN_ACRONYMS: &[&str] = &[
+    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI", "UI", "UX",
+];
+
+fn format_plan_word(word: &str) -> String {
+    if word.is_empty() {
+        return String::new();
+    }
+
+    let uppercase = word.to_ascii_uppercase();
+    if KNOWN_ACRONYMS.contains(&uppercase.as_str()) {
+        return uppercase;
+    }
+
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+
+    let mut formatted = String::new();
+    formatted.extend(first.to_uppercase());
+    formatted.push_str(&chars.flat_map(char::to_lowercase).collect::<String>());
+    formatted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_plan_name;
+
+    #[test]
+    fn drops_empty_names() {
+        assert_eq!(normalize_plan_name(None), None);
+        assert_eq!(normalize_plan_name(Some("   ".into())), None);
+    }
+
+    #[test]
+    fn title_cases_snake_and_kebab_cases() {
+        assert_eq!(
+            normalize_plan_name(Some("add_cat_command_guard".into())),
+            Some("Add Cat Command Guard".into())
+        );
+        assert_eq!(
+            normalize_plan_name(Some("update-core-tui".into())),
+            Some("Update Core TUI".into())
+        );
+    }
+
+    #[test]
+    fn handles_camel_case_and_acronyms() {
+        assert_eq!(
+            normalize_plan_name(Some("updateCoreAPIIntegration".into())),
+            Some("Update Core API Integration".into())
+        );
+    }
 }
