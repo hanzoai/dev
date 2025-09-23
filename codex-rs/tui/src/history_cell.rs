@@ -38,6 +38,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 use shlex::Shlex;
+
+const UPGRADE_NOTICE_TARGET_WIDTH: u16 = 70;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Cursor;
@@ -1139,6 +1141,58 @@ impl HistoryCell for LimitsHistoryCell {
     }
 }
 
+pub(crate) struct UpgradeNoticeCell {
+    lines: Vec<Line<'static>>,
+    backdrop: ratatui::style::Color,
+    border_style: Style,
+}
+
+impl UpgradeNoticeCell {
+    fn new(current_version: String, latest_version: String) -> Self {
+        let current_version = current_version.trim().to_string();
+        let latest_version = latest_version.trim().to_string();
+        let primary = crate::colors::primary();
+        let backdrop = crate::colors::mix_toward(primary, crate::colors::background(), 0.95);
+        let base_style = Style::default().bg(backdrop).fg(crate::colors::text());
+        let title_style = Style::default()
+            .bg(backdrop)
+            .fg(primary)
+            .add_modifier(Modifier::BOLD);
+        let highlight_style = Style::default().bg(backdrop).fg(primary);
+        let dim_style = Style::default().bg(backdrop).fg(crate::colors::text_dim());
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(vec![Span::styled("★ Upgrade Available ★", title_style)]));
+        lines.push(Line::from(vec![
+            Span::styled("Latest release: ", dim_style),
+            Span::styled(
+                format!("{current_version} → {latest_version}"),
+                highlight_style,
+            ),
+        ]));
+        lines.push(Line::from(vec![Span::styled(String::new(), base_style)]));
+        lines.push(Line::from(vec![
+            Span::styled("Use ", base_style),
+            Span::styled("/upgrade", highlight_style),
+            Span::styled(" to upgrade now or enable auto-update.", base_style),
+        ]));
+
+        Self {
+            lines,
+            backdrop,
+            border_style: Style::default().bg(backdrop).fg(primary),
+        }
+    }
+
+    fn text(&self) -> Text<'static> {
+        Text::from(self.lines.clone())
+    }
+
+    fn inner_width(total_width: u16) -> u16 {
+        total_width.saturating_sub(2).max(1)
+    }
+}
+
 struct PlainLayoutCache {
     requested_width: u16,
     effective_width: u16,
@@ -1341,6 +1395,62 @@ impl HistoryCell for PlainHistoryCell {
                 buf[(dest_x, dest_y)] = src_cell.clone();
             }
         }
+    }
+}
+
+impl HistoryCell for UpgradeNoticeCell {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Plain
+    }
+
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.lines.clone()
+    }
+
+    fn has_custom_render(&self) -> bool {
+        true
+    }
+
+    fn desired_height(&self, width: u16) -> u16 {
+        if width == 0 {
+            return 0;
+        }
+        let box_width = width.min(UPGRADE_NOTICE_TARGET_WIDTH).max(3);
+        let inner_width = Self::inner_width(box_width);
+        let paragraph = Paragraph::new(self.text()).wrap(Wrap { trim: false });
+        let text_height = paragraph.line_count(inner_width) as u16;
+        text_height.saturating_add(2)
+    }
+
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let box_width = area.width.min(UPGRADE_NOTICE_TARGET_WIDTH).max(3);
+        let render_area = Rect::new(area.x, area.y, box_width, area.height);
+
+        let bg_style = Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        fill_rect(buf, area, Some(' '), bg_style);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(self.border_style)
+            .style(Style::default().bg(self.backdrop));
+
+        Paragraph::new(self.text())
+            .wrap(Wrap { trim: false })
+            .alignment(Alignment::Center)
+            .scroll((skip_rows, 0))
+            .block(block)
+            .style(Style::default().bg(self.backdrop).fg(crate::colors::text()))
+            .render(render_area, buf);
     }
 }
 
@@ -6232,7 +6342,7 @@ pub(crate) fn new_session_info(
 
 /// Build the common lines for the "Popular commands" section (without the leading
 /// "notice" marker). Shared between the initial session info and the startup prelude.
-fn popular_commands_lines(latest_version: Option<&str>) -> Vec<Line<'static>> {
+fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::styled(
         "Popular commands:",
@@ -6299,26 +6409,34 @@ fn popular_commands_lines(latest_version: Option<&str>) -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
 
-    if let Some(version) = latest_version {
-        let primary = Style::default()
-            .fg(crate::colors::primary())
-            .add_modifier(Modifier::BOLD);
-        lines.push(Line::from(vec![
-            Span::styled("★ Update Available!", primary),
-        ]));
-        lines.push(Line::from(vec![
-            Span::raw("   Use "),
-            Span::styled("/update", Style::default().fg(crate::colors::primary())),
-            Span::raw(format!(" to install version {version}")),
-        ]));
-    }
-
     lines
 }
 
 /// Create a notice cell that shows the "Popular commands" immediately.
 /// If `connecting_mcp` is true, include a dim status line to inform users
 /// that external MCP servers are being connected in the background.
+pub(crate) fn new_upgrade_prelude(
+    latest_version: Option<&str>,
+) -> Option<UpgradeNoticeCell> {
+    if !crate::updates::upgrade_ui_enabled() {
+        return None;
+    }
+    let latest = latest_version?.trim();
+    if latest.is_empty() {
+        return None;
+    }
+
+    let current = codex_version::version();
+    if latest == current {
+        return None;
+    }
+
+    Some(UpgradeNoticeCell::new(
+        current.to_string(),
+        latest.to_string(),
+    ))
+}
+
 pub(crate) fn new_popular_commands_notice(
     _connecting_mcp: bool,
     latest_version: Option<&str>,
