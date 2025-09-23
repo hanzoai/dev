@@ -111,6 +111,9 @@ pub(crate) enum AppEvent {
     /// layer so it can be handled centrally. Includes the full command text.
     DispatchCommand(SlashCommand, String),
 
+    /// Restore the workspace to a selected snapshot captured earlier in the session.
+    UndoSnapshotSelected { index: usize },
+
     /// Switch to a new working directory by rebuilding the chat widget with
     /// the same configuration but a different `cwd`. Optionally submits an
     /// initial prompt once the new session is ready.
