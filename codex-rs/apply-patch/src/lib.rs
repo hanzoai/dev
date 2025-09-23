@@ -490,21 +490,18 @@ async fn derive_new_contents_from_chunks(
         }
     };
 
-    let mut original_lines: Vec<String> = original_contents
-        .split('\n')
-        .map(|s| s.to_string())
-        .collect();
+    let mut original_lines: Vec<String> = original_contents.split('\n').map(String::from).collect();
 
     // Drop the trailing empty element that results from the final newline so
     // that line counts match the behaviour of standard `diff`.
-    if original_lines.last().is_some_and(|s| s.is_empty()) {
+    if original_lines.last().is_some_and(String::is_empty) {
         original_lines.pop();
     }
 
     let replacements = compute_replacements(&original_lines, path, chunks)?;
     let new_lines = apply_replacements(original_lines, &replacements);
     let mut new_lines = new_lines;
-    if !new_lines.last().is_some_and(|s| s.is_empty()) {
+    if !new_lines.last().is_some_and(String::is_empty) {
         new_lines.push(String::new());
     }
     let new_contents = new_lines.join("\n");
@@ -545,7 +542,7 @@ fn compute_replacements(
         if chunk.old_lines.is_empty() {
             // Pure addition (no old lines). We'll add them at the end or just
             // before the final empty line if one exists.
-            let insertion_idx = if original_lines.last().is_some_and(|s| s.is_empty()) {
+            let insertion_idx = if original_lines.last().is_some_and(String::is_empty) {
                 original_lines.len() - 1
             } else {
                 original_lines.len()
@@ -571,11 +568,11 @@ fn compute_replacements(
 
         let mut new_slice: &[String] = &chunk.new_lines;
 
-        if found.is_none() && pattern.last().is_some_and(|s| s.is_empty()) {
+        if found.is_none() && pattern.last().is_some_and(String::is_empty) {
             // Retry without the trailing empty line which represents the final
             // newline in the file.
             pattern = &pattern[..pattern.len() - 1];
-            if new_slice.last().is_some_and(|s| s.is_empty()) {
+            if new_slice.last().is_some_and(String::is_empty) {
                 new_slice = &new_slice[..new_slice.len() - 1];
             }
 
@@ -691,6 +688,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::fs;
+    use std::string::ToString;
     use tempfile::tempdir;
 
     /// Helper to construct a patch with the given body.
@@ -699,7 +697,7 @@ mod tests {
     }
 
     fn strs_to_strings(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(|s| s.to_string()).collect()
+        strs.iter().map(ToString::to_string).collect()
     }
 
     #[test]
