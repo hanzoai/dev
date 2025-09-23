@@ -12,6 +12,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use futures::Stream;
 use serde::Serialize;
+use serde_json::Value;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -71,6 +72,8 @@ pub struct Prompt {
 
     /// Optional per-request model family override matching `model_override`.
     pub model_family_override: Option<ModelFamily>,
+    /// Optional the output schema for the model's response.
+    pub output_schema: Option<Value>,
 }
 
 impl Default for Prompt {
@@ -87,6 +90,7 @@ impl Default for Prompt {
             text_format: None,
             model_override: None,
             model_family_override: None,
+            output_schema: None,
         }
     }
 }
@@ -501,7 +505,7 @@ mod tests {
             stream: true,
             include: vec![],
             prompt_cache_key: None,
-            text: Some(Text { verbosity: OpenAiTextVerbosity::Low }),
+            text: Some(Text { verbosity: OpenAiTextVerbosity::Low, format: None }),
         };
 
         let v = serde_json::to_value(&req).expect("json");
@@ -511,6 +515,57 @@ mod tests {
                 .and_then(|s| s.as_str()),
             Some("low")
         );
+    }
+
+    #[test]
+    fn serializes_text_schema_with_strict_format() {
+        let input: Vec<ResponseItem> = vec![];
+        let tools: Vec<serde_json::Value> = vec![];
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"}
+            },
+            "required": ["answer"],
+        });
+        let req = ResponsesApiRequest {
+            model: "gpt-5",
+            instructions: "i",
+            input: &input,
+            tools: &tools,
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning: None,
+            store: false,
+            stream: true,
+            include: vec![],
+            prompt_cache_key: None,
+            text: Some(Text {
+                verbosity: OpenAiTextVerbosity::Medium,
+                format: Some(TextFormat {
+                    r#type: "json_schema".to_string(),
+                    name: Some("codex_output_schema".to_string()),
+                    strict: Some(true),
+                    schema: Some(schema.clone()),
+                }),
+            }),
+        };
+
+        let v = serde_json::to_value(&req).expect("json");
+        let text = v.get("text").expect("text field");
+        assert!(text.get("verbosity").is_none());
+        let format = text.get("format").expect("format field");
+
+        assert_eq!(
+            format.get("name"),
+            Some(&serde_json::Value::String("codex_output_schema".into()))
+        );
+        assert_eq!(
+            format.get("type"),
+            Some(&serde_json::Value::String("json_schema".into()))
+        );
+        assert_eq!(format.get("strict"), Some(&serde_json::Value::Bool(true)));
+        assert_eq!(format.get("schema"), Some(&schema));
     }
 
     #[test]
