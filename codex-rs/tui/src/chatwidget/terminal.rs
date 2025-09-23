@@ -51,6 +51,7 @@ impl TerminalState {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PendingManualTerminal {
     pub(crate) command: String,
+    pub(crate) run_direct: bool,
 }
 
 pub(crate) struct TerminalOverlay {
