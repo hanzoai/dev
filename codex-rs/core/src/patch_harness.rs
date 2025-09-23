@@ -615,9 +615,8 @@ pub fn run_patch_harness(
                     cmd.arg("check");
                     cmd.arg("--quiet");
                     let hints = manifest_hints.get(&manifest).copied().unwrap_or_default();
-                    if !hints.needs_dev_deps() {
-                        cmd.arg("--no-dev-deps");
-                    }
+                    // `cargo check` does not support `--no-dev-deps`; compiling dev deps is
+                    // avoided by limiting targets instead.
                     if hints.include_tests {
                         cmd.arg("--tests");
                     }
@@ -784,10 +783,6 @@ struct RustTargetHints {
 }
 
 impl RustTargetHints {
-    fn needs_dev_deps(&self) -> bool {
-        self.include_tests || self.include_benches || self.include_examples
-    }
-
     fn observe_path(&mut self, path: &Path) {
         if touches_tests(path) {
             self.include_tests = true;
