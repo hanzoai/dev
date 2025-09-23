@@ -4082,16 +4082,6 @@ impl ChatWidget<'_> {
                 // Close out any running tool/exec indicators before inserting final answer.
                 self.finalize_all_running_due_to_answer();
 
-                if self.is_review_flow_active() {
-                    tracing::debug!("Suppressing review final message id={} to avoid duplicate output", id);
-                    self.stream_state
-                        .closed_answer_ids
-                        .insert(StreamId(id.clone()));
-                    self.active_task_ids.remove(&id);
-                    self.maybe_hide_spinner();
-                    return;
-                }
-
                 // Route final message through streaming controller so AppEvent::InsertFinalAnswer
                 // is the single source of truth for assistant content.
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
@@ -4156,10 +4146,6 @@ impl ChatWidget<'_> {
                 // If the user requested an interrupt, ignore late deltas.
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring Answer delta after interrupt");
-                    return;
-                }
-                if self.is_review_flow_active() {
-                    tracing::debug!("Suppressing review streaming delta id={}", id);
                     return;
                 }
                 // Ignore late deltas for ids that have already finalized in this turn
@@ -8611,6 +8597,30 @@ fn update_rate_limit_resets(
             lines.len()
         );
         tracing::info!("[order] final Answer id={:?}", id);
+        if self.is_review_flow_active() {
+            if let Some(ref want) = id {
+                if let Some(idx) = self.history_cells.iter().rposition(|c| {
+                    c.as_any()
+                        .downcast_ref::<history_cell::StreamingContentCell>()
+                        .and_then(|sc| sc.id.as_ref())
+                        .map(|existing| existing == want)
+                        .unwrap_or(false)
+                }) {
+                    self.history_remove_at(idx);
+                }
+                self.stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()));
+            } else if let Some(idx) = self.history_cells.iter().rposition(|c| {
+                c.as_any()
+                    .downcast_ref::<history_cell::StreamingContentCell>()
+                    .is_some()
+            }) {
+                self.history_remove_at(idx);
+            }
+            self.last_assistant_message = Some(source);
+            return;
+        }
         // Debug: list last few history cell kinds so we can see what's present
         let tail_kinds: String = self
             .history_cells
@@ -11991,66 +12001,51 @@ impl ChatWidget<'_> {
         hint: Option<&str>,
         prompt: Option<&str>,
         output: &ReviewOutputEvent,
-    ) -> history_cell::PlainHistoryCell {
-        let mut lines: Vec<Line<'static>> = Vec::new();
+    ) -> history_cell::AssistantMarkdownCell {
+        let mut sections: Vec<String> = Vec::new();
         let title = match hint {
             Some(h) if !h.trim().is_empty() => {
                 let trimmed = h.trim();
-                format!("Review summary — {trimmed}")
+                format!("**Review summary — {trimmed}**")
             }
-            _ => "Review summary".to_string(),
+            _ => "**Review summary**".to_string(),
         };
-        lines.push(Line::from(vec![RtSpan::styled(
-            title,
-            Style::default().add_modifier(Modifier::BOLD),
-        )]));
+        sections.push(title);
 
         if let Some(p) = prompt {
             let trimmed_prompt = p.trim();
             if !trimmed_prompt.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![
-                    RtSpan::styled(
-                        "Prompt:",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    RtSpan::raw(" "),
-                    RtSpan::raw(trimmed_prompt.to_string()),
-                ]));
+                sections.push(format!("**Prompt:** {trimmed_prompt}"));
             }
         }
 
-        let mut sections: Vec<String> = Vec::new();
         let explanation = output.overall_explanation.trim();
         if !explanation.is_empty() {
             sections.push(explanation.to_string());
         }
         if !output.findings.is_empty() {
-            sections.push(format_review_findings_block(&output.findings, None));
+            sections.push(format_review_findings_block(&output.findings, None).trim().to_string());
         }
         let correctness = output.overall_correctness.trim();
         if !correctness.is_empty() {
-            sections.push(format!("Overall correctness: {correctness}"));
+            sections.push(format!("**Overall correctness:** {correctness}"));
         }
         if output.overall_confidence_score > 0.0 {
             let score = output.overall_confidence_score;
-            sections.push(format!("Confidence score: {score:.1}"));
+            sections.push(format!("**Confidence score:** {score:.1}"));
         }
-        if sections.is_empty() {
+        if sections.len() == 1 {
             sections.push("No detailed findings were provided.".to_string());
         }
 
-        lines.push(Line::from(""));
-        for (idx, section) in sections.iter().enumerate() {
-            if idx > 0 {
-                lines.push(Line::from(""));
-            }
-            for line in section.lines() {
-                lines.push(Line::from(line.to_string()));
-            }
-        }
+        let markdown = sections
+            .into_iter()
+            .map(|part| part.trim().to_string())
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
-        history_cell::PlainHistoryCell::new(lines, history_cell::HistoryCellType::Assistant)
+        history_cell::AssistantMarkdownCell::new(markdown, &self.config)
     }
 
     /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
