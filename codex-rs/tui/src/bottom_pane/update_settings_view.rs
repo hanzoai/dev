@@ -107,7 +107,7 @@ impl UpdateSettingsView {
             display: display.clone(),
             latest_version: Some(latest.clone()),
         });
-        self.app_event_tx.send_background_event_late(format!(
+        self.app_event_tx.send_background_event(format!(
             "↻ Restart Code after `{}` completes to finish upgrading to {}.",
             display, latest
         ));
