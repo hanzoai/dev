@@ -54,7 +54,7 @@ use self::agent_install::{
     wrap_command,
 };
 use self::rate_limit_refresh::start_rate_limit_refresh;
-use self::history_render::{HistoryRenderState, LayoutRef};
+use self::history_render::{CachedLayout, HistoryRenderState, LayoutRef};
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::ApprovedCommandMatchKind;
@@ -161,7 +161,7 @@ use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
-use crate::util::buffer::{fill_rect, write_line};
+use crate::util::buffer::fill_rect;
 use crate::user_approval_widget::ApprovalRequest;
 pub(crate) use self::terminal::{
     PendingCommand,
@@ -1527,7 +1527,7 @@ impl ChatWidget<'_> {
     fn render_cached_lines(
         &self,
         item: &dyn HistoryCell,
-        lines: &[Line<'static>],
+        layout: &CachedLayout,
         area: Rect,
         buf: &mut Buffer,
         skip_rows: u16,
@@ -1535,6 +1535,13 @@ impl ChatWidget<'_> {
         if area.width == 0 || area.height == 0 {
             return;
         }
+
+        let total = layout.lines.len() as u16;
+        if skip_rows >= total {
+            return;
+        }
+
+        debug_assert_eq!(layout.lines.len(), layout.rows.len());
 
         let cell_bg = match item.kind() {
             crate::history_cell::HistoryCellType::Assistant => crate::colors::assistant_bg(),
@@ -1548,27 +1555,55 @@ impl ChatWidget<'_> {
             fill_rect(buf, area, Some(' '), bg_style);
         }
 
-        let total = lines.len() as u16;
-        if skip_rows >= total {
-            return;
-        }
-
-        let base_style = Style::default().bg(cell_bg);
         let max_rows = area.height.min(total.saturating_sub(skip_rows));
-        for (row, line) in lines
-            .iter()
-            .skip(skip_rows as usize)
-            .take(max_rows as usize)
+        let buf_width = buf.area.width as usize;
+        let offset_x = area.x.saturating_sub(buf.area.x) as usize;
+        let offset_y = area.y.saturating_sub(buf.area.y) as usize;
+        let row_width = area.width as usize;
+
+        for (visible_offset, src_index) in (skip_rows as usize..skip_rows as usize + max_rows as usize)
             .enumerate()
         {
-            write_line(
-                buf,
-                area.x,
-                area.y.saturating_add(row as u16),
-                area.width,
-                line,
-                base_style,
-            );
+            let src_row = layout
+                .rows
+                .get(src_index)
+                .map(|row| row.as_ref())
+                .unwrap_or(&[]);
+
+            let dest_y = offset_y + visible_offset;
+            if dest_y >= buf.area.height as usize {
+                break;
+            }
+            let start = dest_y * buf_width + offset_x;
+            if start >= buf.content.len() {
+                break;
+            }
+            let max_width = row_width.min(buf_width.saturating_sub(offset_x));
+            let end = (start + max_width).min(buf.content.len());
+            if end <= start {
+                continue;
+            }
+            let dest_slice = &mut buf.content[start..end];
+
+            let copy_len = src_row.len().min(dest_slice.len());
+            if copy_len == dest_slice.len() {
+                if copy_len > 0 {
+                    dest_slice.clone_from_slice(&src_row[..copy_len]);
+                }
+            } else {
+                for (dst, src) in dest_slice.iter_mut().zip(src_row.iter()).take(copy_len) {
+                    dst.clone_from(src);
+                }
+                for cell in dest_slice.iter_mut().skip(copy_len) {
+                    cell.reset();
+                }
+            }
+
+            for cell in dest_slice.iter_mut() {
+                if cell.bg == ratatui::style::Color::Reset {
+                    cell.bg = cell_bg;
+                }
+            }
         }
     }
     /// Trigger fade on the welcome cell when the composer expands (e.g., slash popup).
@@ -15316,7 +15351,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
         let mut assistant_layouts: Vec<Option<crate::history_cell::AssistantLayoutCache>> =
             vec![None; all_content.len()];
-        let mut default_layouts: Vec<Option<Rc<Vec<Line<'static>>>>> =
+        let mut default_layouts: Vec<Option<Rc<CachedLayout>>> =
             vec![None; all_content.len()];
 
         // Append any queued user messages as sticky preview cells at the very
@@ -15432,10 +15467,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         }
                     }
                     let height = layout_ref
-                        .lines
-                        .len()
+                        .line_count()
                         .min(u16::MAX as usize) as u16;
-                    default_layouts[idx] = Some(Rc::clone(&layout_ref.lines));
+                    default_layouts[idx] = Some(layout_ref.layout());
                     height
                 } else {
                     if perf_enabled {
@@ -15619,7 +15653,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 && !is_streaming
                 && maybe_assistant.is_none();
 
-            let mut layout_for_render: Option<Rc<Vec<Line<'static>>>> = None;
+            let mut layout_for_render: Option<Rc<CachedLayout>> = None;
 
             let item_height = if let Some(assistant) = maybe_assistant {
                 if self.perf_state.enabled {
@@ -15649,7 +15683,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     .then(|| self.perf_label_for_item(item));
                 let layout_ref = if let Some(existing) = default_layouts[idx].as_ref() {
                     LayoutRef {
-                        lines: Rc::clone(existing),
+                        data: Rc::clone(existing),
                         freshly_computed: false,
                     }
                 } else {
@@ -15657,7 +15691,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     let lr = self
                         .history_render
                         .ensure_layout(idx, content_width, || item.display_lines_trimmed());
-                    default_layouts[idx] = Some(Rc::clone(&lr.lines));
+                    default_layouts[idx] = Some(lr.layout());
                     lr
                 };
 
@@ -15680,10 +15714,9 @@ impl WidgetRef for &ChatWidget<'_> {
                         );
                     }
                 }
-                layout_for_render = Some(Rc::clone(&layout_ref.lines));
+                layout_for_render = Some(layout_ref.layout());
                 layout_ref
-                    .lines
-                    .len()
+                    .line_count()
                     .min(u16::MAX as usize) as u16
             } else {
                 if self.perf_state.enabled {
@@ -15958,10 +15991,10 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
 
                 if !handled_assistant {
-                    if let Some(lines_rc) = layout_for_render.as_ref() {
+                    if let Some(layout_rc) = layout_for_render.as_ref() {
                         self.render_cached_lines(
                             item,
-                            lines_rc.as_ref(),
+                            layout_rc.as_ref(),
                             item_area,
                             buf,
                             skip_rows,
