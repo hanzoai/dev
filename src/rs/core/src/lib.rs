@@ -80,6 +80,8 @@ pub mod hanzo_integration;
 pub mod qwen_model_info;
 pub mod node_client;
 pub mod engine_integration;
+pub mod hanzo_inference;
+pub mod hanzo_supabase;
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
 pub use safety::get_platform_sandbox;
 // Use our local protocol definitions to preserve custom events and input items.

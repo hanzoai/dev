@@ -1,0 +1,10 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+git+https://github.com/huggingface/transformers.git
+torch>=2.1.2
+accelerate>=0.26.0
+pydantic==2.5.3
+numpy==1.24.4
+safetensors==0.4.1
+sentencepiece
+protobuf

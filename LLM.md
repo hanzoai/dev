@@ -29,47 +29,101 @@ Hanzo Dev is a powerful fork of OpenAI's Codex CLI, enhanced with enterprise fea
    - Full test suite with 7 passing tests
    - Zero-copy design with `zeroize` for secure memory handling
 
-## Hanzo Node Integration (September 2025)
+## Hanzod - Unified Compute Layer (December 2025)
 
-### Local Inference Infrastructure
-The dev project now integrates with Hanzo Node for local AI capabilities:
+### Complete AI Compute Infrastructure
+Hanzod has evolved from a container orchestration system to a unified compute layer that provides:
 
-1. **Hanzo Node Connection**
-   - **Port**: 3690 (corrected from 11434 which is Ollama's port)
-   - **Engine Port**: 36900 for Hanzo Engine
-   - **Configuration**: `hanzo_integration.rs` and `hanzo_inference.rs`
-   - **Model**: Default to `gpt-oss:20b` for local inference
+1. **Runtime Detection & Abstraction**
+   - Automatically detects Docker Desktop, Colima, Containerd, Podman
+   - Abstract `RuntimeProvider` trait for unified container operations
+   - Runtime capabilities detection (GPU, MicroVM, WASM, rootless)
+   - Health checking for runtime availability
 
-2. **HanzoInferenceManager** (`/src/rs/core/src/hanzo_inference.rs`)
-   - Manages local hanzod process lifecycle
-   - Provides OpenAI-compatible API interface
-   - Supports:
-     - LLM inference without external APIs
-     - Local embeddings generation
-     - Vector search capabilities
-   - Auto-backgrounding for long-running processes
+2. **Unified API System**
+   - **HTTP Port**: 8080 (REST API)
+   - **gRPC Port**: 50051 (High-performance RPC)
+   - **Endpoints**:
+     - `/v1/inference` - LLM inference with Qwen3 models
+     - `/v1/embeddings` - Text embedding generation
+     - `/v1/vector_search` - Similarity search
+     - `/v1/gspo/train` - GSPO preference optimization training
+     - `/v1/bitdelta` - BitDelta personalization
+     - `/health` - Service health check
+   - **Models**: Qwen3:8b with MLX acceleration on Apple Silicon
+   - **Features**: Streaming inference, batch operations, model caching
 
-3. **Provider Fallback Chain**
-   - Primary: Hanzo Local (port 3690)
-   - Fallback 1: OpenAI (if API key present)
-   - Fallback 2: Claude/Anthropic (if API key present)
-   - Fallback 3: Custom API endpoints
+3. **Successful Container Deployment**
+   - ✅ Successfully deployed Alpine container through Colima runtime
+   - Container ID: `151b211c468f` (hanzod-test-alpine-001)
+   - Automatic runtime selection based on availability
+   - Full lifecycle management (create, start, stop, remove)
 
-### Pure Rust Cryptography Migration
-Replaced C-based OQS with pure-Rust saorsa-pqc v0.3.13:
-- **ML-KEM-768** (FIPS 203) for key encapsulation
-- **ML-DSA-65** (FIPS 204) for digital signatures
-- Improved compilation (no C dependencies)
-- All 7 cryptographic tests passing
+4. **Architecture Components**
+   - **Core Infrastructure**:
+     - HPKE-based post-quantum secure communication
+     - ML-KEM-768 (NIST FIPS 203) for key encapsulation
+     - ChaCha20-Poly1305 for authenticated encryption
+   - **AI Capabilities**:
+     - MLX-accelerated inference on Apple Silicon
+     - GSPO (Group Sparse Preference Optimization)
+     - BitDelta efficient model personalization
+     - gRPC server for high-performance operations
+   - **Integration Points**:
+     - `hanzo_inference.rs` - Unified compute endpoint management
+     - Container node communication via PQSSHSession
+     - NodeCommunicator for multi-node orchestration
 
-### Agent SDK Enhancement
-Created `HanzoNodeProvider` in the agent library:
-```python
-from agents import HanzoNodeProvider, create_hanzo_node_provider
+## Hanzo Compute Integration (December 2025)
 
-# Direct connection to Hanzo node
-provider = create_hanzo_node_provider(port=3690)
-model = provider.get_model("gpt-oss:20b")
+### Unified Compute Layer Infrastructure
+The dev project now uses hanzod as its primary compute layer:
+
+1. **Hanzod Connection**
+   - **HTTP Port**: 8080 for REST API
+   - **gRPC Port**: 50051 for high-performance RPC
+   - **Configuration**: `hanzo_inference.rs` with `HanzoComputeEndpoint`
+   - **Model**: Default to `qwen3:8b` with MLX acceleration
+
+2. **HanzoComputeEndpoint** (`/src/rs/core/src/hanzo_inference.rs`)
+   - Manages unified hanzod compute layer
+   - Provides comprehensive AI capabilities:
+     - LLM inference with streaming support
+     - Text embeddings via HTTP/gRPC
+     - Vector similarity search
+     - GSPO training for preference optimization
+     - BitDelta for efficient personalization
+   - Post-quantum secure communication with container nodes
+   - Health monitoring across all services
+
+3. **Service Architecture**
+   - Primary: Hanzod unified compute (port 8080/50051)
+   - All services (inference, embeddings, vector) through single daemon
+   - GSPO and BitDelta capabilities for advanced AI operations
+   - Post-quantum secure for future-proof infrastructure
+
+### Post-Quantum Cryptography Stack
+Implemented comprehensive post-quantum security:
+- **HPKE** (Hybrid Public Key Encryption) for secure channels
+- **ML-KEM-768** (NIST FIPS 203) for key encapsulation
+- **ChaCha20-Poly1305** for authenticated encryption
+- **PQSSHSession** for secure container communication
+- Pure Rust implementation, no C dependencies
+- All cryptographic tests passing
+
+### Compute SDK Enhancement
+```rust
+use hanzo_inference::{HanzoManager, HanzoConfig};
+
+// Initialize unified compute manager
+let config = HanzoConfig::default();  // Uses hanzod on 8080/50051
+let manager = HanzoManager::new(config);
+manager.start_all().await?;
+
+// Use various AI capabilities
+let response = manager.compute.inference(prompt, None, None).await?;
+let embedding = manager.embedding.embed(text).await?;
+let results = manager.vector.search(query, 10, None).await?;
 ```
 
 ### TUI Compilation Fixes
@@ -82,33 +136,38 @@ Resolved major compilation issues after merge:
 - Resolved FrameRequester trait dyn-compatibility with DefaultFrameRequester
 - Fixed ConfigOverrides field names (`codex_linux_sandbox_exe`)
 
-### Running with Hanzo Node
+### Running with Hanzod Compute Layer
 
-1. **Start the Hanzo Node**:
+1. **Start Hanzod**:
    ```bash
-   cd /Users/z/work/hanzo/node
-   cargo run --release --bin hanzod
+   cd /Users/z/work/hanzo/hanzod
+   cargo build --release
+   ./target/release/hanzod
+   # Runs on ports 8080 (HTTP) and 50051 (gRPC)
    ```
 
-2. **Run Dev with Local Inference**:
+2. **Run Dev with Unified Compute**:
    ```bash
    cd /Users/z/work/hanzo/dev
-   ./target/debug/dev-exec --oss "Your prompt here"
+   cargo build --release
+   ./target/release/dev-exec "Your prompt here"
    ```
 
-3. **Test Agent SDK Integration**:
+3. **Verify Health Status**:
    ```bash
-   cd /Users/z/work/hanzo/agent
-   python test_hanzo_node.py
+   curl http://localhost:8080/health
+   # Returns: {"status":"healthy","version":"0.1.0","mlx_enabled":true}
    ```
 
 ### Environment Configuration
 ```bash
-# Hanzo Node settings
-HANZO_NODE_URL=http://localhost:3690/v1
-HANZO_ENGINE_URL=http://localhost:36900
-HANZO_ENABLE_QWEN3=true
-HANZO_ENABLE_RERANKER=true
+# Hanzod compute layer settings
+HANZOD_HTTP_URL=http://localhost:8080
+HANZOD_GRPC_URL=localhost:50051
+HANZOD_ENABLE_MLX=true           # Apple Silicon acceleration
+HANZOD_MODEL=qwen3:8b            # Default model
+HANZOD_ENABLE_GSPO=true          # Preference optimization
+HANZOD_ENABLE_BITDELTA=true      # Model personalization
 ```
 
 3. **Testing Infrastructure**

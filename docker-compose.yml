@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  # Inference container running Qwen3 model
+  inference:
+    container_name: hanzod-inference
+    build:
+      context: ./inference
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  # Inference API
+    environment:
+      - MODEL_NAME=Qwen/Qwen3-4B-Thinking-2507  # Qwen3 4B Thinking model (July 2025)
+      - HF_TOKEN=${HF_TOKEN:-}  # Optional Hugging Face token
+      - DEVICE=cpu  # CPU for container (MPS only works on host)
+      - MAX_MEMORY=4GB
+      - PORT=8080
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+    volumes:
+      - ~/.cache/hanzo/models:/root/.cache/huggingface  # Cache models in hanzo directory
+      - ./inference/models:/models  # Local model storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

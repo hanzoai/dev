@@ -8,9 +8,12 @@ model = "qwen3-8b"
 [hanzo]
 engine_url = "http://localhost:36900"
 node_url = "http://localhost:3690"
+cloud_api_url = "https://api.hanzo.ai/v1"
+auth_url = "https://auth.hanzo.ai"
 enable_qwen3 = true
 enable_reranker = true
 fallback_enabled = true
+enable_cloud_sync = true
 
 # Model Provider Configuration with Fallback Chain
 [[model_providers]]
@@ -29,23 +32,32 @@ base_url = "http://localhost:3690/v2"
 api_type = "hanzo-native"
 
 [[model_providers]]
+id = "hanzo-cloud"
+name = "Hanzo Cloud"
+priority = 3
+base_url = "https://api.hanzo.ai/v1"
+api_type = "hanzo-cloud"
+auth_required = true
+# Will use HANZO_API_KEY from environment
+
+[[model_providers]]
 id = "openai"
 name = "OpenAI"
-priority = 3
+priority = 4
 api_type = "openai"
 # Will use OPENAI_API_KEY from environment
 
 [[model_providers]]
 id = "claude"
 name = "Anthropic Claude"
-priority = 4
+priority = 5
 api_type = "anthropic"
 # Will use ANTHROPIC_API_KEY from environment
 
 [[model_providers]]
 id = "dashscope"
 name = "DashScope/Qwen Cloud"
-priority = 5
+priority = 6
 base_url = "https://dashscope.aliyuncs.com/api/v1"
 api_type = "openai-compatible"
 # Will use DASHSCOPE_API_KEY or QWEN_API_KEY from environment
@@ -117,12 +129,15 @@ exclude-slash-tmp = false
 inherit = "all"
 ignore-default-excludes = false
 exclude = ["*SECRET*", "*PASSWORD*", "*CREDENTIAL*", "*TOKEN*"]
-set = { 
+set = {
     HANZO_ENGINE_URL = "http://localhost:36900",
     HANZO_NODE_URL = "http://localhost:3690",
+    HANZO_CLOUD_API_URL = "https://api.hanzo.ai/v1",
+    HANZO_AUTH_URL = "https://auth.hanzo.ai",
     EMBEDDINGS_SERVER_URL = "http://localhost:36900",
     HANZO_ENABLE_QWEN3 = "true",
-    HANZO_ENABLE_RERANKER = "true"
+    HANZO_ENABLE_RERANKER = "true",
+    HANZO_ENABLE_CLOUD_SYNC = "true"
 }
 
 # History Configuration

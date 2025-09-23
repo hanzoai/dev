@@ -4,154 +4,284 @@ use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Configuration for Hanzo local inference
+// ===== Configuration =====
+
+/// Configuration for Hanzo services
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HanzoInferenceConfig {
+pub struct HanzoConfig {
     /// Path to hanzod binary
     pub hanzod_path: Option<String>,
-    /// Port for local inference server
-    pub inference_port: u16,
-    /// Enable local embeddings
+    /// HTTP API port
+    pub http_port: u16,
+    /// gRPC port for advanced operations
+    pub grpc_port: u16,
+    /// Model configuration
+    pub inference_model: String,
+    pub embedding_model: String,
+    /// Service toggles
+    pub enable_inference: bool,
+    pub enable_compute: bool,
     pub enable_embeddings: bool,
-    /// Enable vector search
     pub enable_vector_search: bool,
-    /// Model to use for inference
-    pub model: String,
 }
 
-impl Default for HanzoInferenceConfig {
+impl Default for HanzoConfig {
     fn default() -> Self {
         Self {
-            hanzod_path: Some("/Users/z/work/hanzo/node/target/release/hanzod".to_string()),
-            inference_port: 3690,  // Hanzo node default port
+            hanzod_path: Some("/Users/z/work/hanzo/hanzod/target/release/hanzod".to_string()),
+            http_port: 8080,
+            grpc_port: 50051,
+            inference_model: "qwen3-4b-thinking-2507".to_string(),
+            embedding_model: "nomic-embed-text".to_string(),
+            enable_inference: true,
+            enable_compute: true,
             enable_embeddings: true,
             enable_vector_search: true,
-            model: "gpt-oss:20b".to_string(),
         }
     }
 }
 
-/// Manager for Hanzo local inference
-pub struct HanzoInferenceManager {
-    config: Arc<RwLock<HanzoInferenceConfig>>,
-    hanzod_process: Arc<RwLock<Option<std::process::Child>>>,
+// ===== Base Trait =====
+
+/// Base trait for Hanzo endpoints
+#[async_trait::async_trait]
+pub trait HanzoEndpoint: Send + Sync {
+    async fn base_url(&self) -> String;
+
+    async fn is_available(&self) -> bool {
+        let url = format!("{}/health", self.base_url().await);
+        match reqwest::get(&url).await {
+            Ok(response) => response.status().is_success(),
+            Err(_) => false,
+        }
+    }
 }
 
-impl HanzoInferenceManager {
-    pub fn new(config: HanzoInferenceConfig) -> Self {
+// ===== Inference Endpoint (LLM text generation) =====
+
+/// LLM inference endpoint for text generation
+pub struct HanzoInferenceEndpoint {
+    config: Arc<RwLock<HanzoConfig>>,
+    process: Arc<RwLock<Option<std::process::Child>>>,
+}
+
+impl HanzoInferenceEndpoint {
+    pub fn new(config: Arc<RwLock<HanzoConfig>>) -> Self {
         Self {
-            config: Arc::new(RwLock::new(config)),
-            hanzod_process: Arc::new(RwLock::new(None)),
+            config,
+            process: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// Start the hanzod process for local inference
     pub async fn start(&self) -> Result<()> {
         let config = self.config.read().await;
-
-        // Check if hanzod is already running
-        if self.hanzod_process.read().await.is_some() {
+        if !config.enable_inference {
             return Ok(());
         }
 
-        let hanzod_path = config.hanzod_path.clone().unwrap_or_else(|| {
-            // Try to find hanzod in PATH or use default location
-            "hanzod".to_string()
-        });
+        if self.process.read().await.is_some() {
+            return Ok(());
+        }
 
-        // Start hanzod with appropriate arguments
+        let hanzod_path = config.hanzod_path.clone().unwrap_or_else(|| "hanzod".to_string());
         let mut cmd = Command::new(&hanzod_path);
-        cmd.arg("--port").arg(config.inference_port.to_string());
-
-        if config.enable_embeddings {
-            cmd.arg("--enable-embeddings");
-        }
-
-        if config.enable_vector_search {
-            cmd.arg("--enable-vector-search");
-        }
-
-        cmd.arg("--model").arg(&config.model);
+        cmd.env("HANZOD_MODE", "inference");
+        cmd.env("HANZOD_MODEL", &config.inference_model);
+        cmd.env("HANZOD_PORT", config.http_port.to_string());
 
         let child = cmd.spawn()?;
-        *self.hanzod_process.write().await = Some(child);
-
-        // Wait for server to be ready
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
+        *self.process.write().await = Some(child);
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
         Ok(())
     }
 
-    /// Stop the hanzod process
     pub async fn stop(&self) -> Result<()> {
-        if let Some(mut child) = self.hanzod_process.write().await.take() {
+        if let Some(mut child) = self.process.write().await.take() {
             child.kill()?;
             child.wait()?;
         }
         Ok(())
     }
 
-    /// Get the inference URL
-    pub async fn get_inference_url(&self) -> String {
+    /// Generate text completion
+    pub async fn complete(&self, prompt: String, temperature: Option<f32>, max_tokens: Option<u32>) -> Result<String> {
+        let url = format!("{}/v1/completions", self.base_url().await);
         let config = self.config.read().await;
-        format!("http://localhost:{}/v1", config.inference_port)
+
+        let request = serde_json::json!({
+            "model": config.inference_model,
+            "prompt": prompt,
+            "temperature": temperature.unwrap_or(0.7),
+            "max_tokens": max_tokens.unwrap_or(2048),
+        });
+
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Inference failed: {}", response.text().await?);
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        Ok(json["choices"][0]["text"].as_str().unwrap_or("").to_string())
     }
 
-    /// Check if local inference is available
-    pub async fn is_available(&self) -> bool {
-        let url = format!("{}/health", self.get_inference_url().await);
-        match reqwest::get(&url).await {
-            Ok(response) => response.status().is_success(),
-            Err(_) => false,
+    /// Chat completion with messages
+    pub async fn chat(&self, messages: Vec<ChatMessage>) -> Result<String> {
+        let url = format!("{}/v1/chat/completions", self.base_url().await);
+        let config = self.config.read().await;
+
+        let request = serde_json::json!({
+            "model": config.inference_model,
+            "messages": messages,
+        });
+
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Chat failed: {}", response.text().await?);
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        Ok(json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string())
+    }
+}
+
+#[async_trait::async_trait]
+impl HanzoEndpoint for HanzoInferenceEndpoint {
+    async fn base_url(&self) -> String {
+        let config = self.config.read().await;
+        format!("http://localhost:{}", config.http_port)
+    }
+}
+
+// ===== Compute Endpoint (container workloads, distributed tasks) =====
+
+/// Compute endpoint for container workloads and distributed tasks
+pub struct HanzoComputeEndpoint {
+    config: Arc<RwLock<HanzoConfig>>,
+    process: Arc<RwLock<Option<std::process::Child>>>,
+}
+
+impl HanzoComputeEndpoint {
+    pub fn new(config: Arc<RwLock<HanzoConfig>>) -> Self {
+        Self {
+            config,
+            process: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// Perform inference using local hanzod
-    pub async fn inference(&self, prompt: String) -> Result<String> {
-        let url = format!("{}/chat/completions", self.get_inference_url().await);
+    pub async fn start(&self) -> Result<()> {
+        let config = self.config.read().await;
+        if !config.enable_compute {
+            return Ok(());
+        }
+
+        if self.process.read().await.is_some() {
+            return Ok(());
+        }
+
+        let hanzod_path = config.hanzod_path.clone().unwrap_or_else(|| "hanzod".to_string());
+        let mut cmd = Command::new(&hanzod_path);
+        cmd.env("HANZOD_MODE", "compute");
+        cmd.env("HANZOD_GRPC_PORT", config.grpc_port.to_string());
+
+        let child = cmd.spawn()?;
+        *self.process.write().await = Some(child);
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        Ok(())
+    }
+
+    pub async fn stop(&self) -> Result<()> {
+        if let Some(mut child) = self.process.write().await.take() {
+            child.kill()?;
+            child.wait()?;
+        }
+        Ok(())
+    }
+
+    /// Submit a compute job
+    pub async fn submit_job(&self, job: ComputeJob) -> Result<String> {
+        let url = format!("{}/v1/jobs", self.base_url().await);
+        
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&job).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Job submission failed: {}", response.text().await?);
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        Ok(json["job_id"].as_str().unwrap_or("").to_string())
+    }
+
+    /// Get job status
+    pub async fn job_status(&self, job_id: &str) -> Result<JobStatus> {
+        let url = format!("{}/v1/jobs/{}", self.base_url().await, job_id);
+        
+        let client = reqwest::Client::new();
+        let response = client.get(&url).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Failed to get job status: {}", response.text().await?);
+        }
+
+        Ok(response.json().await?)
+    }
+
+    /// Schedule a container workload
+    pub async fn schedule_container(&self, spec: ContainerSpec) -> Result<String> {
+        let url = format!("{}/v1/containers", self.base_url().await);
+        
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&spec).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Container scheduling failed: {}", response.text().await?);
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        Ok(json["container_id"].as_str().unwrap_or("").to_string())
+    }
+}
+
+#[async_trait::async_trait]
+impl HanzoEndpoint for HanzoComputeEndpoint {
+    async fn base_url(&self) -> String {
+        let config = self.config.read().await;
+        format!("http://localhost:{}", config.http_port)
+    }
+}
+
+// ===== Embedding Endpoint =====
+
+/// Manager for Hanzo embedding endpoint
+pub struct HanzoEmbeddingEndpoint {
+    config: Arc<RwLock<HanzoConfig>>,
+}
+
+impl HanzoEmbeddingEndpoint {
+    pub fn new(config: Arc<RwLock<HanzoConfig>>) -> Self {
+        Self { config }
+    }
+
+    /// Generate embeddings for text
+    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let url = format!("{}/v1/embeddings", self.base_url().await);
         let config = self.config.read().await;
 
         let request = serde_json::json!({
-            "model": config.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        });
-
-        let client = reqwest::Client::new();
-        let response = client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
-
-        let json: serde_json::Value = response.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-
-        Ok(content)
-    }
-
-    /// Generate embeddings locally
-    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let url = format!("{}/embeddings", self.get_inference_url().await);
-
-        let request = serde_json::json!({
             "input": text,
-            "model": "text-embedding-ada-002"
+            "model": config.embedding_model
         });
 
         let client = reqwest::Client::new();
-        let response = client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Embedding generation failed: {}", response.text().await?);
+        }
 
         let json: serde_json::Value = response.json().await?;
         let embedding = json["data"][0]["embedding"]
@@ -164,45 +294,277 @@ impl HanzoInferenceManager {
         Ok(embedding)
     }
 
-    /// Perform vector search
-    pub async fn vector_search(&self, query: Vec<f32>, top_k: usize) -> Result<Vec<String>> {
-        let url = format!("{}/vector/search", self.get_inference_url().await);
+    /// Batch embed multiple texts
+    pub async fn embed_batch(&self, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+        let url = format!("{}/v1/embeddings", self.base_url().await);
+        let config = self.config.read().await;
 
         let request = serde_json::json!({
-            "query": query,
-            "top_k": top_k
+            "input": texts,
+            "model": config.embedding_model
         });
 
         let client = reqwest::Client::new();
-        let response = client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Batch embedding failed: {}", response.text().await?);
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        let embeddings = json["data"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("No data in response"))?
+            .iter()
+            .filter_map(|item| {
+                item["embedding"].as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_f64().map(|f| f as f32))
+                        .collect()
+                })
+            })
+            .collect();
+
+        Ok(embeddings)
+    }
+}
+
+#[async_trait::async_trait]
+impl HanzoEndpoint for HanzoEmbeddingEndpoint {
+    async fn base_url(&self) -> String {
+        let config = self.config.read().await;
+        format!("http://localhost:{}", config.http_port)
+    }
+}
+
+// ===== Vector Search Endpoint =====
+
+/// Manager for Hanzo vector search endpoint
+pub struct HanzoVectorEndpoint {
+    config: Arc<RwLock<HanzoConfig>>,
+}
+
+impl HanzoVectorEndpoint {
+    pub fn new(config: Arc<RwLock<HanzoConfig>>) -> Self {
+        Self { config }
+    }
+
+    /// Perform vector similarity search
+    pub async fn search(&self, query: Vec<f32>, top_k: usize, threshold: Option<f32>) -> Result<Vec<VectorSearchResult>> {
+        let url = format!("{}/v1/vector/search", self.base_url().await);
+
+        let request = serde_json::json!({
+            "query": query,
+            "top_k": top_k,
+            "threshold": threshold.unwrap_or(0.7)
+        });
+
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Vector search failed: {}", response.text().await?);
+        }
 
         let json: serde_json::Value = response.json().await?;
         let results = json["results"]
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .filter_map(|v| v["text"].as_str().map(|s| s.to_string()))
+            .filter_map(|v| {
+                Some(VectorSearchResult {
+                    id: v["id"].as_str()?.to_string(),
+                    score: v["score"].as_f64()? as f32,
+                    metadata: v["metadata"].clone(),
+                })
+            })
             .collect();
 
         Ok(results)
     }
+
+    /// Add vectors to the database
+    pub async fn add(&self, vectors: Vec<VectorEntry>) -> Result<()> {
+        let url = format!("{}/v1/vector/add", self.base_url().await);
+
+        let request = serde_json::json!({
+            "vectors": vectors
+        });
+
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Failed to add vectors: {}", response.text().await?);
+        }
+
+        Ok(())
+    }
+
+    /// Delete vectors by IDs
+    pub async fn delete(&self, ids: Vec<String>) -> Result<()> {
+        let url = format!("{}/v1/vector/delete", self.base_url().await);
+
+        let request = serde_json::json!({
+            "ids": ids
+        });
+
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Failed to delete vectors: {}", response.text().await?);
+        }
+
+        Ok(())
+    }
 }
 
-impl Drop for HanzoInferenceManager {
-    fn drop(&mut self) {
-        // Stop hanzod when manager is dropped
-        let hanzod_process = self.hanzod_process.clone();
-        tokio::spawn(async move {
-            if let Some(mut child) = hanzod_process.write().await.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        });
+#[async_trait::async_trait]
+impl HanzoEndpoint for HanzoVectorEndpoint {
+    async fn base_url(&self) -> String {
+        let config = self.config.read().await;
+        format!("http://localhost:{}", config.http_port)
     }
+}
+
+// ===== Data Types =====
+
+/// Chat message for conversations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Compute job specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputeJob {
+    pub name: String,
+    pub image: String,
+    pub command: Vec<String>,
+    pub resources: ResourceRequirements,
+    pub env: Option<Vec<EnvVar>>,
+}
+
+/// Container specification for workloads
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerSpec {
+    pub name: String,
+    pub image: String,
+    pub command: Vec<String>,
+    pub args: Vec<String>,
+    pub env: Option<Vec<EnvVar>>,
+    pub resources: ResourceRequirements,
+}
+
+/// Resource requirements for compute
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceRequirements {
+    pub cpu: String,
+    pub memory: String,
+    pub gpu: Option<u32>,
+}
+
+/// Environment variable
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// Job status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobStatus {
+    pub job_id: String,
+    pub status: String,
+    pub message: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// Vector search result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorSearchResult {
+    pub id: String,
+    pub score: f32,
+    pub metadata: serde_json::Value,
+}
+
+/// Vector entry for storage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorEntry {
+    pub id: String,
+    pub vector: Vec<f32>,
+    pub metadata: serde_json::Value,
+}
+
+// ===== Manager =====
+
+/// Unified Hanzo manager
+pub struct HanzoManager {
+    config: Arc<RwLock<HanzoConfig>>,
+    pub inference: HanzoInferenceEndpoint,
+    pub compute: HanzoComputeEndpoint,
+    pub embedding: HanzoEmbeddingEndpoint,
+    pub vector: HanzoVectorEndpoint,
+}
+
+impl HanzoManager {
+    pub fn new(config: HanzoConfig) -> Self {
+        let config = Arc::new(RwLock::new(config));
+
+        Self {
+            inference: HanzoInferenceEndpoint::new(config.clone()),
+            compute: HanzoComputeEndpoint::new(config.clone()),
+            embedding: HanzoEmbeddingEndpoint::new(config.clone()),
+            vector: HanzoVectorEndpoint::new(config.clone()),
+            config,
+        }
+    }
+
+    /// Start enabled services
+    pub async fn start_all(&self) -> Result<()> {
+        let config = self.config.read().await;
+
+        if config.enable_inference {
+            self.inference.start().await?;
+        }
+
+        if config.enable_compute {
+            self.compute.start().await?;
+        }
+
+        Ok(())
+    }
+
+    /// Stop all services
+    pub async fn stop_all(&self) -> Result<()> {
+        self.inference.stop().await?;
+        self.compute.stop().await?;
+        Ok(())
+    }
+
+    /// Check health of all services
+    pub async fn health_check(&self) -> HealthStatus {
+        let config = self.config.read().await;
+        
+        HealthStatus {
+            inference: config.enable_inference && self.inference.is_available().await,
+            compute: config.enable_compute && self.compute.is_available().await,
+            embedding: config.enable_embeddings && self.embedding.is_available().await,
+            vector: config.enable_vector_search && self.vector.is_available().await,
+        }
+    }
+}
+
+/// Health status for all services
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthStatus {
+    pub inference: bool,
+    pub compute: bool,
+    pub embedding: bool,
+    pub vector: bool,
 }
 
 #[cfg(test)]
@@ -210,21 +572,33 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_hanzo_inference_config() {
-        let config = HanzoInferenceConfig::default();
-        assert_eq!(config.inference_port, 11434);
-        assert!(config.enable_embeddings);
-        assert!(config.enable_vector_search);
-        assert_eq!(config.model, "gpt-oss:20b");
+    async fn test_config_defaults() {
+        let config = HanzoConfig::default();
+        assert_eq!(config.http_port, 8080);
+        assert_eq!(config.grpc_port, 50051);
+        assert!(config.enable_inference);
+        assert!(config.enable_compute);
     }
 
     #[tokio::test]
-    async fn test_inference_manager() {
-        let config = HanzoInferenceConfig::default();
-        let manager = HanzoInferenceManager::new(config);
+    async fn test_manager_creation() {
+        let config = HanzoConfig::default();
+        let manager = HanzoManager::new(config);
 
-        // Test URL generation
-        let url = manager.get_inference_url().await;
-        assert_eq!(url, "http://localhost:11434/v1");
+        assert_eq!(manager.inference.base_url().await, "http://localhost:8080");
+        assert_eq!(manager.compute.base_url().await, "http://localhost:8080");
+    }
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let config = HanzoConfig::default();
+        let manager = HanzoManager::new(config);
+
+        let health = manager.health_check().await;
+        // Services won't be running in test
+        assert!(!health.inference);
+        assert!(!health.compute);
+        assert!(!health.embedding);
+        assert!(!health.vector);
     }
 }
