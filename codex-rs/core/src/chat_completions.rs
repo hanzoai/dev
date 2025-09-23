@@ -39,6 +39,12 @@ pub(crate) async fn stream_chat_completions(
     provider: &ModelProviderInfo,
     debug_logger: &Arc<Mutex<DebugLogger>>,
 ) -> Result<ResponseStream> {
+    if prompt.output_schema.is_some() {
+        return Err(CodexErr::UnsupportedOperation(
+            "output_schema is not supported for Chat Completions API".to_string(),
+        ));
+    }
+
     // Build messages array
     let mut messages = Vec::<serde_json::Value>::new();
 
