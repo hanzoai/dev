@@ -27,6 +27,7 @@ pub enum SlashCommand {
     Cmd,
     Status,
     Limits,
+    #[strum(serialize = "update", serialize = "upgrade")]
     Update,
     Theme,
     Model,
