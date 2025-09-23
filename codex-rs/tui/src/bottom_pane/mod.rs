@@ -572,11 +572,11 @@ impl BottomPane<'_> {
     /// Show validation harness settings (master toggle + per-tool toggles).
     pub fn show_validation_settings(
         &mut self,
-        patch_harness: bool,
-        tools: Vec<(validation_settings_view::ToolStatus, bool)>,
+        groups: Vec<(validation_settings_view::GroupStatus, bool)>,
+        tools: Vec<validation_settings_view::ToolRow>,
     ) {
         use validation_settings_view::ValidationSettingsView;
-        let view = ValidationSettingsView::new(patch_harness, tools, self.app_event_tx.clone());
+        let view = ValidationSettingsView::new(groups, tools, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();
