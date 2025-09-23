@@ -189,6 +189,10 @@ impl ChatComposer {
         }
     }
 
+    pub fn set_using_chatgpt_auth(&mut self, using: bool) {
+        self.using_chatgpt_auth = using;
+    }
+
     /// Returns true if the input starts with a slash command and the cursor
     /// is positioned within the command head (i.e., before the first
     /// whitespace on the first line). Used to decide whether to keep the
