@@ -22,7 +22,7 @@ use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
 use color_eyre::eyre::Result;
 use futures::FutureExt;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use ratatui::prelude::Rect;
 use ratatui::text::Line;
 use std::io::{Read, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, Sender as StdSender, channel};
@@ -50,6 +50,8 @@ use shlex::try_join;
 /// reduces render thrash, improving perceived input latency while staying
 /// comfortably under a 60 FPS refresh budget.
 const REDRAW_DEBOUNCE: Duration = Duration::from_millis(16);
+const DEFAULT_PTY_ROWS: u16 = 24;
+const DEFAULT_PTY_COLS: u16 = 80;
 
 /// Top-level application state: which full-screen view is currently active.
 #[allow(clippy::large_enum_variant)]
@@ -72,6 +74,7 @@ struct TerminalRunState {
     running: bool,
     controller: Option<TerminalRunController>,
     writer_tx: Option<StdSender<Vec<u8>>>,
+    pty: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
 }
 
 struct LoginFlowState {
@@ -445,11 +448,12 @@ impl App<'_> {
 
         let joined_display = try_join(command.iter().map(|s| s.as_str()))
             .ok()
-            .or(display.clone())
             .unwrap_or_else(|| command.join(" "));
 
-        if !joined_display.trim().is_empty() {
-            let line = format!("$ {joined_display}\n");
+        let display_line = display.clone().unwrap_or_else(|| joined_display.clone());
+
+        if !display_line.trim().is_empty() {
+            let line = format!("$ {display_line}\n");
             self.app_event_tx.send(AppEvent::TerminalChunk {
                 id,
                 chunk: line.into_bytes(),
@@ -461,121 +465,228 @@ impl App<'_> {
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let (writer_tx, writer_rx) = channel::<Vec<u8>>();
         let controller_clone = controller.clone();
+        let cwd = self.config.cwd.clone();
+        let controller_tx = controller.map(|c| c.tx);
+
+        let (pty_rows, pty_cols) = match &self.app_state {
+            AppState::Chat { widget } => widget
+                .terminal_dimensions_hint()
+                .unwrap_or((DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS)),
+            _ => (DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS),
+        };
+
+        let pty_system = native_pty_system();
+        let pair = match pty_system.openpty(PtySize {
+            rows: pty_rows,
+            cols: pty_cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(pair) => pair,
+            Err(err) => {
+                let msg = format!("Failed to open PTY: {err}\n");
+                self.app_event_tx.send(AppEvent::TerminalChunk {
+                    id,
+                    chunk: msg.clone().into_bytes(),
+                    _is_stderr: true,
+                });
+                if let Some(ref ctrl) = controller_tx {
+                    let _ = ctrl.send(TerminalRunEvent::Chunk {
+                        data: msg.clone().into_bytes(),
+                        _is_stderr: true,
+                    });
+                    let _ = ctrl.send(TerminalRunEvent::Exit {
+                        exit_code: Some(1),
+                        _duration: Duration::from_millis(0),
+                    });
+                }
+                self.app_event_tx.send(AppEvent::TerminalExit {
+                    id,
+                    exit_code: Some(1),
+                    _duration: Duration::from_millis(0),
+                });
+                return;
+            }
+        };
+
+        let PtyPair { master, slave } = pair;
+        let master = Arc::new(Mutex::new(master));
+
+        let writer = {
+            let guard = match master.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    let msg = "Failed to acquire terminal writer: poisoned lock\n".to_string();
+                    self.app_event_tx.send(AppEvent::TerminalChunk {
+                        id,
+                        chunk: msg.clone().into_bytes(),
+                        _is_stderr: true,
+                    });
+                    if let Some(ref ctrl) = controller_tx {
+                        let _ = ctrl.send(TerminalRunEvent::Chunk {
+                            data: msg.clone().into_bytes(),
+                            _is_stderr: true,
+                        });
+                        let _ = ctrl.send(TerminalRunEvent::Exit {
+                            exit_code: Some(1),
+                            _duration: Duration::from_millis(0),
+                        });
+                    }
+                    self.app_event_tx.send(AppEvent::TerminalExit {
+                        id,
+                        exit_code: Some(1),
+                        _duration: Duration::from_millis(0),
+                    });
+                    return;
+                }
+            };
+            let result = guard.take_writer();
+            drop(guard);
+            match result {
+                Ok(writer) => writer,
+                Err(err) => {
+                    let msg = format!("Failed to acquire terminal writer: {err}\n");
+                    self.app_event_tx.send(AppEvent::TerminalChunk {
+                        id,
+                        chunk: msg.clone().into_bytes(),
+                        _is_stderr: true,
+                    });
+                    if let Some(ref ctrl) = controller_tx {
+                        let _ = ctrl.send(TerminalRunEvent::Chunk {
+                            data: msg.clone().into_bytes(),
+                            _is_stderr: true,
+                        });
+                        let _ = ctrl.send(TerminalRunEvent::Exit {
+                            exit_code: Some(1),
+                            _duration: Duration::from_millis(0),
+                        });
+                    }
+                    self.app_event_tx.send(AppEvent::TerminalExit {
+                        id,
+                        exit_code: Some(1),
+                        _duration: Duration::from_millis(0),
+                    });
+                    return;
+                }
+            }
+        };
+
+        let reader = {
+            let guard = match master.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    let msg = "Failed to read terminal output: poisoned lock\n".to_string();
+                    self.app_event_tx.send(AppEvent::TerminalChunk {
+                        id,
+                        chunk: msg.clone().into_bytes(),
+                        _is_stderr: true,
+                    });
+                    if let Some(ref ctrl) = controller_tx {
+                        let _ = ctrl.send(TerminalRunEvent::Chunk {
+                            data: msg.clone().into_bytes(),
+                            _is_stderr: true,
+                        });
+                        let _ = ctrl.send(TerminalRunEvent::Exit {
+                            exit_code: Some(1),
+                            _duration: Duration::from_millis(0),
+                        });
+                    }
+                    self.app_event_tx.send(AppEvent::TerminalExit {
+                        id,
+                        exit_code: Some(1),
+                        _duration: Duration::from_millis(0),
+                    });
+                    return;
+                }
+            };
+            let result = guard.try_clone_reader();
+            drop(guard);
+            match result {
+                Ok(reader) => reader,
+                Err(err) => {
+                    let msg = format!("Failed to read terminal output: {err}\n");
+                    self.app_event_tx.send(AppEvent::TerminalChunk {
+                        id,
+                        chunk: msg.clone().into_bytes(),
+                        _is_stderr: true,
+                    });
+                    if let Some(ref ctrl) = controller_tx {
+                        let _ = ctrl.send(TerminalRunEvent::Chunk {
+                            data: msg.clone().into_bytes(),
+                            _is_stderr: true,
+                        });
+                        let _ = ctrl.send(TerminalRunEvent::Exit {
+                            exit_code: Some(1),
+                            _duration: Duration::from_millis(0),
+                        });
+                    }
+                    self.app_event_tx.send(AppEvent::TerminalExit {
+                        id,
+                        exit_code: Some(1),
+                        _duration: Duration::from_millis(0),
+                    });
+                    return;
+                }
+            }
+        };
+
+        let mut command_builder = CommandBuilder::new(command[0].clone());
+        for arg in &command[1..] {
+            command_builder.arg(arg);
+        }
+        command_builder.cwd(&cwd);
+
+        let mut child = match slave.spawn_command(command_builder) {
+            Ok(child) => child,
+            Err(err) => {
+                let msg = format!("Failed to spawn command: {err}\n");
+                self.app_event_tx.send(AppEvent::TerminalChunk {
+                    id,
+                    chunk: msg.clone().into_bytes(),
+                    _is_stderr: true,
+                });
+                if let Some(ref ctrl) = controller_tx {
+                    let _ = ctrl.send(TerminalRunEvent::Chunk {
+                        data: msg.clone().into_bytes(),
+                        _is_stderr: true,
+                    });
+                    let _ = ctrl.send(TerminalRunEvent::Exit {
+                        exit_code: Some(1),
+                        _duration: Duration::from_millis(0),
+                    });
+                }
+                self.app_event_tx.send(AppEvent::TerminalExit {
+                    id,
+                    exit_code: Some(1),
+                    _duration: Duration::from_millis(0),
+                });
+                return;
+            }
+        };
+
+        let mut killer = child.clone_killer();
+
+        let master_for_state = Arc::clone(&master);
         self.terminal_runs.insert(
             id,
             TerminalRunState {
                 command: stored_command,
-                display: joined_display.clone(),
+                display: display_line.clone(),
                 cancel_tx: Some(cancel_tx),
                 running: true,
                 controller: controller_clone,
                 writer_tx: Some(writer_tx.clone()),
+                pty: Some(master_for_state),
             },
         );
 
-        let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
-        let controller_tx = controller.map(|c| c.tx);
-        let command_spawn = command;
+        let controller_tx_task = controller_tx.clone();
+        let master_for_task = Arc::clone(&master);
         tokio::spawn(async move {
             let start_time = Instant::now();
-            let pty_system = native_pty_system();
-            let pair = match pty_system.openpty(PtySize {
-                rows: 24,
-                cols: 80,
-                pixel_width: 0,
-                pixel_height: 0,
-            }) {
-                Ok(pair) => pair,
-                Err(err) => {
-                    let msg = format!("Failed to open PTY: {err}\n");
-                    tx.send(AppEvent::TerminalChunk {
-                        id,
-                        chunk: msg.clone().into_bytes(),
-                        _is_stderr: true,
-                    });
-                    if let Some(ref ctrl) = controller_tx {
-                        let _ = ctrl.send(TerminalRunEvent::Chunk {
-                            data: msg.clone().into_bytes(),
-                            _is_stderr: true,
-                        });
-                        let _ = ctrl.send(TerminalRunEvent::Exit {
-                            exit_code: Some(1),
-                            _duration: Duration::from_millis(0),
-                        });
-                    }
-                    tx.send(AppEvent::TerminalExit {
-                        id,
-                        exit_code: Some(1),
-                        _duration: Duration::from_millis(0),
-                    });
-                    return;
-                }
-            };
-
-            let mut command_builder = CommandBuilder::new(command_spawn[0].clone());
-            for arg in &command_spawn[1..] {
-                command_builder.arg(arg);
-            }
-            command_builder.cwd(&cwd);
-
-            let mut child = match pair.slave.spawn_command(command_builder) {
-                Ok(child) => child,
-                Err(err) => {
-                    let msg = format!("Failed to spawn command: {err}\n");
-                    tx.send(AppEvent::TerminalChunk {
-                        id,
-                        chunk: msg.clone().into_bytes(),
-                        _is_stderr: true,
-                    });
-                    if let Some(ref ctrl) = controller_tx {
-                        let _ = ctrl.send(TerminalRunEvent::Chunk {
-                            data: msg.clone().into_bytes(),
-                            _is_stderr: true,
-                        });
-                        let _ = ctrl.send(TerminalRunEvent::Exit {
-                            exit_code: Some(1),
-                            _duration: Duration::from_millis(0),
-                        });
-                    }
-                    tx.send(AppEvent::TerminalExit {
-                        id,
-                        exit_code: Some(1),
-                        _duration: Duration::from_millis(0),
-                    });
-                    return;
-                }
-            };
-
-            let mut killer = child.clone_killer();
-            let master = pair.master;
-            let writer = match master.take_writer() {
-                Ok(writer) => writer,
-                Err(err) => {
-                    let msg = format!("Failed to acquire terminal writer: {err}\n");
-                    tx.send(AppEvent::TerminalChunk {
-                        id,
-                        chunk: msg.clone().into_bytes(),
-                        _is_stderr: true,
-                    });
-                    if let Some(ref ctrl) = controller_tx {
-                        let _ = ctrl.send(TerminalRunEvent::Chunk {
-                            data: msg.clone().into_bytes(),
-                            _is_stderr: true,
-                        });
-                        let _ = ctrl.send(TerminalRunEvent::Exit {
-                            exit_code: Some(1),
-                            _duration: Duration::from_millis(0),
-                        });
-                    }
-                    tx.send(AppEvent::TerminalExit {
-                        id,
-                        exit_code: Some(1),
-                        _duration: Duration::from_millis(0),
-                    });
-                    return;
-                }
-            };
+            let controller_tx = controller_tx_task;
+            let _master = master_for_task;
 
             let writer_handle = tokio::task::spawn_blocking(move || {
                 let mut writer = writer;
@@ -589,39 +700,11 @@ impl App<'_> {
                 }
             });
 
-            let mut reader = match master.try_clone_reader() {
-                Ok(reader) => reader,
-                Err(err) => {
-                    let msg = format!("Failed to read terminal output: {err}\n");
-                    tx.send(AppEvent::TerminalChunk {
-                        id,
-                        chunk: msg.clone().into_bytes(),
-                        _is_stderr: true,
-                    });
-                    if let Some(ref ctrl) = controller_tx {
-                        let _ = ctrl.send(TerminalRunEvent::Chunk {
-                            data: msg.clone().into_bytes(),
-                            _is_stderr: true,
-                        });
-                        let _ = ctrl.send(TerminalRunEvent::Exit {
-                            exit_code: Some(1),
-                            _duration: Duration::from_millis(0),
-                        });
-                    }
-                    tx.send(AppEvent::TerminalExit {
-                        id,
-                        exit_code: Some(1),
-                        _duration: Duration::from_millis(0),
-                    });
-                    return;
-                }
-            };
-            drop(master);
-
             let tx_reader = tx.clone();
             let controller_tx_reader = controller_tx.clone();
             let reader_handle = tokio::task::spawn_blocking(move || {
                 let mut buf = [0u8; 8192];
+                let mut reader = reader;
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
@@ -1191,6 +1274,7 @@ impl App<'_> {
                         run.running = false;
                         run.cancel_tx = None;
                         run.writer_tx = None;
+                        run.pty = None;
                         run.controller.is_some()
                     } else {
                         false
@@ -1214,6 +1298,7 @@ impl App<'_> {
                         run.running = false;
                         run.controller = None;
                         run.writer_tx = None;
+                        run.pty = None;
                         remove_entry = had_controller;
                     }
                     if remove_entry {
@@ -1257,6 +1342,26 @@ impl App<'_> {
                         if let Some(tx) = run.writer_tx.as_ref() {
                             if tx.send(data).is_err() {
                                 run.writer_tx = None;
+                            }
+                        }
+                    }
+                }
+                AppEvent::TerminalResize { id, rows, cols } => {
+                    if rows == 0 || cols == 0 {
+                        continue;
+                    }
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.terminal_apply_resize(id, rows, cols);
+                    }
+                    if let Some(run) = self.terminal_runs.get(&id) {
+                        if let Some(pty) = run.pty.as_ref() {
+                            if let Ok(guard) = pty.lock() {
+                                let _ = guard.resize(PtySize {
+                                    rows,
+                                    cols,
+                                    pixel_width: 0,
+                                    pixel_height: 0,
+                                });
                             }
                         }
                     }

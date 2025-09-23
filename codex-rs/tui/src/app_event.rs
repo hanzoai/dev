@@ -292,6 +292,11 @@ pub(crate) enum AppEvent {
         id: u64,
         data: Vec<u8>,
     },
+    TerminalResize {
+        id: u64,
+        rows: u16,
+        cols: u16,
+    },
     TerminalRerun { id: u64 },
     TerminalUpdateMessage { id: u64, message: String },
     TerminalForceClose { id: u64 },
