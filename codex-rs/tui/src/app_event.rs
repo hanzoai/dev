@@ -59,6 +59,14 @@ pub(crate) enum TerminalAfter {
     RefreshAgentsAndClose { selected_index: usize },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackgroundPlacement {
+    /// Default: append to the end of the current request/history window.
+    Tail,
+    /// Display immediately before the next provider/tool output for the active request.
+    BeforeNextOutput,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -185,12 +193,11 @@ pub(crate) enum AppEvent {
     InsertHistoryWithKind { id: Option<String>, kind: StreamKind, lines: Vec<Line<'static>> },
     /// Finalized assistant answer with raw markdown for re-rendering under theme changes.
     InsertFinalAnswer { id: Option<String>, lines: Vec<Line<'static>>, source: String },
-    /// Insert a background event near the top of the current request so it
-    /// appears above imminent provider output (e.g. above Exec begin).
-    InsertBackgroundEventEarly(String),
-    /// Insert a background event at the end of the current request so it
-    /// follows previously rendered content.
-    InsertBackgroundEventLate(String),
+    /// Insert a background event with explicit placement semantics.
+    InsertBackgroundEvent {
+        message: String,
+        placement: BackgroundPlacement,
+    },
 
     /// Background rate limit refresh failed (threaded request).
     RateLimitFetchFailed { message: String },
