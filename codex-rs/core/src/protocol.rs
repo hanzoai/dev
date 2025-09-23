@@ -32,7 +32,7 @@ pub use codex_protocol::protocol::ReviewCodeLocation;
 pub use codex_protocol::protocol::ReviewFinding;
 pub use codex_protocol::protocol::ReviewLineRange;
 pub use codex_protocol::protocol::ReviewOutputEvent;
-pub use codex_protocol::protocol::ReviewRequest;
+pub use codex_protocol::protocol::{ReviewContextMetadata, ReviewRequest};
 pub use codex_protocol::protocol::GitInfo;
 pub use codex_protocol::protocol::RolloutItem;
 pub use codex_protocol::protocol::RolloutLine;
