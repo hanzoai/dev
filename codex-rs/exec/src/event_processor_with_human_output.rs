@@ -294,9 +294,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 if let Some(snapshot) = &ev.rate_limits {
                     ts_println!(
                         self,
-                        "rate limits: hourly {:.1}% • weekly {:.1}%",
+                        "rate limits: hourly {:.1}% • secondary {:.1}%",
                         snapshot.primary_used_percent,
-                        snapshot.weekly_used_percent
+                        snapshot.secondary_used_percent
                     );
                 }
             }
@@ -736,7 +736,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
 }
 
 fn escape_command(command: &[String]) -> String {
-    try_join(command.iter().map(|s| s.as_str())).unwrap_or_else(|_| command.join(" "))
+    try_join(command.iter().map(String::as_str)).unwrap_or_else(|_| command.join(" "))
 }
 
 fn format_file_change(change: &FileChange) -> &'static str {
