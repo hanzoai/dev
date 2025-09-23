@@ -3957,8 +3957,10 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
 
                 // If there are responses, add them to pending input for the next iteration
                 if !responses.is_empty() {
-                    for response in &responses {
-                        sess.add_pending_input(response.clone());
+                    if !is_review_mode {
+                        for response in &responses {
+                            sess.add_pending_input(response.clone());
+                        }
                     }
                 }
 
