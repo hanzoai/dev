@@ -20,6 +20,7 @@ use codex_common::model_presets::ModelPreset;
 use codex_common::model_presets::builtin_model_presets;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
+use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
@@ -125,6 +126,8 @@ use crate::app_event::{
     TerminalRunController,
 };
 use crate::app_event_sender::AppEventSender;
+use crate::bottom_pane::CustomPromptView;
+use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionItem};
 use crate::bottom_pane::validation_settings_view;
 use crate::bottom_pane::validation_settings_view::ToolStatus;
 use crate::bottom_pane::BottomPane;
@@ -4079,6 +4082,16 @@ impl ChatWidget<'_> {
                 // Close out any running tool/exec indicators before inserting final answer.
                 self.finalize_all_running_due_to_answer();
 
+                if self.is_review_flow_active() {
+                    tracing::debug!("Suppressing review final message id={} to avoid duplicate output", id);
+                    self.stream_state
+                        .closed_answer_ids
+                        .insert(StreamId(id.clone()));
+                    self.active_task_ids.remove(&id);
+                    self.maybe_hide_spinner();
+                    return;
+                }
+
                 // Route final message through streaming controller so AppEvent::InsertFinalAnswer
                 // is the single source of truth for assistant content.
                 let sink = AppEventHistorySink(self.app_event_tx.clone());
@@ -4143,6 +4156,10 @@ impl ChatWidget<'_> {
                 // If the user requested an interrupt, ignore late deltas.
                 if self.stream_state.drop_streaming {
                     tracing::debug!("Ignoring Answer delta after interrupt");
+                    return;
+                }
+                if self.is_review_flow_active() {
+                    tracing::debug!("Suppressing review streaming delta id={}", id);
                     return;
                 }
                 // Ignore late deltas for ids that have already finalized in this turn
@@ -11632,6 +11649,286 @@ fn update_rate_limit_resets(
 }
 
 impl ChatWidget<'_> {
+    pub(crate) fn open_review_dialog(&mut self) {
+        if self.is_task_running() {
+            self.history_push(crate::history_cell::new_error_event(
+                "`/review` — complete or cancel the current task before starting a new review.".to_string(),
+            ));
+            self.request_redraw();
+            return;
+        }
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+
+        items.push(SelectionItem {
+            name: "Review current workspace changes".to_string(),
+            description: Some("Include staged, unstaged, and untracked files".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::RunReviewCommand(String::new()));
+            })],
+        });
+
+        items.push(SelectionItem {
+            name: "Review a specific commit".to_string(),
+            description: Some("Pick from recent commits".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::StartReviewCommitPicker);
+            })],
+        });
+
+        items.push(SelectionItem {
+            name: "Review against a base branch".to_string(),
+            description: Some("Diff current branch against another".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::StartReviewBranchPicker);
+            })],
+        });
+
+        items.push(SelectionItem {
+            name: "Custom review instructions".to_string(),
+            description: Some("Describe exactly what to audit".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::OpenReviewCustomPrompt);
+            })],
+        });
+
+        let view: ListSelectionView = ListSelectionView::new(
+            " Review options ".to_string(),
+            Some("Choose what scope to review".to_string()),
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            6,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Review options".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn show_review_custom_prompt(&mut self) {
+        let submit_tx = self.app_event_tx.clone();
+        let on_submit: Box<dyn Fn(String) + Send + Sync> = Box::new(move |text: String| {
+            submit_tx.send(crate::app_event::AppEvent::RunReviewCommand(text));
+        });
+        let view = CustomPromptView::new(
+            "Custom review instructions".to_string(),
+            "Describe the files or changes you want reviewed".to_string(),
+            Some("Press Enter to submit · Esc cancel".to_string()),
+            self.app_event_tx.clone(),
+            None,
+            on_submit,
+        );
+        self.bottom_pane.show_custom_prompt(view);
+    }
+
+    pub(crate) fn show_review_commit_loading(&mut self) {
+        let loading_item = SelectionItem {
+            name: "Loading recent commits…".to_string(),
+            description: None,
+            is_current: true,
+            actions: Vec::new(),
+        };
+        let view = ListSelectionView::new(
+            " Select a commit ".to_string(),
+            Some("Fetching recent commits from git".to_string()),
+            Some("Esc cancel".to_string()),
+            vec![loading_item],
+            self.app_event_tx.clone(),
+            6,
+        );
+        self.bottom_pane.show_list_selection(
+            "Select a commit".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn present_review_commit_picker(&mut self, commits: Vec<CommitLogEntry>) {
+        if commits.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No recent commits found for review".to_string());
+            self.request_redraw();
+            return;
+        }
+
+        let mut items: Vec<SelectionItem> = Vec::with_capacity(commits.len());
+        for entry in commits {
+            let subject = entry.subject.trim().to_string();
+            let sha = entry.sha.trim().to_string();
+            if sha.is_empty() {
+                continue;
+            }
+            let short_sha: String = sha.chars().take(7).collect();
+            let title = if subject.is_empty() {
+                short_sha.clone()
+            } else {
+                format!("{short_sha} — {subject}")
+            };
+            let prompt = if subject.is_empty() {
+                format!(
+                    "Review the code changes introduced by commit {sha}. Provide prioritized, actionable findings."
+                )
+            } else {
+                format!(
+                    "Review the code changes introduced by commit {sha} (\"{subject}\"). Provide prioritized, actionable findings."
+                )
+            };
+            let hint = format!("commit {short_sha}");
+            let preparation = format!("Preparing code review for commit {short_sha}");
+            let prompt_closure = prompt.clone();
+            let hint_closure = hint.clone();
+            let prep_closure = preparation.clone();
+            items.push(SelectionItem {
+                name: title,
+                description: None,
+                is_current: false,
+                actions: vec![Box::new(move |tx: &crate::app_event_sender::AppEventSender| {
+                    tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                        prompt: prompt_closure.clone(),
+                        hint: hint_closure.clone(),
+                        preparation_label: Some(prep_closure.clone()),
+                    });
+                })],
+            });
+        }
+
+        if items.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No recent commits found for review".to_string());
+            self.request_redraw();
+            return;
+        }
+
+        let view = ListSelectionView::new(
+            " Select a commit ".to_string(),
+            Some("Choose a commit to review".to_string()),
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            10,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Select a commit to review".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn show_review_branch_loading(&mut self) {
+        let loading_item = SelectionItem {
+            name: "Loading local branches…".to_string(),
+            description: None,
+            is_current: true,
+            actions: Vec::new(),
+        };
+        let view = ListSelectionView::new(
+            " Select a base branch ".to_string(),
+            Some("Fetching local branches".to_string()),
+            Some("Esc cancel".to_string()),
+            vec![loading_item],
+            self.app_event_tx.clone(),
+            6,
+        );
+        self.bottom_pane.show_list_selection(
+            "Select a base branch".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn present_review_branch_picker(
+        &mut self,
+        current_branch: Option<String>,
+        branches: Vec<String>,
+    ) {
+        let current_trimmed = current_branch.as_ref().map(|s| s.trim().to_string());
+        let mut items: Vec<SelectionItem> = Vec::new();
+        for branch in branches {
+            let branch_trimmed = branch.trim();
+            if branch_trimmed.is_empty() {
+                continue;
+            }
+            if current_trimmed
+                .as_ref()
+                .is_some_and(|current| current == branch_trimmed)
+            {
+                continue;
+            }
+
+            let title = if let Some(current) = current_trimmed.as_ref() {
+                format!("{current} → {branch_trimmed}")
+            } else {
+                format!("Compare against {branch_trimmed}")
+            };
+
+            let prompt = if let Some(current) = current_trimmed.as_ref() {
+                format!(
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                )
+            } else {
+                format!(
+                    "Review the code changes that would merge into '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merge."
+                )
+            };
+            let hint = format!("against {branch_trimmed}");
+            let preparation = format!("Preparing code review against {branch_trimmed}");
+            let prompt_closure = prompt.clone();
+            let hint_closure = hint.clone();
+            let prep_closure = preparation.clone();
+            items.push(SelectionItem {
+                name: title,
+                description: None,
+                is_current: false,
+                actions: vec![Box::new(move |tx: &crate::app_event_sender::AppEventSender| {
+                    tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                        prompt: prompt_closure.clone(),
+                        hint: hint_closure.clone(),
+                        preparation_label: Some(prep_closure.clone()),
+                    });
+                })],
+            });
+        }
+
+        if items.is_empty() {
+            self.bottom_pane
+                .flash_footer_notice("No alternative branches found for review".to_string());
+            self.request_redraw();
+            return;
+        }
+
+        let subtitle = current_trimmed
+            .as_ref()
+            .map(|current| format!("Current branch: {current}"));
+
+        let view = ListSelectionView::new(
+            " Select a base branch ".to_string(),
+            subtitle,
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            10,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Compare against a branch".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
     /// Handle `/review [focus]` command by starting a dedicated review session.
     pub(crate) fn handle_review_command(&mut self, args: String) {
         if self.is_task_running() {
@@ -11643,24 +11940,37 @@ impl ChatWidget<'_> {
         }
 
         let trimmed = args.trim();
-        let (prompt, hint) = if trimmed.is_empty() {
-            (
+        if trimmed.is_empty() {
+            self.start_review_with_scope(
                 "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
                 "current workspace changes".to_string(),
-            )
+                Some("Preparing code review request...".to_string()),
+            );
         } else {
             let value = trimmed.to_string();
-            (value.clone(), value)
-        };
+            let preparation = format!("Preparing code review for {value}");
+            self.start_review_with_scope(value.clone(), value, Some(preparation));
+        }
+    }
 
+    pub(crate) fn start_review_with_scope(
+        &mut self,
+        prompt: String,
+        hint: String,
+        preparation_label: Option<String>,
+    ) {
         self.active_review_hint = None;
         self.active_review_prompt = None;
 
-        let preparation_notice = if trimmed.is_empty() {
-            "Preparing code review request...".to_string()
-        } else {
-            format!("Preparing code review for {hint}")
-        };
+        let trimmed_hint = hint.trim();
+        let preparation_notice = preparation_label.unwrap_or_else(|| {
+            if trimmed_hint.is_empty() {
+                "Preparing code review request...".to_string()
+            } else {
+                format!("Preparing code review for {trimmed_hint}")
+            }
+        });
+
         self.insert_background_event_early(preparation_notice);
         self.request_redraw();
 
@@ -11670,6 +11980,10 @@ impl ChatWidget<'_> {
         };
 
         self.submit_op(Op::Review { review_request });
+    }
+
+    fn is_review_flow_active(&self) -> bool {
+        self.active_review_hint.is_some() || self.active_review_prompt.is_some()
     }
 
     fn build_review_summary_cell(

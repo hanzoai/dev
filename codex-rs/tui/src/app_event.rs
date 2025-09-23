@@ -3,6 +3,7 @@ use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
 use codex_core::protocol::ApprovedCommandMatchKind;
+use codex_core::git_info::CommitLogEntry;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
@@ -134,6 +135,31 @@ pub(crate) enum AppEvent {
 
     /// Submit a message with hidden preface instructions
     SubmitTextWithPreface { visible: String, preface: String },
+
+    /// Run a review with an explicit prompt/hint pair (used by TUI selections)
+    RunReviewWithScope {
+        prompt: String,
+        hint: String,
+        preparation_label: Option<String>,
+    },
+
+    /// Run the review command with the given argument string (mirrors `/review <args>`)
+    RunReviewCommand(String),
+
+    /// Open a bottom-pane form that lets the user select a commit to review.
+    StartReviewCommitPicker,
+    /// Populate the commit picker with retrieved commit entries.
+    PresentReviewCommitPicker { commits: Vec<CommitLogEntry> },
+    /// Open a bottom-pane form that lets the user select a base branch to diff against.
+    StartReviewBranchPicker,
+    /// Populate the branch picker with branch metadata once loaded asynchronously.
+    PresentReviewBranchPicker {
+        current_branch: Option<String>,
+        branches: Vec<String>,
+    },
+
+    /// Show the multi-line prompt input to collect custom review instructions.
+    OpenReviewCustomPrompt,
 
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
