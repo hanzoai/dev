@@ -10,8 +10,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -343,6 +342,7 @@ pub(crate) struct ChatWidget<'a> {
 
     // Cached cell size (width,height) in pixels
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
+    git_branch_cache: RefCell<GitBranchCache>,
 
     // Terminal information from startup
     terminal_info: crate::tui::TerminalInfo,
@@ -475,6 +475,13 @@ pub(crate) struct ChatWidget<'a> {
 
 struct PendingJumpBack {
     removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
+}
+
+#[derive(Default)]
+struct GitBranchCache {
+    value: Option<String>,
+    last_head_mtime: Option<SystemTime>,
+    last_refresh: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2167,6 +2174,7 @@ impl ChatWidget<'_> {
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
+            git_branch_cache: RefCell::new(GitBranchCache::default()),
             terminal_info,
             active_agents: Vec::new(),
             agents_ready_to_start: false,
@@ -2391,6 +2399,7 @@ impl ChatWidget<'_> {
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
+            git_branch_cache: RefCell::new(GitBranchCache::default()),
             terminal_info,
             active_agents: Vec::new(),
             agents_ready_to_start: false,
@@ -11702,32 +11711,51 @@ fn update_rate_limit_resets(
         use std::fs;
         use std::path::Path;
 
-        // Read .git/HEAD to avoid spawning `git` every frame.
-        // Formats:
-        //   - "ref: refs/heads/<branch>" when on a named branch
-        //   - "<40-hex-SHA>" when in a detached HEAD state
         let head_path = self.config.cwd.join(".git/HEAD");
-        let head_contents = fs::read_to_string(&head_path).ok()?;
-        let head = head_contents.trim();
+        let mut cache = self.git_branch_cache.borrow_mut();
+        let now = Instant::now();
 
-        if let Some(rest) = head.strip_prefix("ref: ") {
-            // Extract last path segment as branch name
-            if let Some(name) = Path::new(rest)
-                .file_name()
-                .and_then(|s| s.to_str())
-                .filter(|s| !s.is_empty())
-            {
-                return Some(name.to_string());
+        let needs_refresh = match cache.last_refresh {
+            Some(last) => now.duration_since(last) >= Duration::from_millis(500),
+            None => true,
+        };
+
+        if needs_refresh {
+            let modified = fs::metadata(&head_path)
+                .and_then(|meta| meta.modified())
+                .ok();
+
+            let metadata_changed = cache.last_head_mtime != modified || cache.last_refresh.is_none();
+
+            if metadata_changed {
+                cache.value = fs::read_to_string(&head_path)
+                    .ok()
+                    .and_then(|head_contents| {
+                        let head = head_contents.trim();
+
+                        if let Some(rest) = head.strip_prefix("ref: ") {
+                            return Path::new(rest)
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .filter(|s| !s.is_empty())
+                                .map(|name| name.to_string());
+                        }
+
+                        if head.len() >= 7
+                            && head.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
+                        {
+                            return Some(format!("detached: {}", &head[..7]));
+                        }
+
+                        None
+                    });
+                cache.last_head_mtime = modified;
             }
+
+            cache.last_refresh = Some(now);
         }
 
-        // Detached HEAD: display short SHA if it looks like a commit hash
-        let is_hex = head.len() >= 7 && head.as_bytes().iter().all(|b| b.is_ascii_hexdigit());
-        if is_hex {
-            return Some(format!("detached: {}", &head[..7]));
-        }
-
-        None
+        cache.value.clone()
     }
 
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
