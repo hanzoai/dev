@@ -84,7 +84,7 @@ use codex_core::protocol::SessionConfiguredEvent;
 // MCP tool call handlers moved into chatwidget::tools
 use codex_core::protocol::Op;
 use codex_core::protocol::ReviewOutputEvent;
-use codex_core::protocol::ReviewRequest;
+use codex_core::protocol::{ReviewContextMetadata, ReviewRequest};
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
@@ -11797,6 +11797,11 @@ impl ChatWidget<'_> {
             let prompt_closure = prompt.clone();
             let hint_closure = hint.clone();
             let prep_closure = preparation.clone();
+            let metadata_option = Some(ReviewContextMetadata {
+                scope: Some("commit".to_string()),
+                commit: Some(sha.clone()),
+                ..Default::default()
+            });
             items.push(SelectionItem {
                 name: title,
                 description: None,
@@ -11806,6 +11811,7 @@ impl ChatWidget<'_> {
                         prompt: prompt_closure.clone(),
                         hint: hint_closure.clone(),
                         preparation_label: Some(prep_closure.clone()),
+                        metadata: metadata_option.clone(),
                     });
                 })],
             });
@@ -11897,6 +11903,12 @@ impl ChatWidget<'_> {
             let prompt_closure = prompt.clone();
             let hint_closure = hint.clone();
             let prep_closure = preparation.clone();
+            let metadata_option = Some(ReviewContextMetadata {
+                scope: Some("branch_diff".to_string()),
+                base_branch: Some(branch_trimmed.to_string()),
+                current_branch: current_trimmed.clone(),
+                ..Default::default()
+            });
             items.push(SelectionItem {
                 name: title,
                 description: None,
@@ -11906,6 +11918,7 @@ impl ChatWidget<'_> {
                         prompt: prompt_closure.clone(),
                         hint: hint_closure.clone(),
                         preparation_label: Some(prep_closure.clone()),
+                        metadata: metadata_option.clone(),
                     });
                 })],
             });
@@ -11951,15 +11964,24 @@ impl ChatWidget<'_> {
 
         let trimmed = args.trim();
         if trimmed.is_empty() {
+            let metadata = ReviewContextMetadata {
+                scope: Some("workspace".to_string()),
+                ..Default::default()
+            };
             self.start_review_with_scope(
                 "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
                 "current workspace changes".to_string(),
                 Some("Preparing code review request...".to_string()),
+                Some(metadata),
             );
         } else {
             let value = trimmed.to_string();
             let preparation = format!("Preparing code review for {value}");
-            self.start_review_with_scope(value.clone(), value, Some(preparation));
+            let metadata = ReviewContextMetadata {
+                scope: Some("custom".to_string()),
+                ..Default::default()
+            };
+            self.start_review_with_scope(value.clone(), value, Some(preparation), Some(metadata));
         }
     }
 
@@ -11968,6 +11990,7 @@ impl ChatWidget<'_> {
         prompt: String,
         hint: String,
         preparation_label: Option<String>,
+        metadata: Option<ReviewContextMetadata>,
     ) {
         self.active_review_hint = None;
         self.active_review_prompt = None;
@@ -11987,6 +12010,7 @@ impl ChatWidget<'_> {
         let review_request = ReviewRequest {
             prompt,
             user_facing_hint: hint,
+            metadata,
         };
 
         self.submit_op(Op::Review { review_request });

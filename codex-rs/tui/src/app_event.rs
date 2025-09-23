@@ -4,6 +4,7 @@ use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
 use codex_core::protocol::ApprovedCommandMatchKind;
 use codex_core::git_info::CommitLogEntry;
+use codex_core::protocol::ReviewContextMetadata;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
@@ -141,6 +142,7 @@ pub(crate) enum AppEvent {
         prompt: String,
         hint: String,
         preparation_label: Option<String>,
+        metadata: Option<ReviewContextMetadata>,
     },
 
     /// Run the review command with the given argument string (mirrors `/review <args>`)
