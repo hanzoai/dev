@@ -25,6 +25,7 @@ Notes
 
 - `/init`: create an `AGENTS.md` file with instructions for Codex.
 - `/diff`: show `git diff` (including untracked files).
+- `/undo`: restore the workspace to the most recent Code snapshot.
 - `/branch [task]`: create a worktree branch and switch to it. If a
   task/description is provided, it is used when naming the branch. Must be run
   from the repository root (not inside another branch worktree).
