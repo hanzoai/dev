@@ -1090,12 +1090,6 @@ pub(crate) struct LimitsHistoryCell {
     view: LimitsView,
 }
 
-pub(crate) struct UpgradeNoticeCell {
-    lines: Vec<Line<'static>>,
-    backdrop: ratatui::style::Color,
-    border_style: Style,
-}
-
 impl LimitsHistoryCell {
     const TRANSCRIPT_WIDTH: u16 = 80;
 
@@ -1147,9 +1141,16 @@ impl HistoryCell for LimitsHistoryCell {
     }
 }
 
+pub(crate) struct UpgradeNoticeCell {
+    lines: Vec<Line<'static>>,
+    backdrop: ratatui::style::Color,
+    border_style: Style,
+}
+
 impl UpgradeNoticeCell {
-    fn new(current_version: String, latest_version: Option<String>) -> Self {
-        let latest = latest_version.unwrap_or_else(|| current_version.clone());
+    fn new(current_version: String, latest_version: String) -> Self {
+        let current_version = current_version.trim().to_string();
+        let latest_version = latest_version.trim().to_string();
         let primary = crate::colors::primary();
         let backdrop = crate::colors::mix_toward(primary, crate::colors::background(), 0.95);
         let base_style = Style::default().bg(backdrop).fg(crate::colors::text());
@@ -1164,7 +1165,10 @@ impl UpgradeNoticeCell {
         lines.push(Line::from(vec![Span::styled("★ Upgrade Available ★", title_style)]));
         lines.push(Line::from(vec![
             Span::styled("Latest release: ", dim_style),
-            Span::styled(format!("{current_version} -> {latest}"), highlight_style),
+            Span::styled(
+                format!("{current_version} → {latest_version}"),
+                highlight_style,
+            ),
         ]));
         lines.push(Line::from(vec![Span::styled(String::new(), base_style)]));
         lines.push(Line::from(vec![
@@ -6417,9 +6421,19 @@ pub(crate) fn new_upgrade_prelude(
     if !crate::updates::upgrade_ui_enabled() {
         return None;
     }
+    let latest = latest_version?.trim();
+    if latest.is_empty() {
+        return None;
+    }
+
+    let current = codex_version::version();
+    if latest == current {
+        return None;
+    }
+
     Some(UpgradeNoticeCell::new(
-        codex_version::version().to_string(),
-        latest_version.map(str::to_string),
+        current.to_string(),
+        latest.to_string(),
     ))
 }
 

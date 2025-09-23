@@ -135,7 +135,6 @@ use crate::bottom_pane::LoginAccountsState;
 use crate::bottom_pane::LoginAccountsView;
 use crate::bottom_pane::LoginAddAccountState;
 use crate::bottom_pane::LoginAddAccountView;
-#[cfg(not(debug_assertions))]
 use crate::bottom_pane::UpdateSharedState;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
@@ -5932,7 +5931,6 @@ fn update_rate_limit_resets(
         self.bottom_pane.set_using_chatgpt_auth(using);
     }
 
-    #[cfg(not(debug_assertions))]
     fn show_update_settings_ui(&mut self) {
         use crate::bottom_pane::UpdateSettingsView;
 
