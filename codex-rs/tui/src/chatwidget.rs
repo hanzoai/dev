@@ -3007,9 +3007,9 @@ impl ChatWidget<'_> {
         key: OrderKey,
         tag: &'static str,
     ) -> usize {
-        let cell_kind = cell.kind();
         #[cfg(debug_assertions)]
         {
+            let cell_kind = cell.kind();
             if cell_kind == HistoryCellType::BackgroundEvent {
                 debug_assert!(
                     tag == "background",
