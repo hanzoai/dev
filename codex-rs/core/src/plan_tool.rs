@@ -132,75 +132,60 @@ fn normalize_plan_name(name: Option<String>) -> Option<String> {
 }
 
 fn canonicalize_word_boundaries(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut previous_kind = CharKind::Start;
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    let mut prev_char: Option<char> = None;
+    let mut uppercase_run: usize = 0;
 
-    for ch in input.chars() {
-        let kind = CharKind::from(ch);
-
-        match kind {
-            CharKind::Separator => {
-                if !result.ends_with(' ') && !result.is_empty() {
-                    result.push(' ');
-                }
-                previous_kind = CharKind::Separator;
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() || matches!(ch, '_' | '-' | '/' | ':' | '.') {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
             }
-            _ => {
-                if should_insert_space(previous_kind, kind) && !result.ends_with(' ') {
-                    result.push(' ');
+            prev_char = None;
+            uppercase_run = 0;
+            continue;
+        }
+
+        let next_char = chars.peek().copied();
+        let mut split = false;
+
+        if !current.is_empty() {
+            if let Some(prev) = prev_char {
+                if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
+                    split = true;
+                } else if prev.is_ascii_uppercase()
+                    && ch.is_ascii_uppercase()
+                    && uppercase_run > 0
+                    && next_char.map_or(false, |c| c.is_ascii_lowercase())
+                {
+                    split = true;
                 }
-                result.push(ch);
-                previous_kind = kind;
             }
         }
+
+        if split {
+            tokens.push(std::mem::take(&mut current));
+            uppercase_run = 0;
+        }
+
+        current.push(ch);
+
+        if ch.is_ascii_uppercase() {
+            uppercase_run += 1;
+        } else {
+            uppercase_run = 0;
+        }
+
+        prev_char = Some(ch);
     }
 
-    result.trim().to_string()
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CharKind {
-    Start,
-    Upper,
-    Lower,
-    Digit,
-    Other,
-    Separator,
-}
-
-impl From<char> for CharKind {
-    fn from(value: char) -> Self {
-        if value.is_whitespace() || matches!(value, '_' | '-' | '/' | ':' | '.' ) {
-            return CharKind::Separator;
-        }
-
-        if value.is_ascii_uppercase() {
-            return CharKind::Upper;
-        }
-        if value.is_ascii_lowercase() {
-            return CharKind::Lower;
-        }
-        if value.is_ascii_digit() {
-            return CharKind::Digit;
-        }
-
-        CharKind::Other
+    if !current.is_empty() {
+        tokens.push(current);
     }
-}
 
-fn should_insert_space(previous: CharKind, current: CharKind) -> bool {
-    matches!(
-        (previous, current),
-        (CharKind::Upper, CharKind::Lower)
-            | (CharKind::Lower, CharKind::Upper)
-            | (CharKind::Digit, CharKind::Upper)
-            | (CharKind::Digit, CharKind::Lower)
-            | (CharKind::Upper, CharKind::Digit)
-            | (CharKind::Lower, CharKind::Digit)
-            | (CharKind::Other, CharKind::Upper)
-            | (CharKind::Other, CharKind::Lower)
-            | (CharKind::Other, CharKind::Digit)
-    )
+    tokens.join(" ")
 }
 
 const KNOWN_ACRONYMS: &[&str] = &[
@@ -255,6 +240,30 @@ mod tests {
         assert_eq!(
             normalize_plan_name(Some("updateCoreAPIIntegration".into())),
             Some("Update Core API Integration".into())
+        );
+    }
+
+    #[test]
+    fn prioritizes_snake_and_kebab_cases() {
+        assert_eq!(
+            normalize_plan_name(Some("improve_tui_scroll_perf".into())),
+            Some("Improve TUI Scroll Perf".into())
+        );
+        assert_eq!(
+            normalize_plan_name(Some("fix-ui-drag".into())),
+            Some("Fix UI Drag".into())
+        );
+    }
+
+    #[test]
+    fn keeps_acronyms_intact_when_present() {
+        assert_eq!(
+            normalize_plan_name(Some("ImproveTUIScrollPerf".into())),
+            Some("Improve TUI Scroll Perf".into())
+        );
+        assert_eq!(
+            normalize_plan_name(Some("http_server_cleanup".into())),
+            Some("HTTP Server Cleanup".into())
         );
     }
 }
