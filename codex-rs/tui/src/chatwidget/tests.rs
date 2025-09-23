@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, unnameable_test_items)]
 
 use super::*;
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::app_event_sender::AppEventSender;
 use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
@@ -94,6 +94,63 @@ fn final_answer_without_newline_is_flushed_immediately() {
         found_final,
         "expected final answer text to be flushed to history"
     );
+}
+
+fn cell_texts(chat: &ChatWidget<'_>) -> Vec<String> {
+    chat
+        .history_cells
+        .iter()
+        .map(|cell| {
+            let mut out = Vec::new();
+            for line in cell.display_lines() {
+                let mut buf = String::new();
+                for span in line.spans {
+                    buf.push_str(span.content.as_ref());
+                }
+                out.push(buf);
+            }
+            out.join("\n")
+        })
+        .collect()
+}
+
+#[test]
+fn background_events_append_in_arrival_order() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.insert_background_event_with_placement(
+        "first background".to_string(),
+        BackgroundPlacement::Tail,
+    );
+    chat.insert_background_event_with_placement(
+        "second background".to_string(),
+        BackgroundPlacement::Tail,
+    );
+
+    let texts = cell_texts(&chat);
+    assert_eq!(texts, vec!["first background".to_string(), "second background".to_string()]);
+}
+
+#[test]
+fn background_event_before_next_output_precedes_later_cells() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.insert_background_event_with_placement(
+        "initial".to_string(),
+        BackgroundPlacement::Tail,
+    );
+    chat.insert_background_event_with_placement(
+        "guard".to_string(),
+        BackgroundPlacement::BeforeNextOutput,
+    );
+    chat.push_background_tail("tail".to_string());
+
+    let texts = cell_texts(&chat);
+    assert_eq!(texts, vec![
+        "initial".to_string(),
+        "guard".to_string(),
+        "tail".to_string(),
+    ]);
 }
 
 #[tokio::test(flavor = "current_thread")]
