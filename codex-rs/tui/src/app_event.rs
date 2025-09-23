@@ -205,6 +205,8 @@ pub(crate) enum AppEvent {
         placement: BackgroundPlacement,
     },
 
+    AutoUpgradeCompleted { version: String },
+
     /// Background rate limit refresh failed (threaded request).
     RateLimitFetchFailed { message: String },
 
