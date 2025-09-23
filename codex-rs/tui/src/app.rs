@@ -1485,6 +1485,9 @@ impl App<'_> {
                     };
 
                     match command {
+                        SlashCommand::Undo => {
+                            // Undo snapshots are handled directly within the chat widget.
+                        }
                         SlashCommand::Review => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 if command_args.is_empty() {
