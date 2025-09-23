@@ -45,6 +45,7 @@ mod perf;
 mod rate_limit_refresh;
 mod streaming;
 mod terminal_handlers;
+mod terminal;
 mod tools;
 use self::agent_install::{
     start_agent_install_session,
@@ -147,16 +148,18 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
-use crate::history_cell::normalize_overwrite_sequences;
 use crate::live_wrap::RowBuilder;
-use crate::sanitize::Mode as SanitizeMode;
-use crate::sanitize::Options as SanitizeOptions;
-use crate::sanitize::sanitize_for_tui;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
 use crate::util::buffer::fill_rect;
 use crate::user_approval_widget::ApprovalRequest;
-use codex_ansi_escape::ansi_escape_line;
+pub(crate) use self::terminal::{
+    PendingCommand,
+    PendingCommandAction,
+    PendingManualTerminal,
+    TerminalOverlay,
+    TerminalState,
+};
 use codex_browser::BrowserManager;
 use codex_core::config::find_codex_home;
 use codex_core::config::resolve_codex_path_for_read;
@@ -6427,8 +6430,15 @@ fn update_rate_limit_resets(
     pub(crate) fn terminal_append_chunk(&mut self, id: u64, chunk: &[u8], is_stderr: bool) {
         let mut needs_redraw = false;
         let visible = self.terminal.last_visible_rows.get();
+        let visible_cols = self.terminal.last_visible_cols.get();
         if let Some(overlay) = self.terminal.overlay_mut() {
             if overlay.id == id {
+                if visible > 0 {
+                    overlay.pty_rows = visible;
+                }
+                if visible_cols > 0 {
+                    overlay.pty_cols = visible_cols;
+                }
                 if visible != overlay.visible_rows {
                     overlay.visible_rows = visible;
                     overlay.clamp_scroll();
@@ -6439,6 +6449,24 @@ fn update_rate_limit_resets(
         }
         if needs_redraw {
             self.request_redraw();
+        }
+    }
+
+    pub(crate) fn terminal_dimensions_hint(&self) -> Option<(u16, u16)> {
+        let rows = self.terminal.last_visible_rows.get();
+        let cols = self.terminal.last_visible_cols.get();
+        if rows > 0 && cols > 0 {
+            Some((rows, cols))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn terminal_apply_resize(&mut self, id: u64, rows: u16, cols: u16) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            if overlay.id == id && overlay.update_pty_dimensions(rows, cols) {
+                self.request_redraw();
+            }
         }
     }
 
@@ -15433,6 +15461,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let content = inner.inner(ratatui::layout::Margin::new(1, 0));
             if content.height == 0 || content.width == 0 {
                 self.terminal.last_visible_rows.set(0);
+                self.terminal.last_visible_cols.set(0);
             } else {
                 let header_height = 1.min(content.height);
                 let footer_height = if content.height >= 2 { 2 } else { 0 };
@@ -15598,25 +15627,36 @@ impl WidgetRef for &ChatWidget<'_> {
                 };
 
                 // Body content
-                self.terminal.last_visible_rows.set(body_area.height);
-                if body_area.height > 0 && body_area.width > 0 {
-                    let mut rows: Vec<RtLine<'static>> = Vec::new();
+                let rows = body_area.height;
+                let cols = body_area.width;
+                let prev_rows = self.terminal.last_visible_rows.replace(rows);
+                let prev_cols = self.terminal.last_visible_cols.replace(cols);
+                if rows > 0 && cols > 0 && (prev_rows != rows || prev_cols != cols) {
+                    self.app_event_tx.send(AppEvent::TerminalResize {
+                        id: overlay.id,
+                        rows,
+                        cols,
+                    });
+                }
+
+                if rows > 0 && cols > 0 {
+                    let mut rendered_rows: Vec<RtLine<'static>> = Vec::new();
                     if overlay.truncated {
-                        rows.push(ratatui::text::Line::from(vec![
+                        rendered_rows.push(ratatui::text::Line::from(vec![
                             ratatui::text::Span::styled(
                                 "… output truncated (showing last 10,000 lines)",
                                 Style::default().fg(crate::colors::text_dim()),
                             ),
                         ]));
                     }
-                    rows.extend(overlay.lines.iter().cloned());
-                    let total = rows.len();
-                    let visible = body_area.height as usize;
+                    rendered_rows.extend(overlay.lines.iter().cloned());
+                    let total = rendered_rows.len();
+                    let visible = rows as usize;
                     if visible > 0 {
                         let max_scroll = total.saturating_sub(visible);
                         let scroll = (overlay.scroll as usize).min(max_scroll);
                         let end = (scroll + visible).min(total);
-                        let window = rows.get(scroll..end).unwrap_or(&[]);
+                        let window = rendered_rows.get(scroll..end).unwrap_or(&[]);
                         Paragraph::new(RtText::from(window.to_vec()))
                             .wrap(ratatui::widgets::Wrap { trim: false })
                             .render(body_area, buf);
@@ -16449,531 +16489,6 @@ impl HelpOverlay {
     }
 }
 
-#[derive(Default)]
-struct TerminalState {
-    overlay: Option<TerminalOverlay>,
-    next_id: u64,
-    after: Option<TerminalAfter>,
-    last_visible_rows: std::cell::Cell<u16>,
-}
-
-impl TerminalState {
-    fn alloc_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1);
-        id
-    }
-
-    fn overlay(&self) -> Option<&TerminalOverlay> {
-        self.overlay.as_ref()
-    }
-
-    fn overlay_mut(&mut self) -> Option<&mut TerminalOverlay> {
-        self.overlay.as_mut()
-    }
-
-    fn clear(&mut self) {
-        self.overlay = None;
-        self.after = None;
-    }
-}
-
-const TERMINAL_MAX_LINES: usize = 10_000;
-
-struct PendingManualTerminal {
-    command: String,
-}
-
-struct TerminalOverlay {
-    id: u64,
-    title: String,
-    command_display: String,
-    lines: VecDeque<RtLine<'static>>,
-    scroll: u16,
-    visible_rows: u16,
-    running: bool,
-    exit_code: Option<i32>,
-    duration: Option<Duration>,
-    start_time: Option<Instant>,
-    truncated: bool,
-    pending_utf8: Vec<u8>,
-    pending_line: String,
-    pending_line_is_stderr: bool,
-    auto_close_on_success: bool,
-    pending_command: Option<PendingCommand>,
-    last_info_message: Option<String>,
-    last_info_line_count: usize,
-}
-
-struct PendingCommand {
-    input: String,
-    cursor: usize,
-    ack: Option<Sender<TerminalCommandGate>>,
-}
-
-pub(crate) enum PendingCommandAction {
-    Forwarded(String),
-    Manual(String),
-}
-
-impl PendingCommand {
-    fn new(suggestion: String, ack: Sender<TerminalCommandGate>) -> Self {
-        let input = suggestion;
-        let cursor = input.len();
-        Self {
-            input,
-            cursor,
-            ack: Some(ack),
-        }
-    }
-
-    fn manual() -> Self {
-        Self {
-            input: String::new(),
-            cursor: 0,
-            ack: None,
-        }
-    }
-
-    fn manual_with_input(input: String) -> Self {
-        Self {
-            cursor: input.len(),
-            input,
-            ack: None,
-        }
-    }
-
-    fn action_after_enter(mut self) -> Option<PendingCommandAction> {
-        let command = self.input.trim().to_string();
-        if command.is_empty() {
-            return None;
-        }
-        if let Some(tx) = self.ack.take() {
-            let _ = tx.send(TerminalCommandGate::Run(command.clone()));
-            Some(PendingCommandAction::Forwarded(command))
-        } else {
-            Some(PendingCommandAction::Manual(command))
-        }
-    }
-
-}
-
-impl TerminalOverlay {
-    fn new(id: u64, title: String, command_display: String, auto_close_on_success: bool) -> Self {
-        Self {
-            id,
-            title,
-            command_display,
-            lines: VecDeque::new(),
-            scroll: 0,
-            visible_rows: 0,
-            running: true,
-            exit_code: None,
-            duration: None,
-            start_time: None,
-            truncated: false,
-            pending_utf8: Vec::new(),
-            pending_line: String::new(),
-            pending_line_is_stderr: false,
-            auto_close_on_success,
-            pending_command: None,
-            last_info_message: None,
-            last_info_line_count: 0,
-        }
-    }
-
-    fn total_render_lines(&self) -> usize {
-        let base = self.lines.len();
-        if self.truncated {
-            base.saturating_add(1)
-        } else {
-            base
-        }
-    }
-
-    fn max_scroll(&self) -> u16 {
-        let visible = self.visible_rows.max(1) as usize;
-        let total = self.total_render_lines();
-        total.saturating_sub(visible).min(u16::MAX as usize) as u16
-    }
-
-    fn clamp_scroll(&mut self) {
-        let max_scroll = self.max_scroll();
-        if self.scroll > max_scroll {
-            self.scroll = max_scroll;
-        }
-    }
-
-    fn is_following(&self) -> bool {
-        let visible = self.visible_rows.max(1) as usize;
-        let total = self.total_render_lines();
-        (self.scroll as usize).saturating_add(visible) >= total
-    }
-
-    fn auto_follow(&mut self, was_following: bool) {
-        if !was_following {
-            return;
-        }
-        let visible = self.visible_rows.max(1) as usize;
-        let total = self.total_render_lines();
-        let max_scroll = total.saturating_sub(visible);
-        self.scroll = max_scroll.min(u16::MAX as usize) as u16;
-    }
-
-    fn reset_for_rerun(&mut self) {
-        self.lines.clear();
-        self.scroll = 0;
-        self.visible_rows = 0;
-        self.running = true;
-        self.exit_code = None;
-        self.duration = None;
-        self.start_time = None;
-        self.truncated = false;
-        self.pending_utf8.clear();
-        self.pending_line.clear();
-        self.pending_line_is_stderr = false;
-        self.pending_command = None;
-        self.last_info_message = None;
-        self.last_info_line_count = 0;
-    }
-
-    fn set_pending_command(&mut self, suggestion: String, ack: Sender<TerminalCommandGate>) {
-        self.cancel_pending_command();
-        self.pending_command = Some(PendingCommand::new(suggestion, ack));
-    }
-
-    fn ensure_pending_command(&mut self) {
-        if self.pending_command.is_none() {
-            self.pending_command = Some(PendingCommand::manual());
-        }
-    }
-
-    fn accept_pending_command(&mut self) -> Option<PendingCommandAction> {
-        let pending = self.pending_command.take()?;
-        pending.action_after_enter()
-    }
-
-    fn cancel_pending_command(&mut self) {
-        if let Some(mut pending) = self.pending_command.take() {
-            if let Some(tx) = pending.ack.take() {
-                let _ = tx.send(TerminalCommandGate::Cancel);
-            }
-        }
-    }
-
-    fn push_info_message(&mut self, message: &str) {
-        self.push_info_message_with_style(message, false);
-    }
-
-    fn push_assistant_message(&mut self, message: &str) {
-        self.push_info_message_with_style(message, true);
-    }
-
-    fn push_info_message_with_style(&mut self, message: &str, emphasize: bool) {
-        let trimmed = message.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let was_following = self.is_following();
-
-        if self.last_info_message.as_deref() == Some(trimmed) {
-            if was_following {
-                self.scroll = self.max_scroll();
-            } else {
-                self.clamp_scroll();
-            }
-            return;
-        }
-
-        if self.last_info_line_count > 0 {
-            for _ in 0..self.last_info_line_count {
-                self.lines.pop_back();
-            }
-            self.last_info_line_count = 0;
-        }
-
-        let mut added = 0usize;
-        if !self.last_line_is_blank() {
-            self.push_line(blank_line());
-            added += 1;
-        }
-
-        let sanitized = sanitize_for_tui(
-            trimmed,
-            SanitizeMode::AnsiPreserving,
-            SanitizeOptions {
-                expand_tabs: true,
-                ..Default::default()
-            },
-        );
-        let mut line = ansi_escape_line(&sanitized);
-        line.spans.insert(
-            0,
-            ratatui::text::Span::styled(
-                "• ",
-                Style::default().fg(crate::colors::text()),
-            ),
-        );
-        if emphasize {
-            for span in line.spans.iter_mut() {
-                span.style = span.style.add_modifier(Modifier::BOLD);
-            }
-        }
-        self.push_line(line);
-        added += 1;
-        self.push_line(blank_line());
-        added += 1;
-
-        self.last_info_message = Some(trimmed.to_string());
-        self.last_info_line_count = added;
-
-        if was_following {
-            self.scroll = self.max_scroll();
-        } else {
-            self.clamp_scroll();
-        }
-    }
-
-    fn push_line(&mut self, line: RtLine<'static>) {
-        self.lines.push_back(line);
-        if self.lines.len() > TERMINAL_MAX_LINES {
-            self.lines.pop_front();
-            self.truncated = true;
-        }
-    }
-
-    fn last_line_is_blank(&self) -> bool {
-        self.lines
-            .back()
-            .map(|line| line.spans.iter().all(|span| span.content.trim().is_empty()))
-            .unwrap_or(true)
-    }
-
-    fn append_chunk(&mut self, chunk: &[u8], is_stderr: bool) {
-        if chunk.is_empty() && self.pending_utf8.is_empty() && self.pending_line.is_empty() {
-            return;
-        }
-        let was_following = self.is_following();
-        let mut appended = false;
-        if self.pending_line_is_stderr != is_stderr && !self.pending_line.is_empty() {
-            appended |= self.flush_pending_line();
-        }
-        self.pending_line_is_stderr = is_stderr;
-        self.pending_utf8.extend_from_slice(chunk);
-
-        loop {
-            match std::str::from_utf8(&self.pending_utf8) {
-                Ok(valid) => {
-                    self.pending_line.push_str(valid);
-                    self.pending_utf8.clear();
-                    break;
-                }
-                Err(err) => {
-                    let valid_up_to = err.valid_up_to();
-                    if valid_up_to > 0 {
-                        if let Ok(valid) = std::str::from_utf8(&self.pending_utf8[..valid_up_to]) {
-                            self.pending_line.push_str(valid);
-                        } else {
-                            let slice = &self.pending_utf8[..valid_up_to];
-                            let owned = String::from_utf8_lossy(slice);
-                            self.pending_line.push_str(&owned);
-                        }
-                        self.pending_utf8.drain(..valid_up_to);
-                    }
-                    if let Some(err_len) = err.error_len() {
-                        self.pending_line.push('�');
-                        let drain_len = err_len.min(self.pending_utf8.len());
-                        self.pending_utf8.drain(..drain_len);
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-
-        while let Some(pos) = self.pending_line.find('\n') {
-            let mut segment = self.pending_line[..pos].to_string();
-            self.pending_line.drain(..=pos);
-            segment.push('\n');
-            appended |= self.push_segment(&segment, is_stderr);
-        }
-
-        if appended {
-            self.auto_follow(was_following);
-        }
-    }
-
-    fn flush_pending_line(&mut self) -> bool {
-        let was_following = self.is_following();
-        let mut appended = false;
-        self.last_info_message = None;
-        self.last_info_line_count = 0;
-        if !self.pending_utf8.is_empty() {
-            if let Ok(valid) = std::str::from_utf8(&self.pending_utf8) {
-                self.pending_line.push_str(valid);
-            } else {
-                let owned = String::from_utf8_lossy(&self.pending_utf8);
-                self.pending_line.push_str(&owned);
-            }
-            self.pending_utf8.clear();
-        }
-        if self.pending_line.is_empty() {
-            return false;
-        }
-        let segment = std::mem::take(&mut self.pending_line);
-        appended |= self.push_segment(&segment, self.pending_line_is_stderr);
-        if appended {
-            self.auto_follow(was_following);
-        }
-        appended
-    }
-
-    fn finalize(&mut self, exit_code: Option<i32>, duration: Duration) {
-        let _ = self.flush_pending_line();
-        self.running = false;
-        self.exit_code = exit_code;
-        self.duration = Some(duration);
-        self.start_time = None;
-    }
-
-    fn push_segment(&mut self, segment: &str, is_stderr: bool) -> bool {
-        self.last_info_message = None;
-        self.last_info_line_count = 0;
-        let mut appended = false;
-        let normalized = normalize_overwrite_sequences(segment);
-        for raw_line in normalized.split_inclusive('\n') {
-            let line_text = raw_line.trim_end_matches('\n');
-            let sanitized = sanitize_for_tui(
-                line_text,
-                SanitizeMode::AnsiPreserving,
-                SanitizeOptions {
-                    expand_tabs: true,
-                    ..Default::default()
-                },
-            );
-            let mut line = ansi_escape_line(&sanitized);
-            let is_command_line = !is_stderr && line_text.starts_with("$ ");
-            if is_stderr {
-                let warn = crate::colors::warning();
-                for span in line.spans.iter_mut() {
-                    if span.style.fg.is_none() {
-                        span.style.fg = Some(warn);
-                    }
-                }
-            } else if is_command_line {
-                let primary = crate::colors::primary();
-                for span in line.spans.iter_mut() {
-                    if span.style.fg.is_none() {
-                        span.style.fg = Some(primary);
-                    } else {
-                        span.style.fg = Some(primary);
-                    }
-                }
-            }
-            self.lines.push_back(line);
-            appended = true;
-            if self.lines.len() > TERMINAL_MAX_LINES {
-                self.lines.pop_front();
-                self.truncated = true;
-            }
-        }
-        appended
-    }
-}
-
-impl PendingCommand {
-    fn insert_char(&mut self, ch: char) -> bool {
-        if ch.is_control() {
-            return false;
-        }
-        let mut buf = [0u8; 4];
-        let encoded = ch.encode_utf8(&mut buf);
-        self.input.insert_str(self.cursor, encoded);
-        self.cursor = self.cursor.saturating_add(encoded.len());
-        true
-    }
-
-    fn backspace(&mut self) -> bool {
-        let Some(prev) = self.prev_boundary() else {
-            return false;
-        };
-        self.input.drain(prev..self.cursor);
-        self.cursor = prev;
-        true
-    }
-
-    fn delete(&mut self) -> bool {
-        let Some(next) = self.next_boundary() else {
-            return false;
-        };
-        self.input.drain(self.cursor..next);
-        true
-    }
-
-    fn move_left(&mut self) -> bool {
-        let Some(prev) = self.prev_boundary() else {
-            return false;
-        };
-        self.cursor = prev;
-        true
-    }
-
-    fn move_right(&mut self) -> bool {
-        let Some(next) = self.next_boundary() else {
-            return false;
-        };
-        self.cursor = next;
-        true
-    }
-
-    fn move_home(&mut self) -> bool {
-        if self.cursor == 0 {
-            return false;
-        }
-        self.cursor = 0;
-        true
-    }
-
-    fn move_end(&mut self) -> bool {
-        let len = self.input.len();
-        if self.cursor == len {
-            return false;
-        }
-        self.cursor = len;
-        true
-    }
-
-    fn prev_boundary(&self) -> Option<usize> {
-        if self.cursor == 0 {
-            return None;
-        }
-        let mut prev: Option<usize> = None;
-        for (idx, _) in self.input.grapheme_indices(true) {
-            if idx >= self.cursor {
-                break;
-            }
-            prev = Some(idx);
-        }
-        prev
-    }
-
-    fn next_boundary(&self) -> Option<usize> {
-        if self.cursor >= self.input.len() {
-            return None;
-        }
-        for (idx, _) in self.input.grapheme_indices(true) {
-            if idx > self.cursor {
-                return Some(idx);
-            }
-        }
-        Some(self.input.len())
-    }
-}
-
-fn blank_line() -> RtLine<'static> {
-    ratatui::text::Line::from(vec![ratatui::text::Span::raw(String::new())])
-}
-
 struct CommandDisplayLine {
     text: String,
     start: usize,
@@ -17058,8 +16573,8 @@ fn pending_command_box_lines(
         })
         .collect();
 
-    let command_lines = wrap_pending_command_lines(&pending.input, command_width);
-    let cursor_line_idx = command_line_index_for_cursor(&command_lines, pending.cursor);
+    let command_lines = wrap_pending_command_lines(pending.input(), command_width);
+    let cursor_line_idx = command_line_index_for_cursor(&command_lines, pending.cursor());
     let prefix_style = Style::default().fg(crate::colors::primary());
     let text_style = Style::default().fg(crate::colors::text());
     let cursor_style = Style::default()
@@ -17080,7 +16595,7 @@ fn pending_command_box_lines(
         }
 
         if idx == cursor_line_idx {
-            let cursor_offset = pending.cursor.saturating_sub(line.start);
+            let cursor_offset = pending.cursor().saturating_sub(line.start);
             let cursor_offset = cursor_offset.min(line.text.len());
             let (before, cursor_span, after) = split_line_for_cursor(&line.text, cursor_offset);
             if !before.is_empty() {
