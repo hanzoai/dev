@@ -42,6 +42,7 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
+use crate::AuthManager;
 use crate::CodexAuth;
 use crate::acp::AcpFileSystem;
 use crate::agent_tool::AgentStatusUpdatePayload;
@@ -120,10 +121,12 @@ impl ConfirmGuardPatternRuntime {
     }
 }
 
+#[allow(dead_code)]
 trait MutexExt<T> {
     fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T>;
 }
 
+#[allow(dead_code)]
 impl<T> MutexExt<T> for Mutex<T> {
     fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T> {
         #[expect(clippy::expect_used)]
@@ -532,6 +535,7 @@ use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenCountEvent;
 use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
+use crate::protocol::ValidationGroup;
 use crate::protocol::ReviewOutputEvent;
 use crate::protocol::ReviewRequest;
 use crate::protocol::SandboxPolicy;
@@ -579,6 +583,14 @@ pub struct CodexSpawnOk {
 impl Codex {
     /// Spawn a new [`Codex`] and initialize the session.
     pub async fn spawn(config: Config, auth: Option<CodexAuth>) -> CodexResult<CodexSpawnOk> {
+        let auth_manager = auth.map(crate::AuthManager::from_auth_for_testing);
+        Self::spawn_with_auth_manager(config, auth_manager).await
+    }
+
+    pub async fn spawn_with_auth_manager(
+        config: Config,
+        auth_manager: Option<Arc<AuthManager>>,
+    ) -> CodexResult<CodexSpawnOk> {
         // experimental resume path (undocumented)
         let resume_path = config.experimental_resume.clone();
         info!("resume_path: {resume_path:?}");
@@ -611,7 +623,13 @@ impl Codex {
         let session_id = Uuid::new_v4();
 
         // This task will run until Op::Shutdown is received.
-        tokio::spawn(submission_loop(session_id, config, auth, rx_sub, tx_event));
+        tokio::spawn(submission_loop(
+            session_id,
+            config,
+            auth_manager,
+            rx_sub,
+            tx_event,
+        ));
         let codex = Codex {
             next_id: AtomicU64::new(0),
             tx_sub,
@@ -1121,12 +1139,6 @@ impl Session {
         &self.mcp_connection_manager
     }
 
-    pub(crate) fn update_validation_patch_harness(&self, enabled: bool) {
-        if let Ok(mut cfg) = self.validation.write() {
-            cfg.patch_harness = enabled;
-        }
-    }
-
     pub(crate) fn update_validation_tool(&self, name: &str, enable: bool) {
         if name == "actionlint" {
             if let Ok(mut github) = self.github.write() {
@@ -1146,6 +1158,15 @@ impl Session {
                 "shfmt" => tools.shfmt = Some(enable),
                 "prettier" => tools.prettier = Some(enable),
                 _ => {}
+            }
+        }
+    }
+
+    pub(crate) fn update_validation_group(&self, group: ValidationGroup, enable: bool) {
+        if let Ok(mut cfg) = self.validation.write() {
+            match group {
+                ValidationGroup::Functional => cfg.groups.functional = enable,
+                ValidationGroup::Stylistic => cfg.groups.stylistic = enable,
             }
         }
     }
@@ -2701,7 +2722,7 @@ impl AgentTask {
 async fn submission_loop(
     mut session_id: Uuid,
     config: Arc<Config>,
-    auth: Option<CodexAuth>,
+    auth_manager: Option<Arc<AuthManager>>,
     rx_sub: Receiver<Submission>,
     tx_event: Sender<Event>,
 ) {
@@ -2912,12 +2933,9 @@ async fn submission_loop(
                 };
 
                 // Wrap provided auth (if any) in a minimal AuthManager for client usage.
-                let auth_manager = auth
-                    .as_ref()
-                    .map(|a| crate::AuthManager::from_auth_for_testing(a.clone()));
                 let client = ModelClient::new(
                     config.clone(),
-                    auth_manager,
+                    auth_manager.clone(),
                     provider.clone(),
                     model_reasoning_effort,
                     model_reasoning_summary,
@@ -3249,16 +3267,16 @@ async fn submission_loop(
                     other => sess.notify_approval(&id, other),
                 }
             }
-            Op::UpdateValidationPatchHarness { enabled } => {
+            Op::UpdateValidationTool { name, enable } => {
                 if let Some(sess) = sess.as_ref() {
-                    sess.update_validation_patch_harness(enabled);
+                    sess.update_validation_tool(&name, enable);
                 } else {
                     send_no_session_event(sub.id).await;
                 }
             }
-            Op::UpdateValidationTool { name, enable } => {
+            Op::UpdateValidationGroup { group, enable } => {
                 if let Some(sess) = sess.as_ref() {
-                    sess.update_validation_tool(&name, enable);
+                    sess.update_validation_group(group, enable);
                 } else {
                     send_no_session_event(sub.id).await;
                 }
@@ -4535,10 +4553,10 @@ async fn try_run_turn(
                 let mut state = sess.state.lock().unwrap();
                 state.latest_rate_limits = Some(RateLimitSnapshotEvent {
                     primary_used_percent: snapshot.primary_used_percent,
-                    weekly_used_percent: snapshot.weekly_used_percent,
-                    primary_to_weekly_ratio_percent: snapshot.primary_to_weekly_ratio_percent,
+                    secondary_used_percent: snapshot.secondary_used_percent,
+                    primary_to_secondary_ratio_percent: snapshot.primary_to_secondary_ratio_percent,
                     primary_window_minutes: snapshot.primary_window_minutes,
-                    weekly_window_minutes: snapshot.weekly_window_minutes,
+                    secondary_window_minutes: snapshot.secondary_window_minutes,
                 });
             }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
