@@ -27,6 +27,7 @@ pub enum SlashCommand {
     Cmd,
     Status,
     Limits,
+    #[strum(serialize = "update", serialize = "upgrade")]
     Update,
     Theme,
     Model,
@@ -42,6 +43,7 @@ pub enum SlashCommand {
     Validation,
     Mcp,
     Resume,
+    Login,
     // Prompt-expanding commands
     Plan,
     Solve,
@@ -88,6 +90,7 @@ impl SlashCommand {
             SlashCommand::Validation => "control validation harness (status/on/off)",
             SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
+            SlashCommand::Login => "manage Code sign-ins (add/select/disconnect)",
             SlashCommand::Logout => "log out of Code",
             #[cfg(debug_assertions)]
             SlashCommand::TestApproval => "test approval request",
