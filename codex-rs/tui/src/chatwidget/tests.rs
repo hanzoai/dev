@@ -207,6 +207,10 @@ fn make_chatwidget_manual() -> (
         rate_limit_fetch_inflight: false,
         rate_limit_fetch_placeholder: None,
         rate_limit_fetch_ack_pending: false,
+        #[cfg(not(feature = "legacy_tests"))]
+        ghost_snapshots: Vec::new(),
+        #[cfg(not(feature = "legacy_tests"))]
+        ghost_snapshots_disabled: false,
         stream: StreamController::new(cfg),
         last_stream_kind: None,
         running_commands: HashMap::new(),
