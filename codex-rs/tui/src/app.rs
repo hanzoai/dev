@@ -1485,9 +1485,16 @@ impl App<'_> {
                     };
 
                     match command {
+                        SlashCommand::Undo => {
+                            // Undo snapshots are handled directly within the chat widget.
+                        }
                         SlashCommand::Review => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_review_command(command_args);
+                                if command_args.is_empty() {
+                                    widget.open_review_dialog();
+                                } else {
+                                    widget.handle_review_command(command_args);
+                                }
                             }
                         }
                         SlashCommand::Branch => {
@@ -1839,6 +1846,67 @@ impl App<'_> {
                 AppEvent::SubmitTextWithPreface { visible, preface } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.submit_text_message_with_preface(visible, preface);
+                    }
+                }
+                AppEvent::RunReviewCommand(args) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_review_command(args);
+                    }
+                }
+                AppEvent::RunReviewWithScope {
+                    prompt,
+                    hint,
+                    preparation_label,
+                    metadata,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.start_review_with_scope(prompt, hint, preparation_label, metadata);
+                    }
+                }
+                AppEvent::OpenReviewCustomPrompt => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_review_custom_prompt();
+                    }
+                }
+                AppEvent::StartReviewCommitPicker => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_review_commit_loading();
+                    }
+                    let cwd = self.config.cwd.clone();
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let commits = codex_core::git_info::recent_commits(&cwd, 60).await;
+                        tx.send(AppEvent::PresentReviewCommitPicker { commits });
+                    });
+                }
+                AppEvent::PresentReviewCommitPicker { commits } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.present_review_commit_picker(commits);
+                    }
+                }
+                AppEvent::StartReviewBranchPicker => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_review_branch_loading();
+                    }
+                    let cwd = self.config.cwd.clone();
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let (branches, current_branch) = tokio::join!(
+                            codex_core::git_info::local_git_branches(&cwd),
+                            codex_core::git_info::current_branch_name(&cwd),
+                        );
+                        tx.send(AppEvent::PresentReviewBranchPicker {
+                            current_branch,
+                            branches,
+                        });
+                    });
+                }
+                AppEvent::PresentReviewBranchPicker {
+                    current_branch,
+                    branches,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.present_review_branch_picker(current_branch, branches);
                     }
                 }
                 AppEvent::DiffResult(text) => {
