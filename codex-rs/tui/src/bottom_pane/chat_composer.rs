@@ -465,7 +465,7 @@ impl ChatComposer {
 
         let state = self.textarea_state.borrow();
         self.textarea
-            .cursor_pos_with_state(padded_textarea_rect, &state)
+            .cursor_pos_with_state(padded_textarea_rect, *state)
     }
 
     /// Returns true if the composer currently contains no user input.
@@ -1921,7 +1921,7 @@ impl WidgetRef for ChatComposer {
         drop(state); // release the borrow before computing position again
         if let Some((cx, cy)) = self
             .textarea
-            .cursor_pos_with_state(padded_textarea_rect, &self.textarea_state.borrow())
+            .cursor_pos_with_state(padded_textarea_rect, *self.textarea_state.borrow())
         {
             let cursor_bg = crate::theme::current_theme().cursor;
             if cx < buf.area.width.saturating_add(buf.area.x)
