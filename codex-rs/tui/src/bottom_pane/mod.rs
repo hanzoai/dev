@@ -19,6 +19,7 @@ mod chat_composer;
 mod chat_composer_history;
 pub mod chrome_selection_view;
 mod diff_popup;
+mod custom_prompt_view;
 mod command_popup;
 mod file_search_popup;
 mod paste_burst;
@@ -30,6 +31,8 @@ mod model_selection_view;
 mod scroll_state;
 mod selection_popup_common;
 pub mod list_selection_view;
+pub(crate) use list_selection_view::SelectionAction;
+pub(crate) use custom_prompt_view::CustomPromptView;
 pub mod resume_selection_view;
 pub mod agents_settings_view;
 mod github_settings_view;
@@ -553,6 +556,13 @@ impl BottomPane<'_> {
         // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
+    }
+
+    /// Show a multi-line prompt input view (used for custom review instructions)
+    pub fn show_custom_prompt(&mut self, view: CustomPromptView) {
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
     }
 
     /// Show a generic list selection popup with items and actions.
