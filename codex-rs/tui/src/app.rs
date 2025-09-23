@@ -782,19 +782,14 @@ impl App<'_> {
                     },
                     AppState::Onboarding { .. } => {}
                 },
-                // InsertBackgroundEvent removed; use InsertBackgroundEventEarly for
-                // approval decisions to appear above command begin.
-                AppEvent::InsertBackgroundEventEarly(message) => match &mut self.app_state {
+                AppEvent::InsertBackgroundEvent { message, placement } => match &mut self.app_state {
                     AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertBackgroundEventEarly len={}", message.len());
-                        widget.insert_background_event_early(message);
-                    }
-                    AppState::Onboarding { .. } => {}
-                },
-                AppEvent::InsertBackgroundEventLate(message) => match &mut self.app_state {
-                    AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertBackgroundEventLate len={}", message.len());
-                        widget.insert_background_event_late(message);
+                        tracing::debug!(
+                            "app: InsertBackgroundEvent placement={:?} len={}",
+                            placement,
+                            message.len()
+                        );
+                        widget.insert_background_event_with_placement(message, placement);
                     }
                     AppState::Onboarding { .. } => {}
                 },
@@ -1116,9 +1111,9 @@ impl App<'_> {
                                 )));
                             } else {
                                 let display = strip_bash_lc_and_escape(&command);
-                                widget.history_push(history_cell::new_background_event(format!(
+                                widget.push_background_tail(format!(
                                     "Always allowing `{display}` for this project.",
-                                )));
+                                ));
                             }
                         }
                     }
