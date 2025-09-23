@@ -120,10 +120,12 @@ impl ConfirmGuardPatternRuntime {
     }
 }
 
+#[allow(dead_code)]
 trait MutexExt<T> {
     fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T>;
 }
 
+#[allow(dead_code)]
 impl<T> MutexExt<T> for Mutex<T> {
     fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T> {
         #[expect(clippy::expect_used)]
@@ -4535,10 +4537,10 @@ async fn try_run_turn(
                 let mut state = sess.state.lock().unwrap();
                 state.latest_rate_limits = Some(RateLimitSnapshotEvent {
                     primary_used_percent: snapshot.primary_used_percent,
-                    weekly_used_percent: snapshot.weekly_used_percent,
-                    primary_to_weekly_ratio_percent: snapshot.primary_to_weekly_ratio_percent,
+                    secondary_used_percent: snapshot.secondary_used_percent,
+                    primary_to_secondary_ratio_percent: snapshot.primary_to_secondary_ratio_percent,
                     primary_window_minutes: snapshot.primary_window_minutes,
-                    weekly_window_minutes: snapshot.weekly_window_minutes,
+                    secondary_window_minutes: snapshot.secondary_window_minutes,
                 });
             }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
