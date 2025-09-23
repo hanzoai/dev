@@ -1051,6 +1051,25 @@ pub struct GitInfo {
 pub struct ReviewRequest {
     pub prompt: String,
     pub user_facing_hint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub metadata: Option<ReviewContextMetadata>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS, Default)]
+pub struct ReviewContextMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current_branch: Option<String>,
 }
 
 /// Structured review result produced by a child review session.
