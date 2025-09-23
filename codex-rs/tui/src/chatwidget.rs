@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::rc::Weak;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
@@ -54,7 +54,7 @@ use self::agent_install::{
     wrap_command,
 };
 use self::rate_limit_refresh::start_rate_limit_refresh;
-use self::history_render::HistoryRenderState;
+use self::history_render::{HistoryRenderState, LayoutRef};
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::ApprovedCommandMatchKind;
@@ -134,7 +134,7 @@ use crate::app_event::{
 };
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::CustomPromptView;
-use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionItem};
+use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionAction, SelectionItem};
 use crate::bottom_pane::validation_settings_view;
 use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
 use crate::bottom_pane::BottomPane;
@@ -161,7 +161,7 @@ use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
-use crate::util::buffer::fill_rect;
+use crate::util::buffer::{fill_rect, write_line};
 use crate::user_approval_widget::ApprovalRequest;
 pub(crate) use self::terminal::{
     PendingCommand,
@@ -428,7 +428,7 @@ pub(crate) struct ChatWidget<'a> {
     // a new turn; used to anchor the next turn window so assistant output
     // appears after them.
     pending_user_prompts_for_next_turn: usize,
-    ghost_snapshots: Vec<GhostCommit>,
+    ghost_snapshots: Vec<GhostSnapshot>,
     ghost_snapshots_disabled: bool,
 
     // Event sequencing to preserve original order across streaming/tool events
@@ -475,6 +475,70 @@ pub(crate) struct ChatWidget<'a> {
 
 struct PendingJumpBack {
     removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
+}
+
+#[derive(Clone)]
+struct GhostSnapshot {
+    commit: GhostCommit,
+    captured_at: DateTime<Local>,
+    summary: Option<String>,
+}
+
+impl GhostSnapshot {
+    fn new(commit: GhostCommit, summary: Option<String>) -> Self {
+        let summary = summary.and_then(|text| {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        Self {
+            commit,
+            captured_at: Local::now(),
+            summary,
+        }
+    }
+
+    fn commit(&self) -> &GhostCommit {
+        &self.commit
+    }
+
+    fn short_id(&self) -> String {
+        self.commit.id().chars().take(8).collect()
+    }
+
+    fn summary_snippet(&self, max_len: usize) -> Option<String> {
+        let summary = self.summary.as_ref()?;
+        let mut snippet = String::new();
+        let mut truncated = false;
+        for word in summary.split_whitespace() {
+            if !snippet.is_empty() {
+                snippet.push(' ');
+            }
+            snippet.push_str(word);
+            if snippet.chars().count() > max_len {
+                truncated = true;
+                break;
+            }
+        }
+
+        if snippet.chars().count() > max_len {
+            truncated = true;
+            snippet = snippet.chars().take(max_len).collect();
+        }
+
+        if truncated {
+            snippet.push('…');
+        }
+
+        Some(snippet)
+    }
+
+    fn age_from(&self, now: DateTime<Local>) -> Option<std::time::Duration> {
+        now.signed_duration_since(self.captured_at).to_std().ok()
+    }
 }
 
 #[derive(Default)]
@@ -1457,6 +1521,54 @@ impl ChatWidget<'_> {
             _ => {
                 // Ignore other item kinds for replay (tool calls, etc.)
             }
+        }
+    }
+
+    fn render_cached_lines(
+        &self,
+        item: &dyn HistoryCell,
+        lines: &[Line<'static>],
+        area: Rect,
+        buf: &mut Buffer,
+        skip_rows: u16,
+    ) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let cell_bg = match item.kind() {
+            crate::history_cell::HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ => crate::colors::background(),
+        };
+
+        if matches!(item.kind(), crate::history_cell::HistoryCellType::Assistant) {
+            let bg_style = Style::default()
+                .bg(cell_bg)
+                .fg(crate::colors::text());
+            fill_rect(buf, area, Some(' '), bg_style);
+        }
+
+        let total = lines.len() as u16;
+        if skip_rows >= total {
+            return;
+        }
+
+        let base_style = Style::default().bg(cell_bg);
+        let max_rows = area.height.min(total.saturating_sub(skip_rows));
+        for (row, line) in lines
+            .iter()
+            .skip(skip_rows as usize)
+            .take(max_rows as usize)
+            .enumerate()
+        {
+            write_line(
+                buf,
+                area.x,
+                area.y.saturating_add(row as u16),
+                area.width,
+                line,
+                base_style,
+            );
         }
     }
     /// Trigger fade on the welcome cell when the composer expands (e.g., slash popup).
@@ -3630,7 +3742,7 @@ impl ChatWidget<'_> {
             }
             crate::slash_command::ProcessedCommand::RegularCommand(cmd, command_text) => {
                 if cmd == SlashCommand::Undo {
-                    self.undo_last_snapshot();
+                    self.handle_undo_command();
                     return;
                 }
                 // This is a regular slash command, dispatch it normally
@@ -3798,7 +3910,12 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.capture_ghost_snapshot();
+        let prompt_summary = if message.display_text.trim().is_empty() {
+            None
+        } else {
+            Some(message.display_text.clone())
+        };
+        self.capture_ghost_snapshot(prompt_summary);
 
         let turn_active = self.is_task_running()
             || !self.active_task_ids.is_empty()
@@ -3842,7 +3959,7 @@ impl ChatWidget<'_> {
         // (debug watchdog removed)
     }
 
-    fn capture_ghost_snapshot(&mut self) {
+    fn capture_ghost_snapshot(&mut self, summary: Option<String>) {
         if self.ghost_snapshots_disabled {
             return;
         }
@@ -3850,7 +3967,8 @@ impl ChatWidget<'_> {
         let options = CreateGhostCommitOptions::new(&self.config.cwd);
         match create_ghost_commit(&options) {
             Ok(commit) => {
-                self.ghost_snapshots.push(commit);
+                self.ghost_snapshots
+                    .push(GhostSnapshot::new(commit, summary));
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
                 }
@@ -3878,22 +3996,109 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn undo_last_snapshot(&mut self) {
-        let Some(commit) = self.ghost_snapshots.pop() else {
-            self.push_background_tail("No snapshot is available to restore.".to_string());
-            return;
-        };
-
-        if let Err(err) = restore_ghost_commit(&self.config.cwd, &commit) {
-            self.history_push(history_cell::new_error_event(format!(
-                "Failed to restore snapshot: {err}",
-            )));
-            self.ghost_snapshots.push(commit);
+    fn handle_undo_command(&mut self) {
+        if self.ghost_snapshots_disabled {
+            self.push_background_tail(
+                "Snapshots are currently disabled. Resolve the Git issue and restart Code to re-enable them.".to_string(),
+            );
             return;
         }
 
-        let short_id: String = commit.id().chars().take(8).collect();
-        self.push_background_tail(format!("Restored workspace to snapshot {short_id}"));
+        if self.ghost_snapshots.is_empty() {
+            self.push_background_tail("No snapshot is available to restore.".to_string());
+            return;
+        }
+
+        self.show_undo_snapshot_picker();
+    }
+
+    fn show_undo_snapshot_picker(&mut self) {
+        let now = Local::now();
+        let mut entries: Vec<(usize, &GhostSnapshot)> = self
+            .ghost_snapshots
+            .iter()
+            .enumerate()
+            .collect();
+        entries.reverse();
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+        for (display_idx, (actual_idx, snapshot)) in entries.into_iter().enumerate() {
+            let idx = actual_idx;
+            let short_id = snapshot.short_id();
+            let name = snapshot
+                .summary_snippet(80)
+                .unwrap_or_else(|| format!("Snapshot {short_id}"));
+
+            let mut details: Vec<String> = Vec::new();
+            if let Some(age) = snapshot.age_from(now) {
+                details.push(format!("captured {} ago", format_duration(age)));
+            } else {
+                details.push("captured moments ago".to_string());
+            }
+            details.push(snapshot.captured_at.format("%Y-%m-%d %H:%M:%S").to_string());
+            details.push(format!("commit {short_id}"));
+            let description = Some(details.join(" • "));
+
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::UndoSnapshotSelected { index: idx });
+            })];
+
+            items.push(SelectionItem {
+                name,
+                description,
+                is_current: display_idx == 0,
+                actions,
+            });
+        }
+
+        if items.is_empty() {
+            self.push_background_tail("No snapshot is available to restore.".to_string());
+            return;
+        }
+
+        let view = ListSelectionView::new(
+            " Restore a workspace snapshot ".to_string(),
+            Some("Select a snapshot to jump back in time.".to_string()),
+            Some("Enter restore • Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            8,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Restore snapshot".to_string(),
+            Some("Select a snapshot to restore the workspace.".to_string()),
+            Some("Enter restore • Esc cancel".to_string()),
+            view,
+        );
+    }
+
+    pub(crate) fn restore_snapshot_by_index(&mut self, index: usize) {
+        if index >= self.ghost_snapshots.len() {
+            self.push_background_tail("Selected snapshot is no longer available.".to_string());
+            return;
+        }
+
+        let snapshot = self.ghost_snapshots[index].clone();
+        if let Err(err) = restore_ghost_commit(&self.config.cwd, snapshot.commit()) {
+            self.history_push(history_cell::new_error_event(format!(
+                "Failed to restore snapshot: {err}",
+            )));
+            return;
+        }
+
+        // Drop the restored snapshot and anything more recent so subsequent undo operations
+        // continue walking back in time.
+        self.ghost_snapshots.truncate(index);
+
+        let mut message = format!("Restored workspace to snapshot {}", snapshot.short_id());
+        if let Some(snippet) = snapshot.summary_snippet(60) {
+            message.push_str(&format!(" • {}", snippet));
+        }
+        if let Some(age) = snapshot.age_from(Local::now()) {
+            message.push_str(&format!(" • captured {} ago", format_duration(age)));
+        }
+        self.push_background_tail(message);
     }
 
     fn flush_pending_agent_notes(&mut self) {
@@ -15111,6 +15316,8 @@ impl WidgetRef for &ChatWidget<'_> {
 
         let mut assistant_layouts: Vec<Option<crate::history_cell::AssistantLayoutCache>> =
             vec![None; all_content.len()];
+        let mut default_layouts: Vec<Option<Rc<Vec<Line<'static>>>>> =
+            vec![None; all_content.len()];
 
         // Append any queued user messages as sticky preview cells at the very
         // end so they always render at the bottom until they are dispatched.
@@ -15129,14 +15336,17 @@ impl WidgetRef for &ChatWidget<'_> {
         if assistant_layouts.len() < all_content.len() {
             assistant_layouts.resize(all_content.len(), None);
         }
+        if default_layouts.len() < all_content.len() {
+            default_layouts.resize(all_content.len(), None);
+        }
 
         // Calculate total content height using prefix sums; build if needed
         let spacing = 1u16; // Standard spacing between cells
         const GUTTER_WIDTH: u16 = 2; // Same as in render loop
+        let cache_width = content_area.width.saturating_sub(GUTTER_WIDTH);
 
         // Opportunistically clear height cache if width changed
-        self.history_render
-            .handle_width_change(content_area.width);
+        self.history_render.handle_width_change(cache_width);
 
         // Perf: count a frame
         if self.perf_state.enabled {
@@ -15169,11 +15379,6 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             for (idx, item) in all_content.iter().enumerate() {
                 let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-                let is_stable_exec = item
-                    .as_any()
-                    .downcast_ref::<crate::history_cell::ExecCell>()
-                    .map(|e| e.output.is_some())
-                    .unwrap_or(false);
                 let maybe_assistant = item
                     .as_any()
                     .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
@@ -15181,50 +15386,43 @@ impl WidgetRef for &ChatWidget<'_> {
                     .as_any()
                     .downcast_ref::<crate::history_cell::StreamingContentCell>()
                     .is_some();
-                let is_cacheable =
-                    (maybe_assistant.is_some() || !item.has_custom_render() || is_stable_exec)
-                        && !item.is_animating()
-                        && !is_streaming;
-                let key = (idx, content_width);
-                let h = if is_cacheable {
-                    let cached_val = {
-                        let cache_ref = self.history_render.height_cache.borrow();
-                        cache_ref.get(&key).copied()
-                    };
-                    if let Some(cached) = cached_val {
-                        if perf_enabled {
-                            let mut p = self.perf_state.stats.borrow_mut();
+                let can_use_layout_cache = !item.has_custom_render()
+                    && !item.is_animating()
+                    && !is_streaming;
+
+                let h = if let Some(assistant) = maybe_assistant {
+                    if perf_enabled {
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        p.height_misses_total = p.height_misses_total.saturating_add(1);
+                    }
+                    let t0 = perf_enabled.then(Instant::now);
+                    let plan = assistant.ensure_layout(content_width);
+                    let rows = plan.total_rows();
+                    assistant_layouts[idx] = Some(plan);
+                    default_layouts[idx] = None;
+                    if let (true, Some(start)) = (perf_enabled, t0) {
+                        let dt = start.elapsed().as_nanos();
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        p.record_total((idx, content_width), "assistant", dt);
+                    }
+                    rows
+                } else if can_use_layout_cache {
+                    let label = perf_enabled.then(|| self.perf_label_for_item(*item));
+                    let start = perf_enabled.then(Instant::now);
+                    let layout_ref = self
+                        .history_render
+                        .ensure_layout(idx, content_width, || item.display_lines_trimmed());
+                    if perf_enabled {
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        if layout_ref.freshly_computed {
+                            p.height_misses_total = p.height_misses_total.saturating_add(1);
+                        } else {
                             p.height_hits_total = p.height_hits_total.saturating_add(1);
                         }
-                        if let Some(assistant) = maybe_assistant {
-                            assistant_layouts[idx] = Some(assistant.ensure_layout(content_width));
-                        }
-                        cached
-                    } else {
-                        if perf_enabled {
-                            let mut p = self.perf_state.stats.borrow_mut();
-                            p.height_misses_total = p.height_misses_total.saturating_add(1);
-                        }
-                        let label = if perf_enabled {
-                            Some(self.perf_label_for_item(*item))
-                        } else {
-                            None
-                        };
-                        let t0 = if perf_enabled {
-                            Some(std::time::Instant::now())
-                        } else {
-                            None
-                        };
-                        let computed = if let Some(assistant) = maybe_assistant {
-                            let plan = assistant.ensure_layout(content_width);
-                            let rows = plan.total_rows();
-                            assistant_layouts[idx] = Some(plan);
-                            rows
-                        } else {
-                            item.desired_height(content_width)
-                        };
-                        if let (true, Some(start)) = (perf_enabled, t0) {
-                            let dt = start.elapsed().as_nanos();
+                    }
+                    if layout_ref.freshly_computed {
+                        if let (true, Some(begin)) = (perf_enabled, start) {
+                            let dt = begin.elapsed().as_nanos();
                             let mut p = self.perf_state.stats.borrow_mut();
                             p.record_total(
                                 (idx, content_width),
@@ -15232,14 +15430,32 @@ impl WidgetRef for &ChatWidget<'_> {
                                 dt,
                             );
                         }
-                        self.history_render
-                            .height_cache
-                            .borrow_mut()
-                            .insert(key, computed);
-                        computed
                     }
+                    let height = layout_ref
+                        .lines
+                        .len()
+                        .min(u16::MAX as usize) as u16;
+                    default_layouts[idx] = Some(Rc::clone(&layout_ref.lines));
+                    height
                 } else {
-                    item.desired_height(content_width)
+                    if perf_enabled {
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        p.height_misses_total = p.height_misses_total.saturating_add(1);
+                    }
+                    let label = perf_enabled.then(|| self.perf_label_for_item(*item));
+                    let t0 = perf_enabled.then(Instant::now);
+                    let computed = item.desired_height(content_width);
+                    default_layouts[idx] = None;
+                    if let (true, Some(start)) = (perf_enabled, t0) {
+                        let dt = start.elapsed().as_nanos();
+                        let mut p = self.perf_state.stats.borrow_mut();
+                        p.record_total(
+                            (idx, content_width),
+                            label.as_deref().unwrap_or("unknown"),
+                            dt,
+                        );
+                    }
+                    computed
                 };
                 acc = acc.saturating_add(h);
                 let mut should_add_spacing = idx < all_content.len() - 1 && h > 0;
@@ -15390,52 +15606,72 @@ impl WidgetRef for &ChatWidget<'_> {
             // Calculate height with reduced width due to gutter
             const GUTTER_WIDTH: u16 = 2;
             let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
-            // Height from cache if possible
-            // Cache heights for most items. Also allow caching for completed ExecCell (stable).
-            let is_stable_exec = item
+            let maybe_assistant = item
                 .as_any()
-                .downcast_ref::<crate::history_cell::ExecCell>()
-                .map(|e| e.output.is_some())
-                .unwrap_or(false);
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
             let is_streaming = item
                 .as_any()
                 .downcast_ref::<crate::history_cell::StreamingContentCell>()
                 .is_some();
-            let is_cacheable = ((!item.has_custom_render()) || is_stable_exec)
+
+            let can_use_layout_cache = !item.has_custom_render()
                 && !item.is_animating()
-                && !is_streaming;
-            let item_height = if is_cacheable {
-                let key = (idx, content_width);
-                if let Some(cached) = self
-                    .history_render
-                    .height_cache
-                    .borrow()
-                    .get(&key)
-                    .copied()
-                {
-                    if self.perf_state.enabled {
-                        let mut p = self.perf_state.stats.borrow_mut();
+                && !is_streaming
+                && maybe_assistant.is_none();
+
+            let mut layout_for_render: Option<Rc<Vec<Line<'static>>>> = None;
+
+            let item_height = if let Some(assistant) = maybe_assistant {
+                if self.perf_state.enabled {
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.height_misses_render = p.height_misses_render.saturating_add(1);
+                }
+                let start = self.perf_state.enabled.then(Instant::now);
+                default_layouts[idx] = None;
+                let plan_ref = if let Some(plan) = assistant_layouts[idx].as_ref() {
+                    plan.clone()
+                } else {
+                    let new_plan = assistant.ensure_layout(content_width);
+                    assistant_layouts[idx] = Some(new_plan);
+                    assistant_layouts[idx].as_ref().unwrap().clone()
+                };
+                if let (true, Some(t0)) = (self.perf_state.enabled, start) {
+                    let dt = t0.elapsed().as_nanos();
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.record_render((idx, content_width), "assistant", dt);
+                }
+                plan_ref.total_rows()
+            } else if can_use_layout_cache {
+                let mut timing: Option<Instant> = None;
+                let label = self
+                    .perf_state
+                    .enabled
+                    .then(|| self.perf_label_for_item(item));
+                let layout_ref = if let Some(existing) = default_layouts[idx].as_ref() {
+                    LayoutRef {
+                        lines: Rc::clone(existing),
+                        freshly_computed: false,
+                    }
+                } else {
+                    timing = self.perf_state.enabled.then(Instant::now);
+                    let lr = self
+                        .history_render
+                        .ensure_layout(idx, content_width, || item.display_lines_trimmed());
+                    default_layouts[idx] = Some(Rc::clone(&lr.lines));
+                    lr
+                };
+
+                if self.perf_state.enabled {
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    if layout_ref.freshly_computed {
+                        p.height_misses_render = p.height_misses_render.saturating_add(1);
+                    } else {
                         p.height_hits_render = p.height_hits_render.saturating_add(1);
                     }
-                    cached
-                } else {
-                    if self.perf_state.enabled {
-                        let mut p = self.perf_state.stats.borrow_mut();
-                        p.height_misses_render = p.height_misses_render.saturating_add(1);
-                    }
-                    let label = if self.perf_state.enabled {
-                        Some(self.perf_label_for_item(item))
-                    } else {
-                        None
-                    };
-                    let t0 = if self.perf_state.enabled {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    };
-                    let computed = item.desired_height(content_width);
-                    if let (true, Some(start)) = (self.perf_state.enabled, t0) {
-                        let dt = start.elapsed().as_nanos();
+                }
+                if layout_ref.freshly_computed {
+                    if let (true, Some(t0)) = (self.perf_state.enabled, timing) {
+                        let dt = t0.elapsed().as_nanos();
                         let mut p = self.perf_state.stats.borrow_mut();
                         p.record_render(
                             (idx, content_width),
@@ -15443,14 +15679,34 @@ impl WidgetRef for &ChatWidget<'_> {
                             dt,
                         );
                     }
-                    self.history_render
-                        .height_cache
-                        .borrow_mut()
-                        .insert(key, computed);
-                    computed
                 }
+                layout_for_render = Some(Rc::clone(&layout_ref.lines));
+                layout_ref
+                    .lines
+                    .len()
+                    .min(u16::MAX as usize) as u16
             } else {
-                item.desired_height(content_width)
+                if self.perf_state.enabled {
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.height_misses_render = p.height_misses_render.saturating_add(1);
+                }
+                let label = self
+                    .perf_state
+                    .enabled
+                    .then(|| self.perf_label_for_item(item));
+                let start = self.perf_state.enabled.then(Instant::now);
+                let computed = item.desired_height(content_width);
+                if let (true, Some(t0)) = (self.perf_state.enabled, start) {
+                    let dt = t0.elapsed().as_nanos();
+                    let mut p = self.perf_state.stats.borrow_mut();
+                    p.record_render(
+                        (idx, content_width),
+                        label.as_deref().unwrap_or("unknown"),
+                        dt,
+                    );
+                }
+                default_layouts[idx] = None;
+                computed
             };
 
             let content_y = ps[idx];
@@ -15702,7 +15958,17 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
 
                 if !handled_assistant {
-                    item.render_with_skip(item_area, buf, skip_rows);
+                    if let Some(lines_rc) = layout_for_render.as_ref() {
+                        self.render_cached_lines(
+                            item,
+                            lines_rc.as_ref(),
+                            item_area,
+                            buf,
+                            skip_rows,
+                        );
+                    } else {
+                        item.render_with_skip(item_area, buf, skip_rows);
+                    }
                 }
 
                 // Debug: overlay order info on the spacing row below (or above if needed).
