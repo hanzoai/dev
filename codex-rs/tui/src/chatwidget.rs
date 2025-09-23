@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::rc::Weak;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
@@ -117,6 +118,7 @@ use fs2::FileExt;
 
 use crate::app_event::{
     AppEvent,
+    BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
     TerminalLaunch,
@@ -124,11 +126,16 @@ use crate::app_event::{
 };
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::validation_settings_view;
-use crate::bottom_pane::validation_settings_view::ToolStatus;
+use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
+use crate::bottom_pane::LoginAccountsState;
+use crate::bottom_pane::LoginAccountsView;
+use crate::bottom_pane::LoginAddAccountState;
+use crate::bottom_pane::LoginAddAccountView;
+#[cfg(not(debug_assertions))]
 use crate::bottom_pane::UpdateSharedState;
 use crate::height_manager::HeightEvent;
 use crate::height_manager::HeightManager;
@@ -156,13 +163,15 @@ use codex_core::config::find_codex_home;
 use codex_core::config::resolve_codex_path_for_read;
 use codex_core::config::set_github_actionlint_on_patch;
 use codex_core::config::set_github_check_on_push;
-use codex_core::config::set_validation_patch_harness;
+use codex_core::config::set_validation_group_enabled;
 use codex_core::config::set_validation_tool_enabled;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::plan_tool::StepStatus;
+use codex_core::config_types::{validation_tool_category, ValidationCategory};
 use codex_core::protocol::RateLimitSnapshotEvent;
+use codex_core::protocol::ValidationGroup;
 use crate::rate_limits_view::RateLimitResetInfo;
 use codex_core::review_format::format_review_findings_block;
 use chrono::{DateTime, Local, Utc};
@@ -249,7 +258,7 @@ impl RateLimitWarningState {
         {
             let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
             warnings.push(format!(
-                "Weekly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+                "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
             ));
             self.weekly_index += 1;
         }
@@ -277,6 +286,9 @@ pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
     bottom_pane: BottomPane<'a>,
+    auth_manager: Arc<AuthManager>,
+    login_view_state: Option<Weak<RefCell<LoginAccountsState>>>,
+    login_add_view_state: Option<Weak<RefCell<LoginAddAccountState>>>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     history_render: HistoryRenderState,
@@ -634,13 +646,12 @@ impl AsRef<str> for StreamId {
 // ---- System notice ordering helpers ----
 #[derive(Copy, Clone)]
 enum SystemPlacement {
-    /// Place near the top of the current request (before most provider output)
-    EarlyInCurrent,
-    /// Place at the end of the current request window (after provider output)
-    EndOfCurrent,
-    /// Place before the first user prompt of the very first request
-    /// (used for pre‑turn UI confirmations like theme/spinner changes)
-    PrePromptInCurrent,
+    /// Place before the next user prompt (used for pre-turn confirmations).
+    BeforePrompt,
+    /// Place immediately before the next provider/tool output for the active request.
+    BeforeNextOutput,
+    /// Append to the end of the current request window.
+    Tail,
 }
 
 impl ChatWidget<'_> {
@@ -752,9 +763,7 @@ impl ChatWidget<'_> {
 
         // Derive a stable request bucket for system notices when OrderMeta is absent.
         // Default to the current provider request if known; else use a sticky
-        // pre‑turn synthetic req=1 to group UI confirmations before the first turn.
-        // If a user prompt for the next turn is already queued, attach new
-        // system notices to the upcoming request to avoid retroactive inserts.
+        // pre-turn synthetic req=1 to group UI confirmations before the first turn.
         let mut req = if self.last_seen_request_index > 0 {
             self.last_seen_request_index
         } else {
@@ -763,23 +772,23 @@ impl ChatWidget<'_> {
             }
             self.synthetic_system_req.unwrap_or(1)
         };
-        if order.is_none() && self.pending_user_prompts_for_next_turn > 0 {
+
+        if self.pending_user_prompts_for_next_turn > 0 {
             req = req.saturating_add(1);
         }
 
         self.internal_seq = self.internal_seq.saturating_add(1);
-        let mut out = match placement {
-            SystemPlacement::EarlyInCurrent => i32::MIN + 2,
-            SystemPlacement::EndOfCurrent => i32::MAX,
-            SystemPlacement::PrePromptInCurrent => i32::MIN,
+        let out = match placement {
+            SystemPlacement::BeforePrompt => i32::MIN,
+            SystemPlacement::BeforeNextOutput => {
+                if self.pending_user_prompts_for_next_turn > 0 {
+                    i32::MIN
+                } else {
+                    i32::MIN + 2
+                }
+            }
+            SystemPlacement::Tail => i32::MAX,
         };
-
-        if order.is_none()
-            && self.pending_user_prompts_for_next_turn > 0
-            && matches!(placement, SystemPlacement::EarlyInCurrent)
-        {
-            out = i32::MIN;
-        }
 
         OrderKey {
             req,
@@ -796,6 +805,7 @@ impl ChatWidget<'_> {
         placement: SystemPlacement,
         id_for_replace: Option<String>,
         order: Option<&codex_core::protocol::OrderMeta>,
+        tag: &'static str,
     ) {
         if let Some(id) = id_for_replace.as_ref() {
             if let Some(&idx) = self.system_cell_by_id.get(id) {
@@ -804,7 +814,7 @@ impl ChatWidget<'_> {
             }
         }
         let key = self.system_order_key(placement, order);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "system");
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag);
         if let Some(id) = id_for_replace {
             self.system_cell_by_id.insert(id, pos);
         }
@@ -815,9 +825,9 @@ impl ChatWidget<'_> {
     /// place before the first user prompt. Otherwise, append to end of current.
     fn ui_placement_for_now(&self) -> SystemPlacement {
         if self.last_seen_request_index == 0 && self.pending_user_prompts_for_next_turn == 0 {
-            SystemPlacement::PrePromptInCurrent
+            SystemPlacement::BeforePrompt
         } else {
-            SystemPlacement::EndOfCurrent
+            SystemPlacement::Tail
         }
     }
     pub(crate) fn enable_perf(&mut self, enable: bool) {
@@ -999,7 +1009,7 @@ impl ChatWidget<'_> {
     // current (active) request: (req = last_seen, out = +∞, seq = monotonic).
     fn next_internal_key(&mut self) -> OrderKey {
         // Anchor to the current provider request if known; otherwise step a synthetic counter.
-        let req = if self.last_seen_request_index > 0 {
+        let mut req = if self.last_seen_request_index > 0 {
             self.last_seen_request_index
         } else {
             // Ensure current_request_index always moves forward
@@ -1009,6 +1019,15 @@ impl ChatWidget<'_> {
             self.current_request_index = self.current_request_index.saturating_add(1);
             self.current_request_index
         };
+        if self.pending_user_prompts_for_next_turn > 0 {
+            let next_req = self.last_seen_request_index.saturating_add(1);
+            if req < next_req {
+                req = next_req;
+            }
+        }
+        if self.current_request_index < req {
+            self.current_request_index = req;
+        }
         self.internal_seq = self.internal_seq.saturating_add(1);
         // Place internal notices at the end of the current request window by using
         // a maximal out so they sort after any model-provided output_index.
@@ -1204,13 +1223,7 @@ impl ChatWidget<'_> {
         let codex_home = self.config.codex_home.clone();
         let candidates = crate::resume::discovery::list_sessions_for_cwd(&cwd, &codex_home);
         if candidates.is_empty() {
-            let key = self.next_internal_key();
-            let _ = self.history_insert_with_key_global(
-                Box::new(crate::history_cell::new_background_event(
-                    "No past sessions found for this folder".to_string(),
-                )),
-                key,
-            );
+            self.push_background_tail("No past sessions found for this folder".to_string());
             return;
         }
         // Convert to simple rows with aligned columns and human-friendly times
@@ -1346,9 +1359,10 @@ impl ChatWidget<'_> {
                     message.push_str(&format!("\ncall_id: {}", call_id));
                 }
                 let key = self.next_internal_key();
-                let _ = self.history_insert_with_key_global(
+                let _ = self.history_insert_with_key_global_tagged(
                     Box::new(crate::history_cell::new_background_event(message)),
                     key,
+                    "background",
                 );
             }
             ResponseItem::Reasoning { summary, .. } => {
@@ -1408,9 +1422,10 @@ impl ChatWidget<'_> {
                     return;
                 }
                 let key = self.next_internal_key();
-                let _ = self.history_insert_with_key_global(
+                let _ = self.history_insert_with_key_global_tagged(
                     Box::new(crate::history_cell::new_background_event(message)),
                     key,
+                    "background",
                 );
             }
             _ => {
@@ -1872,10 +1887,9 @@ impl ChatWidget<'_> {
             self.bottom_pane.update_status_text(message.clone());
             // Add a dim background event instead of a hard error cell to avoid
             // alarming users during auto-retries.
-            let key = self.next_internal_key();
-            let _ = self.history_insert_with_key_global(
-                Box::new(history_cell::new_background_event(message)),
-                key,
+            self.insert_background_event_with_placement(
+                message,
+                BackgroundPlacement::Tail,
             );
             // Do NOT clear running state or streams; the retry will resume them.
             self.request_redraw();
@@ -1922,13 +1936,7 @@ impl ChatWidget<'_> {
             // Surface an explicit notice in history so users see confirmation.
             // We add a lightweight background event (not an error) to match prior UX.
             if !has_wait_running {
-                let key = self.next_internal_key();
-                let _ = self.history_insert_with_key_global(
-                    Box::new(crate::history_cell::new_background_event(
-                        "Cancelled by user.".to_string(),
-                    )),
-                    key,
-                );
+                self.push_background_tail("Cancelled by user.".to_string());
             }
             self.submit_op(Op::Interrupt);
             // Immediately drop the running status so the next message can be typed/run,
@@ -2001,26 +2009,27 @@ impl ChatWidget<'_> {
         show_order_overlay: bool,
         latest_upgrade_version: Option<String>,
     ) -> Self {
-        let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
+        let (codex_op_tx, codex_op_rx) = unbounded_channel::<Op>();
+
+        let auth_manager = AuthManager::shared(
+            config.codex_home.clone(),
+            AuthMode::ApiKey,
+            config.responses_originator_header.clone(),
+        );
 
         let app_event_tx_clone = app_event_tx.clone();
-        // Create the Code asynchronously so the UI loads as quickly as possible.
+        let auth_manager_for_spawn = auth_manager.clone();
         let config_for_agent_loop = config.clone();
         tokio::spawn(async move {
-            // Use ConversationManager with an AuthManager (API key by default)
-            let auth_manager = AuthManager::shared(
-                config_for_agent_loop.codex_home.clone(),
-                AuthMode::ApiKey,
-                config_for_agent_loop.responses_originator_header.clone(),
-            );
-            let conversation_manager = ConversationManager::new(auth_manager.clone());
+            let mut codex_op_rx = codex_op_rx;
+            let conversation_manager = ConversationManager::new(auth_manager_for_spawn.clone());
             let resume_path = config_for_agent_loop.experimental_resume.clone();
             let new_conversation = match resume_path {
                 Some(path) => conversation_manager
                     .resume_conversation_from_rollout(
                         config_for_agent_loop,
                         path,
-                        auth_manager,
+                        auth_manager_for_spawn,
                     )
                     .await,
                 None => conversation_manager.new_conversation(config_for_agent_loop).await,
@@ -2095,6 +2104,9 @@ impl ChatWidget<'_> {
                 enhanced_keys_supported,
                 using_chatgpt_auth: config.using_chatgpt_auth,
             }),
+            auth_manager: auth_manager.clone(),
+            login_view_state: None,
+            login_add_view_state: None,
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
@@ -2267,6 +2279,7 @@ impl ChatWidget<'_> {
         terminal_info: crate::tui::TerminalInfo,
         show_order_overlay: bool,
         latest_upgrade_version: Option<String>,
+        auth_manager: Arc<AuthManager>,
     ) -> Self {
         let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
@@ -2315,6 +2328,9 @@ impl ChatWidget<'_> {
                 enhanced_keys_supported,
                 using_chatgpt_auth: config.using_chatgpt_auth,
             }),
+            auth_manager: auth_manager.clone(),
+            login_view_state: None,
+            login_add_view_state: None,
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
@@ -2985,6 +3001,17 @@ impl ChatWidget<'_> {
         key: OrderKey,
         tag: &'static str,
     ) -> usize {
+        let cell_kind = cell.kind();
+        #[cfg(debug_assertions)]
+        {
+            if cell_kind == HistoryCellType::BackgroundEvent {
+                debug_assert!(
+                    tag == "background",
+                    "Background events must use the background helper (tag={})",
+                    tag
+                );
+            }
+        }
         // Any ordered insert of a non-reasoning cell means reasoning is no longer the
         // bottom-most active block; drop the in-progress ellipsis on collapsed titles.
         let is_reasoning_cell = cell
@@ -3136,33 +3163,46 @@ impl ChatWidget<'_> {
 
     /// Push a cell using a synthetic global order key at the bottom of the current request.
     pub(crate) fn history_push(&mut self, cell: impl HistoryCell + 'static) {
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(
+                cell.kind() != HistoryCellType::BackgroundEvent,
+                "Background events must use push_background_* helpers"
+            );
+        }
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
     }
-    /// Insert a background event near the top of the current request so it appears
-    /// before imminent provider output (e.g. Exec begin).
-    pub(crate) fn insert_background_event_early(&mut self, message: String) {
-        let placement = if self.pending_user_prompts_for_next_turn > 0 {
-            SystemPlacement::EarlyInCurrent
-        } else {
-            SystemPlacement::PrePromptInCurrent
+    /// Insert a background event using the specified placement semantics.
+    pub(crate) fn insert_background_event_with_placement(
+        &mut self,
+        message: String,
+        placement: BackgroundPlacement,
+    ) {
+        let system_placement = match placement {
+            BackgroundPlacement::Tail => SystemPlacement::Tail,
+            BackgroundPlacement::BeforeNextOutput => SystemPlacement::BeforeNextOutput,
         };
         self.push_system_cell(
             history_cell::new_background_event(message),
-            placement,
+            system_placement,
             None,
             None,
+            "background",
         );
     }
-    /// Insert a background event at the tail of the current request.
-    pub(crate) fn insert_background_event_late(&mut self, message: String) {
-        self.push_system_cell(
-            history_cell::new_background_event(message),
-            SystemPlacement::EndOfCurrent,
-            None,
-            None,
+
+    pub(crate) fn push_background_tail(&mut self, message: impl Into<String>) {
+        self.insert_background_event_with_placement(message.into(), BackgroundPlacement::Tail);
+    }
+
+    pub(crate) fn push_background_before_next_output(&mut self, message: impl Into<String>) {
+        self.insert_background_event_with_placement(
+            message.into(),
+            BackgroundPlacement::BeforeNextOutput,
         );
     }
+
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
@@ -4493,7 +4533,7 @@ impl ChatWidget<'_> {
                     self.update_rate_limit_resets(previous_snapshot.as_ref(), &snapshot);
                     let warnings = self
                         .rate_limit_warnings
-                        .take_warnings(snapshot.weekly_used_percent, snapshot.primary_used_percent);
+                        .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
                     self.rate_limit_snapshot = Some(snapshot);
                     if !warnings.is_empty() {
                         for warning in warnings {
@@ -5171,9 +5211,7 @@ impl ChatWidget<'_> {
                     .on_history_entry_response(log_id, offset, entry.map(|e| e.text));
             }
             EventMsg::ShutdownComplete => {
-                self.history_push(history_cell::new_background_event(
-                    "🟡 ShutdownComplete".to_string(),
-                ));
+                self.push_background_tail("🟡 ShutdownComplete".to_string());
                 self.app_event_tx.send(AppEvent::ExitRequest);
             }
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
@@ -5182,12 +5220,13 @@ impl ChatWidget<'_> {
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
                 // Route through unified system notice helper. If the core ties the
-                // event to a turn (order present), prefer EarlyInCurrent; else append
-                // at EndOfCurrent. Use the event.id for in-place replacement.
+                // event to a turn (order present), prefer placing it before the next
+                // provider output; else append to the tail. Use the event.id for
+                // in-place replacement.
                 let placement = if event.order.as_ref().is_some() {
-                    SystemPlacement::EarlyInCurrent
+                    SystemPlacement::BeforeNextOutput
                 } else {
-                    SystemPlacement::EndOfCurrent
+                    SystemPlacement::Tail
                 };
                 let id_for_replace = Some(id.clone());
                 self.push_system_cell(
@@ -5195,6 +5234,7 @@ impl ChatWidget<'_> {
                     placement,
                     id_for_replace,
                     event.order.as_ref(),
+                    "background",
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
@@ -5341,7 +5381,7 @@ impl ChatWidget<'_> {
                 };
                 self.active_review_hint = Some(review_request.user_facing_hint.clone());
                 self.active_review_prompt = Some(review_request.prompt.clone());
-                self.history_push(history_cell::new_background_event(banner));
+                self.push_background_before_next_output(banner);
 
                 let prompt_text = review_request.prompt.trim();
                 if !prompt_text.is_empty() {
@@ -5379,7 +5419,7 @@ impl ChatWidget<'_> {
                             }
                             _ => "<< Code review finished >>".to_string(),
                         };
-                        self.history_push(history_cell::new_background_event(finish_banner));
+                        self.push_background_tail(finish_banner);
                     }
                     None => {
                         let banner = match hint.as_deref() {
@@ -5391,7 +5431,7 @@ impl ChatWidget<'_> {
                             }
                             _ => "<< Code review finished without a final response >>".to_string(),
                         };
-                        self.history_push(history_cell::new_background_event(banner));
+                        self.push_background_tail(banner);
                         self.history_push(history_cell::new_warning_event(
                             "Review session ended without returning findings. Try `/review` again if you still need feedback.".to_string(),
                         ));
@@ -5574,7 +5614,7 @@ fn update_rate_limit_resets(
                     changed_primary = true;
                 }
             }
-            if current.weekly_used_percent + 0.5 < prev.weekly_used_percent {
+            if current.secondary_used_percent + 0.5 < prev.secondary_used_percent {
                 if self
                     .rate_limit_last_weekly_reset_at
                     .map_or(true, |existing| now > existing)
@@ -5590,7 +5630,7 @@ fn update_rate_limit_resets(
                 self.rate_limit_last_primary_reset_at = Some(now);
                 changed_primary = true;
             }
-            if current.weekly_used_percent <= 1.0
+            if current.secondary_used_percent <= 1.0
                 && self.rate_limit_last_weekly_reset_at.is_none()
             {
                 self.rate_limit_last_weekly_reset_at = Some(now);
@@ -5808,6 +5848,91 @@ fn update_rate_limit_resets(
         self.show_agents_overview_ui();
     }
 
+    pub(crate) fn handle_login_command(&mut self) {
+        self.show_login_accounts_view();
+    }
+
+    pub(crate) fn auth_manager(&self) -> Arc<AuthManager> {
+        self.auth_manager.clone()
+    }
+
+    pub(crate) fn reload_auth(&self) -> bool {
+        self.auth_manager.reload()
+    }
+
+    pub(crate) fn show_login_accounts_view(&mut self) {
+        let (view, state_rc) = LoginAccountsView::new(
+            self.config.codex_home.clone(),
+            self.app_event_tx.clone(),
+        );
+        self.login_view_state = Some(LoginAccountsState::weak_handle(&state_rc));
+        self.login_add_view_state = None;
+        self.bottom_pane.show_login_accounts(view);
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_login_add_account_view(&mut self) {
+        let (view, state_rc) = LoginAddAccountView::new(
+            self.config.codex_home.clone(),
+            self.app_event_tx.clone(),
+        );
+        self.login_add_view_state = Some(LoginAddAccountState::weak_handle(&state_rc));
+        self.login_view_state = None;
+        self.bottom_pane.show_login_add_account(view);
+        self.request_redraw();
+    }
+
+    fn with_login_add_view<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&mut LoginAddAccountState),
+    {
+        if let Some(weak) = &self.login_add_view_state {
+            if let Some(state_rc) = weak.upgrade() {
+                f(&mut state_rc.borrow_mut());
+                self.request_redraw();
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(crate) fn notify_login_chatgpt_started(&mut self, auth_url: String) {
+        if self.with_login_add_view(|state| state.acknowledge_chatgpt_started(auth_url.clone())) {
+            return;
+        }
+    }
+
+    pub(crate) fn notify_login_chatgpt_failed(&mut self, error: String) {
+        if self.with_login_add_view(|state| state.acknowledge_chatgpt_failed(error.clone())) {
+            return;
+        }
+    }
+
+    pub(crate) fn notify_login_chatgpt_complete(&mut self, result: Result<(), String>) {
+        if self.with_login_add_view(|state| state.on_chatgpt_complete(result.clone())) {
+            return;
+        }
+    }
+
+    pub(crate) fn notify_login_chatgpt_cancelled(&mut self) {
+        if self.with_login_add_view(|state| state.cancel_chatgpt_wait()) {
+            return;
+        }
+    }
+
+    pub(crate) fn login_add_view_active(&self) -> bool {
+        self.login_add_view_state
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .is_some()
+    }
+
+    pub(crate) fn set_using_chatgpt_auth(&mut self, using: bool) {
+        self.config.using_chatgpt_auth = using;
+        self.bottom_pane.set_using_chatgpt_auth(using);
+    }
+
+    #[cfg(not(debug_assertions))]
     fn show_update_settings_ui(&mut self) {
         use crate::bottom_pane::UpdateSettingsView;
 
@@ -6054,9 +6179,9 @@ fn update_rate_limit_resets(
         let (controller_tx, controller_rx) = mpsc::channel();
         let controller = TerminalRunController { tx: controller_tx };
         let cwd = self.config.cwd.to_string_lossy().to_string();
-        self.history_push(history_cell::new_background_event(format!(
+        self.push_background_before_next_output(format!(
             "Starting guided install for agent '{name}'"
-        )));
+        ));
         start_agent_install_session(
             self.app_event_tx.clone(),
             id,
@@ -6112,9 +6237,9 @@ fn update_rate_limit_resets(
             auto_close_on_success: false,
         };
 
-        self.history_push(history_cell::new_background_event(format!(
+        self.push_background_before_next_output(format!(
             "Installing validation tool '{tool_name}' with `{trimmed}`"
-        )));
+        ));
         Some(launch)
     }
 
@@ -6169,9 +6294,9 @@ fn update_rate_limit_resets(
             controller: Some(controller.clone()),
             auto_close_on_success: false,
         };
-        self.history_push(history_cell::new_background_event(format!(
+        self.push_background_before_next_output(format!(
             "Terminal command: {command}"
-        )));
+        ));
         self.app_event_tx.send(AppEvent::OpenTerminal(launch));
         let cwd = self.config.cwd.to_string_lossy().to_string();
         start_direct_terminal_session(
@@ -6202,9 +6327,9 @@ fn update_rate_limit_resets(
             auto_close_on_success: false,
         };
 
-        self.history_push(history_cell::new_background_event(format!(
+        self.push_background_before_next_output(format!(
             "Guided terminal request: {prompt}"
-        )));
+        ));
         self.app_event_tx.send(AppEvent::OpenTerminal(launch));
         start_prompt_terminal_session(
             self.app_event_tx.clone(),
@@ -6439,9 +6564,9 @@ fn update_rate_limit_resets(
                 self.config.debug,
             );
 
-            self.history_push(history_cell::new_background_event(format!(
+            self.push_background_before_next_output(format!(
                 "Terminal prompt: {prompt_text}"
-            )));
+            ));
             return;
         }
 
@@ -7432,6 +7557,7 @@ fn update_rate_limit_resets(
             placement,
             Some("ui:model".to_string()),
             None,
+            "system",
         );
 
         self.request_redraw();
@@ -7514,7 +7640,7 @@ fn update_rate_limit_resets(
 
             // Display success message
             let message = format!("Text verbosity set to: {}", new_verbosity);
-            self.history_push(history_cell::new_background_event(message));
+            self.push_background_tail(message);
 
             // Send the update to the backend
             let op = Op::ConfigureSession {
@@ -7666,6 +7792,7 @@ fn update_rate_limit_resets(
             placement,
             Some("ui:reasoning".to_string()),
             None,
+            "system",
         );
     }
 
@@ -7694,7 +7821,7 @@ fn update_rate_limit_resets(
 
         // Add status message to history
         let message = format!("Text verbosity set to: {}", new_verbosity);
-        self.history_push(history_cell::new_background_event(message));
+        self.push_background_tail(message);
     }
 
     pub(crate) fn set_auto_upgrade_enabled(&mut self, enabled: bool) {
@@ -7823,6 +7950,7 @@ fn update_rate_limit_resets(
             placement,
             Some("ui:theme".to_string()),
             None,
+            "background",
         );
     }
 
@@ -7848,6 +7976,7 @@ fn update_rate_limit_resets(
             placement,
             Some("ui:spinner".to_string()),
             None,
+            "background",
         );
     }
 
@@ -8000,7 +8129,7 @@ fn update_rate_limit_resets(
         }
         // Insert new status near the top of this request window
         let key = self.near_time_key(None);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "access-status");
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background");
         self.access_status_idx = Some(pos);
     }
 
@@ -10195,7 +10324,7 @@ fn update_rate_limit_resets(
 
         // Add the response to the UI as a background event using the helper
         // so the first content line is not hidden by the renderer.
-        self.history_push(history_cell::new_background_event(response));
+        self.push_background_tail(response);
     }
 
     pub(crate) fn handle_github_command(&mut self, command_text: String) {
@@ -10282,11 +10411,32 @@ fn update_rate_limit_resets(
             "cargo-check" => Some(&mut tools.cargo_check),
             "shfmt" => Some(&mut tools.shfmt),
             "prettier" => Some(&mut tools.prettier),
+            "tsc" => Some(&mut tools.tsc),
+            "eslint" => Some(&mut tools.eslint),
+            "phpstan" => Some(&mut tools.phpstan),
+            "psalm" => Some(&mut tools.psalm),
+            "mypy" => Some(&mut tools.mypy),
+            "pyright" => Some(&mut tools.pyright),
+            "golangci-lint" => Some(&mut tools.golangci_lint),
             _ => None,
         }
     }
 
-    fn validation_tool_enabled(&self, name: &str) -> bool {
+    fn validation_group_label(group: ValidationGroup) -> &'static str {
+        match group {
+            ValidationGroup::Functional => "Functional checks",
+            ValidationGroup::Stylistic => "Stylistic checks",
+        }
+    }
+
+    fn validation_group_enabled(&self, group: ValidationGroup) -> bool {
+        match group {
+            ValidationGroup::Functional => self.config.validation.groups.functional,
+            ValidationGroup::Stylistic => self.config.validation.groups.stylistic,
+        }
+    }
+
+    fn validation_tool_requested(&self, name: &str) -> bool {
         let tools = &self.config.validation.tools;
         match name {
             "actionlint" => self.config.github.actionlint_on_patch,
@@ -10297,53 +10447,68 @@ fn update_rate_limit_resets(
             "cargo-check" => tools.cargo_check.unwrap_or(true),
             "shfmt" => tools.shfmt.unwrap_or(true),
             "prettier" => tools.prettier.unwrap_or(true),
+            "tsc" => tools.tsc.unwrap_or(true),
+            "eslint" => tools.eslint.unwrap_or(true),
+            "phpstan" => tools.phpstan.unwrap_or(true),
+            "psalm" => tools.psalm.unwrap_or(true),
+            "mypy" => tools.mypy.unwrap_or(true),
+            "pyright" => tools.pyright.unwrap_or(true),
+            "golangci-lint" => tools.golangci_lint.unwrap_or(true),
             _ => true,
         }
     }
 
-    pub(crate) fn apply_validation_patch_harness(&mut self, enabled: bool) {
-        if self.config.validation.patch_harness == enabled {
-            self.history_push(history_cell::new_background_event(format!(
-                "ℹ️ Validate New Code already {}",
-                if enabled { "enabled" } else { "disabled" }
-            )));
+    fn validation_tool_enabled(&self, name: &str) -> bool {
+        let requested = self.validation_tool_requested(name);
+        let category = validation_tool_category(name);
+        let group_enabled = match category {
+            ValidationCategory::Functional => self.config.validation.groups.functional,
+            ValidationCategory::Stylistic => self.config.validation.groups.stylistic,
+        };
+        requested && group_enabled
+    }
+
+    fn apply_validation_group_toggle(&mut self, group: ValidationGroup, enable: bool) {
+        if self.validation_group_enabled(group) == enable {
             return;
         }
 
-        self.config.validation.patch_harness = enabled;
-        if let Err(err) = self
-            .codex_op_tx
-            .send(Op::UpdateValidationPatchHarness { enabled })
-        {
-            tracing::warn!("failed to send validation patch harness update: {err}");
+        match group {
+            ValidationGroup::Functional => self.config.validation.groups.functional = enable,
+            ValidationGroup::Stylistic => self.config.validation.groups.stylistic = enable,
         }
 
-        let persist_result = match find_codex_home() {
-            Ok(home) => set_validation_patch_harness(&home, enabled)
-                .map_err(|e| e.to_string()),
+        if let Err(err) = self
+            .codex_op_tx
+            .send(Op::UpdateValidationGroup { group, enable })
+        {
+            tracing::warn!("failed to send validation group update: {err}");
+        }
+
+        let result = match find_codex_home() {
+            Ok(home) => {
+                let key = match group {
+                    ValidationGroup::Functional => "functional",
+                    ValidationGroup::Stylistic => "stylistic",
+                };
+                set_validation_group_enabled(&home, key, enable).map_err(|e| e.to_string())
+            }
             Err(err) => Err(err.to_string()),
         };
 
-        match persist_result {
-            Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                "✅ Validate New Code {}",
-                if enabled { "enabled" } else { "disabled" }
-            ))),
-            Err(err) => self.history_push(history_cell::new_background_event(format!(
-                "⚠️ Validate New Code {} (persist failed: {err})",
-                if enabled { "enabled" } else { "disabled" }
-            ))),
+        let label = Self::validation_group_label(group);
+        if let Err(err) = result {
+            self.push_background_tail(format!(
+                "⚠️ {} {} (persist failed: {err})",
+                label,
+                if enable { "enabled" } else { "disabled" }
+            ));
         }
     }
 
     fn apply_validation_tool_toggle(&mut self, name: &str, enable: bool) {
         if name == "actionlint" {
             if self.config.github.actionlint_on_patch == enable {
-                self.history_push(history_cell::new_background_event(format!(
-                    "ℹ️ {} already {}",
-                    name,
-                    if enable { "on" } else { "off" }
-                )));
                 return;
             }
             self.config.github.actionlint_on_patch = enable;
@@ -10358,34 +10523,24 @@ fn update_rate_limit_resets(
                     .map_err(|e| e.to_string()),
                 Err(err) => Err(err.to_string()),
             };
-            match persist_result {
-                Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                    "✅ {}: {}",
-                    name,
-                    if enable { "enabled" } else { "disabled" }
-                ))),
-                Err(err) => self.history_push(history_cell::new_background_event(format!(
+            if let Err(err) = persist_result {
+                self.push_background_tail(format!(
                     "⚠️ {}: {} (persist failed: {err})",
                     name,
                     if enable { "enabled" } else { "disabled" }
-                ))),
+                ));
             }
             return;
         }
 
         let Some(flag) = self.validation_tool_flag_mut(name) else {
-            self.history_push(history_cell::new_background_event(format!(
+            self.push_background_tail(format!(
                 "⚠️ Unknown validation tool '{name}'"
-            )));
+            ));
             return;
         };
 
         if flag.unwrap_or(true) == enable {
-            self.history_push(history_cell::new_background_event(format!(
-                "ℹ️ {} already {}",
-                name,
-                if enable { "enabled" } else { "disabled" }
-            )));
             return;
         }
 
@@ -10401,37 +10556,40 @@ fn update_rate_limit_resets(
                 .map_err(|e| e.to_string()),
             Err(err) => Err(err.to_string()),
         };
-        match persist_result {
-                Ok(()) => self.history_push(history_cell::new_background_event(format!(
-                    "✅ {}: {}",
-                    name,
-                    if enable { "enabled" } else { "disabled" }
-                ))),
-                Err(err) => self.history_push(history_cell::new_background_event(format!(
-                    "⚠️ {}: {} (persist failed: {err})",
-                    name,
-                    if enable { "enabled" } else { "disabled" }
-                ))),
+        if let Err(err) = persist_result {
+            self.push_background_tail(format!(
+                "⚠️ {}: {} (persist failed: {err})",
+                name,
+                if enable { "enabled" } else { "disabled" }
+            ));
         }
     }
 
     fn build_validation_status_message(&self) -> String {
         let mut lines = Vec::new();
-        lines.push(format!(
-            "Validate New Code: {}",
-            if self.config.validation.patch_harness { "enabled" } else { "disabled" }
-        ));
+        lines.push("Validation groups:".to_string());
+        for group in [ValidationGroup::Functional, ValidationGroup::Stylistic] {
+            let enabled = self.validation_group_enabled(group);
+            lines.push(format!(
+                "• {} — {}",
+                Self::validation_group_label(group),
+                if enabled { "enabled" } else { "disabled" }
+            ));
+        }
         lines.push("".to_string());
         lines.push("Tools:".to_string());
         for status in validation_settings_view::detect_tools() {
-            let enabled = self.validation_tool_enabled(status.name);
-            let suffix = if status.installed { "" } else { " (not installed)" };
-            lines.push(format!(
-                "• {} — {}{}",
-                status.name,
-                if enabled { "enabled" } else { "disabled" },
-                suffix
-            ));
+            let requested = self.validation_tool_requested(status.name);
+            let effective = self.validation_tool_enabled(status.name);
+            let mut state = if requested {
+                if effective { "enabled".to_string() } else { "disabled (group off)".to_string() }
+            } else {
+                "disabled".to_string()
+            };
+            if !status.installed {
+                state.push_str(" (not installed)");
+            }
+            lines.push(format!("• {} — {}", status.name, state));
         }
         lines.join("\n")
     }
@@ -10440,18 +10598,44 @@ fn update_rate_limit_resets(
         self.apply_validation_tool_toggle(name, enable);
     }
 
+    pub(crate) fn toggle_validation_group(&mut self, group: ValidationGroup, enable: bool) {
+        self.apply_validation_group_toggle(group, enable);
+    }
+
     pub(crate) fn handle_validation_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
-            let tools: Vec<(ToolStatus, bool)> = validation_settings_view::detect_tools()
+            let groups = vec![
+                (
+                    GroupStatus {
+                        group: ValidationGroup::Functional,
+                        name: "Functional checks",
+                    },
+                    self.config.validation.groups.functional,
+                ),
+                (
+                    GroupStatus {
+                        group: ValidationGroup::Stylistic,
+                        name: "Stylistic checks",
+                    },
+                    self.config.validation.groups.stylistic,
+                ),
+            ];
+
+            let tool_rows: Vec<ToolRow> = validation_settings_view::detect_tools()
                 .into_iter()
                 .map(|status| {
-                    let enabled = self.validation_tool_enabled(status.name);
-                    (status, enabled)
+                    let group = match status.category {
+                        ValidationCategory::Functional => ValidationGroup::Functional,
+                        ValidationCategory::Stylistic => ValidationGroup::Stylistic,
+                    };
+                    let requested = self.validation_tool_requested(status.name);
+                    let group_enabled = self.validation_group_enabled(group);
+                    ToolRow { status, enabled: requested, group_enabled }
                 })
                 .collect();
-            self.bottom_pane
-                .show_validation_settings(self.config.validation.patch_harness, tools);
+
+            self.bottom_pane.show_validation_settings(groups, tool_rows);
             return;
         }
 
@@ -10459,24 +10643,54 @@ fn update_rate_limit_resets(
         match parts.next().unwrap_or("") {
             "status" => {
                 let message = self.build_validation_status_message();
-                self.history_push(history_cell::new_background_event(message));
+                self.push_background_tail(message);
             }
-            "on" => self.apply_validation_patch_harness(true),
-            "off" => self.apply_validation_patch_harness(false),
-            tool => {
+            "on" => {
+                if !self.validation_group_enabled(ValidationGroup::Functional) {
+                    self.apply_validation_group_toggle(ValidationGroup::Functional, true);
+                }
+            }
+            "off" => {
+                if self.validation_group_enabled(ValidationGroup::Functional) {
+                    self.apply_validation_group_toggle(ValidationGroup::Functional, false);
+                }
+                if self.validation_group_enabled(ValidationGroup::Stylistic) {
+                    self.apply_validation_group_toggle(ValidationGroup::Stylistic, false);
+                }
+            }
+            group @ ("functional" | "stylistic") => {
                 let Some(state) = parts.next() else {
                     self.history_push(history_cell::new_background_event(
-                        "Usage: /validation <tool> on|off".to_string(),
+                        "Usage: /validation <tool|group> on|off".to_string(),
                     ));
+                    return;
+                };
+                let group = if group == "functional" {
+                    ValidationGroup::Functional
+                } else {
+                    ValidationGroup::Stylistic
+                };
+                match state {
+                    "on" | "enable" => self.apply_validation_group_toggle(group, true),
+                    "off" | "disable" => self.apply_validation_group_toggle(group, false),
+                    _ => self.history_push(history_cell::new_background_event(format!(
+                        "⚠️ Unknown validation command '{}'. Use on|off.",
+                        state
+                    ))),
+                }
+            }
+            tool => {
+                let Some(state) = parts.next() else {
+                    self.push_background_tail("Usage: /validation <tool|group> on|off".to_string());
                     return;
                 };
                 match state {
                     "on" | "enable" => self.apply_validation_tool_toggle(tool, true),
                     "off" | "disable" => self.apply_validation_tool_toggle(tool, false),
-                    _ => self.history_push(history_cell::new_background_event(format!(
+                    _ => self.push_background_tail(format!(
                         "⚠️ Unknown validation command '{}'. Use on|off.",
                         state
-                    ))),
+                    )),
                 }
             }
         }
@@ -10564,7 +10778,7 @@ fn update_rate_limit_resets(
                                 lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
                             }
                         }
-                        self.history_push(history_cell::new_background_event(lines));
+                        self.push_background_tail(lines);
                     }
                     Err(e) => {
                         let msg = format!("Failed to read MCP config: {}", e);
@@ -10611,14 +10825,14 @@ fn update_rate_limit_resets(
                                         if sub == "on" { "Enabled" } else { "Disabled" },
                                         name
                                     );
-                                    self.history_push(history_cell::new_background_event(msg));
+                                    self.push_background_tail(msg);
                                 } else {
                                     let msg = format!(
                                         "No change: server '{}' was already {}",
                                         name,
                                         if sub == "on" { "enabled" } else { "disabled" }
                                     );
-                                    self.history_push(history_cell::new_background_event(msg));
+                                    self.push_background_tail(msg);
                                 }
                             }
                             Err(e) => {
@@ -10761,7 +10975,7 @@ fn update_rate_limit_resets(
                                     "Added MCP server '{}': {}{}",
                                     name, command, args_disp
                                 );
-                                self.history_push(history_cell::new_background_event(msg));
+                                self.push_background_tail(msg);
                             }
                             Err(e) => {
                                 let msg = format!("Failed to add MCP server '{}': {}", name, e);
@@ -10887,7 +11101,7 @@ fn update_rate_limit_resets(
             "🔗 Connecting to Chrome DevTools Protocol ({}:{})...",
             host_display, port_display
         );
-        self.history_push(history_cell::new_background_event(status_msg));
+        self.push_background_before_next_output(status_msg);
 
         // Connect in background with a single, unified flow (no double-connect)
         tokio::spawn(async move {
@@ -11685,7 +11899,10 @@ impl ChatWidget<'_> {
         } else {
             format!("Preparing code review for {hint}")
         };
-        self.insert_background_event_early(preparation_notice);
+        self.insert_background_event_with_placement(
+            preparation_notice,
+            BackgroundPlacement::BeforeNextOutput,
+        );
         self.request_redraw();
 
         let review_request = ReviewRequest {
@@ -11780,12 +11997,15 @@ impl ChatWidget<'_> {
         let tx = self.app_event_tx.clone();
         // Add a quick notice into history, include task preview if provided
         if args_trim.is_empty() {
-            self.insert_background_event_early("Creating branch worktree...".to_string());
+            self.insert_background_event_with_placement(
+                "Creating branch worktree...".to_string(),
+                BackgroundPlacement::BeforeNextOutput,
+            );
         } else {
-            self.insert_background_event_early(format!(
-                "Creating branch worktree... Task: {}",
-                args_trim
-            ));
+            self.insert_background_event_with_placement(
+                format!("Creating branch worktree... Task: {}", args_trim),
+                BackgroundPlacement::BeforeNextOutput,
+            );
         }
         self.request_redraw();
 
@@ -11942,7 +12162,10 @@ impl ChatWidget<'_> {
             } else {
                 format!("Running project command `{}`", cmd.name)
             };
-            self.insert_background_event_early(notice);
+            self.insert_background_event_with_placement(
+                notice,
+                BackgroundPlacement::BeforeNextOutput,
+            );
             self.request_redraw();
             self.submit_op(Op::RunProjectCommand { name: cmd.name });
         } else {
@@ -12037,9 +12260,9 @@ impl ChatWidget<'_> {
 
         let tx = self.app_event_tx.clone();
         let work_cwd = self.config.cwd.clone();
-        self.history_push(crate::history_cell::new_background_event(
+        self.push_background_before_next_output(
             "Evaluating repository state before merging current branch...".to_string(),
-        ));
+        );
         self.request_redraw();
 
         tokio::spawn(async move {
@@ -12050,7 +12273,7 @@ impl ChatWidget<'_> {
             }
 
             fn send_background_late(tx: &AppEventSender, message: String) {
-                tx.send_background_event_late(message);
+                tx.send_background_event(message);
             }
 
             let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
@@ -16946,13 +17169,13 @@ impl ChatWidget<'_> {
                         "✅ {} GitHub watcher (persist failed; see logs)",
                         if enabled { "Enabled" } else { "Disabled" }
                     );
-                    self.history_push(history_cell::new_background_event(msg));
+                    self.push_background_tail(msg);
                 } else {
                     let msg = format!(
                         "✅ {} GitHub watcher (persisted)",
                         if enabled { "Enabled" } else { "Disabled" }
                     );
-                    self.history_push(history_cell::new_background_event(msg));
+                    self.push_background_tail(msg);
                 }
             }
             Err(_) => {
@@ -16960,7 +17183,7 @@ impl ChatWidget<'_> {
                     "✅ {} GitHub watcher (not persisted: CODE_HOME/CODEX_HOME not found)",
                     if enabled { "Enabled" } else { "Disabled" }
                 );
-                self.history_push(history_cell::new_background_event(msg));
+                self.push_background_tail(msg);
             }
         }
     }
@@ -16985,7 +17208,7 @@ impl ChatWidget<'_> {
                             if enable { "Enabled" } else { "Disabled" },
                             name
                         );
-                        self.history_push(history_cell::new_background_event(msg));
+                        self.push_background_tail(msg);
                     }
                 }
                 Err(e) => {

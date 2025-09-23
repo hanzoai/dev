@@ -14,7 +14,7 @@ use crate::tui::TerminalInfo;
 use crate::history_cell;
 use crate::exec_command::strip_bash_lc_and_escape;
 use codex_core::ConversationManager;
-use codex_login::{AuthManager, AuthMode};
+use codex_login::{AuthManager, AuthMode, ServerOptions};
 use codex_core::config::add_project_allowed_command;
 use codex_core::config::Config;
 use codex_core::protocol::Event;
@@ -72,6 +72,11 @@ struct TerminalRunState {
     running: bool,
     controller: Option<TerminalRunController>,
     writer_tx: Option<StdSender<Vec<u8>>>,
+}
+
+struct LoginFlowState {
+    shutdown: codex_login::ShutdownHandle,
+    join_handle: tokio::task::JoinHandle<()>,
 }
 
 pub(crate) struct App<'a> {
@@ -142,6 +147,7 @@ pub(crate) struct App<'a> {
     terminal_runs: HashMap<u64, TerminalRunState>,
 
     terminal_title_override: Option<String>,
+    login_flow: Option<LoginFlowState>,
 }
 
 /// Aggregate parameters needed to create a `ChatWidget`, as creation may be
@@ -349,6 +355,7 @@ impl App<'_> {
             alt_screen_active: start_in_alt,
             terminal_runs: HashMap::new(),
             terminal_title_override: None,
+            login_flow: None,
         }
     }
 
@@ -405,6 +412,14 @@ impl App<'_> {
             scheduled.store(false, Ordering::Release);
             tx.send(AppEvent::Redraw);
         });
+    }
+
+    fn handle_login_mode_change(&mut self, using_chatgpt_auth: bool) {
+        self.config.using_chatgpt_auth = using_chatgpt_auth;
+        if let AppState::Chat { widget } = &mut self.app_state {
+            widget.set_using_chatgpt_auth(using_chatgpt_auth);
+            let _ = widget.reload_auth();
+        }
     }
 
     fn start_terminal_run(
@@ -782,19 +797,14 @@ impl App<'_> {
                     },
                     AppState::Onboarding { .. } => {}
                 },
-                // InsertBackgroundEvent removed; use InsertBackgroundEventEarly for
-                // approval decisions to appear above command begin.
-                AppEvent::InsertBackgroundEventEarly(message) => match &mut self.app_state {
+                AppEvent::InsertBackgroundEvent { message, placement } => match &mut self.app_state {
                     AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertBackgroundEventEarly len={}", message.len());
-                        widget.insert_background_event_early(message);
-                    }
-                    AppState::Onboarding { .. } => {}
-                },
-                AppEvent::InsertBackgroundEventLate(message) => match &mut self.app_state {
-                    AppState::Chat { widget } => {
-                        tracing::debug!("app: InsertBackgroundEventLate len={}", message.len());
-                        widget.insert_background_event_late(message);
+                        tracing::debug!(
+                            "app: InsertBackgroundEvent placement={:?} len={}",
+                            placement,
+                            message.len()
+                        );
+                        widget.insert_background_event_with_placement(message, placement);
                     }
                     AppState::Onboarding { .. } => {}
                 },
@@ -1116,9 +1126,9 @@ impl App<'_> {
                                 )));
                             } else {
                                 let display = strip_bash_lc_and_escape(&command);
-                                widget.history_push(history_cell::new_background_event(format!(
+                                widget.push_background_tail(format!(
                                     "Always allowing `{display}` for this project.",
-                                )));
+                                ));
                             }
                         }
                     }
@@ -1394,6 +1404,11 @@ impl App<'_> {
                             }
                         }
                         SlashCommand::Quit => { break 'main; }
+                        SlashCommand::Login => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_login_command();
+                            }
+                        }
                         SlashCommand::Logout => {
                             if let Err(e) = codex_login::logout(&self.config.codex_home) { tracing::error!("failed to logout: {e}"); }
                             break 'main;
@@ -1631,14 +1646,14 @@ impl App<'_> {
                         widget.set_github_watcher(enabled);
                     }
                 }
-                AppEvent::UpdateValidationPatchHarness(enabled) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.apply_validation_patch_harness(enabled);
-                    }
-                }
                 AppEvent::UpdateValidationTool { name, enable } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.toggle_validation_tool(&name, enable);
+                    }
+                }
+                AppEvent::UpdateValidationGroup { group, enable } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.toggle_validation_group(group, enable);
                     }
                 }
                 AppEvent::SetTerminalTitle { title } => {
@@ -1799,11 +1814,85 @@ impl App<'_> {
                     }
                     self.schedule_redraw();
                 }
+                AppEvent::ShowLoginAccounts => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_login_accounts_view();
+                    }
+                }
+                AppEvent::ShowLoginAddAccount => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_login_add_account_view();
+                    }
+                }
                 AppEvent::CycleAccessMode => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.cycle_access_mode();
                     }
                     self.schedule_redraw();
+                }
+                AppEvent::LoginStartChatGpt => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        if !widget.login_add_view_active() {
+                            continue 'main;
+                        }
+
+                        if let Some(flow) = self.login_flow.take() {
+                            flow.shutdown.shutdown();
+                            flow.join_handle.abort();
+                        }
+
+                        let opts = ServerOptions::new(
+                            self.config.codex_home.clone(),
+                            codex_login::CLIENT_ID.to_string(),
+                            self.config.responses_originator_header.clone(),
+                        );
+
+                        match codex_login::run_login_server(opts) {
+                            Ok(server) => {
+                                widget.notify_login_chatgpt_started(server.auth_url.clone());
+                                let shutdown = server.cancel_handle();
+                                let tx = self.app_event_tx.clone();
+                                let join_handle = tokio::spawn(async move {
+                                    let result = server
+                                        .block_until_done()
+                                        .await
+                                        .map_err(|e| e.to_string());
+                                    tx.send(AppEvent::LoginChatGptComplete { result });
+                                });
+                                self.login_flow = Some(LoginFlowState { shutdown, join_handle });
+                            }
+                            Err(err) => {
+                                widget.notify_login_chatgpt_failed(format!(
+                                    "Failed to start ChatGPT login: {err}"
+                                ));
+                            }
+                        }
+                    }
+                }
+                AppEvent::LoginCancelChatGpt => {
+                    if let Some(flow) = self.login_flow.take() {
+                        flow.shutdown.shutdown();
+                        flow.join_handle.abort();
+                    }
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.notify_login_chatgpt_cancelled();
+                    }
+                }
+                AppEvent::LoginChatGptComplete { result } => {
+                    if let Some(flow) = self.login_flow.take() {
+                        flow.shutdown.shutdown();
+                        // Allow the task to finish naturally; if still running, abort.
+                        if !flow.join_handle.is_finished() {
+                            flow.join_handle.abort();
+                        }
+                    }
+
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.notify_login_chatgpt_complete(result);
+                    }
+                }
+                AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth } => {
+                    self.handle_login_mode_change(using_chatgpt_auth);
                 }
                 AppEvent::OnboardingAuthComplete(result) => {
                     if let AppState::Onboarding { screen } = &mut self.app_state {
@@ -1906,6 +1995,14 @@ impl App<'_> {
                     // Replace widget with a new one bound to the forked conversation
                     let session_conf = new_conv.0.session_configured.clone();
                     let conv = new_conv.0.conversation.clone();
+                    let auth_manager = match &self.app_state {
+                        AppState::Chat { widget } => widget.auth_manager(),
+                        _ => AuthManager::shared(
+                            cfg.codex_home.clone(),
+                            AuthMode::ApiKey,
+                            cfg.responses_originator_header.clone(),
+                        ),
+                    };
                     let mut new_widget = ChatWidget::new_from_existing(
                         cfg,
                         conv,
@@ -1915,6 +2012,7 @@ impl App<'_> {
                         self.terminal_info.clone(),
                         self.show_order_overlay,
                         self.latest_upgrade_version.clone(),
+                        auth_manager,
                     );
                     new_widget.enable_perf(self.timing_enabled);
                     // Ensure any initial animations or status are set up on the fresh widget

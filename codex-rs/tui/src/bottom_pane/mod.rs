@@ -34,6 +34,7 @@ pub mod resume_selection_view;
 pub mod agents_settings_view;
 mod github_settings_view;
 pub mod mcp_settings_view;
+mod login_accounts_view;
 // no direct use of list_selection_view or its items here
 mod textarea;
 pub mod form_text_field;
@@ -50,6 +51,12 @@ pub(crate) enum CancellationEvent {
 
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
+pub(crate) use login_accounts_view::{
+    LoginAccountsState,
+    LoginAccountsView,
+    LoginAddAccountState,
+    LoginAddAccountView,
+};
 
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 
@@ -89,6 +96,8 @@ pub(crate) struct BottomPane<'a> {
     /// Defaults to true for visual breathing room, but can be disabled when
     /// the chat history is scrolled up to allow history to reclaim that row.
     top_spacer_enabled: bool,
+
+    pub(crate) using_chatgpt_auth: bool,
 }
 
 pub(crate) struct BottomPaneParams {
@@ -118,6 +127,7 @@ impl BottomPane<'_> {
             live_ring: None,
             status_view_active: false,
             top_spacer_enabled: true,
+            using_chatgpt_auth: params.using_chatgpt_auth,
         }
     }
 
@@ -169,6 +179,26 @@ impl BottomPane<'_> {
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();
+    }
+
+    pub fn show_login_accounts(&mut self, view: LoginAccountsView) {
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub fn show_login_add_account(&mut self, view: LoginAddAccountView) {
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub fn set_using_chatgpt_auth(&mut self, using: bool) {
+        if self.using_chatgpt_auth != using {
+            self.using_chatgpt_auth = using;
+            self.composer.set_using_chatgpt_auth(using);
+            self.request_redraw();
+        }
     }
 
     pub fn set_has_chat_history(&mut self, has_history: bool) {
@@ -574,11 +604,11 @@ impl BottomPane<'_> {
     /// Show validation harness settings (master toggle + per-tool toggles).
     pub fn show_validation_settings(
         &mut self,
-        patch_harness: bool,
-        tools: Vec<(validation_settings_view::ToolStatus, bool)>,
+        groups: Vec<(validation_settings_view::GroupStatus, bool)>,
+        tools: Vec<validation_settings_view::ToolRow>,
     ) {
         use validation_settings_view::ValidationSettingsView;
-        let view = ValidationSettingsView::new(patch_harness, tools, self.app_event_tx.clone());
+        let view = ValidationSettingsView::new(groups, tools, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();

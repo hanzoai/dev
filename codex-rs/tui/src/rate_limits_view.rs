@@ -128,14 +128,14 @@ struct RateLimitMetrics {
 impl RateLimitMetrics {
     fn from_snapshot(snapshot: &RateLimitSnapshotEvent) -> Self {
         let hourly_used = snapshot.primary_used_percent.clamp(0.0, 100.0);
-        let weekly_used = snapshot.weekly_used_percent.clamp(0.0, 100.0);
+        let weekly_used = snapshot.secondary_used_percent.clamp(0.0, 100.0);
         Self {
             hourly_used,
             weekly_used,
             hourly_remaining: (100.0 - hourly_used).max(0.0),
             weekly_remaining: (100.0 - weekly_used).max(0.0),
             primary_window_minutes: snapshot.primary_window_minutes,
-            weekly_window_minutes: snapshot.weekly_window_minutes,
+            weekly_window_minutes: snapshot.secondary_window_minutes,
         }
     }
 
@@ -181,7 +181,7 @@ fn build_summary_lines(
 
     lines.push("".into());
 
-    lines.push(section_header("Weekly Limit"));
+    lines.push(section_header("Secondary Limit"));
     lines.push(build_bar_line(
         "Usage",
         metrics.weekly_used,
@@ -193,7 +193,7 @@ fn build_summary_lines(
         reset_info.weekly_last_reset,
     ));
     lines.push(build_weekly_reset_line(
-        snapshot.weekly_window_minutes,
+        snapshot.secondary_window_minutes,
         reset_info.weekly_last_reset,
     ));
 
@@ -800,7 +800,7 @@ fn format_minutes_round_units(minutes: u64) -> String {
 }
 
 fn extract_capacity_fraction(snapshot: &RateLimitSnapshotEvent) -> Option<f64> {
-    let ratio = snapshot.primary_to_weekly_ratio_percent;
+    let ratio = snapshot.primary_to_secondary_ratio_percent;
     if ratio.is_finite() {
         Some((ratio / 100.0).clamp(0.0, 1.0))
     } else {
@@ -958,10 +958,10 @@ mod tests {
     fn snapshot() -> RateLimitSnapshotEvent {
         RateLimitSnapshotEvent {
             primary_used_percent: 30.0,
-            weekly_used_percent: 60.0,
-            primary_to_weekly_ratio_percent: 40.0,
+            secondary_used_percent: 60.0,
+            primary_to_secondary_ratio_percent: 40.0,
             primary_window_minutes: 300,
-            weekly_window_minutes: 10_080,
+            secondary_window_minutes: 10_080,
         }
     }
 
@@ -1026,7 +1026,7 @@ mod tests {
     #[test]
     fn build_display_without_ratio_skips_gauge() {
         let mut s = snapshot();
-        s.primary_to_weekly_ratio_percent = f64::NAN;
+        s.primary_to_secondary_ratio_percent = f64::NAN;
         let display = build_limits_view(&s, RateLimitResetInfo::default(), DEFAULT_GRID_CONFIG);
         assert!(display.gauge_lines(80).is_empty());
         assert!(display.legend_lines.is_empty());
