@@ -6000,6 +6000,53 @@ fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
     }
 }
 
+fn resolve_agent_read_only(requested: Option<bool>, config: Option<&crate::config_types::AgentConfig>) -> bool {
+    if let Some(flag) = requested {
+        flag
+    } else {
+        config.map(|c| c.read_only).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod resolve_read_only_tests {
+    use super::*;
+    use crate::config_types::AgentConfig;
+
+    fn make_config(read_only: bool) -> AgentConfig {
+        AgentConfig {
+            name: "test".into(),
+            command: "test".into(),
+            args: Vec::new(),
+            read_only,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        }
+    }
+
+    #[test]
+    fn explicit_flag_overrides_config_true() {
+        let cfg = make_config(true);
+        assert!(!resolve_agent_read_only(Some(false), Some(&cfg)));
+    }
+
+    #[test]
+    fn falls_back_to_config_when_request_absent() {
+        let cfg = make_config(true);
+        assert!(resolve_agent_read_only(None, Some(&cfg)));
+    }
+
+    #[test]
+    fn defaults_to_false_without_config() {
+        assert!(!resolve_agent_read_only(None, None));
+        assert!(resolve_agent_read_only(Some(true), None));
+    }
+}
+
 fn parse_container_exec_arguments(
     arguments: String,
     sess: &Session,
@@ -6152,8 +6199,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         continue;
                     }
 
-                    // Override read_only if agent is configured as read-only
-                    let read_only = config.read_only || params.read_only.unwrap_or(false);
+                    // Respect explicit read_only flag from the caller; otherwise fall back to the config default.
+                    let read_only = resolve_agent_read_only(params.read_only, Some(config));
 
                     let agent_id = manager
                         .create_agent_with_config(
@@ -6175,6 +6222,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         skipped.push(format!("{} (missing: {})", model, cmd_to_check));
                         continue;
                     }
+                    let read_only = resolve_agent_read_only(params.read_only, None);
                     let agent_id = manager
                         .create_agent(
                             model,
@@ -6182,7 +6230,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                             params.context.clone(),
                             params.output.clone(),
                             params.files.clone().unwrap_or_default(),
-                            params.read_only.unwrap_or(false),
+                            read_only,
                             batch_id.clone(),
                         )
                         .await;
@@ -6192,6 +6240,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
 
             // If nothing runnable remains, fall back to a single built‑in Codex agent.
             if agent_ids.is_empty() {
+                let read_only = resolve_agent_read_only(params.read_only, None);
                 let agent_id = manager
                     .create_agent(
                         "code".to_string(),
@@ -6199,7 +6248,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         params.context.clone(),
                         params.output.clone(),
                         params.files.clone().unwrap_or_default(),
-                        params.read_only.unwrap_or(false),
+                        read_only,
                         None,
                     )
                     .await;
