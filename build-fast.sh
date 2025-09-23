@@ -69,6 +69,7 @@ fi
 
 # Resolve repository paths relative to this script so absolute invocation works
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+CALLER_CWD="$(pwd)"
 
 # Change to the Rust project root directory (codex-rs) regardless of caller CWD
 cd "${SCRIPT_DIR}/codex-rs"
@@ -120,9 +121,7 @@ if [ "${DETERMINISTIC:-}" = "1" ]; then
     if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         export SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --pretty=%ct 2>/dev/null || true)"
     fi
-    # Disable debuginfo (safer to apply globally); avoid touching UUID here
-    # since some proc-macro dylibs require LC_UUID and will fail to load.
-    export RUSTFLAGS="${RUSTFLAGS:-} -C debuginfo=0"
+    # Keep debuginfo intact so profiling tools can resolve symbols.
 fi
 
 # Select the cargo/rustc toolchain to match deploy
@@ -428,8 +427,10 @@ if [ $? -eq 0 ]; then
     fi
 
     if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
-      echo "Running ${BIN_PATH}..."
-      "${BIN_PATH}"
+      echo "Running ${ABS_BIN_PATH} (cwd: ${CALLER_CWD})..."
+      (
+        cd "${CALLER_CWD}" && "${ABS_BIN_PATH}"
+      )
       RUN_STATUS=$?
       if [ $RUN_STATUS -ne 0 ]; then
         echo "❌ Run failed with status ${RUN_STATUS}"
