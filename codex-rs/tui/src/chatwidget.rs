@@ -6561,15 +6561,8 @@ fn update_rate_limit_resets(
             return;
         }
 
-        let prompt = if let Some(rest) = trimmed.strip_prefix("$$") {
-            Some(rest.trim())
-        } else if let Some(rest) = trimmed.strip_prefix('$') {
-            Some(rest.trim())
-        } else {
-            None
-        };
-
-        if let Some(prompt_text) = prompt {
+        if let Some(rest) = trimmed.strip_prefix("$$") {
+            let prompt_text = rest.trim();
             if prompt_text.is_empty() {
                 if let Some(overlay) = self.terminal.overlay_mut() {
                     overlay.push_info_message("Provide a prompt after '$'.");
@@ -6607,7 +6600,25 @@ fn update_rate_limit_resets(
             return;
         }
 
-        if wrap_command(trimmed).is_empty() {
+        let mut command_body = trimmed;
+        let mut run_direct = false;
+        if let Some(rest) = trimmed.strip_prefix('$') {
+            let candidate = rest.trim();
+            if candidate.is_empty() {
+                if let Some(overlay) = self.terminal.overlay_mut() {
+                    overlay.push_info_message("Provide a command after '$'.");
+                    overlay.ensure_pending_command();
+                }
+                self.request_redraw();
+                return;
+            }
+            command_body = candidate;
+            run_direct = true;
+        }
+
+        let command_string = command_body.to_string();
+        let wrapped_command = wrap_command(&command_string);
+        if wrapped_command.is_empty() {
             self.app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
                 id,
                 message: "Command could not be constructed.".to_string(),
@@ -6619,15 +6630,15 @@ fn update_rate_limit_resets(
             return;
         }
 
-        if let Some(overlay) = self.terminal.overlay_mut() {
-            overlay.cancel_pending_command();
-        }
-
         if !matches!(self.config.sandbox_policy, SandboxPolicy::DangerFullAccess) {
+            if let Some(overlay) = self.terminal.overlay_mut() {
+                overlay.cancel_pending_command();
+            }
             self.pending_manual_terminal.insert(
                 id,
                 PendingManualTerminal {
-                    command: trimmed.to_string(),
+                    command: command_string.clone(),
+                    run_direct,
                 },
             );
             if let Some(overlay) = self.terminal.overlay_mut() {
@@ -6636,13 +6647,17 @@ fn update_rate_limit_resets(
             }
             self.bottom_pane.push_approval_request(ApprovalRequest::TerminalCommand {
                 id,
-                command: trimmed.to_string(),
+                command: command_string,
             });
             self.request_redraw();
             return;
         }
 
-        self.start_manual_terminal_session(id, trimmed.to_string());
+        if run_direct {
+            self.start_direct_terminal_command(id, command_string, wrapped_command);
+        } else {
+            self.start_manual_terminal_session(id, command_string);
+        }
     }
 
     fn start_manual_terminal_session(&mut self, id: u64, command: String) {
@@ -6667,6 +6682,23 @@ fn update_rate_limit_resets(
             controller_rx,
             self.config.debug,
         );
+    }
+
+    fn start_direct_terminal_command(
+        &mut self,
+        id: u64,
+        display: String,
+        command: Vec<String>,
+    ) {
+        if let Some(overlay) = self.terminal.overlay_mut() {
+            overlay.cancel_pending_command();
+        }
+        self.app_event_tx.send(AppEvent::TerminalRunCommand {
+            id,
+            command,
+            command_display: display,
+            controller: None,
+        });
     }
 
     pub(crate) fn terminal_send_input(&mut self, id: u64, data: Vec<u8>) {
@@ -6779,7 +6811,12 @@ fn update_rate_limit_resets(
                     if let Some(overlay) = self.terminal.overlay_mut() {
                         overlay.push_assistant_message("Approval granted. Running command…");
                     }
-                    self.start_manual_terminal_session(id, entry.command);
+                    let command_vec = wrap_command(&entry.command);
+                    if entry.run_direct {
+                        self.start_direct_terminal_command(id, entry.command, command_vec);
+                    } else {
+                        self.start_manual_terminal_session(id, entry.command);
+                    }
                     self.request_redraw();
                 }
             }
