@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use codex_core::debug_logger::DebugLogger;
 use codex_core::ContentItem;
 use codex_core::ModelClient;
 use codex_core::ModelProviderInfo;
@@ -311,21 +310,12 @@ async fn streams_reasoning_before_tool_call() {
     match &events[2] {
         ResponseEvent::OutputItemDone {
             item: ResponseItem::FunctionCall {
-<<<<<<< HEAD
                 name,
                 arguments,
                 call_id,
                 ..
             },
             ..
-=======
-            name,
-            arguments,
-            call_id,
-            ..
-        },
-            ..
->>>>>>> refs/heads/main
         } => {
             assert_eq!(name, "run");
             assert_eq!(arguments, "{}");
