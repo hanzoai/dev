@@ -589,9 +589,6 @@ struct SseEvent {
 }
 
 #[derive(Debug, Deserialize)]
-struct ResponseCreated {}
-
-#[derive(Debug, Deserialize)]
 struct ResponseCompleted {
     id: String,
     usage: Option<ResponseCompletedUsage>,
