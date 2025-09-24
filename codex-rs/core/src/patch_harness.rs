@@ -24,8 +24,8 @@ pub fn run_patch_harness(
     cfg: &ValidationConfig,
     github: &GithubConfig,
 ) -> Option<(Vec<HarnessFinding>, Vec<String>)> {
-    let functional_enabled = cfg.groups.functional || cfg.patch_harness;
-    let stylistic_enabled = cfg.groups.stylistic || cfg.patch_harness;
+    let functional_enabled = cfg.groups.functional;
+    let stylistic_enabled = cfg.groups.stylistic;
 
     if !functional_enabled && !stylistic_enabled {
         return None;
