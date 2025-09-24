@@ -863,12 +863,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "once_cell",
  "pretty_assertions",
  "similar",
  "tempfile",
  "thiserror 2.0.16",
- "tokio",
  "tree-sitter",
  "tree-sitter-bash",
 ]
