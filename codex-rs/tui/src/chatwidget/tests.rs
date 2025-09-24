@@ -211,6 +211,8 @@ fn make_chatwidget_manual() -> (
         ghost_snapshots: Vec::new(),
         #[cfg(not(feature = "legacy_tests"))]
         ghost_snapshots_disabled: false,
+        #[cfg(not(feature = "legacy_tests"))]
+        ghost_snapshots_disabled_reason: None,
         stream: StreamController::new(cfg),
         last_stream_kind: None,
         running_commands: HashMap::new(),
