@@ -1,6 +1,6 @@
 use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::ChatWidget;
+use crate::chatwidget::{ChatWidget, GhostState};
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::file_search::FileSearchManager;
 use crate::get_git_diff::get_git_diff;
@@ -137,6 +137,9 @@ pub(crate) struct App<'a> {
     /// starts with our theme background. This avoids terminals that may show
     /// profile defaults until all cells are explicitly painted.
     clear_on_first_frame: bool,
+
+    /// Pending ghost snapshot state to apply after a conversation fork completes.
+    pending_jump_back_ghost_state: Option<GhostState>,
 
     /// Track last known terminal size. If it changes (true resize or a
     /// tab switch that altered the viewport), perform a full clear on the next
@@ -365,6 +368,7 @@ impl App<'_> {
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             terminal_info,
             clear_on_first_frame: true,
+            pending_jump_back_ghost_state: None,
             last_frame_size: None,
             last_esc_time: None,
             timing_enabled: enable_perf,
@@ -1484,9 +1488,18 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::UndoSnapshotSelected { index } => {
+                AppEvent::ShowUndoOptions { index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.restore_snapshot_by_index(index);
+                        widget.show_undo_restore_options(index);
+                    }
+                }
+                AppEvent::PerformUndoRestore {
+                    index,
+                    restore_files,
+                    restore_conversation,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.perform_undo_restore(index, restore_files, restore_conversation);
                     }
                 }
                 AppEvent::DispatchCommand(command, command_text) => {
@@ -1512,7 +1525,9 @@ impl App<'_> {
 
                     match command {
                         SlashCommand::Undo => {
-                            // Undo snapshots are handled directly within the chat widget.
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_undo_command();
+                            }
                         }
                         SlashCommand::Review => {
                             if let AppState::Chat { widget } = &mut self.app_state {
@@ -2177,6 +2192,7 @@ impl App<'_> {
                 }
                 AppEvent::JumpBack { nth, prefill } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        let ghost_state = widget.snapshot_ghost_state();
                         // Build response items from current UI history
                         let items = widget.export_response_items();
                         let cfg = widget.config_ref().clone();
@@ -2195,6 +2211,8 @@ impl App<'_> {
                             }
                             items.iter().take(cut).cloned().collect::<Vec<_>>()
                         };
+
+                        self.pending_jump_back_ghost_state = Some(ghost_state);
 
                         // Perform the fork off the UI thread to avoid nested runtimes
                         let server = self._server.clone();
@@ -2223,30 +2241,56 @@ impl App<'_> {
                     // Replace widget with a new one bound to the forked conversation
                     let session_conf = new_conv.0.session_configured.clone();
                     let conv = new_conv.0.conversation.clone();
-                    let auth_manager = match &self.app_state {
-                        AppState::Chat { widget } => widget.auth_manager(),
-                        _ => AuthManager::shared(
+
+                    let mut ghost_state = self.pending_jump_back_ghost_state.take();
+
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        let auth_manager = widget.auth_manager();
+                        let mut new_widget = ChatWidget::new_from_existing(
+                            cfg,
+                            conv,
+                            session_conf,
+                            self.app_event_tx.clone(),
+                            self.enhanced_keys_supported,
+                            self.terminal_info.clone(),
+                            self.show_order_overlay,
+                            self.latest_upgrade_version.clone(),
+                            auth_manager,
+                            false,
+                        );
+                        if let Some(state) = ghost_state.take() {
+                            new_widget.adopt_ghost_state(state);
+                        } else {
+                            tracing::warn!("jump-back fork missing ghost snapshot state; redo may be unavailable");
+                        }
+                        new_widget.enable_perf(self.timing_enabled);
+                        new_widget.check_for_initial_animations();
+                        *widget = Box::new(new_widget);
+                    } else {
+                        let auth_manager = AuthManager::shared(
                             cfg.codex_home.clone(),
                             AuthMode::ApiKey,
                             cfg.responses_originator_header.clone(),
-                        ),
-                    };
-                    let mut new_widget = ChatWidget::new_from_existing(
-                        cfg,
-                        conv,
-                        session_conf,
-                        self.app_event_tx.clone(),
-                        self.enhanced_keys_supported,
-                        self.terminal_info.clone(),
-                        self.show_order_overlay,
-                        self.latest_upgrade_version.clone(),
-                        auth_manager,
-                    );
-                    new_widget.enable_perf(self.timing_enabled);
-                    // Ensure any initial animations or status are set up on the fresh widget
-                    new_widget.check_for_initial_animations();
-
-                    self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                        );
+                        let mut new_widget = ChatWidget::new_from_existing(
+                            cfg,
+                            conv,
+                            session_conf,
+                            self.app_event_tx.clone(),
+                            self.enhanced_keys_supported,
+                            self.terminal_info.clone(),
+                            self.show_order_overlay,
+                            self.latest_upgrade_version.clone(),
+                            auth_manager,
+                            false,
+                        );
+                        if let Some(state) = ghost_state.take() {
+                            new_widget.adopt_ghost_state(state);
+                        }
+                        new_widget.enable_perf(self.timing_enabled);
+                        new_widget.check_for_initial_animations();
+                        self.app_state = AppState::Chat { widget: Box::new(new_widget) };
+                    }
                     self.terminal_runs.clear();
                     // Reset any transient state from the previous widget/session
                     self.commit_anim_running.store(false, Ordering::Release);
