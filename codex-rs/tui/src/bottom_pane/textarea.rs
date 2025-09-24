@@ -946,6 +946,7 @@ mod tests {
     use super::*;
     // crossterm types are intentionally not imported here to avoid unused warnings
     use rand::prelude::*;
+    use ratatui::layout::Rect;
 
     fn rand_grapheme(rng: &mut rand::rngs::StdRng) -> String {
         let r: u8 = rng.gen_range(0..100);
@@ -992,6 +993,14 @@ mod tests {
         let mut t = TextArea::new();
         t.insert_str(text);
         t
+    }
+
+    #[test]
+    fn cursor_pos_returns_coordinates_for_visible_cursor() {
+        let mut t = ta_with("hello");
+        t.set_cursor("hello".len());
+        let rect = Rect::new(0, 0, 20, 5);
+        assert_eq!(t.cursor_pos(rect), Some((5, 0)));
     }
 
     #[test]
