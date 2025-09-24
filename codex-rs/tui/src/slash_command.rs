@@ -1,8 +1,42 @@
+use std::sync::OnceLock;
+
 use strum::IntoEnumIterator;
 use strum_macros::AsRefStr;
 use strum_macros::EnumIter;
 use strum_macros::EnumString;
 use strum_macros::IntoStaticStr;
+
+const BUILD_PROFILE: Option<&str> = option_env!("CODEX_PROFILE");
+
+fn demo_command_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        let profile_matches = |
+            profile: &str
+        | {
+            let normalized = profile.trim().to_ascii_lowercase();
+            normalized == "perf" || normalized.starts_with("dev")
+        };
+
+        if let Some(profile) = BUILD_PROFILE.or(option_env!("PROFILE")) {
+            if profile_matches(profile) {
+                return true;
+            }
+        }
+
+        if let Ok(exe_path) = std::env::current_exe() {
+            let path = exe_path.to_string_lossy().to_ascii_lowercase();
+            if path.contains("target/dev-fast/")
+                || path.contains("target/dev/")
+                || path.contains("target/perf/")
+            {
+                return true;
+            }
+        }
+
+        cfg!(debug_assertions)
+    })
+}
 
 /// Commands that can be invoked by starting a message with a leading slash.
 ///
@@ -36,6 +70,7 @@ pub enum SlashCommand {
     Verbosity,
     Prompts,
     Perf,
+    Demo,
     Agents,
     Pro,
     Branch,
@@ -92,6 +127,7 @@ impl SlashCommand {
             SlashCommand::Validation => "control validation harness (status/on/off)",
             SlashCommand::Mcp => "manage MCP servers (status/on/off/add)",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
+            SlashCommand::Demo => "populate history with demo cells (dev/perf only)",
             SlashCommand::Login => "manage Code sign-ins (add/select/disconnect)",
             SlashCommand::Logout => "log out of Code",
             #[cfg(debug_assertions)]
@@ -121,6 +157,13 @@ impl SlashCommand {
         )
     }
 
+    pub fn is_available(self) -> bool {
+        match self {
+            SlashCommand::Demo => demo_command_enabled(),
+            _ => true,
+        }
+    }
+
     /// Expands a prompt-expanding command into a full prompt for the LLM.
     /// Returns None if the command is not a prompt-expanding command.
     pub fn expand_prompt(self, args: &str) -> Option<String> {
@@ -148,7 +191,10 @@ impl SlashCommand {
 
 /// Return all built-in commands in a Vec paired with their command string.
 pub fn built_in_slash_commands() -> Vec<(&'static str, SlashCommand)> {
-    SlashCommand::iter().map(|c| (c.command(), c)).collect()
+    SlashCommand::iter()
+        .filter(|c| c.is_available())
+        .map(|c| (c.command(), c))
+        .collect()
 }
 
 /// Process a message that might contain a slash command.
@@ -187,6 +233,13 @@ pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
 
     // Try to parse the command
     if let Ok(command) = canonical_command.parse::<SlashCommand>() {
+        if !command.is_available() {
+            return ProcessedCommand::Error(format!(
+                "Error: /{} is only available in dev or perf builds.",
+                command.command()
+            ));
+        }
+
         // Check if it's a prompt-expanding command
         if command.is_prompt_expanding() {
             if args_raw.is_empty() && command.requires_arguments() {
