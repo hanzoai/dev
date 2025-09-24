@@ -75,6 +75,8 @@ typically start multiple agents. They require a task/problem description.
 
 ## Development‑Only
 
+- `/demo`: populate the chat history with assorted sample cells (available in
+  dev and perf builds for UI testing).
 - `/test-approval`: test approval request (available in debug builds only).
 
 Implementation Notes
