@@ -4061,11 +4061,20 @@ impl ChatWidget<'_> {
 
     fn handle_undo_command(&mut self) {
         if self.ghost_snapshots_disabled {
+            let reason = self
+                .ghost_snapshots_disabled_reason
+                .as_ref()
+                .map(|reason| reason.message.clone())
+                .unwrap_or_else(|| "Snapshots are currently disabled.".to_string());
+            self.push_background_tail(format!("/undo unavailable: {reason}"));
             self.show_undo_snapshots_disabled();
             return;
         }
 
         if self.ghost_snapshots.is_empty() {
+            self.push_background_tail(
+                "/undo unavailable: no snapshots captured yet. Run a file-modifying command to create one.".to_string(),
+            );
             self.show_undo_empty_state();
             return;
         }
@@ -4186,6 +4195,9 @@ impl ChatWidget<'_> {
         }
 
         if items.is_empty() {
+            self.push_background_tail(
+                "/undo unavailable: no snapshots captured yet. Run a file-modifying command to create one.".to_string(),
+            );
             self.show_undo_empty_state();
             return;
         }
