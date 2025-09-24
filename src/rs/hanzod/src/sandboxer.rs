@@ -637,7 +637,7 @@ impl SandboxManager {
     }
 
     /// Get resource usage summary across all sandboxes
-    pub async fn get_resource_summary(&self) -> Result<crate::docker_provider::ResourceSummary> {
+    pub async fn get_resource_summary(&self) -> Result<ResourceSummary> {
         let sandboxes = self.sandboxes.read().await;
         let running_sandboxes: Vec<_> = sandboxes
             .values()
@@ -670,7 +670,7 @@ impl SandboxManager {
             }
         }
 
-        Ok(crate::docker_provider::ResourceSummary {
+        Ok(ResourceSummary {
             total_sandboxes: self.sandboxes.read().await.len(),
             running_sandboxes: sandbox_count,
             total_cpu_usage: total_cpu,

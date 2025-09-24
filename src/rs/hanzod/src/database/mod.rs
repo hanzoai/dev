@@ -286,7 +286,7 @@ impl DatabaseManager {
     pub async fn switch_backend(&mut self, new_backend: DatabaseBackend) -> Result<()> {
         // Create new config
         let mut new_config = self.config.clone();
-        new_config.backend = new_backend;
+        new_config.backend = new_backend.clone();
 
         // Open new database
         let new_db: Arc<dyn Database> = match new_backend {

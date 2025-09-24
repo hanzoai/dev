@@ -20,6 +20,7 @@ use crate::database::{Database, DatabaseManager, DatabaseConfig, DatabaseBackend
 use crate::blockchain::{TransactionType};
 use crate::lux_consensus::{LuxConsensus, LuxConsensusConfig, ValidatorInfo, ConsensusMetrics};
 use crate::docker_provider::DockerProvider;
+use crate::runtime_detection::{RuntimeInfo, RuntimeType, RuntimeProvider};
 
 /// Chain configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,7 +102,7 @@ impl Chain {
         let db = Arc::new(DatabaseManager::new(config.database).await?);
 
         // Initialize embedded engine if enabled
-        let engine = None; // TODO: Implement engine module
+        let engine: Option<Arc<dyn std::any::Any + Send + Sync>> = None; // TODO: Implement engine module
         /* if config.enable_embedded_engine {
             let engine_config = crate::engine_embedded::EngineConfig {
                 use_embedded: true,
@@ -130,7 +131,22 @@ impl Chain {
 
         // Initialize Docker if enabled
         let docker = if config.enable_container_runtime {
-            Some(Arc::new(DockerProvider::new().await?))
+            let runtime_info = RuntimeInfo {
+                runtime_type: RuntimeType::DockerDesktop,
+                version: "latest".to_string(),
+                socket_path: None,
+                api_endpoint: Some("http://localhost:2375".to_string()),
+                capabilities: crate::runtime_detection::RuntimeCapabilities {
+                    oci_compliant: true,
+                    supports_microvm: false,
+                    supports_wasm: false,
+                    supports_gpu: false,
+                    supports_rootless: false,
+                    max_containers: None,
+                },
+                is_active: true,
+            };
+            Some(Arc::new(DockerProvider::new(runtime_info)))
         } else {
             None
         };
@@ -260,14 +276,32 @@ impl Chain {
         resources: ContainerResources,
     ) -> Result<String> {
         if let Some(docker) = &self.docker {
-            let container_id = docker.run_container(
+            use crate::runtime_detection::{ContainerConfig, Mount};
+            use std::collections::HashMap;
+            
+            let container_name = format!("hanzo-{}", uuid::Uuid::new_v4());
+            let mut env = HashMap::new();
+            for cmd in &command {
+                if cmd.contains('=') {
+                    let parts: Vec<&str> = cmd.splitn(2, '=').collect();
+                    if parts.len() == 2 {
+                        env.insert(parts[0].to_string(), parts[1].to_string());
+                    }
+                }
+            }
+            
+            let config = ContainerConfig {
+                env,
+                mounts: vec![],
+                memory_limit: Some((resources.memory_gb * 1_073_741_824.0) as u64), // GB to bytes
+                cpu_limit: Some(resources.cpu_cores as f64),
+                sandbox_type: None,
+            };
+            
+            let container_id = docker.create_container(
                 image,
-                command,
-                serde_json::json!({
-                    "cpu_limit": resources.cpu_cores,
-                    "memory_limit": resources.memory_gb,
-                    "gpu_count": resources.gpu_count,
-                }),
+                &container_name,
+                config,
             ).await?;
 
             // Record on blockchain

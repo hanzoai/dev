@@ -239,7 +239,7 @@ impl Ledger {
         let db = self.db.write().await;
 
         // Batch insert using UNWIND
-        let entries_json = serde_json::to_string(&buffer)?;
+        let entries_json = serde_json::to_string(&*buffer)?;
         let query = format!(
             "UNWIND {} AS entry
              CREATE (tx:Transaction {{

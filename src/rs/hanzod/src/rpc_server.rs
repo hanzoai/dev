@@ -230,7 +230,7 @@ impl RpcServer {
 
     /// Start gRPC server
     async fn start_grpc(self: Arc<Self>) -> Result<()> {
-        let addr = format!("0.0.0.0:{}", self.config.grpc_port).parse()?;
+        let addr: std::net::SocketAddr = format!("0.0.0.0:{}", self.config.grpc_port).parse()?;
 
         println!("🚀 gRPC server listening on {}", addr);
 
@@ -304,7 +304,7 @@ impl RpcServer {
         let operator = RegisteredOperator {
             address: address.clone(),
             public_key: req.public_key,
-            capabilities: req.capabilities,
+            capabilities: req.capabilities.clone(),
             stake_amount: req.stake_amount,
             reputation_score: 100.0, // Start with base reputation
             active: true,

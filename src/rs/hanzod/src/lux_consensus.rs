@@ -187,7 +187,10 @@ impl LuxConsensus {
     /// Initialize new Lux consensus engine
     pub fn new(config: LuxConsensusConfig) -> Result<Self> {
         // Generate or load signing key
-        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let mut rng = rand::rngs::OsRng;
+        let mut bytes = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rng, &mut bytes);
+        let signing_key = SigningKey::from_bytes(&bytes);
         let verifying_key = signing_key.verifying_key();
 
         Ok(Self {

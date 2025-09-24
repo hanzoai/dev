@@ -79,7 +79,7 @@ pub struct BillingInfo {
     pub payment_method: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BillingPlan {
     PayAsYouGo,
     Monthly(f64),
@@ -99,7 +99,7 @@ pub struct UsageMetrics {
     pub vpn_bandwidth_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PrivacyMode {
     Public,        // Data on public chain
     Private,       // Encrypted on chain
@@ -235,7 +235,7 @@ impl APIGateway {
                 auto_charge: false,
                 payment_method: None,
             },
-            privacy_mode,
+            privacy_mode: privacy_mode.clone(),
             tee_enabled: matches!(privacy_mode, PrivacyMode::TEE | PrivacyMode::Confidential),
             namespace,
         };
@@ -306,7 +306,7 @@ impl APIGateway {
 
         // Store in tenant's isolated database if private
         if matches!(key.privacy_mode, PrivacyMode::Private | PrivacyMode::TEE) {
-            db.put(
+            db.db().put(
                 format!("inference:{}", result.operation_id).as_bytes(),
                 serde_json::to_vec(&result)?.as_slice(),
             ).await?;
@@ -361,7 +361,7 @@ impl APIGateway {
         let db = self.get_tenant_db(&key.namespace).await?;
 
         // Search in isolated namespace
-        let results = db.search_similar(&embedding, k, 0.7).await?;
+        let results = db.db().search_similar(&embedding, k, 0.7).await?;
 
         // Charge for search
         let cost = self.pricing.vector_search;
@@ -396,7 +396,7 @@ impl APIGateway {
         }
 
         // Calculate hourly cost
-        let cpu_cost = job.cpu_cores * self.pricing.cpu_hour;
+        let cpu_cost = job.cpu_cores as f64 * self.pricing.cpu_hour;
         let gpu_cost = job.gpu_count as f64 * self.pricing.gpu_hour;
         let mut total_cost = cpu_cost + gpu_cost;
 
@@ -410,6 +410,9 @@ impl APIGateway {
             return Err(anyhow!("Insufficient balance"));
         }
 
+        // Store estimated hours before moving job
+        let estimated_hours = job.estimated_hours;
+        
         // Run in TEE if enabled
         let job_id = if key.tee_enabled {
             self.run_confidential_compute(job).await?
@@ -429,7 +432,7 @@ impl APIGateway {
         // Update usage
         self.update_usage(
             api_key,
-            UsageUpdate::Compute(job.estimated_hours),
+            UsageUpdate::Compute(estimated_hours),
             total_cost,
         ).await?;
 

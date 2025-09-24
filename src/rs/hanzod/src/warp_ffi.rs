@@ -263,10 +263,8 @@ impl WarpProtocolRust {
             return false;
         }
         
-        let signature = match Signature::from_bytes(&msg.signature.try_into().unwrap_or([0u8; 64])) {
-            Ok(sig) => sig,
-            Err(_) => return false,
-        };
+        let sig_bytes: [u8; 64] = msg.signature.clone().try_into().unwrap_or([0u8; 64]);
+        let signature = Signature::from_bytes(&sig_bytes);
         
         verifying_key.verify(&msg.unsigned.id(), &signature).is_ok()
     }
