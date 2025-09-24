@@ -167,7 +167,6 @@ pub(crate) async fn apply_patch(
             });
         }
     };
-
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let result = if let Some(client_tools) = sess.client_tools() {
