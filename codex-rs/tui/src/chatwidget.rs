@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
@@ -118,6 +119,19 @@ use std::sync::mpsc;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use tokio::sync::mpsc::UnboundedSender;
+
+fn history_cell_logging_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        if let Ok(value) = std::env::var("CODE_BUFFER_DIFF_TRACE_CELLS") {
+            return !matches!(value.trim(), "" | "0");
+        }
+        if let Ok(value) = std::env::var("CODE_BUFFER_DIFF_METRICS") {
+            return !matches!(value.trim(), "" | "0");
+        }
+        false
+    })
+}
 use serde_json::Value as JsonValue;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
@@ -15876,6 +15890,33 @@ impl WidgetRef for &ChatWidget<'_> {
                     width: content_area.width.saturating_sub(GUTTER_WIDTH),
                     height: visible_height,
                 };
+
+                if history_cell_logging_enabled() {
+                    let row_start = item_area.y;
+                    let row_end = item_area
+                        .y
+                        .saturating_add(visible_height)
+                        .saturating_sub(1);
+                    let cache_hit = layout_for_render.is_some();
+                    tracing::info!(
+                        target: "codex_tui::history_cells",
+                        idx,
+                        kind = ?item.kind(),
+                        row_start,
+                        row_end,
+                        height = visible_height,
+                        width = item_area.width,
+                        skip_rows = skip_top,
+                        item_height,
+                        content_y,
+                        cache_hit,
+                        assistant = maybe_assistant.is_some(),
+                        streaming = is_streaming,
+                        custom = item.has_custom_render(),
+                        animating = item.is_animating(),
+                        "history cell render",
+                    );
+                }
 
                 // Paint gutter background. For Assistant, extend the assistant tint under the
                 // gutter and also one extra column to the left (so the • has color on both sides),
