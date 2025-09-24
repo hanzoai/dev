@@ -18,7 +18,6 @@ use async_channel::Sender;
 use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
-use codex_apply_patch::StdFileSystem;
 use codex_browser::BrowserConfig as CodexBrowserConfig;
 use codex_browser::BrowserManager;
 use crate::config_types::ClientTools;
@@ -40,7 +39,6 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 use crate::CodexAuth;
-use crate::acp::AcpFileSystem;
 use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
@@ -960,13 +958,9 @@ impl Session {
         argv: &[String],
         cwd: &Path,
     ) -> MaybeApplyPatchVerified {
-        if let Some(client_tools) = self.client_tools.as_ref() {
-            let fs = AcpFileSystem::new(self.id, client_tools, &self.mcp_connection_manager);
-            codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd, &fs).await
-        } else {
-            let fs = StdFileSystem;
-            codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd, &fs).await
-        }
+        // Upstream parser no longer needs a filesystem; it is pure and sync.
+        let _ = self.client_tools.as_ref();
+        codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd)
     }
 
     // ────────────────────────────
