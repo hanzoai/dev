@@ -7096,7 +7096,7 @@ fn update_rate_limit_resets(
             return;
         }
 
-        if run_direct {
+        if run_direct && self.terminal_dimensions_hint().is_some() {
             self.start_direct_terminal_command(id, command_string, wrapped_command);
         } else {
             self.start_manual_terminal_session(id, command_string);
@@ -7254,8 +7254,8 @@ fn update_rate_limit_resets(
                     if let Some(overlay) = self.terminal.overlay_mut() {
                         overlay.push_assistant_message("Approval granted. Running command…");
                     }
-                    let command_vec = wrap_command(&entry.command);
-                    if entry.run_direct {
+                    if entry.run_direct && self.terminal_dimensions_hint().is_some() {
+                        let command_vec = wrap_command(&entry.command);
                         self.start_direct_terminal_command(id, entry.command, command_vec);
                     } else {
                         self.start_manual_terminal_session(id, entry.command);
