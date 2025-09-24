@@ -121,17 +121,6 @@ pub(super) fn toggle_browser_hud(chat: &mut ChatWidget<'_>) {
     chat.request_redraw();
 }
 
-pub(super) fn toggle_agents_hud(chat: &mut ChatWidget<'_>) {
-    let new_state = !chat.layout.agents_hud_expanded;
-    chat.layout.agents_hud_expanded = new_state;
-    if new_state {
-        chat.layout.browser_hud_expanded = false;
-        chat.layout.pro_hud_expanded = false;
-    }
-    chat.height_manager.borrow_mut().record_event(HeightEvent::HudToggle(true));
-    chat.request_redraw();
-}
-
 pub(super) fn toggle_pro_hud(chat: &mut ChatWidget<'_>) {
     let new_state = !chat.layout.pro_hud_expanded;
     chat.layout.pro_hud_expanded = new_state;
