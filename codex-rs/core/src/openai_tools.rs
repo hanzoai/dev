@@ -661,6 +661,7 @@ pub(crate) fn get_openai_tools(
 
     // Add general wait tool for background completions
     tools.push(create_wait_tool());
+    tools.push(create_kill_tool());
 
     if config.web_search_request {
         let tool = match &config.web_search_allowed_domains {
@@ -727,6 +728,27 @@ pub fn create_wait_tool() -> OpenAiTool {
     })
 }
 
+pub fn create_kill_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "call_id".to_string(),
+        JsonSchema::String {
+            description: Some("Background call_id to terminate.".to_string()),
+        },
+    );
+
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "kill".to_string(),
+        description: "Terminate a running background command by call_id.".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["call_id".to_string()]),
+            additional_properties: Some(false),
+        },
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -785,6 +807,7 @@ mod tests {
                 "browser_status",
                 "agent_run",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
             ],
@@ -821,6 +844,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
             ],
@@ -851,6 +875,7 @@ mod tests {
                 "browser_status",
                 "agent_run",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
             ],
@@ -923,6 +948,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
                 "test_server/do_something_cool",
@@ -1040,6 +1066,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
                 "dash/search",
@@ -1116,6 +1143,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
                 "dash/paginate",
@@ -1189,6 +1217,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
                 "dash/tags",
@@ -1265,6 +1294,7 @@ mod tests {
                 "agent_wait",
                 "agent_list",
                 "wait",
+                "kill",
                 "web_search",
                 "web_fetch",
                 "dash/value",

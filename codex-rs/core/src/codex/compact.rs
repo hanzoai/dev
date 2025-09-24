@@ -69,7 +69,6 @@ pub(super) async fn run_inline_auto_compact_task(
     .await
 }
 
-#[allow(dead_code)]
 pub(super) async fn run_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
