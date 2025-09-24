@@ -12,6 +12,8 @@ use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
+use codex_core::protocol::AgentStatusUpdateEvent;
+use codex_core::protocol::AgentInfo as ProtocolAgentInfo;
 use codex_core::protocol::AgentReasoningDeltaEvent;
 use codex_core::protocol::AgentReasoningEvent;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
@@ -220,6 +222,7 @@ fn make_chatwidget_manual() -> (
         task_complete_pending: false,
         interrupts: InterruptManager::new(),
         needs_redraw: false,
+        agents_terminal: AgentsTerminalState::new(),
     };
     (widget, rx, op_rx)
 }
@@ -281,6 +284,119 @@ fn run_script(chat: &mut ChatWidget<'_>, steps: &[ScriptStep], rx: &std::sync::m
         }
     }
     pump_app_events(chat, rx);
+}
+
+#[test]
+fn agents_terminal_tracks_logs() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let mut event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            model: Some("gemini-pro".into()),
+            last_progress: Some("12:00:01: creating worktree".into()),
+            result: None,
+            error: None,
+        }],
+        context: Some("monorepo".into()),
+        task: Some("upgrade agents UI".into()),
+    };
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event.clone()),
+    });
+
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .expect("expected agent entry");
+    assert_eq!(entry.logs.len(), 2, "expect status + initial progress logged");
+
+    // Duplicate update should not add new logs
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event.clone()),
+    });
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .unwrap();
+    assert_eq!(entry.logs.len(), 2, "duplicate progress should be deduped");
+
+    // Completed update should append status + result
+    event.agents[0].status = "completed".into();
+    event.agents[0].last_progress = Some("12:04:12: finalizing".into());
+    event.agents[0].result = Some("Plan delivered".into());
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .unwrap();
+    assert!(
+        entry
+            .logs
+            .iter()
+            .any(|log| matches!(log.kind, AgentLogKind::Result) && log.message.contains("Plan delivered")),
+        "result log expected"
+    );
+    assert!(
+        entry
+            .logs
+            .iter()
+            .any(|log| matches!(log.kind, AgentLogKind::Status) && log.message.contains("Completed")),
+        "status transition expected"
+    );
+
+    drop(rx);
+}
+
+#[test]
+fn agents_terminal_toggle_via_shortcuts() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            model: Some("gemini-pro".into()),
+            last_progress: Some("progress".into()),
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    assert!(chat.agents_terminal.order.contains(&"agent-1".to_string()));
+    assert!(!chat.agents_terminal.active);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "Ctrl+A should open terminal");
+
+    // Esc should exit the terminal view
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Esc should exit terminal");
 }
 
 fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
