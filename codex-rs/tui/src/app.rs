@@ -1706,6 +1706,11 @@ impl App<'_> {
                                 widget.handle_perf_command(command_args);
                             }
                         }
+                        SlashCommand::Demo => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_demo_command();
+                            }
+                        }
                         // Prompt-expanding commands should have been handled in submit_user_message
                         // but add a fallback just in case. Use a helper that shows the original
                         // slash command in history while sending the expanded prompt to the model.
