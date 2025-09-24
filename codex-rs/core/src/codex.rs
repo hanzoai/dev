@@ -851,6 +851,9 @@ struct BackgroundExecState {
     tail_buf: Option<std::sync::Arc<std::sync::Mutex<Vec<u8>>>>,
     cmd_display: String,
     suppress_event: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    task_handle: Option<tokio::task::JoinHandle<()>>,
+    order_meta_for_end: crate::protocol::OrderMeta,
+    sub_id: String,
 }
 
 /// Context for an initialized model agent
@@ -4980,6 +4983,7 @@ async fn handle_function_call(
         "browser_cleanup" => handle_browser_cleanup(sess, &ctx).await,
         "web_fetch" => handle_web_fetch(sess, &ctx, arguments).await,
         "wait" => handle_wait(sess, &ctx, arguments).await,
+        "kill" => handle_kill(sess, &ctx, arguments).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -6119,6 +6123,152 @@ async fn handle_wait(
                 }
             }
         }
+    ).await
+}
+
+// Kill a background shell execution by call_id.
+async fn handle_kill(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+) -> ResponseInputItem {
+    use serde::Deserialize;
+    #[derive(Deserialize, Clone)]
+    struct Params {
+        call_id: String,
+    }
+
+    let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
+    let arguments_clone = arguments.clone();
+    let ctx_clone = ToolCallCtx::new(ctx.sub_id.clone(), ctx.call_id.clone(), ctx.seq_hint, ctx.output_index);
+    let ctx_for_closure = ctx_clone.clone();
+    let tx_event = sess.tx_event.clone();
+
+    execute_custom_tool(
+        sess,
+        &ctx_clone,
+        "kill".to_string(),
+        params_for_event.take(),
+        move || async move {
+            let ctx_inner = ctx_for_closure.clone();
+            let parsed: Params = match serde_json::from_str(&arguments_clone) {
+                Ok(p) => p,
+                Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: ctx_inner.call_id.clone(),
+                        output: FunctionCallOutputPayload {
+                            content: format!("Invalid kill arguments: {e}"),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
+            use std::sync::atomic::Ordering;
+
+            let (
+                notify,
+                result_cell,
+                suppress_flag,
+                cmd_display,
+                order_meta_for_end,
+                sub_id_for_end,
+                handle_opt,
+                already_done,
+            ) = {
+                let mut st = sess.state.lock().unwrap();
+                match st.background_execs.get_mut(&parsed.call_id) {
+                    Some(bg) => {
+                        let done = bg.result_cell.lock().unwrap().is_some();
+                        let handle = bg.task_handle.take();
+                        (
+                            bg.notify.clone(),
+                            bg.result_cell.clone(),
+                            bg.suppress_event.clone(),
+                            bg.cmd_display.clone(),
+                            bg.order_meta_for_end.clone(),
+                            bg.sub_id.clone(),
+                            handle,
+                            done,
+                        )
+                    }
+                    None => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: ctx_inner.call_id.clone(),
+                            output: FunctionCallOutputPayload {
+                                content: format!("No background job found for call_id={}", parsed.call_id),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
+            };
+
+            if already_done {
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: ctx_inner.call_id.clone(),
+                    output: FunctionCallOutputPayload {
+                        content: format!("Background job {} has already completed.", parsed.call_id),
+                        success: Some(false),
+                    },
+                };
+            }
+
+            suppress_flag.store(true, Ordering::Relaxed);
+            if let Some(handle) = handle_opt {
+                handle.abort();
+                let _ = handle.await;
+            }
+
+            let cancel_message = "Cancelled by user.".to_string();
+            let output = ExecToolCallOutput {
+                exit_code: 130,
+                stdout: StreamOutput::new(String::new()),
+                stderr: StreamOutput::new(cancel_message.clone()),
+                aggregated_output: StreamOutput::new(cancel_message.clone()),
+                duration: std::time::Duration::ZERO,
+                timed_out: false,
+            };
+
+            {
+                let mut slot = result_cell.lock().unwrap();
+                *slot = Some(output.clone());
+            }
+
+            notify.notify_waiters();
+            if let Some(global) = ANY_BG_NOTIFY.get() {
+                global.notify_waiters();
+            }
+
+            let end_msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                call_id: parsed.call_id.clone(),
+                stdout: output.stdout.text.clone(),
+                stderr: output.stderr.text.clone(),
+                exit_code: output.exit_code,
+                duration: output.duration,
+            });
+            let event = Event {
+                id: sub_id_for_end.clone(),
+                event_seq: 0,
+                msg: end_msg,
+                order: Some(order_meta_for_end),
+            };
+            let _ = tx_event.send(event).await;
+
+            let status = if cmd_display.trim().is_empty() {
+                format!("Killed background job {}", parsed.call_id)
+            } else {
+                format!("Killed background command: {}", cmd_display)
+            };
+
+            ResponseInputItem::FunctionCallOutput {
+                call_id: ctx_inner.call_id.clone(),
+                output: FunctionCallOutputPayload {
+                    content: status,
+                    success: Some(true),
+                },
+            }
+        },
     ).await
 }
 
@@ -7767,6 +7917,16 @@ async fn handle_container_exec_with_params(
     let result_cell: std::sync::Arc<std::sync::Mutex<Option<ExecToolCallOutput>>> = std::sync::Arc::new(std::sync::Mutex::new(None));
     let backgrounded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let suppress_event_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let order_meta_for_end = crate::protocol::OrderMeta {
+        request_ordinal: attempt_req,
+        output_index,
+        sequence_number: seq_hint_for_exec.map(|h| h.saturating_add(1)),
+    };
+    let order_meta_for_deltas = crate::protocol::OrderMeta {
+        request_ordinal: attempt_req,
+        output_index,
+        sequence_number: None,
+    };
     {
         let mut st = sess.state.lock().unwrap();
         st.background_execs.insert(
@@ -7777,6 +7937,9 @@ async fn handle_container_exec_with_params(
                 tail_buf: Some(tail_buf.clone()),
                 cmd_display: display_label.clone(),
                 suppress_event: suppress_event_flag.clone(),
+                task_handle: None,
+                order_meta_for_end: order_meta_for_end.clone(),
+                sub_id: sub_id.clone(),
             },
         );
     }
@@ -7800,14 +7963,12 @@ async fn handle_container_exec_with_params(
     let sandbox_cwd = sess.get_cwd().to_path_buf();
     let codex_linux_sandbox_exe = sess.codex_linux_sandbox_exe.clone();
     let result_cell_for_task = result_cell.clone();
-    let order_meta_for_end = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint_for_exec.map(|h| h.saturating_add(1)) };
-    let order_meta_for_deltas = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: None };
     let notify_task = notify.clone();
     let tail_buf_task = tail_buf.clone();
     let backgrounded_task = backgrounded.clone();
     let suppress_event_flag_task = suppress_event_flag.clone();
     let display_label_task = display_label.clone();
-    tokio::spawn(async move {
+    let task_handle = tokio::spawn(async move {
         // Build stdout stream with tail capture. We cannot stamp via `Session` here,
         // but deltas will be delivered with neutral ordering which the UI tolerates.
         let stdout_stream = if exec_command_context.apply_patch.is_some() {
@@ -7901,6 +8062,13 @@ async fn handle_container_exec_with_params(
         }
         notify_task.notify_waiters();
     });
+
+    {
+        let mut st = sess.state.lock().unwrap();
+        if let Some(bg) = st.background_execs.get_mut(&call_id) {
+            bg.task_handle = Some(task_handle);
+        }
+    }
 
     // Wait up to 10 seconds for completion
     let waited = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
