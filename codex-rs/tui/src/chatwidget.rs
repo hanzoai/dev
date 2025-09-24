@@ -295,6 +295,12 @@ impl RateLimitWarningState {
     }
 }
 
+#[derive(Clone)]
+struct GhostSnapshotsDisabledReason {
+    message: String,
+    hint: Option<String>,
+}
+
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
@@ -430,6 +436,7 @@ pub(crate) struct ChatWidget<'a> {
     pending_user_prompts_for_next_turn: usize,
     ghost_snapshots: Vec<GhostSnapshot>,
     ghost_snapshots_disabled: bool,
+    ghost_snapshots_disabled_reason: Option<GhostSnapshotsDisabledReason>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2392,6 +2399,7 @@ impl ChatWidget<'_> {
             pending_user_prompts_for_next_turn: 0,
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
+            ghost_snapshots_disabled_reason: None,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2617,6 +2625,7 @@ impl ChatWidget<'_> {
             pending_user_prompts_for_next_turn: 0,
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
+            ghost_snapshots_disabled_reason: None,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -4002,6 +4011,7 @@ impl ChatWidget<'_> {
         let options = CreateGhostCommitOptions::new(&self.config.cwd);
         match create_ghost_commit(&options) {
             Ok(commit) => {
+                self.ghost_snapshots_disabled_reason = None;
                 self.ghost_snapshots
                     .push(GhostSnapshot::new(commit, summary));
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
@@ -4022,6 +4032,10 @@ impl ChatWidget<'_> {
                         ),
                     ),
                 };
+                self.ghost_snapshots_disabled_reason = Some(GhostSnapshotsDisabledReason {
+                    message: message.clone(),
+                    hint: hint.clone(),
+                });
                 self.push_background_tail(message);
                 if let Some(hint) = hint {
                     self.push_background_tail(hint);
@@ -4033,18 +4047,89 @@ impl ChatWidget<'_> {
 
     fn handle_undo_command(&mut self) {
         if self.ghost_snapshots_disabled {
-            self.push_background_tail(
-                "Snapshots are currently disabled. Resolve the Git issue and restart Code to re-enable them.".to_string(),
-            );
+            self.show_undo_snapshots_disabled();
             return;
         }
 
         if self.ghost_snapshots.is_empty() {
-            self.push_background_tail("No snapshot is available to restore.".to_string());
+            self.show_undo_empty_state();
             return;
         }
 
         self.show_undo_snapshot_picker();
+    }
+
+    fn show_undo_snapshots_disabled(&mut self) {
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(reason) = &self.ghost_snapshots_disabled_reason {
+            lines.push(reason.message.clone());
+            if let Some(hint) = &reason.hint {
+                lines.push(hint.clone());
+            }
+        } else {
+            lines.push(
+                "Snapshots are currently disabled. Resolve the Git issue and restart Code to re-enable them.".to_string(),
+            );
+        }
+
+        self.show_undo_status_popup(
+            "Snapshots unavailable",
+            Some("Automatic snapshotting failed, so /undo cannot restore the workspace.".to_string()),
+            lines,
+        );
+    }
+
+    fn show_undo_empty_state(&mut self) {
+        self.show_undo_status_popup(
+            "No snapshots yet",
+            Some("Snapshots appear once Code captures a Git checkpoint.".to_string()),
+            vec![
+                "No snapshot is available to restore.".to_string(),
+                "Run a command that modifies files to create the first snapshot.".to_string(),
+            ],
+        );
+    }
+
+    fn show_undo_status_popup(
+        &mut self,
+        title: &str,
+        subtitle: Option<String>,
+        mut lines: Vec<String>,
+    ) {
+        if lines.is_empty() {
+            lines.push("No snapshot information available.".to_string());
+        }
+
+        let headline = lines.remove(0);
+        let description = if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        };
+
+        let items = vec![SelectionItem {
+            name: headline,
+            description,
+            is_current: true,
+            actions: Vec::new(),
+        }];
+
+        let subtitle_for_view = subtitle.clone();
+        let view = ListSelectionView::new(
+            format!(" {title} "),
+            subtitle_for_view,
+            Some("Esc close".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            1,
+        );
+
+        self.bottom_pane.show_list_selection(
+            title.to_string(),
+            subtitle,
+            Some("Esc close".to_string()),
+            view,
+        );
     }
 
     fn show_undo_snapshot_picker(&mut self) {
@@ -4087,7 +4172,7 @@ impl ChatWidget<'_> {
         }
 
         if items.is_empty() {
-            self.push_background_tail("No snapshot is available to restore.".to_string());
+            self.show_undo_empty_state();
             return;
         }
 
