@@ -28,7 +28,7 @@ use crossterm::event::KeyEventKind;
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 use crossterm::SynchronizedUpdate; // trait for stdout().sync_update
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use ratatui::prelude::Rect;
 use ratatui::text::Line;
@@ -107,6 +107,7 @@ pub(crate) struct App<'a> {
     _transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
+    non_enhanced_pressed_keys: HashSet<KeyCode>,
 
     /// Debug flag for logging LLM requests/responses
     _debug: bool,
@@ -339,6 +340,7 @@ impl App<'_> {
             _deferred_history_lines: Vec::new(),
             _transcript_saved_viewport: None,
             enhanced_keys_supported,
+            non_enhanced_pressed_keys: HashSet::new(),
             _debug: debug,
             show_order_overlay,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
@@ -783,12 +785,24 @@ impl App<'_> {
                 }
                 AppEvent::KeyEvent(mut key_event) => {
                     if self.timing_enabled { self.timing.on_key(); }
-                    // On terminals that do not support keyboard enhancement flags
-                    // (notably some Windows Git Bash/mintty setups), crossterm may
-                    // report only Release events. Normalize such events to Press so
-                    // keys register consistently.
+                    // On consoles without keyboard enhancement support we may receive both
+                    // Press and Release notifications for a single keypress. Track which
+                    // keys were seen as pressed so matching Release events can be dropped.
+                    // If a Release arrives without a prior Press (common on some mintty setups),
+                    // synthesize a Press so typing still works.
                     if !self.enhanced_keys_supported {
-                        key_event = KeyEvent::new(key_event.code, key_event.modifiers);
+                        let key_code = key_event.code;
+                        match key_event.kind {
+                            KeyEventKind::Press | KeyEventKind::Repeat => {
+                                self.non_enhanced_pressed_keys.insert(key_code);
+                            }
+                            KeyEventKind::Release => {
+                                if self.non_enhanced_pressed_keys.remove(&key_code) {
+                                    continue;
+                                }
+                                key_event = KeyEvent::new(key_event.code, key_event.modifiers);
+                            }
+                        }
                     }
                     // Reset double‑Esc timer on any non‑Esc key
                     if !matches!(key_event.code, KeyCode::Esc) {
