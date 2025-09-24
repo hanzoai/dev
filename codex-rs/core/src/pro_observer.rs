@@ -49,6 +49,7 @@ pub(crate) async fn observe_now(sess: Arc<Session>, sub_id: String, reason: &'st
         text_format: None,
         model_override: None,
         model_family_override: None,
+        output_schema: None,
     };
 
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
