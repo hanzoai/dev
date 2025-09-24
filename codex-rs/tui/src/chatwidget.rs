@@ -25,6 +25,7 @@ use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
+use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
 use codex_core::model_family::derive_default_model_family;
 use codex_core::model_family::find_family_for_model;
 use codex_login::AuthManager;
@@ -195,7 +196,6 @@ use codex_core::config::set_validation_tool_enabled;
 use codex_file_search::FileMatch;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::plan_tool::StepStatus;
 use codex_core::config_types::{validation_tool_category, ValidationCategory};
 use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::ValidationGroup;
@@ -6237,6 +6237,283 @@ impl ChatWidget<'_> {
                 self.add_perf_output("usage: /perf on | off | show | reset".to_string());
             }
         }
+        self.request_redraw();
+    }
+
+    pub(crate) fn handle_demo_command(&mut self) {
+        use ratatui::style::Modifier as RtModifier;
+        use ratatui::style::Style as RtStyle;
+        use ratatui::text::Span;
+
+        self.push_background_tail("demo: populating history with sample cells…");
+        enum DemoPatch {
+            Add {
+                path: &'static str,
+                content: &'static str,
+            },
+            Update {
+                path: &'static str,
+                unified_diff: &'static str,
+                original: &'static str,
+                new_content: &'static str,
+            },
+        }
+
+        let scenarios = [
+            (
+                "build automation",
+                "How do I wire up CI, linting, and release automation for this repo?",
+                vec![
+                    ("Context", "scan workspace layout and toolchain."),
+                    ("Next", "surface build + validation commands."),
+                    ("Goal", "summarize a reproducible workflow."),
+                ],
+                vec![
+                    "streaming preview: inspecting package manifests…",
+                    "streaming preview: drafting deployment summary…",
+                    "streaming preview: cross-checking lint targets…",
+                ],
+                "**Here's a demo walkthrough:**\n\n1. Run `./build-fast.sh perf` to compile quickly.\n2. Cache artifacts in `codex-rs/target/perf`.\n3. Finish by sharing `./build-fast.sh run` output.\n\n```bash\n./build-fast.sh perf run\n```",
+                vec![
+                    (vec!["git", "status"], "On branch main\nnothing to commit, working tree clean\n"),
+                    (vec!["rg", "--files"], ""),
+                ],
+                Some(DemoPatch::Add {
+                    path: "src/demo.rs",
+                    content: "fn main() {\n    println!(\"demo\");\n}\n",
+                }),
+                UpdatePlanArgs {
+                    name: Some("Demo Scroll Plan".to_string()),
+                    plan: vec![
+                        PlanItemArg {
+                            step: "Create reproducible builds".to_string(),
+                            status: StepStatus::InProgress,
+                        },
+                        PlanItemArg {
+                            step: "Verify validations".to_string(),
+                            status: StepStatus::Pending,
+                        },
+                        PlanItemArg {
+                            step: "Document follow-up tasks".to_string(),
+                            status: StepStatus::Completed,
+                        },
+                    ],
+                },
+                ("browser_open", "https://example.com", "navigated to example.com"),
+                ReasoningEffort::High,
+                "demo: lint warnings will appear here",
+                "demo: this slot shows error output",
+                Some("diff --git a/src/lib.rs b/src/lib.rs\n@@ -1,3 +1,5 @@\n-pub fn hello() {}\n+pub fn hello() {\n+    println!(\"hello, demo!\");\n+}\n"),
+            ),
+            (
+                "release rehearsal",
+                "What checklist should I follow before tagging a release?",
+                vec![
+                    ("Inventory", "collect outstanding changes and docs."),
+                    ("Verify", "run smoke tests and package audits."),
+                    ("Announce", "draft release notes and rollout plan."),
+                ],
+                vec![
+                    "streaming preview: aggregating changelog entries…",
+                    "streaming preview: validating release artifacts…",
+                    "streaming preview: preparing announcement copy…",
+                ],
+                "**Release rehearsal:**\n\n1. Run `./scripts/create_github_release.sh --dry-run`.\n2. Capture artifact hashes in the notes.\n3. Schedule follow-up validation in automation.\n\n```bash\n./scripts/create_github_release.sh 1.2.3 --dry-run\n```",
+                vec![
+                    (vec!["git", "--no-pager", "diff", "--stat"], " src/lib.rs | 10 ++++++----\n 1 file changed, 6 insertions(+), 4 deletions(-)\n"),
+                    (vec!["ls", "-1"], "Cargo.lock\nREADME.md\nsrc\ntarget\n"),
+                ],
+                Some(DemoPatch::Update {
+                    path: "src/release.rs",
+                    unified_diff: "--- a/src/release.rs\n+++ b/src/release.rs\n@@ -1 +1,3 @@\n-pub fn release() {}\n+pub fn release() {\n+    println!(\"drafting release\");\n+}\n",
+                    original: "pub fn release() {}\n",
+                    new_content: "pub fn release() {\n    println!(\"drafting release\");\n}\n",
+                }),
+                UpdatePlanArgs {
+                    name: Some("Release Gate Plan".to_string()),
+                    plan: vec![
+                        PlanItemArg {
+                            step: "Finalize changelog".to_string(),
+                            status: StepStatus::Completed,
+                        },
+                        PlanItemArg {
+                            step: "Run smoke tests".to_string(),
+                            status: StepStatus::InProgress,
+                        },
+                        PlanItemArg {
+                            step: "Tag release".to_string(),
+                            status: StepStatus::Pending,
+                        },
+                        PlanItemArg {
+                            step: "Notify stakeholders".to_string(),
+                            status: StepStatus::Pending,
+                        },
+                    ],
+                },
+                ("browser_open", "https://example.com/releases", "reviewed release dashboard"),
+                ReasoningEffort::Medium,
+                "demo: release checklist warning",
+                "demo: release checklist error",
+                Some("diff --git a/CHANGELOG.md b/CHANGELOG.md\n@@ -1,3 +1,6 @@\n+## 1.2.3\n+- polish release flow\n+- document automation hooks\n"),
+            ),
+        ];
+
+        for (idx, scenario) in scenarios.iter().enumerate() {
+            let (
+                label,
+                prompt,
+                reasoning_steps,
+                stream_lines,
+                assistant_body,
+                execs,
+                patch_change,
+                plan,
+                tool_call,
+                effort,
+                warning_text,
+                error_text,
+                diff_snippet,
+            ) = scenario;
+
+            self.push_background_tail(format!(
+                "demo: scenario {} — {}",
+                idx + 1,
+                label
+            ));
+
+            self.history_push(history_cell::new_user_prompt((*prompt).to_string()));
+
+            let mut reasoning_lines: Vec<Line<'static>> = reasoning_steps
+                .iter()
+                .map(|(title, body)| {
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{}:", title),
+                            RtStyle::default().add_modifier(RtModifier::BOLD),
+                        ),
+                        Span::raw(format!(" {body}")),
+                    ])
+                })
+                .collect();
+            reasoning_lines.push(
+                Line::from(format!("Scenario summary: {}", label))
+                    .style(RtStyle::default().fg(crate::colors::text_dim())),
+            );
+            let reasoning_cell = history_cell::CollapsibleReasoningCell::new_with_id(
+                reasoning_lines,
+                Some(format!("demo-reasoning-{}", idx)),
+            );
+            reasoning_cell.set_collapsed(false);
+            reasoning_cell.set_in_progress(false);
+            self.history_push(reasoning_cell);
+
+            let streaming_preview = history_cell::new_streaming_content(
+                stream_lines
+                    .iter()
+                    .map(|line| Line::from((*line).to_string()))
+                    .collect(),
+            );
+            self.history_push(streaming_preview);
+
+            let assistant_cell =
+                history_cell::AssistantMarkdownCell::new((*assistant_body).to_string(), &self.config);
+            self.history_push(assistant_cell);
+
+            for (command_tokens, stdout) in execs {
+                let cmd_vec: Vec<String> = command_tokens.iter().map(|s| s.to_string()).collect();
+                let parsed = codex_core::parse_command::parse_command(&cmd_vec);
+                self.history_push(history_cell::new_active_exec_command(
+                    cmd_vec.clone(),
+                    parsed.clone(),
+                ));
+                if !stdout.is_empty() {
+                    let output = history_cell::CommandOutput {
+                        exit_code: 0,
+                        stdout: stdout.to_string(),
+                        stderr: String::new(),
+                    };
+                    self.history_push(history_cell::new_completed_exec_command(
+                        cmd_vec,
+                        parsed,
+                        output,
+                    ));
+                }
+            }
+
+            if let Some(diff) = diff_snippet {
+                self.history_push(history_cell::new_diff_output(diff.to_string()));
+            }
+
+            if let Some(patch) = patch_change {
+                let mut patch_changes = HashMap::new();
+                let message = match patch {
+                    DemoPatch::Add { path, content } => {
+                        patch_changes.insert(
+                            PathBuf::from(path),
+                            codex_core::protocol::FileChange::Add {
+                                content: (*content).to_string(),
+                            },
+                        );
+                        format!("patch: simulated failure while applying {}", path)
+                    }
+                    DemoPatch::Update {
+                        path,
+                        unified_diff,
+                        original,
+                        new_content,
+                    } => {
+                        patch_changes.insert(
+                            PathBuf::from(path),
+                            codex_core::protocol::FileChange::Update {
+                                unified_diff: (*unified_diff).to_string(),
+                                move_path: None,
+                                original_content: (*original).to_string(),
+                                new_content: (*new_content).to_string(),
+                            },
+                        );
+                        format!("patch: simulated failure while applying {}", path)
+                    }
+                };
+                self.history_push(history_cell::new_patch_event(
+                    history_cell::PatchEventType::ApprovalRequest,
+                    patch_changes,
+                ));
+                self.history_push(history_cell::new_patch_apply_failure(message));
+            }
+
+            self.history_push(history_cell::new_plan_update(plan.clone()));
+
+            let (tool_name, url, result) = tool_call;
+            self.history_push(history_cell::new_completed_custom_tool_call(
+                (*tool_name).to_string(),
+                Some((*url).to_string()),
+                Duration::from_millis(420 + (idx as u64 * 150)),
+                true,
+                (*result).to_string(),
+            ));
+
+            self.history_push(history_cell::new_warning_event((*warning_text).to_string()));
+            self.history_push(history_cell::new_error_event((*error_text).to_string()));
+
+            self.history_push(history_cell::new_model_output("gpt-5-codex", *effort));
+            self.history_push(history_cell::new_reasoning_output(effort));
+
+            self.history_push(history_cell::new_status_output(
+                &self.config,
+                &self.total_token_usage,
+                &self.last_token_usage,
+            ));
+
+            self.history_push(history_cell::new_prompts_output());
+        }
+
+        let final_stream = history_cell::new_streaming_content(vec![
+            Line::from("streaming preview: final tokens rendered."),
+            Line::from("streaming preview: viewport ready for scroll testing."),
+        ]);
+        self.history_push(final_stream);
+
+        self.push_background_tail("demo: finished populating sample history.");
         self.request_redraw();
     }
 
