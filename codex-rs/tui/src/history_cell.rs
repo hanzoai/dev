@@ -2975,6 +2975,30 @@ mod tests {
     }
 
     #[test]
+    fn build_preview_lines_preserves_tabbed_columns() {
+        let sample = "AGENTS.md\t\tdocs\t\t\tpackage.json\r\n\
+build-fast.sh\t\tflake.lock\t\tpnpm-lock.yaml\r\n\
+CHANGELOG.md\t\tflake.nix\t\tpnpm-workspace.yaml\r\n\
+cliff.toml\t\tFormula\t\t\tREADME.md\r\n\
+codex-cli\t\thomebrew-tap\t\trelease-notes\r\n\
+codex-rs\t\tLICENSE\t\t\tscripts\r\n\
+config.toml.example\tNOTICE\r\n";
+
+        let lines = build_preview_lines(sample, false);
+        assert!(lines.len() >= 6);
+
+        let first_line: String = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        assert!(first_line.contains("AGENTS.md"));
+        assert!(first_line.contains("docs"));
+        assert!(first_line.contains("package.json"));
+        assert!(first_line.contains("  docs"), "expected spaces between ls columns: {first_line:?}");
+    }
+
+    #[test]
     fn format_inline_python_breaks_semicolons() {
         let command = vec![
             "python".to_string(),

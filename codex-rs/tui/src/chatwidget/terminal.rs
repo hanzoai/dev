@@ -659,3 +659,41 @@ fn tint_stderr_line(line: &mut RtLine<'_>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn append_chunk_preserves_ls_alignment() {
+        let sample = b"AGENTS.md           \x1b[34mcodex-rs\x1b[39;49m\x1b[0m            \x1b[34mFormula\x1b[39;49m\x1b[0m             pnpm-lock.yaml\r\n\
+\x1b[31mbuild-fast.sh\x1b[39;49m\x1b[0m       config.toml.example \x1b[34mhomebrew-tap\x1b[39;49m\x1b[0m        pnpm-workspace.yaml\r\n\
+CHANGELOG.md        \x1b[34mdocs\x1b[39;49m\x1b[0m                LICENSE             README.md\r\n\
+cliff.toml          flake.lock          NOTICE              \x1b[34mrelease-notes\x1b[39;49m\x1b[0m\r\n\
+\x1b[34mcodex-cli\x1b[39;49m\x1b[0m           flake.nix           package.json        \x1b[34mscripts\x1b[39;49m\x1b[0m\r\n";
+
+        let mut overlay = TerminalOverlay::new(42, "test".into(), "ls".into(), false);
+        overlay.append_chunk(sample, false);
+
+        assert!(!overlay.terminal_plain_lines.is_empty());
+        let first = &overlay.terminal_plain_lines[0];
+        assert!(first.contains("AGENTS.md"));
+        assert!(first.contains("codex-rs"));
+        let idx_a = first.find("AGENTS.md").unwrap();
+        let idx_c = first.find("codex-rs").unwrap();
+        assert!(idx_c > idx_a);
+        let between = &first[idx_a + "AGENTS.md".len()..idx_c];
+        assert!(between.chars().all(|ch| ch == ' '), "expected padding between columns, got {between:?}");
+
+        // Ensure later rows keep column spacing as well
+        let last = overlay
+            .terminal_plain_lines
+            .iter()
+            .find(|line| line.contains("package.json"))
+            .expect("missing package.json row");
+        let idx_pkg = last.find("package.json").unwrap();
+        let idx_scripts = last.find("scripts").unwrap();
+        let between_tail = &last[idx_pkg + "package.json".len()..idx_scripts];
+        assert!(between_tail.chars().all(|ch| ch == ' '), "expected padding between package.json and scripts, got {between_tail:?}");
+    }
+}
