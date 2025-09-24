@@ -4,11 +4,13 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_channel::Receiver;
@@ -16,11 +18,14 @@ use async_channel::Sender;
 use base64::Engine;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::MaybeApplyPatchVerified;
-use codex_apply_patch::maybe_parse_apply_patch_verified;
+use codex_apply_patch::StdFileSystem;
+use codex_browser::BrowserConfig as CodexBrowserConfig;
+use codex_browser::BrowserManager;
+use crate::config_types::ClientTools;
 // unused: AuthManager
 // unused: ConversationHistoryResponseEvent
 use codex_protocol::protocol::TurnAbortReason;
-// unused: TurnAbortedEvent
+use codex_protocol::protocol::TurnAbortedEvent;
 use futures::prelude::*;
 use mcp_types::CallToolResult;
 use serde::Serialize;
@@ -35,12 +40,99 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 use crate::CodexAuth;
+use crate::acp::AcpFileSystem;
+use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
 use codex_protocol::models::WebSearchAction;
+use codex_protocol::protocol::RolloutItem;
+use shlex::split as shlex_split;
+use shlex::try_join as shlex_try_join;
+
+pub mod compact;
+use self::compact::build_compacted_history;
+use self::compact::collect_user_messages;
 
 /// Initial submission ID for session configuration
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
+const HOOK_OUTPUT_LIMIT: usize = 2048;
+const PENDING_ONLY_SENTINEL: &str = "__codex_pending_only__";
+
+#[derive(Clone, Default)]
+struct ConfirmGuardRuntime {
+    patterns: Vec<ConfirmGuardPatternRuntime>,
+}
+
+#[derive(Clone)]
+struct ConfirmGuardPatternRuntime {
+    regex: regex_lite::Regex,
+    message: Option<String>,
+    raw: String,
+}
+
+impl ConfirmGuardRuntime {
+    fn from_config(config: &crate::config_types::ConfirmGuardConfig) -> Self {
+        let mut patterns = Vec::new();
+        for pattern in &config.patterns {
+            match regex_lite::Regex::new(&pattern.regex) {
+                Ok(regex) => patterns.push(ConfirmGuardPatternRuntime {
+                    regex,
+                    message: pattern.message.clone(),
+                    raw: pattern.regex.clone(),
+                }),
+                Err(err) => {
+                    tracing::warn!("Skipping confirm guard pattern `{}`: {err}", pattern.regex);
+                }
+            }
+        }
+        Self { patterns }
+    }
+
+    fn matched_pattern(&self, input: &str) -> Option<&ConfirmGuardPatternRuntime> {
+        self.patterns.iter().find(|pat| pat.regex.is_match(input))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
+    }
+}
+
+impl ConfirmGuardPatternRuntime {
+    fn guidance(&self, original_label: &str, original_value: &str, suggested: &str) -> String {
+        let header = self
+            .message
+            .clone()
+            .unwrap_or_else(|| {
+                format!(
+                    "Blocked command matching confirm guard pattern `{}`. Resend with 'confirm:' if you intend to proceed.",
+                    self.raw
+                )
+            });
+        format!("{header}\n\n{original_label}: {original_value}\nresend_exact_argv: {suggested}")
+    }
+}
+
+trait MutexExt<T> {
+    fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> MutexExt<T> for Mutex<T> {
+    fn lock_unchecked(&self) -> std::sync::MutexGuard<'_, T> {
+        #[expect(clippy::expect_used)]
+        self.lock().expect("poisoned lock")
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TurnContext {
+    pub(crate) client: ModelClient,
+    pub(crate) cwd: PathBuf,
+    pub(crate) base_instructions: Option<String>,
+    pub(crate) user_instructions: Option<String>,
+    pub(crate) approval_policy: AskForApproval,
+    pub(crate) sandbox_policy: SandboxPolicy,
+}
 
 /// Gather ephemeral, per-turn context that should not be persisted to history.
 /// Combines environment info and (when enabled) a live browser snapshot and status.
@@ -161,6 +253,25 @@ fn get_git_branch(cwd: &std::path::Path) -> Option<String> {
         }
     }
     None
+}
+
+fn maybe_update_from_model_info<T: Copy + PartialEq>(
+    field: &mut Option<T>,
+    old_default: Option<T>,
+    new_default: Option<T>,
+) {
+    if field.is_none() {
+        if let Some(new_val) = new_default {
+            *field = Some(new_val);
+        }
+        return;
+    }
+
+    if let (Some(current), Some(old_val)) = (*field, old_default) {
+        if current == old_val {
+            *field = new_default;
+        }
+    }
 }
 
 async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
@@ -342,17 +453,16 @@ use crate::agent_tool::GetAgentResultParams;
 use crate::agent_tool::ListAgentsParams;
 use crate::agent_tool::RunAgentParams;
 use crate::agent_tool::WaitForAgentParams;
-use crate::apply_patch::ApplyPatchExec;
-use crate::apply_patch::CODEX_APPLY_PATCH_ARG1;
-use crate::apply_patch::InternalApplyPatchInvocation;
 use crate::apply_patch::convert_apply_patch_to_protocol;
 use crate::apply_patch::get_writable_roots;
-use crate::apply_patch::{self};
+use crate::apply_patch::{self, ApplyPatchResult};
 use crate::client::ModelClient;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::environment_context::EnvironmentContext;
-use crate::config::Config;
+use crate::user_instructions::UserInstructions;
+use crate::config::{persist_model_selection, Config};
+use crate::config_types::ProjectHookEvent;
 use crate::config_types::ShellEnvironmentPolicy;
 use crate::conversation_history::ConversationHistory;
 use crate::error::CodexErr;
@@ -368,6 +478,7 @@ use crate::exec::process_exec_tool_call;
 use crate::exec_env::create_env;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::mcp_tool_call::handle_mcp_tool_call;
+use crate::model_family::{derive_default_model_family, find_family_for_model};
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::LocalShellAction;
@@ -376,11 +487,14 @@ use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ShellToolCallParams;
+use crate::openai_model_info::get_model_info;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
+use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, DryRunGuardState};
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
 use crate::project_doc::get_user_instructions;
+use crate::project_features::{ProjectCommand, ProjectHook, ProjectHooks};
 use crate::protocol::AgentMessageDeltaEvent;
 use crate::protocol::AgentMessageEvent;
 use crate::protocol::AgentReasoningDeltaEvent;
@@ -404,11 +518,17 @@ use crate::protocol::InputItem;
 use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
+use crate::protocol::RecordedEvent;
+use crate::protocol::RateLimitSnapshotEvent;
+use crate::protocol::TokenCountEvent;
+use crate::protocol::TokenUsageInfo;
 use crate::protocol::ReviewDecision;
 use crate::protocol::SandboxPolicy;
 use crate::protocol::SessionConfiguredEvent;
 use crate::protocol::Submission;
 use crate::protocol::TaskCompleteEvent;
+use std::sync::OnceLock;
+use tokio::sync::Notify;
 use crate::protocol::TurnDiffEvent;
 use crate::rollout::RolloutRecorder;
 use crate::safety::SafetyCheck;
@@ -418,6 +538,7 @@ use crate::shell;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
 use crate::util::backoff;
+use crate::rollout::recorder::SessionStateSnapshot;
 use serde_json::Value;
 use crate::exec_command::ExecSessionManager;
 
@@ -428,6 +549,12 @@ pub struct Codex {
     tx_sub: Sender<Submission>,
     rx_event: Receiver<Event>,
 }
+
+// Allow internal components (like background exec completions) to trigger a new
+// turn without fabricating a visible user message. We enqueue an empty
+// UserInput; the model will only see queued developer/system items.
+static TX_SUB_GLOBAL: OnceLock<Sender<Submission>> = OnceLock::new();
+static ANY_BG_NOTIFY: OnceLock<std::sync::Arc<Notify>> = OnceLock::new();
 
 /// Wrapper returned by [`Codex::spawn`] containing the spawned [`Codex`],
 /// the submission id for the initial `ConfigureSession` request and the
@@ -479,6 +606,9 @@ impl Codex {
             tx_sub,
             rx_event,
         };
+        // Make a clone of tx_sub available for internal auto-turn triggers.
+        let _ = TX_SUB_GLOBAL.set(codex.tx_sub.clone());
+        let _ = ANY_BG_NOTIFY.set(std::sync::Arc::new(Notify::new()));
         let init_id = codex.submit(configure_session).await?;
 
         Ok(CodexSpawnOk {
@@ -519,13 +649,93 @@ impl Codex {
     }
 }
 
-/// Mutable state of the agent
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ApprovedCommandPattern {
+    argv: Vec<String>,
+    kind: ApprovedCommandMatchKind,
+    semantic_prefix: Option<Vec<String>>,
+}
+
+impl ApprovedCommandPattern {
+    pub(crate) fn new(
+        argv: Vec<String>,
+        kind: ApprovedCommandMatchKind,
+        semantic_prefix: Option<Vec<String>>,
+    ) -> Self {
+        let semantic_prefix = if matches!(kind, ApprovedCommandMatchKind::Prefix) {
+            semantic_prefix.or_else(|| Some(argv.clone()))
+        } else {
+            None
+        };
+        Self {
+            argv,
+            kind,
+            semantic_prefix,
+        }
+    }
+
+    pub(crate) fn matches(&self, command: &[String]) -> bool {
+        match self.kind {
+            ApprovedCommandMatchKind::Exact => command == self.argv.as_slice(),
+            ApprovedCommandMatchKind::Prefix => {
+                if command.starts_with(&self.argv) {
+                    return true;
+                }
+                if let (Some(pattern), Some(candidate)) = (
+                    self.semantic_prefix.as_ref(),
+                    semantic_tokens(command),
+                ) {
+                    return candidate.starts_with(pattern);
+                }
+                false
+            }
+        }
+    }
+
+    pub fn argv(&self) -> &[String] { &self.argv }
+
+    pub fn kind(&self) -> ApprovedCommandMatchKind { self.kind }
+}
+
+fn semantic_tokens(command: &[String]) -> Option<Vec<String>> {
+    if command.is_empty() {
+        return None;
+    }
+    if let Some(tokens) = shell_script_tokens(command) {
+        return Some(tokens);
+    }
+    Some(command.to_vec())
+}
+
+fn shell_script_tokens(command: &[String]) -> Option<Vec<String>> {
+    if command.len() == 3 && is_shell_wrapper(&command[0], &command[1]) {
+        if let Some(tokens) = shlex_split(&command[2]) {
+            return Some(tokens);
+        }
+        return Some(vec![command[2].clone()]);
+    }
+    None
+}
+
+fn is_shell_wrapper(shell: &str, flag: &str) -> bool {
+    let file_name = Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    matches!(
+        file_name.as_str(),
+        "bash" | "sh" | "zsh" | "ksh" | "fish" | "dash"
+    ) && matches!(flag, "-lc" | "-c")
+}
+
 #[derive(Default)]
 struct State {
-    approved_commands: HashSet<Vec<String>>,
-    current_agent: Option<AgentAgent>,
+    approved_commands: HashSet<ApprovedCommandPattern>,
+    current_task: Option<AgentTask>,
     pending_approvals: HashMap<String, oneshot::Sender<ReviewDecision>>,
     pending_input: Vec<ResponseInputItem>,
+    pending_user_input: Vec<QueuedUserInput>,
     history: ConversationHistory,
     /// Tracks which completed agents (by id) have already been returned to the
     /// model for a given batch when using `agent_wait` without `return_all`.
@@ -538,6 +748,19 @@ struct State {
     event_seq_by_sub_id: HashMap<String, u64>,
     /// 1-based ordinal of the current HTTP request attempt in this session.
     request_ordinal: u64,
+    dry_run_guard: DryRunGuardState,
+    /// Background execs by call_id
+    background_execs: std::collections::HashMap<String, BackgroundExecState>,
+    next_internal_sub_id: u64,
+    token_usage_info: Option<TokenUsageInfo>,
+    latest_rate_limits: Option<RateLimitSnapshotEvent>,
+}
+
+#[derive(Clone)]
+pub(crate) struct QueuedUserInput {
+    submission_id: String,
+    response_item: ResponseInputItem,
+    core_items: Vec<InputItem>,
 }
 
 /// Buffers partial turn progress produced during a single HTTP streaming attempt.
@@ -555,10 +778,20 @@ struct TurnScratchpad {
     partial_reasoning_summary: String,
 }
 
+#[derive(Debug)]
+struct BackgroundExecState {
+    notify: std::sync::Arc<tokio::sync::Notify>,
+    result_cell: std::sync::Arc<std::sync::Mutex<Option<ExecToolCallOutput>>>,
+    tail_buf: Option<std::sync::Arc<std::sync::Mutex<Vec<u8>>>>,
+    cmd_display: String,
+    suppress_event: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
 /// Context for an initialized model agent
 ///
 /// A session has at most 1 running agent at a time, and can be interrupted by user input.
 pub(crate) struct Session {
+    id: Uuid,
     client: ModelClient,
     tx_event: Sender<Event>,
 
@@ -577,6 +810,7 @@ pub(crate) struct Session {
 
     /// Manager for external MCP servers/tools.
     mcp_connection_manager: McpConnectionManager,
+    client_tools: Option<ClientTools>,
     #[allow(dead_code)]
     session_manager: ExecSessionManager,
 
@@ -601,6 +835,31 @@ pub(crate) struct Session {
     last_system_status: Mutex<Option<String>>,
     /// Track the last screenshot path and hash to detect changes
     last_screenshot_info: Mutex<Option<(PathBuf, Vec<u8>, Vec<u8>)>>, // (path, phash, dhash)
+    confirm_guard: ConfirmGuardRuntime,
+    project_hooks: ProjectHooks,
+    project_commands: Vec<ProjectCommand>,
+    hook_guard: AtomicBool,
+    github: Arc<RwLock<crate::config_types::GithubConfig>>,
+    validation: Arc<RwLock<crate::config_types::ValidationConfig>>,
+}
+
+struct HookGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> HookGuard<'a> {
+    fn try_acquire(flag: &'a AtomicBool) -> Option<Self> {
+        flag
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for HookGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -639,10 +898,73 @@ impl Session {
         &self.sandbox_policy
     }
 
+    pub(crate) fn session_uuid(&self) -> Uuid {
+        self.id
+    }
+
+    pub(crate) fn get_github_config(&self) -> Arc<RwLock<crate::config_types::GithubConfig>> {
+        Arc::clone(&self.github)
+    }
+
+    pub(crate) fn validation_config(&self) -> Arc<RwLock<crate::config_types::ValidationConfig>> {
+        Arc::clone(&self.validation)
+    }
+
+    pub(crate) fn client_tools(&self) -> Option<&ClientTools> {
+        self.client_tools.as_ref()
+    }
+
+    pub(crate) fn mcp_connection_manager(&self) -> &McpConnectionManager {
+        &self.mcp_connection_manager
+    }
+
+    pub(crate) fn update_validation_patch_harness(&self, enabled: bool) {
+        if let Ok(mut cfg) = self.validation.write() {
+            cfg.patch_harness = enabled;
+        }
+    }
+
+    pub(crate) fn update_validation_tool(&self, name: &str, enable: bool) {
+        if name == "actionlint" {
+            if let Ok(mut github) = self.github.write() {
+                github.actionlint_on_patch = enable;
+            }
+            return;
+        }
+
+        if let Ok(mut cfg) = self.validation.write() {
+            let tools = &mut cfg.tools;
+            match name {
+                "shellcheck" => tools.shellcheck = Some(enable),
+                "markdownlint" => tools.markdownlint = Some(enable),
+                "hadolint" => tools.hadolint = Some(enable),
+                "yamllint" => tools.yamllint = Some(enable),
+                "cargo-check" => tools.cargo_check = Some(enable),
+                "shfmt" => tools.shfmt = Some(enable),
+                "prettier" => tools.prettier = Some(enable),
+                _ => {}
+            }
+        }
+    }
+
     fn resolve_path(&self, path: Option<String>) -> PathBuf {
         path.as_ref()
             .map(PathBuf::from)
             .map_or_else(|| self.cwd.clone(), |p| self.cwd.join(p))
+    }
+
+    pub(crate) async fn maybe_parse_apply_patch_verified(
+        &self,
+        argv: &[String],
+        cwd: &Path,
+    ) -> MaybeApplyPatchVerified {
+        if let Some(client_tools) = self.client_tools.as_ref() {
+            let fs = AcpFileSystem::new(self.id, client_tools, &self.mcp_connection_manager);
+            codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd, &fs).await
+        } else {
+            let fs = StdFileSystem;
+            codex_apply_patch::maybe_parse_apply_patch_verified(argv, cwd, &fs).await
+        }
     }
 
     // ────────────────────────────
@@ -718,21 +1040,56 @@ impl Session {
 }
 
 impl Session {
-    pub fn set_agent(&self, agent: AgentAgent) {
+    pub fn set_task(&self, agent: AgentTask) {
         let mut state = self.state.lock().unwrap();
-        if let Some(current_agent) = state.current_agent.take() {
-            current_agent.abort(TurnAbortReason::Replaced);
+        if let Some(current_task) = state.current_task.take() {
+            current_task.abort(TurnAbortReason::Replaced);
         }
-        state.current_agent = Some(agent);
+        state.current_task = Some(agent);
     }
 
-    pub fn remove_agent(&self, sub_id: &str) {
+    pub fn remove_task(&self, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
-        if let Some(agent) = &state.current_agent {
+        if let Some(agent) = &state.current_task {
             if agent.sub_id == sub_id {
-                state.current_agent.take();
+                state.current_task.take();
             }
         }
+    }
+
+    pub fn has_running_task(&self) -> bool {
+        self.state.lock().unwrap().current_task.is_some()
+    }
+
+    pub fn queue_user_input(&self, queued: QueuedUserInput) {
+        let mut state = self.state.lock().unwrap();
+        state.pending_user_input.push(queued);
+    }
+
+    pub fn pop_next_queued_user_input(&self) -> Option<QueuedUserInput> {
+        let mut state = self.state.lock().unwrap();
+        if state.pending_user_input.is_empty() {
+            None
+        } else {
+            Some(state.pending_user_input.remove(0))
+        }
+    }
+
+    /// Enqueue a response item that should be surfaced to the model at the start of the
+    /// next turn. Returns `true` if no agent is currently running and a new turn should be
+    /// scheduled immediately.
+    pub fn enqueue_out_of_turn_item(&self, item: ResponseInputItem) -> bool {
+        let mut state = self.state.lock().unwrap();
+        let should_start_turn = state.current_task.is_none();
+        state.pending_input.push(item);
+        should_start_turn
+    }
+
+    pub(crate) fn next_internal_sub_id(&self) -> String {
+        let mut state = self.state.lock().unwrap();
+        let id = state.next_internal_sub_id;
+        state.next_internal_sub_id = state.next_internal_sub_id.saturating_add(1);
+        format!("auto-compact-{id}")
     }
 
     /// Sends the given event to the client and swallows the send error, if
@@ -743,8 +1100,39 @@ impl Session {
         }
     }
 
+    /// Persist an event into the rollout log if appropriate.
+    fn persist_event(&self, event: &Event) {
+        if !crate::rollout::policy::should_persist_event_msg(&event.msg) {
+            return;
+        }
+        let Some(msg) = crate::protocol::event_msg_to_protocol(&event.msg) else {
+            return;
+        };
+        let recorder = {
+            let guard = self.rollout.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+        if let Some(rec) = recorder {
+            let order = event
+                .order
+                .as_ref()
+                .map(crate::protocol::order_meta_to_protocol);
+            let protocol_event = codex_protocol::protocol::RecordedEvent {
+                id: event.id.clone(),
+                event_seq: event.event_seq,
+                order,
+                msg,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = rec.record_events(&[protocol_event]).await {
+                    warn!("failed to persist rollout event: {e}");
+                }
+            });
+        }
+    }
+
     /// Create a stamped Event with a per-turn sequence number.
-    fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+    fn stamp_event(&self, sub_id: &str, msg: EventMsg) -> Event {
         let mut state = self.state.lock().unwrap();
         let seq = match msg {
             EventMsg::TaskStarted => {
@@ -767,7 +1155,18 @@ impl Session {
                 *e
             }
         };
-        Event { id: sub_id.to_string(), event_seq: seq, msg, order: None }
+        Event {
+            id: sub_id.to_string(),
+            event_seq: seq,
+            msg,
+            order: None,
+        }
+    }
+
+    pub(crate) fn make_event(&self, sub_id: &str, msg: EventMsg) -> Event {
+        let event = self.stamp_event(sub_id, msg);
+        self.persist_event(&event);
+        event
     }
 
     /// Same as make_event but allows supplying a provider sequence_number
@@ -776,10 +1175,9 @@ impl Session {
     /// and local to our runtime. Provider ordering is carried via
     /// `OrderMeta` when applicable.
     fn make_event_with_hint(&self, sub_id: &str, msg: EventMsg, _seq_hint: Option<u64>) -> Event {
-        // Preserve the monotonic invariant of event_seq by delegating to make_event.
-        // Any ordering hints from the provider should be conveyed through
-        // OrderMeta (see make_event_with_order) rather than event_seq.
-        self.make_event(sub_id, msg)
+        let event = self.stamp_event(sub_id, msg);
+        self.persist_event(&event);
+        event
     }
 
     fn make_event_with_order(
@@ -787,10 +1185,11 @@ impl Session {
         sub_id: &str,
         msg: EventMsg,
         order: crate::protocol::OrderMeta,
-        seq_hint: Option<u64>,
+        _seq_hint: Option<u64>,
     ) -> Event {
-        let mut ev = self.make_event_with_hint(sub_id, msg, seq_hint);
+        let mut ev = self.stamp_event(sub_id, msg);
         ev.order = Some(order);
+        self.persist_event(&ev);
         ev
     }
 
@@ -805,6 +1204,17 @@ impl Session {
     fn current_request_ordinal(&self) -> u64 {
         let state = self.state.lock().unwrap();
         state.request_ordinal
+    }
+
+    fn make_turn_context(&self) -> Arc<TurnContext> {
+        Arc::new(TurnContext {
+            client: self.client.clone(),
+            cwd: self.cwd.clone(),
+            base_instructions: self.base_instructions.clone(),
+            user_instructions: self.user_instructions.clone(),
+            approval_policy: self.approval_policy,
+            sandbox_policy: self.sandbox_policy.clone(),
+        })
     }
 
     pub async fn request_command_approval(
@@ -873,9 +1283,9 @@ impl Session {
         }
     }
 
-    pub fn add_approved_command(&self, cmd: Vec<String>) {
+    pub fn add_approved_command(&self, pattern: ApprovedCommandPattern) {
         let mut state = self.state.lock().unwrap();
-        state.approved_commands.insert(cmd);
+        state.approved_commands.insert(pattern);
     }
 
     /// Records items to both the rollout and the chat completions/ZDR
@@ -1013,7 +1423,7 @@ impl Session {
     }
 
     async fn record_state_snapshot(&self, items: &[ResponseItem]) {
-        let snapshot = { crate::rollout::SessionStateSnapshot {} };
+        let snapshot = { SessionStateSnapshot {} };
 
         let recorder = {
             let guard = self.rollout.lock().unwrap();
@@ -1024,6 +1434,18 @@ impl Session {
             if let Err(e) = rec.record_state(snapshot).await {
                 error!("failed to record rollout state: {e:#}");
             }
+            if let Err(e) = rec.record_response_items(items).await {
+                error!("failed to record rollout items: {e:#}");
+            }
+        }
+    }
+
+    pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
+        let recorder = {
+            let guard = self.rollout.lock().unwrap();
+            guard.as_ref().cloned()
+        };
+        if let Some(rec) = recorder {
             if let Err(e) = rec.record_items(items).await {
                 error!("failed to record rollout items: {e:#}");
             }
@@ -1087,6 +1509,7 @@ impl Session {
             aggregated_output: _,
             duration,
             exit_code,
+            timed_out: _,
         } = output;
         // Because stdout and stderr could each be up to 100 KiB, we send
         // truncated versions.
@@ -1139,25 +1562,73 @@ impl Session {
         output_index: Option<u32>,
         attempt_req: u64,
     ) -> crate::error::Result<ExecToolCallOutput> {
+        self
+            .run_exec_with_events_inner(
+                turn_diff_tracker,
+                begin_ctx,
+                exec_args,
+                seq_hint,
+                output_index,
+                attempt_req,
+                true,
+            )
+            .await
+    }
+
+    async fn run_exec_with_events_inner<'a>(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        begin_ctx: ExecCommandContext,
+        exec_args: ExecInvokeArgs<'a>,
+        seq_hint: Option<u64>,
+        output_index: Option<u32>,
+        attempt_req: u64,
+        enable_hooks: bool,
+    ) -> crate::error::Result<ExecToolCallOutput> {
         let is_apply_patch = begin_ctx.apply_patch.is_some();
         let sub_id = begin_ctx.sub_id.clone();
         let call_id = begin_ctx.call_id.clone();
 
+        let ExecInvokeArgs { params, sandbox_type, sandbox_policy, sandbox_cwd, codex_linux_sandbox_exe, stdout_stream } = exec_args;
+        let tracking_command = params.command.clone();
+        let dry_run_analysis = analyze_command(&tracking_command);
+        let params = maybe_run_with_user_profile(params, self);
+        let params_for_hooks = if enable_hooks {
+            Some(params.clone())
+        } else {
+            None
+        };
+
+        if enable_hooks {
+            if let Some(params_ref) = params_for_hooks.as_ref() {
+                let before_event = if is_apply_patch {
+                    ProjectHookEvent::FileBeforeWrite
+                } else {
+                    ProjectHookEvent::ToolBefore
+                };
+                self
+                    .run_hooks_for_exec_event(
+                        turn_diff_tracker,
+                        before_event,
+                        &begin_ctx,
+                        params_ref,
+                        None,
+                        attempt_req,
+                    )
+                    .await;
+            }
+        }
+
         self.on_exec_command_begin(turn_diff_tracker, begin_ctx.clone(), seq_hint, output_index, attempt_req)
             .await;
 
-            let result = process_exec_tool_call(
-                exec_args.params,
-                exec_args.sandbox_type,
-                exec_args.sandbox_policy,
-                exec_args.codex_linux_sandbox_exe,
-                exec_args.stdout_stream,
-            )
-            .await;
+        let result = process_exec_tool_call(params, sandbox_type, sandbox_policy, sandbox_cwd, codex_linux_sandbox_exe, stdout_stream)
+        .await;
 
         let output_stderr;
         let borrowed: &ExecToolCallOutput = match &result {
             Ok(output) => output,
+            Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => output,
             Err(e) => {
                 output_stderr = ExecToolCallOutput {
                     exit_code: -1,
@@ -1165,6 +1636,7 @@ impl Session {
                     stderr: StreamOutput::new(get_error_message_ui(e)),
                     aggregated_output: StreamOutput::new(get_error_message_ui(e)),
                     duration: Duration::default(),
+                    timed_out: false,
                 };
                 &output_stderr
             }
@@ -1181,13 +1653,38 @@ impl Session {
         )
         .await;
 
+        if enable_hooks {
+            if let Some(params_ref) = params_for_hooks.as_ref() {
+                let after_event = if is_apply_patch {
+                    ProjectHookEvent::FileAfterWrite
+                } else {
+                    ProjectHookEvent::ToolAfter
+                };
+                self
+                    .run_hooks_for_exec_event(
+                        turn_diff_tracker,
+                        after_event,
+                        &begin_ctx,
+                        params_ref,
+                        Some(borrowed),
+                        attempt_req,
+                    )
+                    .await;
+            }
+        }
+
+        if let Some(analysis) = dry_run_analysis.as_ref() {
+            let mut state = self.state.lock().unwrap();
+            state.dry_run_guard.note_execution(analysis);
+        }
+
         result
     }
 
     /// Helper that emits a BackgroundEvent with the given message. This keeps
     /// the call‑sites terse so adding more diagnostics does not clutter the
     /// core agent logic.
-    async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
+    pub(crate) async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
         let event = self.make_event(
             sub_id,
             EventMsg::BackgroundEvent(BackgroundEventEvent { message: message.into() }),
@@ -1201,6 +1698,253 @@ impl Session {
             EventMsg::Error(ErrorEvent { message: message.into() }),
         );
         let _ = self.tx_event.send(event).await;
+    }
+
+    fn resolve_internal_sandbox(&self, with_escalated_permissions: bool) -> SandboxType {
+        match assess_safety_for_untrusted_command(
+            self.approval_policy,
+            &self.sandbox_policy,
+            with_escalated_permissions,
+        ) {
+            SafetyCheck::AutoApprove { sandbox_type } => sandbox_type,
+            SafetyCheck::AskUser | SafetyCheck::Reject { .. } => {
+                crate::safety::get_platform_sandbox().unwrap_or(SandboxType::None)
+            }
+        }
+    }
+
+    async fn run_hooks_for_exec_event(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        event: ProjectHookEvent,
+        exec_ctx: &ExecCommandContext,
+        params: &ExecParams,
+        output: Option<&ExecToolCallOutput>,
+        attempt_req: u64,
+    ) {
+        if self.project_hooks.is_empty() {
+            return;
+        }
+        let hooks: Vec<ProjectHook> = self.project_hooks.hooks_for(event).cloned().collect();
+        if hooks.is_empty() {
+            return;
+        }
+        let Some(_guard) = HookGuard::try_acquire(&self.hook_guard) else {
+            return;
+        };
+        let payload = build_exec_hook_payload(event, exec_ctx, params, output);
+        for (idx, hook) in hooks.into_iter().enumerate() {
+            self
+                .run_hook_command(turn_diff_tracker, &hook, event, &payload, Some(exec_ctx), attempt_req, idx)
+                .await;
+        }
+    }
+
+    async fn run_session_hooks(&self, event: ProjectHookEvent) {
+        if self.project_hooks.is_empty() {
+            return;
+        }
+        let hooks: Vec<ProjectHook> = self.project_hooks.hooks_for(event).cloned().collect();
+        if hooks.is_empty() {
+            return;
+        }
+        let Some(_guard) = HookGuard::try_acquire(&self.hook_guard) else {
+            return;
+        };
+        let payload = self.build_session_payload(event);
+        let mut tracker = TurnDiffTracker::new();
+        let attempt_req = self.current_request_ordinal();
+        for (idx, hook) in hooks.into_iter().enumerate() {
+            self
+                .run_hook_command(&mut tracker, &hook, event, &payload, None, attempt_req, idx)
+                .await;
+        }
+    }
+
+    fn build_session_payload(&self, event: ProjectHookEvent) -> Value {
+        match event {
+            ProjectHookEvent::SessionStart => json!({
+                "event": event.as_str(),
+                "cwd": self.cwd.to_string_lossy(),
+                "sandbox_policy": format!("{}", self.sandbox_policy),
+                "approval_policy": format!("{}", self.approval_policy),
+            }),
+            ProjectHookEvent::SessionEnd => json!({
+                "event": event.as_str(),
+                "cwd": self.cwd.to_string_lossy(),
+                "sandbox_policy": format!("{}", self.sandbox_policy),
+                "approval_policy": format!("{}", self.approval_policy),
+            }),
+            _ => json!({ "event": event.as_str() }),
+        }
+    }
+
+    async fn run_hook_command(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        hook: &ProjectHook,
+        event: ProjectHookEvent,
+        payload: &Value,
+        base_ctx: Option<&ExecCommandContext>,
+        attempt_req: u64,
+        index: usize,
+    ) {
+        let sub_id = base_ctx
+            .map(|ctx| ctx.sub_id.clone())
+            .unwrap_or_else(|| INITIAL_SUBMIT_ID.to_string());
+        let base_slug = base_ctx
+            .map(|ctx| sanitize_identifier(&ctx.call_id))
+            .unwrap_or_else(|| event.slug().to_string());
+        let call_id = format!("{base_slug}_hook_{}_{}", event.slug(), index + 1);
+
+        let mut env = hook.env.clone();
+        env.entry("CODE_HOOK_EVENT".to_string())
+            .or_insert_with(|| event.as_str().to_string());
+        env.entry("CODE_HOOK_TRIGGER".to_string())
+            .or_insert_with(|| event.slug().to_string());
+        env.insert("CODE_HOOK_CALL_ID".to_string(), call_id.clone());
+        env.insert("CODE_HOOK_SUB_ID".to_string(), sub_id.clone());
+        env.insert("CODE_HOOK_INDEX".to_string(), (index + 1).to_string());
+        env.insert("CODE_HOOK_PAYLOAD".to_string(), payload.to_string());
+        env.entry("CODE_SESSION_CWD".to_string())
+            .or_insert_with(|| self.cwd.to_string_lossy().to_string());
+        if let Some(name) = &hook.name {
+            env.entry("CODE_HOOK_NAME".to_string())
+                .or_insert_with(|| name.clone());
+        }
+        if let Some(ctx) = base_ctx {
+            env.entry("CODE_HOOK_SOURCE_CALL_ID".to_string())
+                .or_insert_with(|| ctx.call_id.clone());
+        }
+
+        let exec_params = ExecParams {
+            command: hook.command.clone(),
+            cwd: hook.resolved_cwd(self.get_cwd()),
+            timeout_ms: hook.timeout_ms,
+            env,
+            with_escalated_permissions: Some(false),
+            justification: None,
+        };
+
+        let exec_ctx = ExecCommandContext {
+            sub_id: sub_id.clone(),
+            call_id: call_id.clone(),
+            command_for_display: exec_params.command.clone(),
+            cwd: exec_params.cwd.clone(),
+            apply_patch: None,
+        };
+
+        let sandbox_type = self.resolve_internal_sandbox(false);
+        let exec_args = ExecInvokeArgs {
+            params: exec_params,
+            sandbox_type,
+            sandbox_policy: &self.sandbox_policy,
+            sandbox_cwd: self.get_cwd(),
+            codex_linux_sandbox_exe: &self.codex_linux_sandbox_exe,
+            stdout_stream: None,
+        };
+
+        if let Err(err) = Box::pin(self.run_exec_with_events_inner(
+            turn_diff_tracker,
+            exec_ctx,
+            exec_args,
+            None,
+            None,
+            attempt_req,
+            false,
+        ))
+        .await
+        {
+            let hook_label = hook
+                .name
+                .as_deref()
+                .unwrap_or_else(|| hook.command.first().map(String::as_str).unwrap_or("hook"));
+            self
+                .notify_background_event(
+                    &sub_id,
+                    format!("Hook `{}` failed: {}", hook_label, get_error_message_ui(&err)),
+                )
+                .await;
+        }
+    }
+
+    fn find_project_command(&self, candidate: &str) -> Option<ProjectCommand> {
+        self.project_commands
+            .iter()
+            .find(|cmd| cmd.matches(candidate))
+            .cloned()
+    }
+
+    async fn run_project_command(
+        &self,
+        turn_diff_tracker: &mut TurnDiffTracker,
+        sub_id: &str,
+        name: &str,
+        attempt_req: u64,
+    ) {
+        let Some(command) = self.find_project_command(name) else {
+            self
+                .notify_background_event(
+                    sub_id,
+                    format!("Unknown project command `{}`", name.trim()),
+                )
+                .await;
+            return;
+        };
+
+        let mut env = command.env.clone();
+        env.entry("CODE_PROJECT_COMMAND_NAME".to_string())
+            .or_insert_with(|| command.name.clone());
+        if let Some(desc) = &command.description {
+            env.entry("CODE_PROJECT_COMMAND_DESCRIPTION".to_string())
+                .or_insert_with(|| desc.clone());
+        }
+        env.entry("CODE_SESSION_CWD".to_string())
+            .or_insert_with(|| self.cwd.to_string_lossy().to_string());
+
+        let exec_params = ExecParams {
+            command: command.command.clone(),
+            cwd: command.resolved_cwd(self.get_cwd()),
+            timeout_ms: command.timeout_ms,
+            env,
+            with_escalated_permissions: Some(false),
+            justification: None,
+        };
+
+        let call_id = format!("project_cmd_{}", sanitize_identifier(&command.name));
+        let exec_ctx = ExecCommandContext {
+            sub_id: sub_id.to_string(),
+            call_id: call_id.clone(),
+            command_for_display: exec_params.command.clone(),
+            cwd: exec_params.cwd.clone(),
+            apply_patch: None,
+        };
+
+        let sandbox_type = self.resolve_internal_sandbox(false);
+        let exec_args = ExecInvokeArgs {
+            params: exec_params,
+            sandbox_type,
+            sandbox_policy: &self.sandbox_policy,
+            sandbox_cwd: self.get_cwd(),
+            codex_linux_sandbox_exe: &self.codex_linux_sandbox_exe,
+            stdout_stream: None,
+        };
+
+        if let Err(err) = self
+            .run_exec_with_events(turn_diff_tracker, exec_ctx, exec_args, None, None, attempt_req)
+            .await
+        {
+            self
+                .notify_background_event(
+                    sub_id,
+                    format!(
+                        "Project command `{}` failed: {}",
+                        command.name,
+                        get_error_message_ui(&err)
+                    ),
+                )
+                .await;
+        }
     }
 
     /// Build the full turn input by concatenating the current conversation
@@ -1294,6 +2038,8 @@ impl Session {
         // Concatenate filtered history with current turn's extras (which includes current ephemeral images)
         let result = [filtered_history, extra].concat();
 
+        debug_history("turn_input_with_history", &result);
+
         // Count total images in result for debugging
         let total_images = result
             .iter()
@@ -1315,10 +2061,49 @@ impl Session {
         result
     }
 
+    pub(crate) fn build_initial_context(&self, turn_context: &TurnContext) -> Vec<ResponseItem> {
+        let mut items = Vec::new();
+        if let Some(user_instructions) = turn_context.user_instructions.as_deref() {
+            items.push(UserInstructions::new(user_instructions.to_string()).into());
+        }
+        items.push(ResponseItem::from(EnvironmentContext::new(
+            Some(turn_context.cwd.clone()),
+            Some(turn_context.approval_policy),
+            Some(turn_context.sandbox_policy.clone()),
+            Some(self.user_shell.clone()),
+        )));
+        items
+    }
+
+    pub(crate) fn reconstruct_history_from_rollout(
+        &self,
+        turn_context: &TurnContext,
+        rollout_items: &[RolloutItem],
+    ) -> Vec<ResponseItem> {
+        let mut history = self.build_initial_context(turn_context);
+        for item in rollout_items {
+            match item {
+                RolloutItem::ResponseItem(response_item) => {
+                    history.push(response_item.clone());
+                }
+                RolloutItem::Compacted(compacted) => {
+                    let user_messages = collect_user_messages(&history);
+                    history = build_compacted_history(
+                        self.build_initial_context(turn_context),
+                        &user_messages,
+                        &compacted.message,
+                    );
+                }
+                _ => {}
+            }
+        }
+        history
+    }
+
     /// Returns the input if there was no agent running to inject into
     pub fn inject_input(&self, input: Vec<InputItem>) -> Result<(), Vec<InputItem>> {
         let mut state = self.state.lock().unwrap();
-        if state.current_agent.is_some() {
+        if state.current_task.is_some() {
             state
                 .pending_input
                 .push(response_input_from_core_items(input));
@@ -1330,11 +2115,25 @@ impl Session {
 
     pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
         let mut state = self.state.lock().unwrap();
-        if state.pending_input.is_empty() {
+        if state.pending_input.is_empty() && state.pending_user_input.is_empty() {
             Vec::with_capacity(0)
         } else {
             let mut ret = Vec::new();
-            std::mem::swap(&mut ret, &mut state.pending_input);
+            if !state.pending_input.is_empty() {
+                let mut model_inputs = Vec::new();
+                std::mem::swap(&mut model_inputs, &mut state.pending_input);
+                ret.extend(model_inputs);
+            }
+
+            if !state.pending_user_input.is_empty() {
+                let mut queued_user_inputs = Vec::new();
+                std::mem::swap(&mut queued_user_inputs, &mut state.pending_user_input);
+                ret.extend(
+                    queued_user_inputs
+                        .into_iter()
+                        .map(|queued| queued.response_item),
+                );
+            }
             ret
         }
     }
@@ -1368,8 +2167,8 @@ impl Session {
         // `pending_input` by an earlier code path. Clearing it would drop the
         // user's message and prevent the next turn from ever starting.
         state.turn_scratchpad = None;
-        // Take current agent while holding the lock, then drop the lock BEFORE calling abort
-        let current = state.current_agent.take();
+        // Take current task while holding the lock, then drop the lock BEFORE calling abort
+        let current = state.current_task.take();
         drop(state);
         if let Some(agent) = current {
             agent.abort(TurnAbortReason::Interrupted);
@@ -1431,6 +2230,8 @@ impl State {
             // Preserve request_ordinal so reconfigurations (e.g., /reasoning)
             // do not reset provider ordering mid-session.
             request_ordinal: self.request_ordinal,
+            dry_run_guard: self.dry_run_guard.clone(),
+            next_internal_sub_id: self.next_internal_sub_id,
             ..Default::default()
         }
     }
@@ -1451,16 +2252,142 @@ pub(crate) struct ApplyPatchCommandContext {
     pub(crate) changes: HashMap<PathBuf, FileChange>,
 }
 
+fn sanitize_identifier(value: &str) -> String {
+    let mut slug = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else {
+            slug.push('_');
+        }
+    }
+    while slug.starts_with('_') {
+        slug.remove(0);
+    }
+    if slug.is_empty() {
+        slug.push_str("hook");
+    }
+    slug
+}
+
+fn truncate_payload(text: &str, limit: usize) -> String {
+    let mut iter = text.chars();
+    let truncated: String = iter.by_ref().take(limit).collect();
+    if iter.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn build_exec_hook_payload(
+    event: ProjectHookEvent,
+    ctx: &ExecCommandContext,
+    params: &ExecParams,
+    output: Option<&ExecToolCallOutput>,
+) -> Value {
+    let base = json!({
+        "event": event.as_str(),
+        "call_id": ctx.call_id,
+        "cwd": ctx.cwd.to_string_lossy(),
+        "command": params.command,
+        "timeout_ms": params.timeout_ms,
+    });
+
+    match event {
+        ProjectHookEvent::ToolBefore => base,
+        ProjectHookEvent::ToolAfter => {
+            if let Some(out) = output {
+                json!({
+                    "event": event.as_str(),
+                    "call_id": ctx.call_id,
+                    "cwd": ctx.cwd.to_string_lossy(),
+                    "command": params.command,
+                    "timeout_ms": params.timeout_ms,
+                    "exit_code": out.exit_code,
+                    "duration_ms": out.duration.as_millis(),
+                    "timed_out": out.timed_out,
+                    "stdout": truncate_payload(&out.stdout.text, HOOK_OUTPUT_LIMIT),
+                    "stderr": truncate_payload(&out.stderr.text, HOOK_OUTPUT_LIMIT),
+                })
+            } else {
+                base
+            }
+        }
+        ProjectHookEvent::FileBeforeWrite => {
+            let changes = ctx
+                .apply_patch
+                .as_ref()
+                .and_then(|p| serde_json::to_value(&p.changes).ok())
+                .unwrap_or(Value::Null);
+            json!({
+                "event": event.as_str(),
+                "call_id": ctx.call_id,
+                "cwd": ctx.cwd.to_string_lossy(),
+                "command": params.command,
+                "timeout_ms": params.timeout_ms,
+                "changes": changes,
+            })
+        }
+        ProjectHookEvent::FileAfterWrite => {
+            let changes = ctx
+                .apply_patch
+                .as_ref()
+                .and_then(|p| serde_json::to_value(&p.changes).ok())
+                .unwrap_or(Value::Null);
+            if let Some(out) = output {
+                json!({
+                    "event": event.as_str(),
+                    "call_id": ctx.call_id,
+                    "cwd": ctx.cwd.to_string_lossy(),
+                    "command": params.command,
+                    "timeout_ms": params.timeout_ms,
+                    "changes": changes,
+                    "exit_code": out.exit_code,
+                    "duration_ms": out.duration.as_millis(),
+                    "timed_out": out.timed_out,
+                    "stdout": truncate_payload(&out.stdout.text, HOOK_OUTPUT_LIMIT),
+                    "stderr": truncate_payload(&out.stderr.text, HOOK_OUTPUT_LIMIT),
+                    "success": out.exit_code == 0,
+                })
+            } else {
+                json!({
+                    "event": event.as_str(),
+                    "call_id": ctx.call_id,
+                    "cwd": ctx.cwd.to_string_lossy(),
+                    "command": params.command,
+                    "timeout_ms": params.timeout_ms,
+                    "changes": changes,
+                })
+            }
+        }
+        _ => base,
+    }
+}
+
 /// A series of Turns in response to user input.
-pub(crate) struct AgentAgent {
+pub(crate) struct AgentTask {
     sess: Arc<Session>,
     sub_id: String,
     handle: AbortHandle,
 }
 
-impl AgentAgent {
-    fn spawn(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) -> Self {
-        let handle = tokio::spawn(run_agent(Arc::clone(&sess), sub_id.clone(), input)).abort_handle();
+impl AgentTask {
+    fn spawn(
+        sess: Arc<Session>,
+        turn_context: Arc<TurnContext>,
+        sub_id: String,
+        input: Vec<InputItem>,
+    ) -> Self {
+        let handle = {
+            let sess_clone = Arc::clone(&sess);
+            let tc_clone = Arc::clone(&turn_context);
+            let sub_clone = sub_id.clone();
+            tokio::spawn(async move {
+                run_agent(sess_clone, tc_clone, sub_clone, input).await;
+            })
+            .abort_handle()
+        };
         Self {
             sess,
             sub_id,
@@ -1470,17 +2397,28 @@ impl AgentAgent {
 
     fn compact(
         sess: Arc<Session>,
+        turn_context: Arc<TurnContext>,
         sub_id: String,
         input: Vec<InputItem>,
         compact_instructions: String,
     ) -> Self {
-        let handle = tokio::spawn(run_compact_agent(
-            Arc::clone(&sess),
-            sub_id.clone(),
-            input,
-            compact_instructions,
-        ))
-        .abort_handle();
+        let handle = {
+            let sess_clone = Arc::clone(&sess);
+            let tc_clone = Arc::clone(&turn_context);
+            let sub_clone = sub_id.clone();
+            tokio::spawn(async move {
+                let _ = compact::perform_compaction(
+                    sess_clone,
+                    tc_clone,
+                    sub_clone,
+                    input,
+                    compact_instructions,
+                    true,
+                )
+                .await;
+            })
+            .abort_handle()
+        };
         Self {
             sess,
             sub_id,
@@ -1488,16 +2426,15 @@ impl AgentAgent {
         }
     }
 
-    fn abort(self, _reason: TurnAbortReason) {
-        // TOCTOU?
+    fn abort(self, reason: TurnAbortReason) {
         if !self.handle.is_finished() {
             self.handle.abort();
-            let stamped = self
+            let event = self
                 .sess
-                .make_event(&self.sub_id, EventMsg::Error(ErrorEvent { message: "Turn interrupted".to_string() }));
-            let tx_event = self.sess.tx_event.clone();
+                .make_event(&self.sub_id, EventMsg::TurnAborted(TurnAbortedEvent { reason }));
+            let sess = self.sess.clone();
             tokio::spawn(async move {
-                tx_event.send(stamped).await.ok();
+                sess.send_event(event).await;
             });
         }
     }
@@ -1510,6 +2447,7 @@ async fn submission_loop(
     rx_sub: Receiver<Submission>,
     tx_event: Sender<Event>,
 ) {
+    let mut config = config;
     let mut sess: Option<Arc<Session>> = None;
     let mut agent_manager_initialized = false;
     // shorthand - send an event when there is no active session
@@ -1538,13 +2476,28 @@ async fn submission_loop(
                 };
                 tokio::spawn(async move { sess.abort() });
             }
+            Op::AddPendingInputDeveloper { text } => {
+                let sess = match sess.as_ref() { Some(s) => s.clone(), None => { send_no_session_event(sub.id).await; continue; } };
+                let dev_msg = ResponseInputItem::Message { role: "developer".to_string(), content: vec![ContentItem::InputText { text }] };
+                let should_start_turn = sess.enqueue_out_of_turn_item(dev_msg);
+                if should_start_turn {
+                    sess.cleanup_old_status_items().await;
+                    let turn_context = sess.make_turn_context();
+                    let sub_id = sess.next_internal_sub_id();
+                    let sentinel_input = vec![InputItem::Text {
+                        text: PENDING_ONLY_SENTINEL.to_string(),
+                    }];
+                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub_id, sentinel_input);
+                    sess.set_task(agent);
+                }
+            }
             Op::ConfigureSession {
                 provider,
                 model,
                 model_reasoning_effort,
                 model_reasoning_summary,
                 model_text_verbosity,
-                user_instructions,
+                user_instructions: provided_user_instructions,
                 base_instructions,
                 approval_policy,
                 sandbox_policy,
@@ -1565,8 +2518,86 @@ async fn submission_loop(
                     }
                     return;
                 }
+                let current_config = Arc::clone(&config);
+                let mut updated_config = (*current_config).clone();
+
+                let model_changed = !updated_config.model.eq_ignore_ascii_case(&model);
+                let effort_changed = updated_config.model_reasoning_effort != model_reasoning_effort;
+
+                let old_model_family = updated_config.model_family.clone();
+                let old_model_info = get_model_info(&old_model_family);
+
+                updated_config.model = model.clone();
+                updated_config.model_provider = provider.clone();
+                updated_config.model_reasoning_effort = model_reasoning_effort;
+                updated_config.model_reasoning_summary = model_reasoning_summary;
+                updated_config.model_text_verbosity = model_text_verbosity;
+                updated_config.user_instructions = provided_user_instructions.clone();
+                updated_config.base_instructions = base_instructions.clone();
+                updated_config.approval_policy = approval_policy;
+                updated_config.sandbox_policy = sandbox_policy.clone();
+                updated_config.disable_response_storage = disable_response_storage;
+                updated_config.notify = notify.clone();
+                updated_config.cwd = cwd.clone();
+
+                updated_config.model_family = find_family_for_model(&updated_config.model)
+                    .unwrap_or_else(|| derive_default_model_family(&updated_config.model));
+
+                let new_model_info = get_model_info(&updated_config.model_family);
+
+                let old_context_window = old_model_info.as_ref().map(|info| info.context_window);
+                let new_context_window = new_model_info.as_ref().map(|info| info.context_window);
+                let old_max_tokens = old_model_info.as_ref().map(|info| info.max_output_tokens);
+                let new_max_tokens = new_model_info.as_ref().map(|info| info.max_output_tokens);
+                let old_auto_compact = old_model_info
+                    .as_ref()
+                    .and_then(|info| info.auto_compact_token_limit);
+                let new_auto_compact = new_model_info
+                    .as_ref()
+                    .and_then(|info| info.auto_compact_token_limit);
+
+                maybe_update_from_model_info(
+                    &mut updated_config.model_context_window,
+                    old_context_window,
+                    new_context_window,
+                );
+                maybe_update_from_model_info(
+                    &mut updated_config.model_max_output_tokens,
+                    old_max_tokens,
+                    new_max_tokens,
+                );
+                maybe_update_from_model_info(
+                    &mut updated_config.model_auto_compact_token_limit,
+                    old_auto_compact,
+                    new_auto_compact,
+                );
+
+                let computed_user_instructions =
+                    get_user_instructions(&updated_config).await;
+                updated_config.user_instructions = computed_user_instructions.clone();
+
+                let effective_user_instructions = computed_user_instructions.clone();
+
+                let new_config = Arc::new(updated_config);
+
+                if model_changed || effort_changed {
+                    if let Err(err) = persist_model_selection(
+                        &new_config.codex_home,
+                        new_config.active_profile.as_deref(),
+                        &new_config.model,
+                        Some(new_config.model_reasoning_effort),
+                    )
+                    .await
+                    {
+                        warn!("failed to persist model selection: {err:#}");
+                    }
+                }
+
+                config = Arc::clone(&new_config);
+
                 // Optionally resume an existing rollout.
-                let mut restored_items: Option<Vec<ResponseItem>> = None;
+                let mut restored_items: Option<Vec<RolloutItem>> = None;
+                let mut restored_events: Option<Vec<RecordedEvent>> = None;
                 let rollout_recorder: Option<RolloutRecorder> =
                     if let Some(path) = resume_path.as_ref() {
                         match RolloutRecorder::resume(&config, path).await {
@@ -1574,6 +2605,9 @@ async fn submission_loop(
                                 session_id = saved.session_id;
                                 if !saved.items.is_empty() {
                                     restored_items = Some(saved.items);
+                                }
+                                if !saved.events.is_empty() {
+                                    restored_events = Some(saved.events);
                                 }
                                 Some(rec)
                             }
@@ -1592,8 +2626,8 @@ async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                codex_protocol::mcp_protocol::ConversationId(session_id),
-                                user_instructions.clone(),
+                                codex_protocol::mcp_protocol::ConversationId::from(session_id),
+                                effective_user_instructions.clone(),
                             ),
                         )
                             .await
@@ -1649,14 +2683,31 @@ async fn submission_loop(
                 let writable_roots = get_writable_roots(&cwd);
 
                 // Error messages to dispatch after SessionConfigured is sent.
-                let mut mcp_connection_errors = Vec::<Event>::new();
+                let mut mcp_connection_errors = Vec::<String>::new();
+                let mut excluded_tools = HashSet::new();
+                if let Some(client_tools) = config.experimental_client_tools.as_ref() {
+                    for tool in [
+                        client_tools.request_permission.as_ref(),
+                        client_tools.read_text_file.as_ref(),
+                        client_tools.write_text_file.as_ref(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        excluded_tools.insert((
+                            tool.mcp_server.to_string(),
+                            tool.tool_name.to_string(),
+                        ));
+                    }
+                }
+
                 let (mcp_connection_manager, failed_clients) =
-                    match McpConnectionManager::new(config.mcp_servers.clone()).await {
+                    match McpConnectionManager::new(config.mcp_servers.clone(), excluded_tools).await {
                         Ok((mgr, failures)) => (mgr, failures),
                         Err(e) => {
                             let message = format!("Failed to create MCP connection manager: {e:#}");
                             error!("{message}");
-                            mcp_connection_errors.push(Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None });
+                            mcp_connection_errors.push(message);
                             (McpConnectionManager::default(), Default::default())
                         }
                     };
@@ -1667,7 +2718,7 @@ async fn submission_loop(
                         let message =
                             format!("MCP client for `{server_name}` failed to start: {err:#}");
                         error!("{message}");
-                        mcp_connection_errors.push(Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message }), order: None });
+                        mcp_connection_errors.push(message);
                     }
                 }
                 let default_shell = shell::default_user_shell().await;
@@ -1685,18 +2736,20 @@ async fn submission_loop(
                     config.tools_web_search_allowed_domains.clone();
 
                 sess = Some(Arc::new(Session {
+                    id: session_id,
                     client,
                     tools_config,
                     tx_event: tx_event.clone(),
-                    user_instructions,
+                    user_instructions: effective_user_instructions.clone(),
                     base_instructions,
                     approval_policy,
                     sandbox_policy,
                     shell_environment_policy: config.shell_environment_policy.clone(),
                     cwd,
                     _writable_roots: writable_roots,
-                    mcp_connection_manager,
-                    session_manager: crate::exec_command::ExecSessionManager::default(),
+            mcp_connection_manager,
+            client_tools: config.experimental_client_tools.clone(),
+            session_manager: crate::exec_command::ExecSessionManager::default(),
                     agents: config.agents.clone(),
                     notify,
                     state: Mutex::new(state),
@@ -1708,13 +2761,35 @@ async fn submission_loop(
                     pending_browser_screenshots: Mutex::new(Vec::new()),
                     last_system_status: Mutex::new(None),
                     last_screenshot_info: Mutex::new(None),
+                    confirm_guard: ConfirmGuardRuntime::from_config(&config.confirm_guard),
+                    project_hooks: config.project_hooks.clone(),
+                    project_commands: config.project_commands.clone(),
+                    hook_guard: AtomicBool::new(false),
+                    github: Arc::new(RwLock::new(config.github.clone())),
+                    validation: Arc::new(RwLock::new(config.validation.clone())),
                 }));
+                if let Some(sess_arc) = &sess {
+                    if !config.always_allow_commands.is_empty() {
+                        let mut st = sess_arc.state.lock().unwrap();
+                        for pattern in &config.always_allow_commands {
+                            st.approved_commands.insert(pattern.clone());
+                        }
+                    }
+                }
+                let mut replay_history_items: Option<Vec<ResponseItem>> = None;
+
 
                 // Patch restored state into the newly created session.
                 if let Some(sess_arc) = &sess {
                     if let Some(items) = &restored_items {
-                        let mut st = sess_arc.state.lock().unwrap();
-                        st.history.record_items(items.iter());
+                        let turn_context = sess_arc.make_turn_context();
+                        let reconstructed = sess_arc.reconstruct_history_from_rollout(&turn_context, items);
+                        {
+                            let mut st = sess_arc.state.lock().unwrap();
+                            st.history = ConversationHistory::new();
+                            st.history.record_items(reconstructed.iter());
+                        }
+                        replay_history_items = Some(reconstructed);
                     }
                 }
 
@@ -1723,42 +2798,62 @@ async fn submission_loop(
                     crate::message_history::history_metadata(&config).await;
 
                 // ack
-                let events = std::iter::once(Event {
-                    id: INITIAL_SUBMIT_ID.to_string(),
-                    event_seq: 0,
-                    msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
+                let sess_arc = sess.as_ref().expect("session initialized");
+                let events = std::iter::once(sess_arc.make_event(
+                    INITIAL_SUBMIT_ID,
+                    EventMsg::SessionConfigured(SessionConfiguredEvent {
                         session_id,
                         model,
                         history_log_id,
                         history_entry_count,
                     }),
-                    order: None,
-                })
-                .chain(mcp_connection_errors.into_iter());
+                ))
+                .chain(mcp_connection_errors.into_iter().map(|message| {
+                    sess_arc.make_event(&sub.id, EventMsg::Error(ErrorEvent { message }))
+                }));
                 for event in events {
                     if let Err(e) = tx_event.send(event).await {
                         error!("failed to send event: {e:?}");
                     }
                 }
                 // If we resumed from a rollout, replay the prior transcript into the UI.
-                if let Some(items) = restored_items {
-                    let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items }), order: None };
+                if replay_history_items.is_some() || restored_events.is_some() {
+                    let items = replay_history_items.clone().unwrap_or_default();
+                    let events = restored_events.clone().unwrap_or_default();
+                    let event = sess_arc.make_event(
+                        &sub.id,
+                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items, events }),
+                    );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
                     }
                 }
-                
+
+                if let Some(sess_arc) = &sess {
+                    sess_arc.run_session_hooks(ProjectHookEvent::SessionStart).await;
+                }
+
                 // Initialize agent manager after SessionConfigured is sent
                 if !agent_manager_initialized {
                     let mut manager = AGENT_MANAGER.write().await;
-                    let (agent_tx, mut agent_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let (agent_tx, mut agent_rx) =
+                        tokio::sync::mpsc::unbounded_channel::<AgentStatusUpdatePayload>();
                     manager.set_event_sender(agent_tx);
                     drop(manager);
 
+                    let sess_for_agents = sess.as_ref().expect("session active").clone();
                     // Forward agent events to the main event channel
                     let tx_event_clone = tx_event.clone();
                     tokio::spawn(async move {
-                        while let Some(event) = agent_rx.recv().await {
+                        while let Some(payload) = agent_rx.recv().await {
+                            let event = sess_for_agents.make_event(
+                                "agent_status",
+                                EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                                    agents: payload.agents.clone(),
+                                    context: payload.context.clone(),
+                                    task: payload.task.clone(),
+                                }),
+                            );
                             let _ = tx_event_clone.send(event).await;
                         }
                     });
@@ -1779,12 +2874,38 @@ async fn submission_loop(
                 sess.cleanup_old_status_items().await;
 
                 // Abort synchronously here to avoid a race that can kill the
-                // newly spawned agent if the async abort runs after set_agent.
+                // newly spawned agent if the async abort runs after set_task.
                 sess.abort();
 
                 // Spawn a new agent for this user input.
-                let agent = AgentAgent::spawn(Arc::clone(sess), sub.id, items);
-                sess.set_agent(agent);
+                let turn_context = sess.make_turn_context();
+                let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub.id.clone(), items);
+                sess.set_task(agent);
+            }
+            Op::QueueUserInput { items } => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => sess,
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+
+                if sess.has_running_task() {
+                    let response_item = response_input_from_core_items(items.clone());
+                    let queued = QueuedUserInput {
+                        submission_id: sub.id.clone(),
+                        response_item,
+                        core_items: items,
+                    };
+                    sess.queue_user_input(queued);
+                } else {
+                    // No task running: treat this as immediate user input without aborting.
+                    sess.cleanup_old_status_items().await;
+                    let turn_context = sess.make_turn_context();
+                    let agent = AgentTask::spawn(Arc::clone(&sess), turn_context, sub.id.clone(), items);
+                    sess.set_task(agent);
+                }
             }
             Op::ExecApproval { id, decision } => {
                 let sess = match sess.as_ref() {
@@ -1799,6 +2920,24 @@ async fn submission_loop(
                         sess.abort();
                     }
                     other => sess.notify_approval(&id, other),
+                }
+            }
+            Op::RegisterApprovedCommand {
+                command,
+                match_kind,
+                semantic_prefix,
+            } => {
+                if command.is_empty() {
+                    continue;
+                }
+                if let Some(sess) = sess.as_ref() {
+                    sess.add_approved_command(ApprovedCommandPattern::new(
+                        command,
+                        match_kind,
+                        semantic_prefix,
+                    ));
+                } else {
+                    send_no_session_event(sub.id).await;
                 }
             }
             Op::PatchApproval { id, decision } => {
@@ -1816,6 +2955,20 @@ async fn submission_loop(
                     other => sess.notify_approval(&id, other),
                 }
             }
+            Op::UpdateValidationPatchHarness { enabled } => {
+                if let Some(sess) = sess.as_ref() {
+                    sess.update_validation_patch_harness(enabled);
+                } else {
+                    send_no_session_event(sub.id).await;
+                }
+            }
+            Op::UpdateValidationTool { name, enable } => {
+                if let Some(sess) = sess.as_ref() {
+                    sess.update_validation_tool(&name, enable);
+                } else {
+                    send_no_session_event(sub.id).await;
+                }
+            }
             Op::AddToHistory { text } => {
                 // TODO: What should we do if we got AddToHistory before ConfigureSession?
                 // currently, if ConfigureSession has resume path, this history will be ignored
@@ -1827,6 +2980,20 @@ async fn submission_loop(
                         warn!("failed to append to message history: {e}");
                     }
                 });
+            }
+
+            Op::RunProjectCommand { name } => {
+                let sess = match sess.as_ref() {
+                    Some(sess) => sess,
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+                let mut tracker = TurnDiffTracker::new();
+                let attempt_req = sess.current_request_ordinal();
+                sess.run_project_command(&mut tracker, &sub.id, &name, attempt_req)
+                    .await;
             }
 
             Op::GetHistoryEntryRequest { offset, log_id } => {
@@ -1870,20 +3037,12 @@ async fn submission_loop(
                     }
                 };
 
-                // Create a summarization request as user input
-                const SUMMARIZATION_PROMPT: &str = include_str!("prompt_for_compact_command.md");
-
-                // Attempt to inject input into current agent
+                // Attempt to inject input into current task
                 if let Err(items) = sess.inject_input(vec![InputItem::Text {
                     text: "Start Summarization".to_string(),
                 }]) {
-                    let agent = AgentAgent::compact(
-                        sess.clone(),
-                        sub.id,
-                        items,
-                        SUMMARIZATION_PROMPT.to_string(),
-                    );
-                    sess.set_agent(agent);
+                    let turn_context = sess.make_turn_context();
+                    compact::spawn_compact_task(sess.clone(), turn_context, sub.id.clone(), items);
                 }
             }
             Op::Shutdown => {
@@ -1897,19 +3056,35 @@ async fn submission_loop(
 
                 // Gracefully flush and shutdown rollout recorder on session end so tests
                 // that inspect the rollout file do not race with the background writer.
-                if let Some(sess_arc) = sess {
+                if let Some(ref sess_arc) = sess {
                     let recorder_opt = sess_arc.rollout.lock().unwrap().take();
                     if let Some(rec) = recorder_opt {
                         if let Err(e) = rec.shutdown().await {
                             warn!("failed to shutdown rollout recorder: {e}");
-                            let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: "Failed to shutdown rollout recorder".to_string() }), order: None };
+                            let event = sess_arc.make_event(
+                                &sub.id,
+                                EventMsg::Error(ErrorEvent {
+                                    message: "Failed to shutdown rollout recorder".to_string(),
+                                }),
+                            );
                             if let Err(e) = tx_event.send(event).await {
                                 warn!("failed to send error message: {e:?}");
                             }
                         }
                     }
                 }
-                let event = Event { id: sub.id.clone(), event_seq: 0, msg: EventMsg::ShutdownComplete, order: None };
+                if let Some(ref sess_arc) = sess {
+                    sess_arc.run_session_hooks(ProjectHookEvent::SessionEnd).await;
+                }
+                let event = match sess {
+                    Some(ref sess_arc) => sess_arc.make_event(&sub.id, EventMsg::ShutdownComplete),
+                    None => Event {
+                        id: sub.id.clone(),
+                        event_seq: 0,
+                        msg: EventMsg::ShutdownComplete,
+                        order: None,
+                    },
+                };
                 if let Err(e) = tx_event.send(event).await {
                     warn!("failed to send Shutdown event: {e}");
                 }
@@ -1920,6 +3095,7 @@ async fn submission_loop(
     debug!("Agent loop exited");
 }
 
+// Intentionally omit upstream review thread spawning; our fork handles review flows differently.
 /// Takes a user message as input and runs a loop where, at each turn, the model
 /// replies with either:
 ///
@@ -1933,7 +3109,7 @@ async fn submission_loop(
 ///   back to the model in the next turn.
 /// - If the model sends only an assistant message, we record it in the
 ///   conversation history and consider the agent complete.
-async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
+async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: String, input: Vec<InputItem>) {
     if input.is_empty() {
         return;
     }
@@ -1941,6 +3117,13 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
     if sess.tx_event.send(event).await.is_err() {
         return;
     }
+    // Continue with our fork's history and input handling.
+
+    let pending_only_turn = input.len() == 1
+        && matches!(
+            &input[0],
+            InputItem::Text { text } if text == PENDING_ONLY_SENTINEL
+        );
 
     // Debug logging for ephemeral images
     let ephemeral_count = input
@@ -1955,13 +3138,17 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         );
     }
 
-    // Convert input to ResponseInputItem
-    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
-    let initial_response_item: ResponseItem = initial_input_for_turn.clone().into();
+    let mut initial_response_item: Option<ResponseItem> = None;
 
-    // Record to history but we'll handle ephemeral images separately
-    sess.record_conversation_items(&[initial_response_item.clone()])
-        .await;
+    if !pending_only_turn {
+        // Convert input to ResponseInputItem
+        let response_item: ResponseItem = response_input_from_core_items(input.clone()).into();
+
+        // Record to history but we'll handle ephemeral images separately
+        sess.record_conversation_items(&[response_item.clone()])
+            .await;
+        initial_response_item = Some(response_item);
+    }
 
     let mut last_task_message: Option<String> = None;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Agent which contains
@@ -1980,6 +3167,21 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
+        let mut pending_input_tail = pending_input.clone();
+
+        if initial_response_item.is_none() {
+            if let Some(first_pending) = pending_input_tail.first().cloned() {
+                pending_input_tail.remove(0);
+                sess.record_conversation_items(&[first_pending.clone()])
+                    .await;
+                initial_response_item = Some(first_pending);
+            } else {
+                tracing::warn!(
+                    "pending-only turn had no queued input; skipping model invocation"
+                );
+                break;
+            }
+        }
 
         // Do not duplicate the initial input in `pending_input`.
         // It is already recorded to history above; ephemeral items are appended separately.
@@ -1995,7 +3197,7 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         // conversation history on each turn. The rollout file, however, should
         // only record the new items that originated in this turn so that it
         // represents an append-only log without duplicates.
-        let turn_input: Vec<ResponseItem> = sess.turn_input_with_history(pending_input);
+        let turn_input: Vec<ResponseItem> = sess.turn_input_with_history(pending_input_tail.clone());
 
         let turn_input_messages: Vec<String> = turn_input
             .iter()
@@ -2010,7 +3212,17 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
                 })
             })
             .collect();
-        match run_turn(&sess, &mut turn_diff_tracker, sub_id.clone(), turn_input).await {
+        match run_turn(
+            &sess,
+            &turn_context,
+            &mut turn_diff_tracker,
+            sub_id.clone(),
+            initial_response_item.clone(),
+            pending_input_tail,
+            turn_input,
+        )
+        .await
+        {
             Ok(turn_output) => {
                 let mut items_to_record_in_conversation_history = Vec::<ResponseItem>::new();
                 let mut responses = Vec::<ResponseInputItem>::new();
@@ -2134,15 +3346,23 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
             }
             Err(e) => {
                 info!("Turn error: {e:#}");
-                let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: e.to_string() }), order: None };
+                let event = sess.make_event(
+                    &sub_id,
+                    EventMsg::Error(ErrorEvent { message: e.to_string() }),
+                );
                 sess.tx_event.send(event).await.ok();
                 // let the user continue the conversation
                 break;
             }
         }
     }
-    sess.remove_agent(&sub_id);
-    let event = Event { id: sub_id, event_seq: 0, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: last_task_message }), order: None };
+    sess.remove_task(&sub_id);
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: last_task_message,
+        }),
+    );
     match &event.msg {
         EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: Some(m) }) => {
             tracing::info!("core.emit TaskComplete last_agent_message.len={}", m.len());
@@ -2150,21 +3370,43 @@ async fn run_agent(sess: Arc<Session>, sub_id: String, input: Vec<InputItem>) {
         _ => {}
     }
     sess.tx_event.send(event).await.ok();
+
+    if let Some(queued) = sess.pop_next_queued_user_input() {
+        let sess_clone = Arc::clone(&sess);
+        tokio::spawn(async move {
+            sess_clone.cleanup_old_status_items().await;
+            let turn_context = sess_clone.make_turn_context();
+            let submission_id = queued.submission_id;
+            let items = queued.core_items;
+            let agent = AgentTask::spawn(Arc::clone(&sess_clone), turn_context, submission_id, items);
+            sess_clone.set_task(agent);
+        });
+    }
 }
 
 async fn run_turn(
-    sess: &Session,
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
     turn_diff_tracker: &mut TurnDiffTracker,
     sub_id: String,
-    input: Vec<ResponseItem>,
+    initial_user_item: Option<ResponseItem>,
+    pending_input_tail: Vec<ResponseItem>,
+    mut input: Vec<ResponseItem>,
 ) -> CodexResult<Vec<ProcessedResponseItem>> {
     // Check if browser is enabled
     let browser_enabled = codex_browser::global::get_browser_manager().await.is_some();
-    
+
+    let tc = &**turn_context;
+    let agents_active = {
+        let manager = AGENT_MANAGER.read().await;
+        manager.has_active_agents()
+    };
+
     let tools = get_openai_tools(
         &sess.tools_config,
         Some(sess.mcp_connection_manager.list_all_tools()),
         browser_enabled,
+        agents_active,
     );
 
     let mut retries = 0;
@@ -2185,18 +3427,21 @@ async fn run_turn(
 
         let prompt = Prompt {
             input: attempt_input.clone(),
-            user_instructions: sess.user_instructions.clone(),
             store: !sess.disable_response_storage,
-            tools: tools.clone(),
-            base_instructions_override: sess.base_instructions.clone(),
+            user_instructions: tc.user_instructions.clone(),
             environment_context: Some(EnvironmentContext::new(
-                Some(sess.cwd.clone()),
-                Some(sess.approval_policy),
-                Some(sess.sandbox_policy.clone()),
+                Some(tc.cwd.clone()),
+                Some(tc.approval_policy),
+                Some(tc.sandbox_policy.clone()),
                 Some(sess.user_shell.clone()),
             )),
+            tools: tools.clone(),
             status_items, // Include status items with this request
+            base_instructions_override: tc.base_instructions.clone(),
+            include_additional_instructions: true,
             text_format: None,
+            model_override: None,
+            model_family_override: None,
         };
 
         // Start a new scratchpad for this HTTP attempt
@@ -2236,8 +3481,6 @@ async fn run_turn(
 
                         if looks_like_context_overflow {
                             did_auto_compact = true;
-
-                            // Inform UI and run a one-off compact turn inline, then retry
                             sess
                                 .notify_stream_error(
                                     &sub_id,
@@ -2246,62 +3489,44 @@ async fn run_turn(
                                 )
                                 .await;
 
-                            const SUMMARIZATION_PROMPT: &str =
-                                include_str!("prompt_for_compact_command.md");
+                            let previous_input_snapshot = input.clone();
+                            let compacted_history = compact::run_inline_auto_compact_task(
+                                Arc::clone(&sess),
+                                Arc::clone(&turn_context),
+                            )
+                            .await;
 
-                            let compact_input = response_input_from_core_items(vec![InputItem::Text {
-                                text: "Start Summarization".to_string(),
-                            }]);
-                            let compact_turn_input: Vec<ResponseItem> =
-                                sess.turn_input_with_history(vec![compact_input.clone().into()]);
+                            // Reset any partial attempt state and rebuild the request payload using the
+                            // newly compacted history plus the current user turn items.
+                            sess.clear_scratchpad();
 
-                            let compact_prompt = Prompt {
-                                input: compact_turn_input,
-                                user_instructions: None,
-                                store: !sess.disable_response_storage,
-                                tools: Vec::new(),
-                                base_instructions_override: Some(SUMMARIZATION_PROMPT.to_string()),
-                                environment_context: None,
-                                status_items: Vec::new(),
-                                text_format: None,
-                            };
-
-                            match drain_to_completed(sess, &sub_id, &compact_prompt).await {
-                                Ok(()) => {
-                                    // Keep only the summary to shrink history
-                                    {
-                                        let mut state = sess.state.lock().unwrap();
-                                        state.history.keep_last_messages(1);
+                            if compacted_history.is_empty() {
+                                attempt_input = input.clone();
+                            } else {
+                                let mut rebuilt = compacted_history;
+                                if let Some(initial_item) = initial_user_item.clone() {
+                                    rebuilt.push(initial_item);
+                                }
+                                if !pending_input_tail.is_empty() {
+                                    let (missing_calls, filtered_outputs) =
+                                        reconcile_pending_tool_outputs(&pending_input_tail, &rebuilt, &previous_input_snapshot);
+                                    if !missing_calls.is_empty() {
+                                        rebuilt.extend(missing_calls);
                                     }
-
-                                    // Reset any partial attempt state and retry immediately
-                                    sess.clear_scratchpad();
-                                    sess
-                                        .notify_stream_error(
-                                            &sub_id,
-                                            "/compact completed; retrying with condensed history…"
-                                                .to_string(),
-                                        )
-                                        .await;
-                                    attempt_input = input.clone();
-                                    continue;
+                                    if !filtered_outputs.is_empty() {
+                                        rebuilt.extend(filtered_outputs);
+                                    }
                                 }
-                                Err(err) => {
-                                    sess
-                                        .notify_stream_error(
-                                            &sub_id,
-                                            format!(
-                                                "/compact failed: {err}; falling back to normal retries…"
-                                            ),
-                                        )
-                                        .await;
-                                }
+                                input = rebuilt.clone();
+                                attempt_input = rebuilt;
                             }
+                            continue;
                         }
                     }
                 }
+
                 // Use the configured provider-specific stream retry budget.
-                let max_retries = sess.client.get_provider().stream_max_retries();
+                let max_retries = tc.client.get_provider().stream_max_retries();
                 if retries < max_retries {
                     retries += 1;
                     let delay = match e {
@@ -2411,6 +3636,69 @@ async fn run_turn(
             }
         }
     }
+}
+
+fn reconcile_pending_tool_outputs(
+    pending_outputs: &[ResponseItem],
+    rebuilt_history: &[ResponseItem],
+    previous_input_snapshot: &[ResponseItem],
+) -> (Vec<ResponseItem>, Vec<ResponseItem>) {
+    let mut call_ids = collect_tool_call_ids(rebuilt_history);
+    let mut missing_calls = Vec::new();
+    let mut filtered_outputs = Vec::new();
+
+    for item in pending_outputs {
+        match item {
+            ResponseItem::FunctionCallOutput { call_id, .. }
+            | ResponseItem::CustomToolCallOutput { call_id, .. } => {
+                if call_ids.contains(call_id) {
+                    filtered_outputs.push(item.clone());
+                    continue;
+                }
+
+                if let Some(call_item) = find_call_item_by_id(previous_input_snapshot, call_id) {
+                    call_ids.insert(call_id.clone());
+                    missing_calls.push(call_item);
+                    filtered_outputs.push(item.clone());
+                } else {
+                    warn!("Skipping tool output for missing call_id={call_id} after auto-compact");
+                }
+            }
+            _ => {
+                filtered_outputs.push(item.clone());
+            }
+        }
+    }
+
+    (missing_calls, filtered_outputs)
+}
+
+fn collect_tool_call_ids(items: &[ResponseItem]) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for item in items {
+        match item {
+            ResponseItem::FunctionCall { call_id, .. } => {
+                ids.insert(call_id.clone());
+            }
+            ResponseItem::LocalShellCall { call_id: Some(call_id), .. } => {
+                ids.insert(call_id.clone());
+            }
+            ResponseItem::CustomToolCall { call_id, .. } => {
+                ids.insert(call_id.clone());
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
+fn find_call_item_by_id(items: &[ResponseItem], call_id: &str) -> Option<ResponseItem> {
+    items.iter().rev().find_map(|item| match item {
+        ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id => Some(item.clone()),
+        ResponseItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id => Some(item.clone()),
+        ResponseItem::CustomToolCall { call_id: existing, .. } if existing == call_id => Some(item.clone()),
+        _ => None,
+    })
 }
 
 /// When the model is prompted, it returns a stream of events. Some of these
@@ -2555,9 +3843,29 @@ async fn try_run_turn(
                 response_id: _,
                 token_usage,
             } => {
-                if let Some(token_usage) = token_usage {
+                let (new_info, rate_limits, should_emit);
+                {
+                    let mut state = sess.state.lock().unwrap();
+                    let info = TokenUsageInfo::new_or_append(
+                        &state.token_usage_info,
+                        &token_usage,
+                        sess.client.get_model_context_window(),
+                    );
+                    let limits = state.latest_rate_limits.clone();
+                    let emit = info.is_some() || limits.is_some();
+                    state.token_usage_info = info.clone();
+                    new_info = info;
+                    rate_limits = limits;
+                    should_emit = emit;
+                }
+
+                if should_emit {
+                    let payload = TokenCountEvent {
+                        info: new_info,
+                        rate_limits,
+                    };
                     sess.tx_event
-                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
+                        .send(sess.make_event(&sub_id, EventMsg::TokenCount(payload)))
                         .await
                         .ok();
                 }
@@ -2615,94 +3923,19 @@ async fn try_run_turn(
                     sess.tx_event.send(stamped).await.ok();
                 }
             }
+            ResponseEvent::RateLimits(snapshot) => {
+                let mut state = sess.state.lock().unwrap();
+                state.latest_rate_limits = Some(RateLimitSnapshotEvent {
+                    primary_used_percent: snapshot.primary_used_percent,
+                    weekly_used_percent: snapshot.weekly_used_percent,
+                    primary_to_weekly_ratio_percent: snapshot.primary_to_weekly_ratio_percent,
+                    primary_window_minutes: snapshot.primary_window_minutes,
+                    weekly_window_minutes: snapshot.weekly_window_minutes,
+                });
+            }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
     }
-}
-
-async fn run_compact_agent(
-    sess: Arc<Session>,
-    sub_id: String,
-    input: Vec<InputItem>,
-    compact_instructions: String,
-) {
-    let start_event = sess.make_event(&sub_id, EventMsg::TaskStarted);
-    if sess.tx_event.send(start_event).await.is_err() {
-        return;
-    }
-
-    let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
-    let turn_input: Vec<ResponseItem> =
-        sess.turn_input_with_history(vec![initial_input_for_turn.clone().into()]);
-
-    let max_retries = sess.client.get_provider().stream_max_retries();
-    let mut retries = 0;
-
-    loop {
-        // Bump request_ordinal for this provider request attempt so
-        // downstream OrderMeta carries the correct `req` index.
-        sess.begin_http_attempt();
-        // Build status items (screenshots, system status) fresh for each attempt
-        let status_items = build_turn_status_items(&sess).await;
-
-        let prompt = Prompt {
-            input: turn_input.clone(),
-            user_instructions: None,
-            store: !sess.disable_response_storage,
-            environment_context: None,
-            tools: Vec::new(),
-            base_instructions_override: Some(compact_instructions.clone()),
-            status_items, // Include status items with this request
-            text_format: None,
-        };
-
-        let attempt_result = drain_to_completed(&sess, &sub_id, &prompt).await;
-
-        match attempt_result {
-            Ok(()) => {
-                // Record status items to conversation history after successful turn
-                if !prompt.status_items.is_empty() {
-                    sess.record_conversation_items(&prompt.status_items).await;
-                }
-                break;
-            }
-            Err(CodexErr::Interrupted) => return,
-            Err(e) => {
-                if retries < max_retries {
-                    retries += 1;
-                    let delay = backoff(retries);
-                    sess.notify_stream_error(
-                        &sub_id,
-                        format!(
-                            "stream error: {e}; retrying {retries}/{max_retries} in {delay:?}…"
-                        ),
-                    )
-                    .await;
-                    tokio::time::sleep(delay).await;
-                    continue;
-                } else {
-                    let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::Error(ErrorEvent { message: e.to_string() }), order: None };
-                    sess.send_event(event).await;
-                    // Ensure the UI is released from running state even on errors.
-                    let done = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }), order: None };
-                    sess.send_event(done).await;
-                    return;
-                }
-            }
-        }
-    }
-
-    sess.remove_agent(&sub_id);
-    let event = Event { id: sub_id.clone(), event_seq: 0, msg: EventMsg::AgentMessage(AgentMessageEvent { message: "Compact agent completed".to_string() }), order: None };
-    sess.send_event(event).await;
-    let event = sess.make_event(
-        &sub_id,
-        EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
-    );
-    sess.send_event(event).await;
-
-    let mut state = sess.state.lock().unwrap();
-    state.history.keep_last_messages(1);
 }
 
 async fn handle_response_item(
@@ -2936,6 +4169,7 @@ async fn handle_function_call(
         "browser_cdp" => handle_browser_cdp(sess, &ctx, arguments).await,
         "browser_cleanup" => handle_browser_cleanup(sess, &ctx).await,
         "web_fetch" => handle_web_fetch(sess, &ctx, arguments).await,
+        "wait" => handle_wait(sess, &ctx, arguments).await,
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
@@ -2991,7 +4225,16 @@ async fn handle_browser_cleanup(sess: &Session, ctx: &ToolCallCtx) -> ResponseIn
 
 async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     // Include raw params in begin event for observability
-    let params_for_event = serde_json::from_str(&arguments).ok();
+    let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
+    // If call_id is provided, include a friendly "for" string with the command we are waiting on
+    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
+        if let Some(serde_json::Value::String(cid)) = map.get("call_id") {
+            let st = sess.state.lock().unwrap();
+            if let Some(bg) = st.background_execs.get(cid) {
+                map.insert("for".to_string(), serde_json::Value::String(bg.cmd_display.clone()));
+            }
+        }
+    }
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
 
@@ -3023,6 +4266,193 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                     };
                 }
             };
+
+            struct BrowserFetchOutcome {
+                html: String,
+                final_url: Option<String>,
+                headless: bool,
+            }
+
+            async fn fetch_html_via_headless_browser(
+                url: &str,
+                timeout: Duration,
+            ) -> Result<BrowserFetchOutcome, String> {
+                let mut config = CodexBrowserConfig::default();
+                config.enabled = true;
+                config.headless = true;
+                config.fullpage = false;
+                config.segments_max = 2;
+                config.persist_profile = false;
+                config.idle_timeout_ms = 10_000;
+
+                let manager = BrowserManager::new(config);
+                manager.set_enabled_sync(true);
+
+                const CHECK_JS: &str = r#"(function(){
+  const discuss = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]');
+  const timeline = document.querySelectorAll('.js-timeline-item');
+  const article = document.querySelectorAll('article, main');
+  return (discuss.length + timeline.length + article.length);
+})()"#;
+                const HTML_JS: &str =
+                    "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+
+                let goto_result = match tokio::time::timeout(timeout, manager.goto(url)).await {
+                    Ok(Ok(res)) => res,
+                    Ok(Err(e)) => {
+                        let _ = manager.stop().await;
+                        return Err(format!("Headless goto failed: {e}"));
+                    }
+                    Err(_) => {
+                        let _ = manager.stop().await;
+                        return Err("Headless goto timed out".to_string());
+                    }
+                };
+
+                for _ in 0..6 {
+                    match tokio::time::timeout(Duration::from_millis(1500), manager.execute_javascript(CHECK_JS)).await {
+                        Ok(Ok(val)) => {
+                            let count = val
+                                .get("value")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0);
+                            if count > 0 {
+                                break;
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            tracing::debug!("Headless readiness check failed: {}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            tracing::debug!("Headless readiness check timed out");
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                }
+
+                let html_value = match tokio::time::timeout(timeout, manager.execute_javascript(HTML_JS)).await {
+                    Ok(Ok(val)) => val,
+                    Ok(Err(e)) => {
+                        let _ = manager.stop().await;
+                        return Err(format!("Headless HTML extraction failed: {e}"));
+                    }
+                    Err(_) => {
+                        let _ = manager.stop().await;
+                        return Err("Headless HTML extraction timed out".to_string());
+                    }
+                };
+
+                let html = html_value
+                    .get("value")
+                    .and_then(|v| v.get("html"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if html.trim().is_empty() {
+                    let _ = manager.stop().await;
+                    return Err("Headless browser returned empty HTML".to_string());
+                }
+
+                let final_url = Some(goto_result.url.clone());
+                let _ = manager.stop().await;
+
+                Ok(BrowserFetchOutcome {
+                    html,
+                    final_url,
+                    headless: true,
+                })
+            }
+
+            async fn fetch_html_via_browser(
+                url: &str,
+                timeout: Duration,
+                prefer_global: bool,
+            ) -> Option<BrowserFetchOutcome> {
+                const HTML_JS: &str =
+                    "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
+                const CHECK_JS: &str = r#"(function(){
+  const discuss = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]');
+  const timeline = document.querySelectorAll('.js-timeline-item');
+  const article = document.querySelectorAll('article, main');
+  return (discuss.length + timeline.length + article.length);
+})()"#;
+
+                if prefer_global {
+                    if let Some(manager) = codex_browser::global::get_browser_manager().await {
+                        if manager.is_enabled_sync() {
+                            match tokio::time::timeout(timeout, manager.goto(url)).await {
+                                Ok(Ok(res)) => {
+                                    for _ in 0..6 {
+                                        match tokio::time::timeout(Duration::from_millis(1500), manager.execute_javascript(CHECK_JS)).await {
+                                            Ok(Ok(val)) => {
+                                                let count = val
+                                                    .get("value")
+                                                    .and_then(|v| v.as_i64())
+                                                    .unwrap_or(0);
+                                                if count > 0 {
+                                                    break;
+                                                }
+                                            }
+                                            Ok(Err(e)) => {
+                                                tracing::debug!("Global browser readiness check failed: {}", e);
+                                                break;
+                                            }
+                                            Err(_) => {
+                                                tracing::debug!("Global browser readiness timed out");
+                                                break;
+                                            }
+                                        }
+                                        tokio::time::sleep(Duration::from_millis(800)).await;
+                                    }
+
+                                    match tokio::time::timeout(timeout, manager.execute_javascript(HTML_JS)).await {
+                                        Ok(Ok(val)) => {
+                                            if let Some(html) = val
+                                                .get("value")
+                                                .and_then(|v| v.get("html"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                if !html.trim().is_empty() {
+                                                    return Some(BrowserFetchOutcome {
+                                                        html: html.to_string(),
+                                                        final_url: Some(res.url.clone()),
+                                                        headless: false,
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        Ok(Err(e)) => {
+                                            tracing::debug!("Global browser HTML extraction failed: {}", e);
+                                        }
+                                        Err(_) => {
+                                            tracing::debug!("Global browser HTML extraction timed out");
+                                        }
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    tracing::warn!("Global browser navigation failed: {}", e);
+                                }
+                                Err(_) => {
+                                    tracing::warn!("Global browser navigation timed out");
+                                }
+                            }
+                        } else {
+                            tracing::debug!("Global browser manager disabled; skipping UI fetch");
+                        }
+                    }
+                }
+
+                match fetch_html_via_headless_browser(url, timeout).await {
+                    Ok(outcome) => Some(outcome),
+                    Err(err) => {
+                        tracing::warn!("Headless browser fallback failed for {}: {}", url, err);
+                        None
+                    }
+                }
+            }
 
             // Helper: build a client with a specific UA and common headers.
             async fn do_request(
@@ -3473,89 +4903,33 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             let timeout = Duration::from_millis(params.timeout_ms.unwrap_or(15000));
             let codex_ua = crate::default_client::get_codex_user_agent(Some("web_fetch"));
 
-            // Heuristic: some domains render key content client-side. Prefer a
-            // quick browser render first so we capture comments/timelines.
-            let is_dynamic_domain = {
-                let u = params.url.to_lowercase();
-                u.contains("github.com/")
-            };
-
-            if !matches!(params.mode.as_deref(), Some("http")) && is_dynamic_domain {
-                let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                if let Ok(res) = browser_manager.goto(&params.url).await {
-                    // Poll briefly for discussion/timeline elements to appear
-                    for _ in 0..6 {
-                        let js = r#"(function(){ const sel1 = document.querySelectorAll('[data-test-selector=\"issue-comment-body\"]'); const sel2 = document.querySelectorAll('.js-timeline-item'); return (sel1.length + sel2.length); })()"#;
-                        if let Ok(val) = browser_manager.execute_javascript(js).await {
-                            let n = val.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
-                            if n > 0 { break; }
-                        }
-                        tokio::time::sleep(Duration::from_millis(800)).await;
-                    }
-                    if let Ok(val) = browser_manager.execute_javascript(r#"(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()"#).await {
-                        if let Some(html) = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()) {
-                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
-                                }
-                            };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": res.url,
-                                "content_type": "text/html",
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated,
-                                "markdown": markdown,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                        }
-                    }
-                }
-            }
-
-            // If explicit browser mode requested, try the internal browser first.
             if matches!(params.mode.as_deref(), Some("browser")) {
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    if let Ok(res) = browser_manager.goto(&params.url).await {
-                        // Allow a few short settles for JS/cookie challenges to auto-resolve
-                        let mut html: Option<String> = None;
-                        for _ in 0..4 {
-                            if let Ok(val) = browser_manager.execute_javascript("(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()").await {
-                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
-                                    break;
-                                }
-                            }
-                            tokio::time::sleep(Duration::from_millis(1200)).await;
-                        }
-                        if let Some(html) = html {
-                            let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput {
-                                        call_id: call_id_clone,
-                                        output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                    };
-                                }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, true).await {
+                    let (markdown, truncated) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                             };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": res.url,
-                                "content_type": "text/html",
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated,
-                                "markdown": markdown,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
                         }
-                    }
+                    };
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| params.url.clone()),
+                        "content_type": "text/html",
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated,
+                        "markdown": markdown,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
             }
             // Attempt 1: Codex UA + polite headers
@@ -3633,71 +5007,37 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
                 if let Some(ra) = retry_after { diag["retry_after"] = serde_json::json!(ra); }
                 if let Some(ray) = cf_ray { diag["cf_ray"] = serde_json::json!(ray); }
 
-                // Attempt a last-resort browser-based fetch if the live browser is available.
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    browser_manager.set_enabled_sync(true);
-                    // Try navigate and extract outerHTML via JS (after SPA settles per manager config)
-                    if browser_manager.goto(&params.url).await.is_ok() {
-                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
-                        if let Ok(val) = browser_manager.execute_javascript(js).await {
-                            let html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let title = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("");
-                            if !html.is_empty() && title.to_lowercase() != "just a moment..." {
-                                let (markdown, truncated) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                    Ok(t) => t,
-                                    Err(e) => {
-                                        return ResponseInputItem::FunctionCallOutput {
-                                            call_id: call_id_clone,
-                                            output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                        };
-                                    }
-                                };
-                                diag["via_browser"] = serde_json::json!(true);
-                                let body = serde_json::json!({
-                                    "url": params.url,
-                                    "status": 200,
-                                    "final_url": final_url,
-                                    "content_type": content_type,
-                                    "used_browser_ua": used_browser_ua,
-                                    "truncated": truncated,
-                                    "markdown": markdown,
-                                });
-                                return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                            }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, false).await {
+                    let (markdown, truncated) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
+                            };
                         }
-                
-                        // If JS extraction failed, try a CDP outerHTML of root
-                        let root = browser_manager.execute_cdp("DOM.getDocument", json!({"depth": 1})).await.ok();
-                        if let Some(root) = root {
-                            if let Some(node_id) = root.get("root").and_then(|r| r.get("nodeId")).and_then(|n| n.as_u64()) {
-                                if let Ok(outer) = browser_manager.execute_cdp("DOM.getOuterHTML", json!({"nodeId": node_id})).await {
-                                    if let Some(html) = outer.get("outerHTML").and_then(|v| v.as_str()) {
-                                        let (markdown, truncated) = match convert_html_to_markdown_trimmed(html.to_string(), 120_000) {
-                                            Ok(t) => t,
-                                            Err(e) => {
-                                                return ResponseInputItem::FunctionCallOutput {
-                                                    call_id: call_id_clone,
-                                                    output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
-                                                };
-                                            }
-                                        };
-                                        diag["via_browser"] = serde_json::json!(true);
-                                        let body = serde_json::json!({
-                                            "url": params.url,
-                                            "status": 200,
-                                            "final_url": final_url,
-                                            "content_type": content_type,
-                                            "used_browser_ua": used_browser_ua,
-                                            "truncated": truncated,
-                                            "markdown": markdown,
-                                        });
-                                        return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
-                                    }
-                                }
-                            }
-                        }
+                    };
+
+                    diag["via_browser"] = serde_json::json!(true);
+                    if browser_fetch.headless {
+                        diag["headless"] = serde_json::json!(true);
                     }
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| final_url.clone()),
+                        "content_type": content_type,
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated,
+                        "markdown": markdown,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
 
                 let (md_preview, _trunc) = match convert_html_to_markdown_trimmed(body_text, 2000) {
@@ -3790,42 +5130,32 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
             // If the rendered markdown still looks like a challenge page, attempt browser fallback (unless http-only).
             if !matches!(params.mode.as_deref(), Some("http")) && looks_like_challenge_markdown(&markdown) {
-                {
-                    let browser_manager = codex_browser::global::get_or_create_browser_manager().await;
-                    browser_manager.set_enabled_sync(true);
-                    if browser_manager.goto(&params.url).await.is_ok() {
-                        let js = "(function(){ return { html: document.documentElement.outerHTML, title: document.title||'' }; })()";
-                        let mut html: Option<String> = None;
-                        for _ in 0..3 {
-                            if let Ok(val) = browser_manager.execute_javascript(js).await {
-                                html = val.get("value").and_then(|v| v.get("html")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let t_low = val.get("value").and_then(|v| v.get("title")).and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-                                if !(t_low.contains("just a moment") || t_low.contains("checking if") || t_low.contains("waiting for")) {
-                                    break;
-                                }
-                            }
-                            tokio::time::sleep(Duration::from_millis(1200)).await;
-                        }
-                        if let Some(html) = html {
-                            let (md2, truncated2) = match convert_html_to_markdown_trimmed(html, 120_000) {
-                                Ok(t) => t,
-                                Err(e) => {
-                                    return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) } };
-                                }
+                if let Some(browser_fetch) = fetch_html_via_browser(&params.url, timeout, false).await {
+                    let (md2, truncated2) = match convert_html_to_markdown_trimmed(browser_fetch.html, 120_000) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return ResponseInputItem::FunctionCallOutput {
+                                call_id: call_id_clone,
+                                output: FunctionCallOutputPayload { content: format!("Markdown conversion failed: {e}"), success: Some(false) },
                             };
-                            let body = serde_json::json!({
-                                "url": params.url,
-                                "status": 200,
-                                "final_url": final_url,
-                                "content_type": content_type,
-                                "used_browser_ua": true,
-                                "via_browser": true,
-                                "truncated": truncated2,
-                                "markdown": md2,
-                            });
-                            return ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } };
                         }
-                    }
+                    };
+
+                    let body = serde_json::json!({
+                        "url": params.url,
+                        "status": 200,
+                        "final_url": browser_fetch.final_url.unwrap_or_else(|| final_url.clone()),
+                        "content_type": content_type,
+                        "used_browser_ua": true,
+                        "via_browser": true,
+                        "headless": browser_fetch.headless,
+                        "truncated": truncated2,
+                        "markdown": md2,
+                    });
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) },
+                    };
                 }
 
                 // If fallback not possible, return structured error rather than a useless challenge page
@@ -3851,6 +5181,134 @@ async fn handle_web_fetch(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
 
             ResponseInputItem::FunctionCallOutput { call_id: call_id_clone, output: FunctionCallOutputPayload { content: body.to_string(), success: Some(true) } }
         },
+    ).await
+}
+
+// Wait for a background shell execution to complete.
+// Parameters: { call_id?: string, timeout_ms?: number }
+async fn handle_wait(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+) -> ResponseInputItem {
+    use serde::Deserialize;
+    #[derive(Deserialize, Clone)]
+    struct Params { #[serde(default)] call_id: Option<String>, #[serde(default)] timeout_ms: Option<u64> }
+    let mut params_for_event = serde_json::from_str::<serde_json::Value>(&arguments).ok();
+    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
+        if let Some(serde_json::Value::String(cid)) = map.get("call_id") {
+            let st = sess.state.lock().unwrap();
+            if let Some(bg) = st.background_execs.get(cid) {
+                map.insert("for".to_string(), serde_json::Value::String(bg.cmd_display.clone()));
+            }
+        }
+    }
+    let arguments_clone = arguments.clone();
+    let ctx_clone = ToolCallCtx::new(ctx.sub_id.clone(), ctx.call_id.clone(), ctx.seq_hint, ctx.output_index);
+    let ctx_for_closure = ctx_clone.clone();
+    execute_custom_tool(
+        sess,
+        &ctx_clone,
+        "wait".to_string(),
+        params_for_event,
+        move || async move {
+            let ctx_inner = ctx_for_closure.clone();
+                let parsed: Params = match serde_json::from_str(&arguments_clone) {
+                    Ok(p) => p,
+                    Err(e) => {
+                    return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: format!("Invalid wait arguments: {}", e), success: Some(false) } };
+                    }
+                };
+                let call_id = parsed.call_id.clone();
+                let max_ms: u64 = 3_600_000; // 60 minutes cap
+                let default_ms: u64 = 600_000; // 10 minutes default
+                let timeout_ms = parsed.timeout_ms.unwrap_or(default_ms).min(max_ms);
+
+            match call_id {
+                Some(cid) => {
+                    use std::sync::atomic::Ordering;
+                    let (notify_opt, done_opt, tail, suppress_flag) = {
+                        let st = sess.state.lock().unwrap();
+                        match st.background_execs.get(&cid) {
+                            Some(bg) => (
+                                Some(bg.notify.clone()),
+                                bg.result_cell.lock().unwrap().clone(),
+                                bg.tail_buf.clone(),
+                                Some(bg.suppress_event.clone()),
+                            ),
+                            None => (None, None, None, None),
+                        }
+                    };
+                    if let Some(flag) = &suppress_flag {
+                        flag.store(true, Ordering::Relaxed);
+                    }
+                    if let Some(done) = done_opt {
+                        let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(true, Ordering::Relaxed);
+                        }
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) } };
+                    }
+                    let Some(spec_notify) = notify_opt else {
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: format!("No background job found for call_id={}", cid), success: Some(false) } };
+                    };
+                    let any_notify = ANY_BG_NOTIFY.get().cloned().unwrap();
+                    let raced = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async move {
+                        tokio::select! {
+                            _ = spec_notify.notified() => (),
+                            _ = any_notify.notified() => (),
+                        }
+                    }).await;
+                    if raced.is_err() {
+                        let tail_text = tail.and_then(|arc| Some(String::from_utf8_lossy(&arc.lock().unwrap()).to_string())).unwrap_or_default();
+                        let msg = if tail_text.is_empty() { format!("Background job {} still running...", cid) } else { format!("Background job {} still running...\n\nOutput so far (tail):\n{}", cid, tail_text) };
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: msg, success: Some(false) } };
+                    }
+                    let done = {
+                        let mut st = sess.state.lock().unwrap();
+                        if let Some(bg) = st.background_execs.remove(&cid) {
+                            bg.result_cell.lock().unwrap().clone()
+                        } else {
+                            let found = st.background_execs.iter().find_map(|(k, v)| if v.result_cell.lock().unwrap().is_some() { Some(k.clone()) } else { None });
+                            found.and_then(|k| st.background_execs.remove(&k)).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+                        }
+                    };
+                    if let Some(done) = done {
+                        let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) } }
+                    } else {
+                        if let Some(flag) = &suppress_flag {
+                            flag.store(false, Ordering::Relaxed);
+                        }
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: "No completed background job found".to_string(), success: Some(false) } }
+                    }
+                }
+                None => {
+                    let any_notify = ANY_BG_NOTIFY.get().cloned().unwrap();
+                    let waited = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), any_notify.notified()).await;
+                    if waited.is_err() {
+                        return ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: "Timed out waiting for background work".to_string(), success: Some(false) } };
+                    }
+                    let done = {
+                        let mut st = sess.state.lock().unwrap();
+                        let found = st.background_execs.iter().find_map(|(k, v)| if v.result_cell.lock().unwrap().is_some() { Some(k.clone()) } else { None });
+                        found.and_then(|k| st.background_execs.remove(&k)).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+                    };
+                    if let Some(done) = done {
+                        let content = format_exec_output_with_limit(sess, &ctx_inner.sub_id, &ctx_inner.call_id, &done);
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(done.exit_code == 0) } }
+                    } else {
+                        ResponseInputItem::FunctionCallOutput { call_id: ctx_inner.call_id.clone(), output: FunctionCallOutputPayload { content: "Background completed but no result recorded".to_string(), success: Some(false) } }
+                    }
+                }
+            }
+        }
     ).await
 }
 
@@ -3891,6 +5349,7 @@ pub struct ExecInvokeArgs<'a> {
     pub params: ExecParams,
     pub sandbox_type: SandboxType,
     pub sandbox_policy: &'a SandboxPolicy,
+    pub sandbox_cwd: &'a std::path::Path,
     pub codex_linux_sandbox_exe: &'a Option<PathBuf>,
     pub stdout_stream: Option<StdoutStream>,
 }
@@ -3921,15 +5380,28 @@ async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
         Ok(params) => {
             let mut manager = AGENT_MANAGER.write().await;
 
-            // Handle model parameter (can be string or array)
-            let models = match params.model {
-                Some(serde_json::Value::String(model)) => vec![model],
-                Some(serde_json::Value::Array(models)) => models
-                    .into_iter()
-                    .filter_map(|m| m.as_str().map(String::from))
-                    .collect(),
-                _ => vec!["code".to_string()], // Default model
-            };
+            // Collect requested models from the `models` field.
+            let raw_models: Vec<String> = params.models.clone();
+
+            // Split comma-delimited strings, trim whitespace, and deduplicate case-insensitively.
+            let mut seen_models = HashSet::new();
+            let mut models: Vec<String> = Vec::new();
+            for entry in raw_models {
+                for candidate in entry.split(',') {
+                    let trimmed = candidate.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let dedupe_key = trimmed.to_lowercase();
+                    if seen_models.insert(dedupe_key) {
+                        models.push(trimmed.to_string());
+                    }
+                }
+            }
+
+            if models.is_empty() {
+                models.push("code".to_string());
+            }
 
             // Helper: derive the command to check for a given model/config pair.
             fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
@@ -3985,10 +5457,11 @@ async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) 
             let mut agent_ids = Vec::new();
             let mut skipped: Vec<String> = Vec::new();
             for model in models {
+                let model_key = model.to_lowercase();
                 // Check if this model is configured and enabled
                 let agent_config = sess.agents.iter().find(|a| {
-                    a.name.to_lowercase() == model.to_lowercase()
-                        || a.command.to_lowercase() == model.to_lowercase()
+                    a.name.to_lowercase() == model_key
+                        || a.command.to_lowercase() == model_key
                 });
 
                 if let Some(config) = agent_config {
@@ -4652,7 +6125,10 @@ async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String
                     running_count,
                     if running_count != 1 { "s" } else { "" }
                 );
-    let event = Event { id: "agent-status".to_string(), event_seq: 0, msg: EventMsg::BackgroundEvent(BackgroundEventEvent { message: status_msg }), order: None };
+                let event = sess.make_event(
+                    "agent-status",
+                    EventMsg::BackgroundEvent(BackgroundEventEvent { message: status_msg }),
+                );
                 let _ = sess.tx_event.send(event).await;
             }
 
@@ -4730,31 +6206,24 @@ async fn handle_container_exec_with_params(
     output_index: Option<u32>,
     attempt_req: u64,
 ) -> ResponseInputItem {
-    // Intercept risky git branch-changing commands and require an explicit confirm prefix.
+    // Intercept risky git commands and require an explicit confirm prefix.
     // We support a simple convention: prefix the script with `confirm:` to proceed.
     // The prefix is stripped before execution.
-    fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
-        // Return (index_of_script, script) if argv matches: <shell> (-lc|-c) <script>
-        if argv.len() == 3 {
-            let shell = std::path::Path::new(&argv[0])
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
-            let is_shell = matches!(shell, "bash" | "sh" | "zsh");
-            let is_flag = matches!(argv[1].as_str(), "-lc" | "-c");
-            if is_shell && is_flag {
-                return Some((2, argv[2].clone()));
-            }
-        }
-        None
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    enum SensitiveGitKind {
+        BranchChange,
+        PathCheckout,
+        Reset,
+        Revert,
     }
 
-    fn looks_like_branch_change(script: &str) -> bool {
-        // Goal: detect branch-changing git invocations while avoiding false
-        // positives from commit messages or other quoted strings. We do a
-        // lightweight scan that strips quoted regions before token analysis.
+    fn detect_sensitive_git(script: &str) -> Option<SensitiveGitKind> {
+        // Goal: detect sensitive git invocations (branch changes, resets) while
+        // avoiding false positives from commit messages or other quoted strings.
+        // We do a lightweight scan that strips quoted regions before token analysis.
 
-        // 1) Strip single- and double-quoted segments (keep length with spaces).
+        // 1) Strip quote characters but preserve content inside quotes, while
+        // neutralizing control separators to avoid over-splitting tokens.
         let mut cleaned = String::with_capacity(script.len());
         let mut in_squote = false;
         let mut in_dquote = false;
@@ -4768,20 +6237,28 @@ async fn handle_container_exec_with_params(
                 }
                 '\'' if !in_dquote => {
                     in_squote = !in_squote;
-                    emit_space = true;
+                    emit_space = true; // token boundary at quote edges
                     prev_was_backslash = false;
                 }
                 '"' if !in_squote && !prev_was_backslash => {
                     in_dquote = !in_dquote;
-                    emit_space = true;
+                    emit_space = true; // token boundary at quote edges
                     prev_was_backslash = false;
                 }
                 _ => {
                     prev_was_backslash = false;
                 }
             }
-            if in_squote || in_dquote || emit_space {
+            if emit_space {
                 cleaned.push(' ');
+                continue;
+            }
+            if in_squote || in_dquote {
+                if matches!(ch, '|' | '&' | ';' | '\n' | '\r') {
+                    cleaned.push(' ');
+                } else {
+                    cleaned.push(ch);
+                }
             } else {
                 cleaned.push(ch);
             }
@@ -4793,61 +6270,108 @@ async fn handle_container_exec_with_params(
             for part in chunk.split(|c| matches!(c, '|' | '&')) {
                 let s = part.trim();
                 if s.is_empty() { continue; }
-                // Tokenize on whitespace.
-                let mut it = s.split_whitespace();
-                // Skip leading env assignments (FOO=bar) and `env`.
-                let mut first = None;
-                while let Some(tok) = it.next() {
+                // Tokenize on whitespace, skip wrappers and git globals to find the real subcommand.
+                let raw_tokens: Vec<&str> = s.split_whitespace().collect();
+                if raw_tokens.is_empty() { continue; }
+                fn strip_tok(t: &str) -> &str { t.trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '\'' | '"')) }
+                let mut i = 0usize;
+                // Skip env assignments and lightweight wrappers/keywords.
+                loop {
+                    if i >= raw_tokens.len() { break; }
+                    let tok = strip_tok(raw_tokens[i]);
+                    if tok.is_empty() { i += 1; continue; }
+                    // Skip KEY=val assignments.
                     if tok.contains('=') && !tok.starts_with('=') && !tok.starts_with('-') {
+                        i += 1; continue;
+                    }
+                    // Skip simple wrappers and control keywords.
+                    if matches!(tok, "env" | "sudo" | "command" | "time" | "nohup" | "nice" | "then" | "do" | "{" | "(") {
+                        // Best-effort: skip immediate option-like flags after some wrappers.
+                        i += 1;
+                        while i < raw_tokens.len() {
+                            let peek = strip_tok(raw_tokens[i]);
+                            if peek.starts_with('-') { i += 1; } else { break; }
+                        }
                         continue;
                     }
-                    if tok == "env" { continue; }
-                    first = Some(tok);
                     break;
                 }
-                let Some(cmd) = first else { continue };
-                // Identify `git` executable (allow path prefixes).
+                if i >= raw_tokens.len() { continue; }
+                let cmd = strip_tok(raw_tokens[i]);
                 let is_git = cmd.ends_with("/git") || cmd == "git";
                 if !is_git { continue; }
-                // Next token is the subcommand.
-                let Some(sub) = it.next() else { continue; };
+                i += 1; // advance past git
+                // Skip git global options to find the real subcommand.
+                while i < raw_tokens.len() {
+                    let t = strip_tok(raw_tokens[i]);
+                    if t.is_empty() { i += 1; continue; }
+                    if matches!(t, "-C" | "--git-dir" | "--work-tree" | "-c") {
+                        i += 1; // skip option key
+                        if i < raw_tokens.len() { i += 1; } // skip its value
+                        continue;
+                    }
+                    if t.starts_with("--git-dir=") || t.starts_with("--work-tree=") || t.starts_with("-c") {
+                        i += 1; continue;
+                    }
+                    if t.starts_with('-') { i += 1; continue; }
+                    break;
+                }
+                if i >= raw_tokens.len() { continue; }
+                let sub = strip_tok(raw_tokens[i]);
+                i += 1;
                 match sub {
                     "checkout" => {
+                        let args: Vec<&str> = raw_tokens[i..].iter().map(|t| strip_tok(t)).collect();
+                        let has_path_delimiter = args.iter().any(|a| *a == "--");
+                        if has_path_delimiter {
+                            return Some(SensitiveGitKind::PathCheckout);
+                        }
+
                         // If any of the strong branch-changing flags are present, flag it.
                         let mut saw_branch_change_flag = false;
-                        let mut args: Vec<&str> = Vec::new();
-                        for a in it.clone() { args.push(a); }
                         for a in &args {
                             if matches!(*a, "-b" | "-B" | "--orphan" | "--detach") {
                                 saw_branch_change_flag = true;
                                 break;
                             }
                         }
-                        if saw_branch_change_flag { return true; }
-                        // If `--` is present, this is a path checkout, not branch.
-                        if args.iter().any(|a| *a == "--") { continue; }
+                        if saw_branch_change_flag { return Some(SensitiveGitKind::BranchChange); }
+
+                        // `git checkout -` switches to previous branch.
+                        if args.first().copied() == Some("-") {
+                            return Some(SensitiveGitKind::BranchChange);
+                        }
+
                         // Heuristic: a single non-flag argument likely denotes a branch.
-                        // To reduce false positives (e.g. `git checkout .`), only flag
-                        // when the first arg does not start with '-' and is not a solitary '.' or '..'.
                         if let Some(first_arg) = args.first() {
                             let a = *first_arg;
                             if !a.starts_with('-') && a != "." && a != ".." {
-                                return true;
+                                return Some(SensitiveGitKind::BranchChange);
                             }
                         }
                     }
                     "switch" => {
                         // `git switch -c <name>` creates; `git switch <name>` changes.
-                        let mut args = it;
                         let mut saw_c = false;
+                        let mut saw_detach = false;
                         let mut first_non_flag: Option<&str> = None;
-                        while let Some(a) = args.next() {
+                        for a in &raw_tokens[i..] {
+                            let a = strip_tok(a);
                             if a == "-c" { saw_c = true; break; }
+                            if a == "--detach" { saw_detach = true; break; }
                             if a.starts_with('-') { continue; }
                             first_non_flag = Some(a);
                             break;
                         }
-                        if saw_c || first_non_flag.is_some() { return true; }
+                        if saw_c || saw_detach || first_non_flag.is_some() { return Some(SensitiveGitKind::BranchChange); }
+                    }
+                    "reset" => {
+                        // Any form of git reset is considered sensitive.
+                        return Some(SensitiveGitKind::Reset);
+                    }
+                    "revert" => {
+                        // Any form of git revert is considered sensitive.
+                        return Some(SensitiveGitKind::Revert);
                     }
                     // Future: consider `git branch -D/-m` as branch‑modifying, but keep
                     // this minimal to avoid over‑blocking normal workflows.
@@ -4855,12 +6379,88 @@ async fn handle_container_exec_with_params(
                 }
             }
         }
+        None
+    }
+
+    fn strip_leading_confirm_prefix(argv: &mut Vec<String>) -> bool {
+        if argv.is_empty() {
+            return false;
+        }
+
+        let first = argv[0].trim().to_string();
+        for prefix in ["confirm:", "CONFIRM:"] {
+            if first == prefix {
+                argv.remove(0);
+                return true;
+            }
+            if let Some(rest) = first.strip_prefix(prefix) {
+                let trimmed = rest.trim_start();
+                if trimmed.is_empty() {
+                    argv.remove(0);
+                } else {
+                    argv[0] = trimmed.to_string();
+                }
+                return true;
+            }
+        }
+
         false
     }
 
+    fn guidance_for_sensitive_git(kind: SensitiveGitKind, original_label: &str, original_value: &str, suggested: &str) -> String {
+        match kind {
+            SensitiveGitKind::BranchChange => format!(
+                "Blocked git checkout/switch on a branch. Switching branches can discard or hide in-progress changes. Only continue if the user explicitly requested this branch change. Resend with 'confirm:' if you intend to proceed.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+            SensitiveGitKind::PathCheckout => format!(
+                "Blocked git checkout -- <paths>. This command overwrites local modifications to the specified files. Consider backing up the files first. If you intentionally want to discard those edits, resend the exact command prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+            SensitiveGitKind::Reset => format!(
+                "Blocked git reset. Reset rewrites the working tree/index and may delete local work. Consider backing up the files first. If backups exist and this was explicitly requested, resend prefixed with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+            SensitiveGitKind::Revert => format!(
+                "Blocked git revert. Reverting commits alters history and should only happen when the user asks for it. If that’s the case, resend the command with 'confirm:'.\n\n{}: {}\nresend_exact_argv: {}",
+                original_label,
+                original_value,
+                suggested
+            ),
+        }
+    }
+
+    fn guidance_for_dry_run_guard(
+        analysis: &DryRunAnalysis,
+        original_label: &str,
+        original_value: &str,
+        resend_exact_argv: Vec<String>,
+    ) -> String {
+        let suggested_confirm = serde_json::to_string(&resend_exact_argv)
+            .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+        let suggested_dry_run = analysis
+            .suggested_dry_run()
+            .unwrap_or_else(|| "<no canonical dry-run variant; remove mutating flags or use confirm:>".to_string());
+        format!(
+            "Blocked {} without a prior dry run. Run the dry-run variant first or resend with 'confirm:' if explicitly requested.\n\n{}: {}\nresend_exact_argv: {}\nsuggested_dry_run: {}",
+            analysis.display_name(),
+            original_label,
+            original_value,
+            suggested_confirm,
+            suggested_dry_run
+        )
+    }
+
+
     // If the argv is a shell wrapper, analyze and optionally strip `confirm:`.
     let mut params = params;
-    let mut seq_hint_for_exec = seq_hint;
+    let seq_hint_for_exec = seq_hint;
     if let Some((script_index, script)) = extract_shell_script_from_wrapper(&params.command) {
         let trimmed = script.trim_start();
         let confirm_prefixes = ["confirm:", "CONFIRM:"];
@@ -4868,22 +6468,47 @@ async fn handle_container_exec_with_params(
             .iter()
             .any(|p| trimmed.starts_with(p));
 
-        // If no confirm prefix and it looks like a branch change, reject with guidance.
-        if !has_confirm_prefix && looks_like_branch_change(trimmed) {
-            // Provide the exact argv the model should resend with the confirm prefix.
-            let mut argv_confirm = params.command.clone();
-            argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
-            let suggested = serde_json::to_string(&argv_confirm)
-                .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
-            let guidance = format!(
-                "blocked potentially destructive git branch change. Git branching should only be performed when explicitly requested by the user. To proceed, resend the shell call with a confirmation prefix to indicate it was explicitly requested. Please use 'confirm:' to confirm it was requested.\n\noriginal_script: {}\nresend_exact_argv: {}",
-                script,
-                suggested
-            );
-            return ResponseInputItem::FunctionCallOutput {
-                call_id,
-                output: FunctionCallOutputPayload { content: guidance, success: None },
-            };
+        // If no confirm prefix and it looks like a sensitive git command, reject with guidance.
+        if !has_confirm_prefix {
+            if let Some(pattern) = if sess.confirm_guard.is_empty() {
+                None
+            } else {
+                sess.confirm_guard.matched_pattern(trimmed)
+            } {
+                let mut argv_confirm = params.command.clone();
+                argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
+                let suggested = serde_json::to_string(&argv_confirm)
+                    .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+                let guidance = pattern.guidance("original_script", &script, &suggested);
+
+                sess
+                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance))
+                    .await;
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content: guidance, success: None },
+                };
+            }
+
+            if let Some(kind) = detect_sensitive_git(trimmed) {
+                // Provide the exact argv the model should resend with the confirm prefix.
+                let mut argv_confirm = params.command.clone();
+                argv_confirm[script_index] = format!("confirm: {}", script.trim_start());
+                let suggested = serde_json::to_string(&argv_confirm)
+                    .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+
+                let guidance = guidance_for_sensitive_git(kind, "original_script", &script, &suggested);
+
+                sess
+                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                    .await;
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content: guidance, success: None },
+                };
+            }
         }
 
         // If confirm prefix present, strip it before execution.
@@ -4898,161 +6523,284 @@ async fn handle_container_exec_with_params(
             params.command[script_index] = without_prefix;
         }
 
-        // Detect an embedded `apply_patch <<EOF ... EOF` in a larger script and split it out
-        // so the UI can render a distinct "Updated" block before the "Run" block.
-        //
-        // If present, we will:
-        //  1) Execute the patch as a standalone apply_patch exec (with proper events)
-        //  2) Remove the statement from the script and continue with the remainder
-        //     (only if the patch succeeded)
-        if let Ok(Some(found)) = codex_apply_patch::find_embedded_apply_patch(&params.command[script_index]) {
-            // Build a synthetic minimal script for verified parsing of the patch action,
-            // preserving an optional cd path for correct path resolution.
-            let synthetic_script = if let Some(cd) = &found.cd_path {
-                format!("cd {} && apply_patch <<'EOF'\n{}\nEOF\n", cd, found.patch_body)
-            } else {
-                format!("apply_patch <<'EOF'\n{}\nEOF\n", found.patch_body)
-            };
-
-            // Resolve into an ApplyPatchAction using the verified path
-            let cwd_path = std::path::Path::new(&params.cwd);
-            let verified = codex_apply_patch::maybe_parse_apply_patch_verified(
-                &vec!["bash".to_string(), "-lc".to_string(), synthetic_script.clone()],
-                cwd_path,
-            );
-            if let codex_apply_patch::MaybeApplyPatchVerified::Body(action) = verified {
-                // First, run the patch apply as its own Exec with proper events
-                let path_to_codex = std::env::current_exe()
-                    .ok()
-                    .map(|p| p.to_string_lossy().to_string());
-                if let Some(path_to_codex) = path_to_codex {
-                    let patch_params = ExecParams {
-                        command: vec![
-                            path_to_codex,
-                            CODEX_APPLY_PATCH_ARG1.to_string(),
-                            action.patch.clone(),
-                        ],
-                        cwd: action.cwd.clone(),
-                        timeout_ms: params.timeout_ms,
-                        env: HashMap::new(),
-                        with_escalated_permissions: params.with_escalated_permissions,
-                        justification: params.justification.clone(),
+        let dry_run_analysis = analyze_command(&params.command);
+        if !has_confirm_prefix {
+            if let Some(analysis) = dry_run_analysis.as_ref() {
+                if analysis.disposition == DryRunDisposition::Mutating {
+                    let needs_dry_run = {
+                        let state = sess.state.lock().unwrap();
+                        !state.dry_run_guard.has_recent_dry_run(analysis.key)
                     };
+                    if needs_dry_run {
+                        let mut argv_confirm = params.command.clone();
+                        argv_confirm[script_index] = format!("confirm: {}", params.command[script_index].trim_start());
+                        let guidance = guidance_for_dry_run_guard(
+                            analysis,
+                            "original_script",
+                            &params.command[script_index],
+                            argv_confirm,
+                        );
 
-                    // Safety for patch step mirrors normal patch handling
-                    let safety = assess_safety_for_untrusted_command(
-                        sess.approval_policy,
-                        &sess.sandbox_policy,
-                        patch_params.with_escalated_permissions.unwrap_or(false),
-                    );
+                        sess
+                            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                            .await;
 
-                    let exec_command_context = ExecCommandContext {
-                        sub_id: sub_id.clone(),
-                        call_id: format!("{call_id}.apply_patch"),
-                        command_for_display: vec!["apply_patch".to_string(), action.patch.clone()],
-                        cwd: patch_params.cwd.clone(),
-                        apply_patch: Some(ApplyPatchCommandContext {
-                            user_explicitly_approved_this_action: matches!(safety, SafetyCheck::AutoApprove { .. }),
-                            changes: convert_apply_patch_to_protocol(&action),
-                        }),
-                    };
-
-                    let patch_result = sess
-                        .run_exec_with_events(
-                            turn_diff_tracker,
-                            exec_command_context,
-                            ExecInvokeArgs {
-                                params: patch_params.clone(),
-                                sandbox_type: match safety { SafetyCheck::AutoApprove { sandbox_type } => sandbox_type, SafetyCheck::AskUser => SandboxType::None, SafetyCheck::Reject { .. } => SandboxType::None },
-                                sandbox_policy: &sess.sandbox_policy,
-                                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                                stdout_stream: None,
-                            },
-                            seq_hint, // occupy the provided sequence range first
-                            output_index,
-                            attempt_req,
-                        )
-                        .await;
-
-                    let mut should_continue = false;
-                    if let Ok(ref out) = patch_result { should_continue = out.exit_code == 0; }
-
-                    // If patch step succeeded, strip it from the original script and proceed.
-                    if should_continue {
-                        let (start, end) = found.stmt_byte_range;
-                        let mut residual = String::new();
-                        residual.push_str(&params.command[script_index][..start]);
-                        residual.push_str(&params.command[script_index][end..]);
-                        // Clean leading/trailing separators to avoid syntax errors
-                        let mut residual = residual.trim().to_string();
-                        // Remove leading connectors like &&, ||, ; and trailing ones
-                        let trim_connectors = |s: &str| -> String {
-                            let mut s = s.trim().to_string();
-                            // Leading
-                            for _ in 0..2 {
-                                let st = s.trim_start();
-                                let new = if st.starts_with("&&") { &st[2..] } else if st.starts_with("||") { &st[2..] } else if st.starts_with(';') { &st[1..] } else { st };
-                                s = new.trim_start().to_string();
-                            }
-                            // Trailing
-                            for _ in 0..2 {
-                                let st = s.trim_end();
-                                let new = if st.ends_with("&&") { &st[..st.len()-2] } else if st.ends_with("||") { &st[..st.len()-2] } else if st.ends_with(';') { &st[..st.len()-1] } else { st };
-                                s = new.trim_end().to_string();
-                            }
-                            s
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id,
+                            output: FunctionCallOutputPayload { content: guidance, success: None },
                         };
-                        residual = trim_connectors(&residual);
-
-                        if !residual.is_empty() {
-                            params.command[script_index] = residual;
-                            // Bump the seq hint for the following run cell
-                            seq_hint_for_exec = seq_hint.map(|h| h.saturating_add(2));
-
-                            // Continue with normal flow using updated params (fallthrough below)
-                            // We overwrite `script` in local scope to avoid borrow issues
-                        } else {
-                            // No more commands to run; return the patch result as the tool output
-                            let ok = patch_result
-                                .as_ref()
-                                .map(|o| o.exit_code == 0)
-                                .unwrap_or(false);
-                            let content = match patch_result {
-                                Ok(out) => format_exec_output_with_limit(sess, &sub_id, &call_id, &out),
-                                Err(e) => get_error_message_ui(&e),
-                            };
-                            return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content, success: Some(ok) } };
-                        }
-                    } else {
-                        // Patch failed; return immediately with patch output (do not run remainder)
-                        let ok = patch_result
-                            .as_ref()
-                            .map(|o| o.exit_code == 0)
-                            .unwrap_or(false);
-                        let content = match patch_result {
-                            Ok(out) => format_exec_output_with_limit(sess, &sub_id, &call_id, &out),
-                            Err(e) => get_error_message_ui(&e),
-                        };
-                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content, success: Some(ok) } };
                     }
                 }
             }
         }
     }
-    // check if this was a patch, and apply it if so
-    let apply_patch_exec = match maybe_parse_apply_patch_verified(&params.command, &params.cwd) {
-        MaybeApplyPatchVerified::Body(changes) => {
-            match apply_patch::apply_patch(sess, &sub_id, &call_id, changes).await {
-                InternalApplyPatchInvocation::Output(item) => return item,
-                InternalApplyPatchInvocation::DelegateToExec(apply_patch_exec) => {
-                    Some(apply_patch_exec)
+
+    strip_leading_confirm_prefix(&mut params.command);
+
+    if let Some(redundant) = detect_redundant_cd(&params.command, &params.cwd) {
+        let guidance = guidance_for_redundant_cd(&redundant);
+        sess
+            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .await;
+
+        return ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: guidance,
+                success: None,
+            },
+        };
+    }
+
+    if let Some(python_guard) = detect_python_write(&params.command) {
+        let guidance = guidance_for_python_write(&python_guard);
+        sess
+            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .await;
+
+        return ResponseInputItem::FunctionCallOutput {
+            call_id,
+            output: FunctionCallOutputPayload {
+                content: guidance,
+                success: None,
+            },
+        };
+    }
+
+    // If no shell wrapper, perform a lightweight argv inspection for sensitive git commands.
+    if extract_shell_script_from_wrapper(&params.command).is_none() {
+        let joined = params.command.join(" ");
+        if !sess.confirm_guard.is_empty() {
+            if let Some(pattern) = sess.confirm_guard.matched_pattern(&joined) {
+                let suggested = serde_json::to_string(&vec![
+                    "bash".to_string(),
+                    "-lc".to_string(),
+                    format!("confirm: {}", joined),
+                ])
+                .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+                let guidance = pattern.guidance(
+                    "original_argv",
+                    &format!("{:?}", params.command),
+                    &suggested,
+                );
+
+                sess
+                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                    .await;
+
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content: guidance, success: None },
+                };
+            }
+        }
+
+        if let Some(analysis) = analyze_command(&params.command) {
+            if analysis.disposition == DryRunDisposition::Mutating {
+                let needs_dry_run = {
+                    let state = sess.state.lock().unwrap();
+                    !state.dry_run_guard.has_recent_dry_run(analysis.key)
+                };
+                if needs_dry_run {
+                    let resend = vec![
+                        "bash".to_string(),
+                        "-lc".to_string(),
+                        format!("confirm: {}", joined),
+                    ];
+                    let guidance = guidance_for_dry_run_guard(
+                        &analysis,
+                        "original_argv",
+                        &format!("{:?}", params.command),
+                        resend,
+                    );
+
+                    sess
+                        .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                        .await;
+
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload { content: guidance, success: None },
+                    };
+                }
+            }
+        }
+
+        fn strip_tok2(t: &str) -> &str { t.trim_matches(|c| matches!(c, '(' | ')' | '{' | '}' | '\'' | '"')) }
+        let mut i = 0usize;
+        // Skip env assignments and simple wrappers at the front
+        while i < params.command.len() {
+            let tok = strip_tok2(&params.command[i]);
+            if tok.is_empty() { i += 1; continue; }
+            if tok.contains('=') && !tok.starts_with('=') && !tok.starts_with('-') { i += 1; continue; }
+            if matches!(tok, "env" | "sudo" | "command" | "time" | "nohup" | "nice") {
+                i += 1;
+                while i < params.command.len() && strip_tok2(&params.command[i]).starts_with('-') { i += 1; }
+                continue;
+            }
+            break;
+        }
+        if i < params.command.len() {
+            let cmd = strip_tok2(&params.command[i]);
+            if cmd.ends_with("/git") || cmd == "git" {
+                i += 1;
+                while i < params.command.len() {
+                    let t = strip_tok2(&params.command[i]);
+                    if t.is_empty() { i += 1; continue; }
+                    if matches!(t, "-C" | "--git-dir" | "--work-tree" | "-c") {
+                        i += 1; if i < params.command.len() { i += 1; }
+                        continue;
+                    }
+                    if t.starts_with("--git-dir=") || t.starts_with("--work-tree=") || t.starts_with("-c") { i += 1; continue; }
+                    if t.starts_with('-') { i += 1; continue; }
+                    break;
+                }
+                if i < params.command.len() {
+                    let sub = strip_tok2(&params.command[i]);
+                    let args: Vec<&str> = params.command[i + 1..].iter().map(|t| strip_tok2(t)).collect();
+                    let kind = match sub {
+                        "checkout" => {
+                            if args.iter().any(|a| *a == "--") {
+                                Some(SensitiveGitKind::PathCheckout)
+                            } else if args.iter().any(|a| matches!(*a, "-b" | "-B" | "--orphan" | "--detach")) {
+                                Some(SensitiveGitKind::BranchChange)
+                            } else if args.first().copied() == Some("-") {
+                                Some(SensitiveGitKind::BranchChange)
+                            } else if let Some(first_arg) = args.first() {
+                                let a = *first_arg;
+                                if !a.starts_with('-') && a != "." && a != ".." {
+                                    Some(SensitiveGitKind::BranchChange)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        "switch" => Some(SensitiveGitKind::BranchChange),
+                        "reset" => Some(SensitiveGitKind::Reset),
+                        "revert" => Some(SensitiveGitKind::Revert),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        let suggested = serde_json::to_string(&vec![
+                            "bash".to_string(),
+                            "-lc".to_string(),
+                            format!("confirm: {}", params.command.join(" ")),
+                        ]).unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+
+                        let guidance = guidance_for_sensitive_git(kind, "original_argv", &format!("{:?}", params.command), &suggested);
+
+                        sess
+                            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                            .await;
+
+                        return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content: guidance, success: None } };
+                    }
+                }
+            }
+        }
+    }
+
+    // Check if this was a patch, and apply it in-process if so.
+    match sess
+        .maybe_parse_apply_patch_verified(&params.command, &params.cwd)
+        .await
+    {
+        MaybeApplyPatchVerified::Body(action) => {
+            let changes = convert_apply_patch_to_protocol(&action);
+            turn_diff_tracker.on_patch_begin(&changes);
+
+            match apply_patch::apply_patch(sess, &sub_id, &call_id, action).await {
+                ApplyPatchResult::Reply(item) => return item,
+                ApplyPatchResult::Applied(run) => {
+                    let order_begin = crate::protocol::OrderMeta {
+                        request_ordinal: attempt_req,
+                        output_index,
+                        sequence_number: seq_hint,
+                    };
+                    let begin_event = EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
+                        call_id: call_id.clone(),
+                        auto_approved: run.auto_approved,
+                        changes,
+                    });
+                    let event = sess.make_event_with_order(&sub_id, begin_event, order_begin, seq_hint);
+                    let _ = sess.tx_event.send(event).await;
+
+                    let order_end = crate::protocol::OrderMeta {
+                        request_ordinal: attempt_req,
+                        output_index,
+                        sequence_number: seq_hint.map(|h| h.saturating_add(1)),
+                    };
+                    let end_event = EventMsg::PatchApplyEnd(PatchApplyEndEvent {
+                        call_id: call_id.clone(),
+                        stdout: run.stdout.clone(),
+                        stderr: run.stderr.clone(),
+                        success: run.success,
+                    });
+                    let event = sess.make_event_with_order(
+                        &sub_id,
+                        end_event,
+                        order_end,
+                        seq_hint.map(|h| h.saturating_add(1)),
+                    );
+                    let _ = sess.tx_event.send(event).await;
+
+                    if let Ok(Some(unified_diff)) = turn_diff_tracker.get_unified_diff() {
+                        let diff_event = sess.make_event(
+                            &sub_id,
+                            EventMsg::TurnDiff(TurnDiffEvent { unified_diff }),
+                        );
+                        let _ = sess.tx_event.send(diff_event).await;
+                    }
+
+                    let mut content = run.stdout;
+                    if !run.success && !run.stderr.is_empty() {
+                        if !content.is_empty() {
+                            content.push('\n');
+                        }
+                        content.push_str(&format!("stderr: {}", run.stderr));
+                    }
+                    if let Some(summary) = run.harness_summary_json {
+                        if !summary.is_empty() {
+                            if !content.is_empty() {
+                                content.push('\n');
+                            }
+                            content.push_str(&summary);
+                        }
+                    }
+
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload {
+                            content,
+                            success: Some(run.success),
+                        },
+                    };
                 }
             }
         }
         MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
-            // It looks like an invocation of `apply_patch`, but we
-            // could not resolve it into a patch that would apply
-            // cleanly. Return to model for resample.
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload {
@@ -5063,73 +6811,22 @@ async fn handle_container_exec_with_params(
         }
         MaybeApplyPatchVerified::ShellParseError(error) => {
             trace!("Failed to parse shell command, {error:?}");
-            None
         }
-        MaybeApplyPatchVerified::NotApplyPatch => None,
-    };
+        MaybeApplyPatchVerified::NotApplyPatch => {}
+    }
 
-    let (params, safety, command_for_display) = match &apply_patch_exec {
-        Some(ApplyPatchExec {
-            action: ApplyPatchAction { patch, cwd, .. },
-            user_explicitly_approved_this_action,
-        }) => {
-            let path_to_codex = std::env::current_exe()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string());
-            let Some(path_to_codex) = path_to_codex else {
-                return ResponseInputItem::FunctionCallOutput {
-                    call_id,
-                    output: FunctionCallOutputPayload {
-                        content: "failed to determine path to codex executable".to_string(),
-                        success: None,
-                    },
-                };
-            };
-
-            let params = ExecParams {
-                command: vec![
-                    path_to_codex,
-                    CODEX_APPLY_PATCH_ARG1.to_string(),
-                    patch.clone(),
-                ],
-                cwd: cwd.clone(),
-                timeout_ms: params.timeout_ms,
-                env: HashMap::new(),
-                with_escalated_permissions: params.with_escalated_permissions,
-                justification: params.justification.clone(),
-            };
-            let safety = if *user_explicitly_approved_this_action {
-                SafetyCheck::AutoApprove {
-                    sandbox_type: SandboxType::None,
-                }
-            } else {
-                assess_safety_for_untrusted_command(
-                    sess.approval_policy,
-                    &sess.sandbox_policy,
-                    params.with_escalated_permissions.unwrap_or(false),
-                )
-            };
-            (
-                params,
-                safety,
-                vec!["apply_patch".to_string(), patch.clone()],
-            )
-        }
-        None => {
-            let safety = {
-                let state = sess.state.lock().unwrap();
-                assess_command_safety(
-                    &params.command,
-                    sess.approval_policy,
-                    &sess.sandbox_policy,
-                    &state.approved_commands,
-                    params.with_escalated_permissions.unwrap_or(false),
-                )
-            };
-            let command_for_display = params.command.clone();
-            (params, safety, command_for_display)
-        }
+    let safety = {
+        let state = sess.state.lock().unwrap();
+        assess_command_safety(
+            &params.command,
+            sess.approval_policy,
+            &sess.sandbox_policy,
+            &state.approved_commands,
+            params.with_escalated_permissions.unwrap_or(false),
+        )
     };
+    let command_for_display = params.command.clone();
+    let harness_summary_json: Option<String> = None;
 
     let sandbox_type = match safety {
         SafetyCheck::AutoApprove { sandbox_type } => sandbox_type,
@@ -5146,7 +6843,11 @@ async fn handle_container_exec_with_params(
             match rx_approve.await.unwrap_or_default() {
                 ReviewDecision::Approved => (),
                 ReviewDecision::ApprovedForSession => {
-                    sess.add_approved_command(params.command.clone());
+                    sess.add_approved_command(ApprovedCommandPattern::new(
+                        params.command.clone(),
+                        ApprovedCommandMatchKind::Exact,
+                        None,
+                    ));
                 }
                 ReviewDecision::Denied | ReviewDecision::Abort => {
                     return ResponseInputItem::FunctionCallOutput {
@@ -5180,79 +6881,195 @@ async fn handle_container_exec_with_params(
         call_id: call_id.clone(),
         command_for_display: command_for_display.clone(),
         cwd: params.cwd.clone(),
-        apply_patch: apply_patch_exec.map(
-            |ApplyPatchExec {
-                 action,
-                 user_explicitly_approved_this_action,
-             }| ApplyPatchCommandContext {
-                user_explicitly_approved_this_action,
-                changes: convert_apply_patch_to_protocol(&action),
-            },
-        ),
+        apply_patch: None,
     };
 
+    let display_label = exec_command_context.command_for_display.join(" ");
     let params = maybe_run_with_user_profile(params, sess);
-    let output_result = sess
-        .run_exec_with_events(
+
+    // Prepare tail buffer and background registry entry
+    let tail_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    let result_cell: std::sync::Arc<std::sync::Mutex<Option<ExecToolCallOutput>>> = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let backgrounded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let suppress_event_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut st = sess.state.lock().unwrap();
+        st.background_execs.insert(
+            call_id.clone(),
+            BackgroundExecState {
+                notify: notify.clone(),
+                result_cell: result_cell.clone(),
+                tail_buf: Some(tail_buf.clone()),
+                cmd_display: display_label.clone(),
+                suppress_event: suppress_event_flag.clone(),
+            },
+        );
+    }
+
+    // Emit BEGIN event using the normal path so the TUI shows a running cell
+    sess
+        .on_exec_command_begin(
             turn_diff_tracker,
             exec_command_context.clone(),
-            ExecInvokeArgs {
-                params: params.clone(),
-                sandbox_type,
-                sandbox_policy: &sess.sandbox_policy,
-                codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
-                stdout_stream: if exec_command_context.apply_patch.is_some() {
-                    None
-                } else {
-                    Some(StdoutStream {
-                        sub_id: sub_id.clone(),
-                        call_id: call_id.clone(),
-                        tx_event: sess.tx_event.clone(),
-                    })
-                },
-            },
             seq_hint_for_exec,
             output_index,
             attempt_req,
         )
         .await;
 
-    match output_result {
-        Ok(output) => {
-            let ExecToolCallOutput { exit_code, .. } = &output;
+    // Spawn the runner that streams output and, on completion, emits END and records result.
+    let tx_event = sess.tx_event.clone();
+    let sub_id_for_events = sub_id.clone();
+    let call_id_for_events = call_id.clone();
+    let sandbox_policy = sess.sandbox_policy.clone();
+    let sandbox_cwd = sess.get_cwd().to_path_buf();
+    let codex_linux_sandbox_exe = sess.codex_linux_sandbox_exe.clone();
+    let result_cell_for_task = result_cell.clone();
+    let order_meta_for_end = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: seq_hint_for_exec.map(|h| h.saturating_add(1)) };
+    let order_meta_for_deltas = crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index, sequence_number: None };
+    let notify_task = notify.clone();
+    let tail_buf_task = tail_buf.clone();
+    let backgrounded_task = backgrounded.clone();
+    let suppress_event_flag_task = suppress_event_flag.clone();
+    let display_label_task = display_label.clone();
+    tokio::spawn(async move {
+        // Build stdout stream with tail capture. We cannot stamp via `Session` here,
+        // but deltas will be delivered with neutral ordering which the UI tolerates.
+        let stdout_stream = if exec_command_context.apply_patch.is_some() {
+            None
+        } else {
+            Some(StdoutStream {
+                sub_id: sub_id_for_events.clone(),
+                call_id: call_id_for_events.clone(),
+                tx_event: tx_event.clone(),
+                session: None,
+                tail_buf: Some(tail_buf_task.clone()),
+                order: Some(order_meta_for_deltas.clone()),
+            })
+        };
 
-            let is_success = *exit_code == 0;
-            let content = format_exec_output_with_limit(sess, &sub_id, &call_id, &output);
-            ResponseInputItem::FunctionCallOutput {
-                call_id: call_id.clone(),
-                output: FunctionCallOutputPayload {
-                    content,
-                    success: Some(is_success),
-                },
+        let start = std::time::Instant::now();
+        let res = crate::exec::process_exec_tool_call(
+            params.clone(),
+            sandbox_type,
+            &sandbox_policy,
+            &sandbox_cwd,
+            &codex_linux_sandbox_exe,
+            stdout_stream,
+        )
+        .await;
+
+        // Normalize to ExecToolCallOutput
+        let (out, exit_code) = match res {
+            Ok(o) => { let exit = o.exit_code; (o, exit) },
+            Err(CodexErr::Sandbox(SandboxErr::Timeout { output })) => (output.as_ref().clone(), 124),
+            Err(e) => {
+                let msg = get_error_message_ui(&e);
+                (
+                    ExecToolCallOutput {
+                        exit_code: -1,
+                        stdout: StreamOutput::new(String::new()),
+                        stderr: StreamOutput::new(msg.clone()),
+                        aggregated_output: StreamOutput::new(msg),
+                        duration: start.elapsed(),
+                        timed_out: false,
+                    },
+                    -1,
+                )
             }
+        };
+
+        // Emit END event directly
+        let end_msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id_for_events.clone(),
+            stdout: out.stdout.text.clone(),
+            stderr: out.stderr.text.clone(),
+            exit_code,
+            duration: out.duration,
+        });
+        let ev = Event { id: sub_id_for_events.clone(), event_seq: 0, msg: end_msg, order: Some(order_meta_for_end) };
+        let _ = tx_event.send(ev).await;
+
+        // Store result for waiters
+        {
+            let mut slot = result_cell_for_task.lock().unwrap();
+            *slot = Some(out.clone());
         }
-        Err(CodexErr::Sandbox(error)) => {
-            handle_sandbox_error(
-                turn_diff_tracker,
-                params,
-                exec_command_context,
-                error,
-                sandbox_type,
-                sess,
-                attempt_req,
-            )
-            .await
+        // Only emit background completion notifications if the command actually backgrounded
+        if backgrounded_task.load(std::sync::atomic::Ordering::Relaxed) {
+            if !suppress_event_flag_task.load(std::sync::atomic::Ordering::Relaxed) {
+                let label = display_label_task.trim();
+                let message = if label.is_empty() {
+                    format!("Background shell '{}' completed.", call_id_for_events)
+                } else {
+                    format!("{} completed in background", display_label_task.clone())
+                };
+                let bg_event = EventMsg::BackgroundEvent(BackgroundEventEvent { message });
+                let ev = Event { id: sub_id_for_events.clone(), event_seq: 0, msg: bg_event, order: None };
+                let _ = tx_event.send(ev).await;
+
+                if let Some(tx) = TX_SUB_GLOBAL.get() {
+                    let header_label = if label.is_empty() {
+                        format!("call_id={}", call_id_for_events)
+                    } else {
+                        display_label_task.clone()
+                    };
+                    let header = format!("Background shell completed ({header_label}), exit_code={}, duration={:?}.", out.exit_code, out.duration);
+                    let body = out.aggregated_output.text.clone();
+                    let dev_text = format!("{}\n\n{}", header, body);
+                    let _ = tx
+                        .send(Submission { id: uuid::Uuid::new_v4().to_string(), op: Op::AddPendingInputDeveloper { text: dev_text } })
+                        .await;
+                }
+            }
+            if let Some(n) = ANY_BG_NOTIFY.get() { n.notify_waiters(); }
         }
-        Err(e) => ResponseInputItem::FunctionCallOutput {
-            call_id: call_id.clone(),
-            output: FunctionCallOutputPayload {
-                content: format!("execution error: {e}"),
-                success: None,
-            },
-        },
+        notify_task.notify_waiters();
+    });
+
+    // Wait up to 10 seconds for completion
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
+    if waited.is_ok() {
+        // Completed within 10s – return the real output
+        let done_opt = {
+            let st = sess.state.lock().unwrap();
+            st.background_execs.get(&call_id).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+        };
+        if let Some(done) = done_opt {
+            let is_success = done.exit_code == 0;
+            let mut content = format_exec_output_with_limit(sess, &sub_id, &call_id, &done);
+            if let Some(harness) = harness_summary_json.as_ref() {
+                if !harness.is_empty() {
+                    content.push('\n');
+                    content.push_str(harness);
+                }
+            }
+            return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content, success: Some(is_success) } };
+        } else {
+            // Fallback (should not happen): indicate completion without detail
+            let msg = format!("Command completed.");
+            return ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content: msg, success: Some(true) } };
+        }
     }
+
+    // Still running: mark as backgrounded and return background notice + tail and instructions
+    backgrounded.store(true, std::sync::atomic::Ordering::Relaxed);
+    let tail = String::from_utf8_lossy(&tail_buf.lock().unwrap()).to_string();
+    let header = format!(
+        "Command running in background (call_id={}).\nTo wait: wait(call_id=\"{}\")\nYou can continue other work or wait. You'll be notified when the command completes.",
+        call_id,
+        call_id
+    );
+    let msg = if tail.is_empty() {
+        header
+    } else {
+        format!("{}\n\nOutput so far (tail):\n{}", header, tail)
+    };
+    ResponseInputItem::FunctionCallOutput { call_id: call_id.clone(), output: FunctionCallOutputPayload { content: msg, success: Some(true) } }
 }
 
+#[allow(dead_code)]
 async fn handle_sandbox_error(
     turn_diff_tracker: &mut TurnDiffTracker,
     params: ExecParams,
@@ -5272,35 +7089,24 @@ async fn handle_sandbox_error(
         AskForApproval::Never | AskForApproval::OnRequest => {
             // Clarify when Read Only mode is the reason a command cannot proceed.
             let content = if matches!(sess.sandbox_policy, SandboxPolicy::ReadOnly) {
-                format!(
-                    "command blocked by Read Only mode: {}",
-                    error
-                )
+                format!("command blocked by Read Only mode: {error}")
             } else {
-                format!(
-                    "failed in sandbox {sandbox_type:?} with execution error: {error}"
-                )
+                format!("failed in sandbox {sandbox_type:?} with execution error: {error}")
             };
             return ResponseInputItem::FunctionCallOutput {
                 call_id,
-                output: FunctionCallOutputPayload {
-                    content,
-                    success: Some(false),
-                },
+                output: FunctionCallOutputPayload { content, success: Some(false) },
             };
         }
         AskForApproval::UnlessTrusted | AskForApproval::OnFailure => (),
     }
 
     // similarly, if the command timed out, we can simply return this failure to the model
-    if matches!(error, SandboxErr::Timeout) {
+    if matches!(error, SandboxErr::Timeout { .. }) {
         return ResponseInputItem::FunctionCallOutput {
             call_id,
             output: FunctionCallOutputPayload {
-                content: format!(
-                    "command timed out after {} milliseconds",
-                    params.timeout_duration().as_millis()
-                ),
+                content: "command timed out".to_string(),
                 success: Some(false),
             },
         };
@@ -5334,7 +7140,11 @@ async fn handle_sandbox_error(
             // remainder of the session so future
             // executions skip the sandbox directly.
             // TODO(ragona): Isn't this a bug? It always saves the command in an | fork?
-            sess.add_approved_command(params.command.clone());
+            sess.add_approved_command(ApprovedCommandPattern::new(
+                params.command.clone(),
+                ApprovedCommandMatchKind::Exact,
+                None,
+            ));
             // Inform UI we are retrying without sandbox.
             sess.notify_background_event(&sub_id, "retrying command without sandbox")
                 .await;
@@ -5351,6 +7161,7 @@ async fn handle_sandbox_error(
                         params,
                         sandbox_type: SandboxType::None,
                         sandbox_policy: &sess.sandbox_policy,
+                        sandbox_cwd: sess.get_cwd(),
                         codex_linux_sandbox_exe: &sess.codex_linux_sandbox_exe,
                         stdout_stream: if exec_command_context.apply_patch.is_some() {
                             None
@@ -5359,6 +7170,9 @@ async fn handle_sandbox_error(
                                 sub_id: sub_id.clone(),
                                 call_id: call_id.clone(),
                                 tx_event: sess.tx_event.clone(),
+                                session: None,
+                                tail_buf: None,
+                                order: Some(crate::protocol::OrderMeta { request_ordinal: attempt_req, output_index: None, sequence_number: None }),
                             })
                         },
                     },
@@ -5547,42 +7361,6 @@ fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<St
     })
 }
 
-async fn drain_to_completed(sess: &Session, sub_id: &str, prompt: &Prompt) -> CodexResult<()> {
-    let mut stream = sess.client.clone().stream(prompt).await?;
-    loop {
-        let maybe_event = stream.next().await;
-        let Some(event) = maybe_event else {
-            return Err(CodexErr::Stream(
-                "stream closed before response.completed".into(),
-                None,
-            ));
-        };
-        match event {
-            Ok(ResponseEvent::OutputItemDone { item, sequence_number: _, output_index: _ }) => {
-                // Record only to in-memory conversation history; avoid state snapshot.
-                let mut state = sess.state.lock().unwrap();
-                state.history.record_items(std::slice::from_ref(&item));
-            }
-            Ok(ResponseEvent::Completed {
-                response_id: _,
-                token_usage,
-            }) => {
-                // some providers don't return token usage, so we default
-                // TODO: consider approximate token usage
-                let token_usage = token_usage.unwrap_or_default();
-    sess.tx_event
-        .send(sess.make_event(&sub_id, EventMsg::TokenCount(token_usage)))
-        .await
-        .ok();
-
-                return Ok(());
-            }
-            Ok(_) => continue,
-            Err(e) => return Err(e),
-        }
-    }
-}
-
 /// Capture a screenshot from the browser and store it for the next model request
 async fn capture_browser_screenshot(_sess: &Session) -> Result<(PathBuf, String), String> {
     let browser_manager = codex_browser::global::get_browser_manager()
@@ -5622,6 +7400,7 @@ async fn capture_browser_screenshot(_sess: &Session) -> Result<(PathBuf, String)
         }
     }
 }
+// removed upstream exit_review_mode helper: not used in fork
 
 /// Send agent status update event to the TUI
 async fn send_agent_status_update(sess: &Session) {
@@ -5647,16 +7426,14 @@ async fn send_agent_status_update(sess: &Session) {
         })
         .collect();
 
-    let event = Event {
-        id: "agent_status".to_string(),
-        event_seq: 0,
-        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+    let event = sess.make_event(
+        "agent_status",
+        EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
             agents,
             context: None,
             task: None,
         }),
-        order: None,
-    };
+    );
 
     // Send event asynchronously
     let tx_event = sess.tx_event.clone();
@@ -5673,15 +7450,13 @@ fn add_pending_screenshot(sess: &Session, screenshot_path: PathBuf, url: String)
     tracing::info!("Captured screenshot; updating UI and using per-turn injection");
 
     // Also send an immediate event to update the TUI display
-    let event = Event {
-        id: "browser_screenshot".to_string(),
-        event_seq: 0,
-        msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+    let event = sess.make_event(
+        "browser_screenshot",
+        EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
             screenshot_path,
             url,
         }),
-        order: None,
-    };
+    );
 
     // Send event asynchronously to avoid blocking
     let tx_event = sess.tx_event.clone();
@@ -6544,7 +8319,7 @@ async fn handle_browser_console(sess: &Session, ctx: &ToolCallCtx, arguments: St
                                         let message = log_obj.get("message")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("");
-                                        
+
                                         output.push_str(&format!("[{}] [{}] {}\n", timestamp, level.to_uppercase(), message));
                                     }
                                 }
@@ -6968,4 +8743,392 @@ async fn handle_browser_history(sess: &Session, ctx: &ToolCallCtx, arguments: St
         },
     )
     .await
+}
+
+fn extract_shell_script_from_wrapper(argv: &[String]) -> Option<(usize, String)> {
+    // Return (index_of_script, script) if argv matches: <shell> (-lc|-c) <script>
+    if argv.len() == 3 {
+        let shell = std::path::Path::new(&argv[0])
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let is_shell = matches!(shell, "bash" | "sh" | "zsh");
+        let is_flag = matches!(argv[1].as_str(), "-lc" | "-c");
+        if is_shell && is_flag {
+            return Some((2, argv[2].clone()));
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PythonWriteSuggestion {
+    label: &'static str,
+    original_value: String,
+}
+
+fn detect_python_write(argv: &[String]) -> Option<PythonWriteSuggestion> {
+    if let Some((_, script)) = extract_shell_script_from_wrapper(argv) {
+        if script_contains_python_write(&script) {
+            return Some(PythonWriteSuggestion {
+                label: "original_script",
+                original_value: script,
+            });
+        }
+    }
+
+    detect_python_write_in_argv(argv)
+}
+
+fn detect_python_write_in_argv(argv: &[String]) -> Option<PythonWriteSuggestion> {
+    if argv.is_empty() {
+        return None;
+    }
+
+    if !is_python_command(&argv[0]) {
+        return None;
+    }
+
+    if argv.len() >= 3 && argv[1] == "-c" {
+        let code = &argv[2];
+        if python_code_writes_files(code) {
+            return Some(PythonWriteSuggestion {
+                label: "python_inline_script",
+                original_value: code.clone(),
+            });
+        }
+    }
+
+    None
+}
+
+fn script_contains_python_write(script: &str) -> bool {
+    let lower = script.to_ascii_lowercase();
+    if !(lower.contains("python ")
+        || lower.contains("python3")
+        || lower.contains("python\n"))
+    {
+        return false;
+    }
+    contains_python_write_keywords(&lower)
+}
+
+fn python_code_writes_files(code: &str) -> bool {
+    contains_python_write_keywords(&code.to_ascii_lowercase())
+}
+
+fn contains_python_write_keywords(lower: &str) -> bool {
+    const KEYWORDS: &[&str] = &["write_text(", "write_bytes(", ".write_text(", ".write_bytes("];
+    KEYWORDS.iter().any(|needle| lower.contains(needle))
+}
+
+fn is_python_command(cmd: &str) -> bool {
+    std::path::Path::new(cmd)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| {
+            let lower = name.to_ascii_lowercase();
+            matches!(lower.as_str(), "python" | "python3" | "python2")
+        })
+        .unwrap_or(false)
+}
+
+fn guidance_for_python_write(suggestion: &PythonWriteSuggestion) -> String {
+    format!(
+        "Blocked python command that writes files directly. Use apply_patch to edit files so changes stay reviewable.\n\n{}: {}",
+        suggestion.label,
+        suggestion.original_value
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RedundantCdSuggestion {
+    label: &'static str,
+    original_value: String,
+    suggested: Vec<String>,
+    target_arg: String,
+    cwd: PathBuf,
+}
+
+fn detect_redundant_cd(argv: &[String], cwd: &Path) -> Option<RedundantCdSuggestion> {
+    let normalized_cwd = normalize_path(cwd);
+    if let Some((script_index, script)) = extract_shell_script_from_wrapper(argv) {
+        if let Some(suggestion) = detect_redundant_cd_in_shell(
+            argv,
+            script_index,
+            &script,
+            cwd,
+            &normalized_cwd,
+        ) {
+            return Some(suggestion);
+        }
+    }
+    detect_redundant_cd_in_argv(argv, cwd, &normalized_cwd)
+}
+
+fn detect_redundant_cd_in_shell(
+    argv: &[String],
+    script_index: usize,
+    script: &str,
+    cwd: &Path,
+    normalized_cwd: &Path,
+) -> Option<RedundantCdSuggestion> {
+    let trimmed = script.trim_start();
+    let tokens = shlex_split(trimmed)?;
+    if tokens.len() < 3 {
+        return None;
+    }
+    if tokens.first().map(String::as_str) != Some("cd") {
+        return None;
+    }
+    let target = tokens.get(1)?.clone();
+    if !is_simple_cd_target(&target) {
+        return None;
+    }
+    let resolved_target = resolve_cd_target(&target, cwd)?;
+    if resolved_target != normalized_cwd {
+        return None;
+    }
+
+    let mut idx = 2;
+    let mut saw_connector = false;
+    while idx < tokens.len() && is_connector(&tokens[idx]) {
+        saw_connector = true;
+        idx += 1;
+    }
+    if !saw_connector || idx >= tokens.len() {
+        return None;
+    }
+
+    let remainder_tokens = tokens[idx..].to_vec();
+    let suggested_script = shlex_try_join(remainder_tokens.iter().map(|s| s.as_str()))
+        .unwrap_or_else(|_| remainder_tokens.join(" "));
+    if suggested_script.trim().is_empty() {
+        return None;
+    }
+
+    let mut suggested = argv.to_vec();
+    suggested[script_index] = suggested_script;
+
+    Some(RedundantCdSuggestion {
+        label: "original_script",
+        original_value: script.to_string(),
+        suggested,
+        target_arg: target,
+        cwd: normalized_cwd.to_path_buf(),
+    })
+}
+
+fn detect_redundant_cd_in_argv(
+    argv: &[String],
+    cwd: &Path,
+    normalized_cwd: &Path,
+) -> Option<RedundantCdSuggestion> {
+    if argv.len() < 4 {
+        return None;
+    }
+    if argv.first().map(String::as_str) != Some("cd") {
+        return None;
+    }
+    let target = argv.get(1)?.clone();
+    if !is_simple_cd_target(&target) {
+        return None;
+    }
+    let resolved_target = resolve_cd_target(&target, cwd)?;
+    if resolved_target != normalized_cwd {
+        return None;
+    }
+
+    let mut idx = 2;
+    let mut saw_connector = false;
+    while idx < argv.len() && is_connector(&argv[idx]) {
+        saw_connector = true;
+        idx += 1;
+    }
+    if !saw_connector || idx >= argv.len() {
+        return None;
+    }
+
+    let suggested = argv[idx..].to_vec();
+    if suggested.is_empty() {
+        return None;
+    }
+
+    Some(RedundantCdSuggestion {
+        label: "original_argv",
+        original_value: format!("{:?}", argv),
+        suggested,
+        target_arg: target,
+        cwd: normalized_cwd.to_path_buf(),
+    })
+}
+
+fn resolve_cd_target(target: &str, cwd: &Path) -> Option<PathBuf> {
+    if target.is_empty() {
+        return None;
+    }
+    let candidate = if Path::new(target).is_absolute() {
+        PathBuf::from(target)
+    } else {
+        cwd.join(target)
+    };
+    Some(normalize_path(candidate.as_path()))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            Component::Prefix(prefix) => {
+                normalized = PathBuf::from(prefix.as_os_str());
+            }
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn is_simple_cd_target(target: &str) -> bool {
+    if target.is_empty() || target == "-" {
+        return false;
+    }
+    !target.chars().any(|ch| matches!(ch, '$' | '`' | '*' | '?' | '[' | ']' | '{' | '}' | '(' | ')' | '|' | '>' | '<' | '!'))
+}
+
+fn is_connector(token: &str) -> bool {
+    matches!(token, "&&" | ";" | "||")
+}
+
+fn guidance_for_redundant_cd(suggestion: &RedundantCdSuggestion) -> String {
+    let suggested = serde_json::to_string(&suggestion.suggested)
+        .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
+    let target_display = shlex_try_join(std::iter::once(suggestion.target_arg.as_str()))
+        .unwrap_or_else(|_| suggestion.target_arg.clone());
+    format!(
+        "Leading cd {target_display} is redundant because the command already runs in {}. Drop the prefix before retrying.\n\n{}: {}\nresend_exact_argv: {}",
+        suggestion.cwd.display(),
+        suggestion.label,
+        suggestion.original_value,
+        suggested
+    )
+}
+
+#[cfg(test)]
+mod command_guard_detection_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn detects_shell_redundant_cd() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd /tmp/project && ls".to_string(),
+        ];
+
+        let suggestion = detect_redundant_cd(&argv, &cwd).expect("should flag redundant cd");
+        assert_eq!(suggestion.label, "original_script");
+        assert_eq!(suggestion.suggested, vec!["bash".to_string(), "-lc".to_string(), "ls".to_string()]);
+    }
+
+    #[test]
+    fn ignores_cd_to_different_directory() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd /tmp/project/src && ls".to_string(),
+        ];
+
+        assert!(detect_redundant_cd(&argv, &cwd).is_none());
+    }
+
+    #[test]
+    fn skips_dynamic_cd_targets() {
+        let cwd = PathBuf::from("/tmp/project");
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "cd $PWD && ls".to_string(),
+        ];
+
+        assert!(detect_redundant_cd(&argv, &cwd).is_none());
+    }
+
+    #[test]
+    fn detects_python_here_doc_write() {
+        let argv = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "python3 - <<'PY'\nfrom pathlib import Path\nPath('docs.txt').write_text('hello')\nPY".to_string(),
+        ];
+
+        let suggestion = detect_python_write(&argv).expect("should flag python write");
+        assert_eq!(suggestion.label, "original_script");
+        assert!(suggestion.original_value.contains("write_text"));
+    }
+
+    #[test]
+    fn detects_python_inline_write() {
+        let argv = vec![
+            "python3".to_string(),
+            "-c".to_string(),
+            "from pathlib import Path; Path('foo.txt').write_text('hi')".to_string(),
+        ];
+
+        let suggestion = detect_python_write(&argv).expect("should flag inline python write");
+        assert_eq!(suggestion.label, "python_inline_script");
+        assert!(suggestion.original_value.contains("write_text"));
+    }
+
+    #[test]
+    fn allows_read_only_python() {
+        let argv = vec![
+            "python3".to_string(),
+            "-c".to_string(),
+            "print('hello world')".to_string(),
+        ];
+
+        assert!(detect_python_write(&argv).is_none());
+    }
+}
+
+fn debug_history(label: &str, items: &[ResponseItem]) {
+    let preview: Vec<String> = items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| match item {
+            ResponseItem::Message { role, content, .. } => {
+                let text = content
+                    .iter()
+                    .filter_map(|c| match c {
+                        ContentItem::InputText { text }
+                        | ContentItem::OutputText { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let snippet: String = text.chars().take(80).collect();
+                format!("{idx}:{role}:{snippet}")
+            }
+            _ => format!("{idx}:{:?}", item),
+        })
+        .collect();
+    let rendered = preview.join(" | ");
+    if std::env::var_os("CODEX_COMPACT_TRACE").is_some() {
+        eprintln!("[compact_history] {} => [{}]", label, rendered);
+    }
+    info!(target = "codex_core::compact_history", "{} => [{}]", label, rendered);
 }

@@ -5,6 +5,8 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::config::resolve_codex_path_for_read;
+
 pub(crate) const INTERNAL_STORAGE_FILE: &str = "internal_storage.json";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -19,8 +21,9 @@ pub struct InternalStorage {
 impl InternalStorage {
     pub fn load(codex_home: &Path) -> Self {
         let storage_path = codex_home.join(INTERNAL_STORAGE_FILE);
+        let read_path = resolve_codex_path_for_read(codex_home, Path::new(INTERNAL_STORAGE_FILE));
 
-        match std::fs::read_to_string(&storage_path) {
+        match std::fs::read_to_string(&read_path) {
             Ok(serialized) => match serde_json::from_str::<Self>(&serialized) {
                 Ok(mut storage) => {
                     storage.storage_path = storage_path;

@@ -2,7 +2,8 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use hanzo_dev::CODEX_APPLY_PATCH_ARG1;
+use codex_core::config::resolve_codex_path_for_read;
+use codex_core::CODEX_APPLY_PATCH_ARG1;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use tempfile::TempDir;
@@ -29,7 +30,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 /// 4.  Execute the provided async `main_fn` inside that runtime, forwarding any
 ///     error. Note that `main_fn` receives `codex_linux_sandbox_exe:
 ///     Option<PathBuf>`, as an argument, which is generally needed as part of
-///     constructing [`hanzo_dev::config::Config`].
+///     constructing [`codex_core::config::Config`].
 ///
 /// This function should be used to wrap any `main()` function in binary crates
 /// in this workspace that depends on these helper CLIs.
@@ -50,7 +51,7 @@ where
         // Safety: [`run_main`] never returns.
         codex_linux_sandbox::run_main();
     } else if exe_name == APPLY_PATCH_ARG0 || exe_name == MISSPELLED_APPLY_PATCH_ARG0 {
-        dev_apply_patch::main();
+        codex_apply_patch::main();
     }
 
     let argv1 = args.next().unwrap_or_default();
@@ -60,7 +61,17 @@ where
             Some(patch_arg) => {
                 let mut stdout = std::io::stdout();
                 let mut stderr = std::io::stderr();
-                match dev_apply_patch::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
+                let fs = codex_apply_patch::StdFileSystem;
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("failed to build apply_patch runtime");
+                match rt.block_on(codex_apply_patch::apply_patch(
+                    &patch_arg,
+                    &mut stdout,
+                    &mut stderr,
+                    &fs,
+                )) {
                     Ok(()) => 0,
                     Err(_) => 1,
                 }
@@ -106,14 +117,15 @@ where
 
 const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
-/// Load env vars from ~/.codex/.env and `$(pwd)/.env`.
+/// Load env vars from ~/.code/.env (legacy ~/.codex/.env is still read) and `$(pwd)/.env`.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.
 fn load_dotenv() {
     // 1) Load from global ~/.code/.env (or ~/.codex/.env) first.
-    if let Ok(codex_home) = hanzo_dev::config::find_codex_home() {
-        if let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env")) {
+    if let Ok(codex_home) = codex_core::config::find_codex_home() {
+        let global_env_path = resolve_codex_path_for_read(&codex_home, Path::new(".env"));
+        if let Ok(iter) = dotenvy::from_path_iter(global_env_path) {
             // Global env may legitimately contain provider keys for Code usage.
             set_filtered(iter);
         }
@@ -128,13 +140,9 @@ fn load_dotenv() {
         for (key, value) in iter.into_iter().flatten() {
             let upper = key.to_ascii_uppercase();
             // Never allow CODEX_* to be set from .env files for safety.
-            if upper.starts_with(ILLEGAL_ENV_VAR_PREFIX) {
-                continue;
-            }
+            if upper.starts_with(ILLEGAL_ENV_VAR_PREFIX) { continue; }
             // Always ignore provider keys from project .env (must be set globally or in shell).
-            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" {
-                continue;
-            }
+            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" { continue; }
             // Safe: still single-threaded during startup.
             unsafe { std::env::set_var(&key, &value) };
         }

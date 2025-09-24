@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use mcp_types::CallToolResult;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_bytes::ByteBuf;
@@ -24,6 +25,13 @@ use crate::message_history::HistoryEntry;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::parse_command::ParsedCommand;
 use crate::plan_tool::UpdatePlanArgs;
+
+// Re-export review types from the shared protocol crate so callers can use
+// `codex_core::protocol::ReviewFinding` and friends.
+pub use codex_protocol::protocol::ReviewCodeLocation;
+pub use codex_protocol::protocol::ReviewFinding;
+pub use codex_protocol::protocol::ReviewLineRange;
+pub use codex_protocol::protocol::ReviewOutputEvent;
 
 /// Submission Queue Entry - requests from user
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -97,12 +105,28 @@ pub enum Op {
         items: Vec<InputItem>,
     },
 
+    /// Queue user input to be appended to the next model request without
+    /// interrupting the current turn.
+    QueueUserInput {
+        /// User input items, see `InputItem`
+        items: Vec<InputItem>,
+    },
+
     /// Approve a command execution
     ExecApproval {
         /// The id of the submission we are approving
         id: String,
         /// The user's decision in response to the request.
         decision: ReviewDecision,
+    },
+
+    /// Register a command pattern as approved for the remainder of the session.
+    RegisterApprovedCommand {
+        command: Vec<String>,
+        match_kind: ApprovedCommandMatchKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        semantic_prefix: Option<Vec<String>>,
     },
 
     /// Approve a code patch
@@ -113,12 +137,34 @@ pub enum Op {
         decision: ReviewDecision,
     },
 
+    /// Update the validation harness toggle in the running session.
+    UpdateValidationPatchHarness {
+        enabled: bool,
+    },
+
+    /// Update a specific validation tool toggle for the session.
+    UpdateValidationTool {
+        name: String,
+        enable: bool,
+    },
+
     /// Append an entry to the persistent cross-session message history.
     ///
     /// Note the entry is not guaranteed to be logged if the user has
     /// history disabled, it matches the list of "sensitive" patterns, etc.
     AddToHistory {
         /// The message text to be stored.
+        text: String,
+    },
+
+    /// Execute a project-scoped custom command defined in configuration.
+    RunProjectCommand {
+        name: String,
+    },
+
+    /// Internally queue a developer-role message to be included in the next turn.
+    AddPendingInputDeveloper {
+        /// The developer message text to add to pending input.
         text: String,
     },
 
@@ -159,6 +205,13 @@ pub enum AskForApproval {
     /// Never ask the user to approve commands. Failures are immediately returned
     /// to the model, and never escalated to the user for approval.
     Never,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovedCommandMatchKind {
+    Exact,
+    Prefix,
 }
 
 /// Determines execution restrictions for model shell commands.
@@ -392,6 +445,95 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecordedEvent {
+    pub id: String,
+    pub event_seq: u64,
+    pub order: Option<OrderMeta>,
+    pub msg: EventMsg,
+}
+
+pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<codex_protocol::protocol::EventMsg> {
+    if matches!(msg, EventMsg::ReplayHistory(_)) {
+        return None;
+    }
+    convert_value(msg)
+}
+
+
+pub fn event_msg_from_protocol(msg: &codex_protocol::protocol::EventMsg) -> Option<EventMsg> {
+    let Some(converted) = convert_value(msg) else {
+        return None;
+    };
+    if matches!(converted, EventMsg::ReplayHistory(_)) {
+        return None;
+    }
+    Some(converted)
+}
+
+
+pub fn order_meta_to_protocol(
+    order: &OrderMeta,
+) -> codex_protocol::protocol::OrderMeta {
+    codex_protocol::protocol::OrderMeta {
+        request_ordinal: order.request_ordinal,
+        output_index: order.output_index,
+        sequence_number: order.sequence_number,
+    }
+}
+
+pub fn order_meta_from_protocol(
+    order: &codex_protocol::protocol::OrderMeta,
+) -> OrderMeta {
+    OrderMeta {
+        request_ordinal: order.request_ordinal,
+        output_index: order.output_index,
+        sequence_number: order.sequence_number,
+    }
+}
+
+
+pub fn recorded_event_to_protocol(
+    event: &RecordedEvent,
+) -> Option<codex_protocol::protocol::RecordedEvent> {
+    let msg = event_msg_to_protocol(&event.msg)?;
+    let order = event
+        .order
+        .as_ref()
+        .map(order_meta_to_protocol);
+    Some(codex_protocol::protocol::RecordedEvent {
+        id: event.id.clone(),
+        event_seq: event.event_seq,
+        order,
+        msg,
+    })
+}
+
+
+pub fn recorded_event_from_protocol(
+    src: codex_protocol::protocol::RecordedEvent,
+) -> Option<RecordedEvent> {
+    let msg = event_msg_from_protocol(&src.msg)?;
+    let order = src.order.as_ref().map(order_meta_from_protocol);
+    Some(RecordedEvent {
+        id: src.id,
+        event_seq: src.event_seq,
+        order,
+        msg,
+    })
+}
+
+fn convert_value<T, U>(value: &T) -> Option<U>
+where
+    T: Serialize,
+    U: DeserializeOwned,
+{
+    let Ok(json) = serde_json::to_value(value) else {
+        return None;
+    };
+    serde_json::from_value(json).ok()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OrderMeta {
     /// 1-based ordinal of this request/turn in the session
     pub request_ordinal: u64,
@@ -418,8 +560,8 @@ pub enum EventMsg {
     TaskComplete(TaskCompleteEvent),
 
     /// Token count event, sent periodically to report the number of tokens
-    /// used in the current session.
-    TokenCount(TokenUsage),
+    /// used in the current session and the latest rate limit snapshot.
+    TokenCount(TokenCountEvent),
 
     /// Agent text output message
     AgentMessage(AgentMessageEvent),
@@ -491,8 +633,23 @@ pub enum EventMsg {
     /// Agent status has been updated
     AgentStatusUpdate(AgentStatusUpdateEvent),
 
+    /// User/system input message (what was sent to the model)
+    UserMessage(codex_protocol::protocol::UserMessageEvent),
+
     /// Notification that the agent is shutting down.
     ShutdownComplete,
+
+    /// The system aborted the current turn (e.g., due to interruption).
+    TurnAborted(codex_protocol::protocol::TurnAbortedEvent),
+
+    /// Response to a conversation path request.
+    ConversationPath(codex_protocol::protocol::ConversationPathResponseEvent),
+
+    /// Entered review mode with the provided request.
+    EnteredReviewMode(codex_protocol::protocol::ReviewRequest),
+
+    /// Exited review mode with an optional final result to apply.
+    ExitedReviewMode(Option<codex_protocol::protocol::ReviewOutputEvent>),
 
     /// Replay a previously recorded transcript into the UI.
     /// Used after resuming from a rollout file so the user sees the full
@@ -515,9 +672,9 @@ pub struct TaskCompleteEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TokenUsage {
     pub input_tokens: u64,
-    pub cached_input_tokens: Option<u64>,
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
-    pub reasoning_output_tokens: Option<u64>,
+    pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
 }
 
@@ -527,7 +684,7 @@ impl TokenUsage {
     }
 
     pub fn cached_input(&self) -> u64 {
-        self.cached_input_tokens.unwrap_or(0)
+        self.cached_input_tokens
     }
 
     pub fn non_cached_input(&self) -> u64 {
@@ -545,8 +702,97 @@ impl TokenUsage {
     /// This will be off for the current turn and pending function calls.
     pub fn tokens_in_context_window(&self) -> u64 {
         self.total_tokens
-            .saturating_sub(self.reasoning_output_tokens.unwrap_or(0))
+            .saturating_sub(self.reasoning_output_tokens)
     }
+
+    /// Estimate the remaining user-controllable percentage of the model's context window.
+    pub fn percent_of_context_window_remaining(&self, context_window: u64) -> u8 {
+        if context_window <= BASELINE_TOKENS {
+            return 0;
+        }
+
+        let effective_window = context_window - BASELINE_TOKENS;
+        let used = self
+            .tokens_in_context_window()
+            .saturating_sub(BASELINE_TOKENS);
+        let remaining = effective_window.saturating_sub(used);
+        ((remaining as f32 / effective_window as f32) * 100.0).clamp(0.0, 100.0) as u8
+    }
+
+    /// In-place element-wise sum of token counts.
+    pub fn add_assign(&mut self, other: &TokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.cached_input_tokens += other.cached_input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.reasoning_output_tokens += other.reasoning_output_tokens;
+        self.total_tokens += other.total_tokens;
+    }
+}
+
+/// Includes prompts, tools and space to call compact.
+const BASELINE_TOKENS: u64 = 12_000;
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TokenUsageInfo {
+    pub total_token_usage: TokenUsage,
+    pub last_token_usage: TokenUsage,
+    pub model_context_window: Option<u64>,
+}
+
+impl TokenUsageInfo {
+    pub fn new_or_append(
+        info: &Option<TokenUsageInfo>,
+        last: &Option<TokenUsage>,
+        model_context_window: Option<u64>,
+    ) -> Option<Self> {
+        if info.is_none() && last.is_none() {
+            return None;
+        }
+
+        let mut info = match info {
+            Some(info) => info.clone(),
+            None => Self {
+                total_token_usage: TokenUsage::default(),
+                last_token_usage: TokenUsage::default(),
+                model_context_window,
+            },
+        };
+
+        if let Some(last) = last {
+            info.append_last_usage(last);
+        }
+
+        if info.model_context_window.is_none() {
+            info.model_context_window = model_context_window;
+        }
+
+        Some(info)
+    }
+
+    pub fn append_last_usage(&mut self, last: &TokenUsage) {
+        self.total_token_usage.add_assign(last);
+        self.last_token_usage = last.clone();
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RateLimitSnapshotEvent {
+    /// Percentage (0-100) of the primary window that has been consumed.
+    pub primary_used_percent: f64,
+    /// Percentage (0-100) of the protection window that has been consumed.
+    pub weekly_used_percent: f64,
+    /// Size of the primary window relative to weekly (0-100).
+    pub primary_to_weekly_ratio_percent: f64,
+    /// Rolling window duration for the primary limit, in minutes.
+    pub primary_window_minutes: u64,
+    /// Rolling window duration for the weekly limit, in minutes.
+    pub weekly_window_minutes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TokenCountEvent {
+    pub info: Option<TokenUsageInfo>,
+    pub rate_limits: Option<RateLimitSnapshotEvent>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -559,7 +805,10 @@ pub struct FinalOutput {
 pub struct ReplayHistoryEvent {
     /// Items to render in order. Front-ends should render these as static
     /// history without triggering any tool execution.
-    pub items: Vec<dev_protocol::models::ResponseItem>,
+    pub items: Vec<codex_protocol::models::ResponseItem>,
+    /// Previously emitted events to replay for UI restoration.
+    #[serde(default)]
+    pub events: Vec<RecordedEvent>,
 }
 
 impl From<TokenUsage> for FinalOutput {
@@ -596,10 +845,11 @@ impl fmt::Display for FinalOutput {
                 String::new()
             },
             token_usage.output_tokens,
-            token_usage
-                .reasoning_output_tokens
-                .map(|r| format!(" (reasoning {r})"))
-                .unwrap_or_default()
+            if token_usage.reasoning_output_tokens > 0 {
+                format!(" (reasoning {})", token_usage.reasoning_output_tokens)
+            } else {
+                String::new()
+            }
         )
     }
 }
@@ -815,9 +1065,6 @@ pub struct SessionConfiguredEvent {
     /// Tell the client what model is being queried.
     pub model: String,
 
-    /// The reasoning effort level for this session.
-    pub reasoning_effort: ReasoningEffortConfig,
-
     /// Identifier of the history log file (inode on Unix, 0 otherwise).
     pub history_log_id: u64,
 
@@ -899,6 +1146,8 @@ pub enum FileChange {
     Update {
         unified_diff: String,
         move_path: Option<PathBuf>,
+        original_content: String,
+        new_content: String,
     },
 }
 
@@ -926,16 +1175,14 @@ mod tests {
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id,
                 model: "codex-mini-latest".to_string(),
-                reasoning_effort: ReasoningEffortConfig::Medium,
                 history_log_id: 0,
                 history_entry_count: 0,
             }),
-            order: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         assert_eq!(
             serialized,
-            r#"{"id":"1234","event_seq":0,"msg":{"type":"session_configured","session_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","model":"codex-mini-latest","reasoning_effort":"medium","history_log_id":0,"history_entry_count":0},"order":null}"#
+            r#"{"id":"1234","event_seq":0,"msg":{"type":"session_configured","session_id":"67e55044-10b1-426f-9247-bb680e5fe0c8","model":"codex-mini-latest","history_log_id":0,"history_entry_count":0}}"#
         );
     }
 }

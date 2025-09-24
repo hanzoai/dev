@@ -1,16 +1,18 @@
-## @just-every/code v0.2.148
+## @just-every/code v0.2.162
 
-This release improves Qwen agent integration and updates shortcuts for a smoother experience.
+This release improves CLI resume reliability and hardens runtime handling.
 
 ### Changes
-- Core/Agents: mirror Qwen/DashScope API vars; respect QWEN_MODEL; add qwen examples in config.toml.example.
-- Shortcuts: set Qwen-coder as default for /plan and related commands.
+
+- CLI/Resume: fix --last to reliably select the most recent session under active runtimes.
+- Stability: avoid nested Tokio runtime creation during resume lookup to prevent sporadic failures.
 
 ### Install
+
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.147...v0.2.148
+Compare: https://github.com/just-every/code/compare/v0.2.161...v0.2.162
 

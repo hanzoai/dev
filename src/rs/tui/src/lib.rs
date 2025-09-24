@@ -4,18 +4,18 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![deny(clippy::disallowed_methods)]
 use app::App;
-use hanzo_dev::BUILT_IN_OSS_MODEL_PROVIDER_ID;
-use hanzo_dev::config::Config;
-use hanzo_dev::config::ConfigOverrides;
-use hanzo_dev::config::ConfigToml;
-use hanzo_dev::config::find_codex_home;
-use hanzo_dev::config::load_config_as_toml_with_cli_overrides;
-use hanzo_dev::protocol::AskForApproval;
-use hanzo_dev::protocol::SandboxPolicy;
-use dev_login::AuthMode;
-use dev_login::CodexAuth;
+use codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use codex_core::config::Config;
+use codex_core::config::ConfigOverrides;
+use codex_core::config::ConfigToml;
+use codex_core::config::find_codex_home;
+use codex_core::config::load_config_as_toml_with_cli_overrides;
+use codex_core::protocol::AskForApproval;
+use codex_core::protocol::SandboxPolicy;
+use codex_login::AuthMode;
+use codex_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
-use dev_protocol::config_types::SandboxMode;
+use codex_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 use tracing_appender::non_blocking;
@@ -30,6 +30,7 @@ use color_eyre::owo_colors::OwoColorize;
 mod app;
 mod app_event;
 mod app_event_sender;
+mod backtrack_helpers;
 mod bottom_pane;
 mod chatwidget;
 mod citation_regex;
@@ -45,7 +46,6 @@ mod history_cell;
 mod insert_history;
 pub mod live_wrap;
 mod markdown;
-mod markdown_render;
 mod markdown_renderer;
 mod markdown_stream;
 mod syntax_highlight;
@@ -56,6 +56,7 @@ mod render;
 mod session_log;
 mod shimmer;
 mod slash_command;
+mod rate_limits_view;
 mod resume;
 mod streaming;
 mod sanitize;
@@ -66,12 +67,12 @@ mod text_formatting;
 mod text_processing;
 mod theme;
 mod util {
+    pub mod buffer;
     pub mod list_window;
 }
 mod spinner;
-mod key_hint;
-mod ui_consts;
 mod tui;
+mod ui_consts;
 mod user_approval_widget;
 mod height_manager;
 mod transcript_app;
@@ -80,6 +81,8 @@ mod greeting;
 // Upstream introduced a standalone status indicator widget. Our fork renders
 // status within the composer title; keep the module private unless tests need it.
 mod status_indicator_widget;
+#[cfg(target_os = "macos")]
+mod agent_install_helpers;
 
 // Internal vt100-based replay tests live as a separate source file to keep them
 // close to the widget code. Include them in unit tests.
@@ -94,13 +97,15 @@ pub use cli::Cli;
 // (tests access modules directly within the crate)
 
 pub async fn run_main(
-    cli: Cli,
+    mut cli: Cli,
     codex_linux_sandbox_exe: Option<PathBuf>,
-) -> std::io::Result<hanzo_dev::protocol::TokenUsage> {
+) -> std::io::Result<codex_core::protocol::TokenUsage> {
+    cli.finalize_defaults();
+
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
-            Some(AskForApproval::OnFailure),
+            Some(AskForApproval::OnRequest),
         )
     } else if cli.dangerously_bypass_approvals_and_sandbox {
         (
@@ -136,6 +141,7 @@ pub async fn run_main(
 
     let overrides = ConfigOverrides {
         model,
+        review_model: None,
         approval_policy,
         sandbox_mode,
         cwd,
@@ -144,11 +150,14 @@ pub async fn run_main(
         codex_linux_sandbox_exe,
         base_instructions: None,
         include_plan_tool: Some(true),
+        include_apply_patch_tool: None,
+        include_view_image_tool: None,
         disable_response_storage: cli.oss.then_some(true),
         show_raw_agent_reasoning: cli.oss.then_some(true),
         debug: Some(cli.debug),
-        // Enable web search by default (no CLI flag).
-        tools_web_search_request: Some(true),
+        tools_web_search_request: Some(cli.web_search),
+        mcp_servers: None,
+        experimental_client_tools: None,
     };
 
     // Parse `-c` overrides from the CLI.
@@ -173,6 +182,15 @@ pub async fn run_main(
             }
         }
     };
+
+    #[cfg(not(debug_assertions))]
+    let startup_footer_notice = crate::updates::auto_upgrade_if_enabled(&config)
+        .await
+        .unwrap_or(None)
+        .map(|version| format!("Upgraded to {version}"));
+
+    #[cfg(debug_assertions)]
+    let startup_footer_notice: Option<String> = None;
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
@@ -202,7 +220,7 @@ pub async fn run_main(
         cli.config_profile.clone(),
     )?;
 
-    let log_dir = hanzo_dev::config::log_dir(&config)?;
+    let log_dir = codex_core::config::log_dir(&config)?;
     std::fs::create_dir_all(&log_dir)?;
     // Open (or create) your log file, appending to it.
     let mut log_file_opts = OpenOptions::new();
@@ -211,7 +229,7 @@ pub async fn run_main(
     // Ensure the file is only readable and writable by the current user.
     // Doing the equivalent to `chmod 600` on Windows is quite a bit more code
     // and requires the Windows API crates, so we can reconsider that when
-    // Codex CLI is officially supported on Windows.
+    // Code CLI is officially supported on Windows.
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -223,11 +241,15 @@ pub async fn run_main(
     // Wrap file in non‑blocking writer.
     let (non_blocking, _guard) = non_blocking(log_file);
 
-    // use RUST_LOG env var, default to info for codex crates.
+    let default_filter = if cli.debug {
+        "codex_core=info,codex_tui=info,codex_browser=info"
+    } else {
+        "codex_core=warn,codex_tui=warn,codex_browser=warn"
+    };
+
+    // use RUST_LOG env var, defaulting based on debug flag.
     let env_filter = || {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("hanzo_dev=info,codex_tui=info,codex_browser=info")
-        })
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
     };
 
     // Build layered subscriber:
@@ -245,39 +267,19 @@ pub async fn run_main(
 
     let _ = tracing_subscriber::registry().with(file_layer).try_init();
 
-    #[allow(clippy::print_stderr)]
     #[cfg(not(debug_assertions))]
-    if let Some(latest_version) = updates::get_upgrade_version(&config) {
-        let current_version = dev_version::version();
-        let exe = std::env::current_exe()?;
-        let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
+    let latest_upgrade_version = updates::get_upgrade_version(&config);
 
-        eprintln!(
-            "{} {current_version} -> {latest_version}.",
-            "Code update available!".blue()
-        );
+    #[cfg(debug_assertions)]
+    let latest_upgrade_version: Option<String> = None;
 
-        if managed_by_npm {
-            let npm_cmd = "npm install -g @just-every/code@latest";
-            eprintln!("Run {} to update.", npm_cmd.cyan().on_black());
-        } else if cfg!(target_os = "macos")
-            && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
-        {
-            let brew_cmd = "brew upgrade code";
-            eprintln!("Run {} to update.", brew_cmd.cyan().on_black());
-        } else {
-            eprintln!(
-                "See {} for the latest releases and installation options.",
-                "https://github.com/just-every/code/releases/latest"
-                    .cyan()
-                    .on_black()
-            );
-        }
-
-        eprintln!("");
-    }
-
-    run_ratatui_app(cli, config, should_show_trust_screen)
+    run_ratatui_app(
+        cli,
+        config,
+        should_show_trust_screen,
+        startup_footer_notice,
+        latest_upgrade_version,
+    )
         .map_err(|err| std::io::Error::other(err.to_string()))
 }
 
@@ -285,7 +287,9 @@ fn run_ratatui_app(
     cli: Cli,
     config: Config,
     should_show_trust_screen: bool,
-) -> color_eyre::Result<hanzo_dev::protocol::TokenUsage> {
+    startup_footer_notice: Option<String>,
+    latest_upgrade_version: Option<String>,
+) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
     color_eyre::install()?;
 
     // Forward panic reports through tracing so they appear in the UI status
@@ -312,53 +316,6 @@ fn run_ratatui_app(
         );
     }
 
-    // Show update banner in terminal history (instead of stderr) so it is visible
-    // within the TUI scrollback. Building spans keeps styling consistent.
-    #[cfg(not(debug_assertions))]
-    if let Some(latest_version) = updates::get_upgrade_version(&config) {
-        use ratatui::style::Stylize as _;
-        use ratatui::text::Line;
-        use ratatui::text::Span;
-
-        let current_version = dev_version::version();
-        let exe = std::env::current_exe()?;
-        let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(vec![
-            "✨⬆️ Update available!".bold().cyan(),
-            Span::raw(" "),
-            Span::raw(format!("{current_version} -> {latest_version}.")),
-        ]));
-
-        if managed_by_npm {
-            let npm_cmd = "npm install -g @openai/codex@latest";
-            lines.push(Line::from(vec![
-                Span::raw("Run "),
-                npm_cmd.cyan(),
-                Span::raw(" to update."),
-            ]));
-        } else if cfg!(target_os = "macos")
-            && (exe.starts_with("/opt/homebrew") || exe.starts_with("/usr/local"))
-        {
-            let brew_cmd = "brew upgrade codex";
-            lines.push(Line::from(vec![
-                Span::raw("Run "),
-                brew_cmd.cyan(),
-                Span::raw(" to update."),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::raw("See "),
-                "https://github.com/openai/codex/releases/latest".cyan(),
-                Span::raw(" for the latest releases and installation options."),
-            ]));
-        }
-
-        lines.push(Line::from(""));
-        crate::insert_history::insert_history_lines(&mut terminal, lines);
-    }
-
     // Initialize high-fidelity session event logging if enabled.
     session_log::maybe_init(&config);
 
@@ -368,6 +325,9 @@ fn run_ratatui_app(
         debug,
         order,
         timing,
+        resume_picker,
+        resume_last: _,
+        resume_session_id: _,
         ..
     } = cli;
     let mut app = App::new(
@@ -376,9 +336,12 @@ fn run_ratatui_app(
         images,
         should_show_trust_screen,
         debug,
-        order.is_some(),
+        order,
         terminal_info,
         timing,
+        resume_picker,
+        startup_footer_notice,
+        latest_upgrade_version,
     );
 
     let app_result = app.run(&mut terminal);
@@ -516,3 +479,4 @@ fn determine_repo_trust_state(
         Ok(true)
     }
 }
+ 

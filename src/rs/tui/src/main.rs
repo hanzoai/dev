@@ -1,8 +1,8 @@
 use clap::Parser;
-use dev_arg0::arg0_dispatch_or_else;
-use dev_common::CliConfigOverrides;
-use dev_tui::Cli;
-use dev_tui::run_main;
+use codex_arg0::arg0_dispatch_or_else;
+use codex_common::CliConfigOverrides;
+use codex_tui::Cli;
+use codex_tui::run_main;
 
 #[derive(Parser, Debug)]
 struct TopCli {
@@ -14,16 +14,18 @@ struct TopCli {
 }
 
 fn main() -> anyhow::Result<()> {
-    arg0_dispatch_or_else(|dev_linux_sandbox_exe| async move {
+    arg0_dispatch_or_else(|codex_linux_sandbox_exe| async move {
         let top_cli = TopCli::parse();
         let mut inner = top_cli.inner;
+        inner.finalize_defaults();
         inner
             .config_overrides
             .raw_overrides
             .splice(0..0, top_cli.config_overrides.raw_overrides);
-        let usage = run_main(inner, dev_linux_sandbox_exe).await?;
+        let usage = run_main(inner, codex_linux_sandbox_exe).await?;
         if !usage.is_zero() {
-            println!("{}", hanzo_dev::protocol::FinalOutput::from(usage));
+            println!("{}", codex_core::protocol::FinalOutput::from(usage));
+            // Conversation id hint not available in fork run_main() return type.
         }
         Ok(())
     })

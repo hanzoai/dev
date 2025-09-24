@@ -3,8 +3,8 @@ use crate::backtrack_helpers;
 use crate::pager_overlay::Overlay;
 use crate::tui;
 use crate::tui::TuiEvent;
-use hanzo_dev::protocol::ConversationHistoryResponseEvent;
-use dev_protocol::mcp_protocol::ConversationId;
+use codex_core::protocol::ConversationHistoryResponseEvent;
+use codex_protocol::mcp_protocol::ConversationId;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -42,7 +42,10 @@ impl App {
                     kind: KeyEventKind::Press | KeyEventKind::Repeat,
                     ..
                 }) => {
-                    self.overlay_step_backtrack(tui, event)?;
+                    // Close the jump-back overlay on Esc instead of stepping selection.
+                    self.close_transcript_overlay(tui);
+                    // Backtrack state will be reset by close_transcript_overlay; ensure a redraw.
+                    tui.frame_requester().schedule_frame();
                     Ok(true)
                 }
                 TuiEvent::Key(KeyEvent {
@@ -98,7 +101,7 @@ impl App {
     ) {
         self.backtrack.pending = Some((base_id, drop_last_messages, prefill));
         self.app_event_tx.send(crate::app_event::AppEvent::CodexOp(
-            hanzo_dev::protocol::Op::GetHistory,
+            codex_core::protocol::Op::GetHistory,
         ));
     }
 
@@ -301,10 +304,10 @@ impl App {
     /// Thin wrapper around ConversationManager::fork_conversation.
     async fn perform_fork(
         &self,
-        entries: Vec<dev_protocol::models::ResponseItem>,
+        entries: Vec<codex_protocol::models::ResponseItem>,
         drop_count: usize,
-        cfg: hanzo_dev::config::Config,
-    ) -> hanzo_dev::error::Result<hanzo_dev::NewConversation> {
+        cfg: codex_core::config::Config,
+    ) -> codex_core::error::Result<codex_core::NewConversation> {
         self.server
             .fork_conversation(entries, drop_count, cfg)
             .await
@@ -314,24 +317,23 @@ impl App {
     fn install_forked_conversation(
         &mut self,
         tui: &mut tui::Tui,
-        cfg: hanzo_dev::config::Config,
-        new_conv: hanzo_dev::NewConversation,
+        cfg: codex_core::config::Config,
+        new_conv: codex_core::NewConversation,
         drop_count: usize,
         prefill: &str,
     ) {
         let conv = new_conv.conversation;
         let session_configured = new_conv.session_configured;
-        let init = crate::chatwidget::ChatWidgetInit {
-            config: cfg,
-            frame_requester: tui.frame_requester(),
-            app_event_tx: self.app_event_tx.clone(),
-            initial_prompt: None,
-            initial_images: Vec::new(),
-            enhanced_keys_supported: self.enhanced_keys_supported,
-            auth_manager: self.auth_manager.clone(),
-        };
-        self.chat_widget =
-            crate::chatwidget::ChatWidget::new_from_existing(init, conv, session_configured);
+        self.chat_widget = crate::chatwidget::ChatWidget::new_from_existing(
+            cfg,
+            conv,
+            session_configured,
+            self.app_event_tx.clone(),
+            self.enhanced_keys_supported,
+            self.terminal_info.clone(),
+            self.show_order_overlay,
+            self.latest_upgrade_version.clone(),
+        );
         // Trim transcript up to the selected user message and re-render it.
         self.trim_transcript_for_backtrack(drop_count);
         self.render_transcript_once(tui);

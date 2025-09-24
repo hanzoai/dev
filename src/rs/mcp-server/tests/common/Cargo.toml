@@ -9,9 +9,9 @@ path = "lib.rs"
 [dependencies]
 anyhow = "1"
 assert_cmd = "2"
-hanzo-dev = { path = "../../../core" }
-codex-mcp-server = { path = "../.." }
-dev-protocol = { path = "../../../protocol" }
+codex-core = { path = "../../../core" }
+code-mcp-server = { path = "../.." }
+codex-protocol = { path = "../../../protocol" }
 mcp-types = { path = "../../../mcp-types" }
 os_info = "3.12.0"
 pretty_assertions = "1.4.1"

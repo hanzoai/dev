@@ -1,4 +1,4 @@
-# JustEvery_ Code
+# CODE
 
 &ensp;
 
@@ -20,7 +20,7 @@
   - 🧠 **Reasoning Control** - /reasoning for dynamic effort adjustment
   - 🔌 **MCP support** – Extend with filesystem, DBs, APIs, or your own tools.
   - 🔒 **Safety modes** – Read-only, approvals, and workspace sandboxing.
-  - 🔁 **Backwards compatible** – Supports `~/.codex/*` or default `~/.coder/*`
+  - 🔁 **Backwards compatible** – Reads both `~/.code/*` (primary) and legacy `~/.codex/*`; writes only to `~/.code/*`
 
 &ensp;
 | <img src="docs/screenshots/simple.png" alt="Simple interface" width="100%"><br>Simple interface | <img src="docs/screenshots/diff.png" alt="Unified diff viewer" width="100%"><br>Unified diffs |
@@ -51,7 +51,7 @@ Note: If another tool already provides a `code` command (e.g. VS Code), our CLI 
 **Authenticate** (one of the following):
 - **Sign in with ChatGPT** (Plus/Pro/Team; uses models available to your plan)
   - Run `code` and pick "Sign in with ChatGPT"
-  - Stores creds locally at `~/.coder/auth.json` (also reads legacy `~/.codex/auth.json`)
+  - Stores creds locally at `~/.code/auth.json` (still reads legacy `~/.codex/auth.json` if present)
 - **API key** (usage-based)
   - Set `export OPENAI_API_KEY=xyz` and run `code`
 
@@ -100,6 +100,9 @@ npm install -g @anthropic-ai/claude-code @google/gemini-cli && claude "Just chec
 
 # Change reasoning level
 /reasoning low|medium|high
+
+# Switch models or effort presets
+/model
 
 # Start new conversation
 /new
@@ -170,11 +173,10 @@ Code supports MCP for extended capabilities:
 - **API integrations**: Connect to external services
 - **Custom tools**: Build your own extensions
 
-Configure MCP in `~/.codex/config.toml`:
+Configure MCP in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read if present). Define each server under a named table like `[mcp_servers.<name>]` (this maps to the JSON `mcpServers` object used by other clients):
 
 ```toml
-[[mcp_servers]]
-name = "filesystem"
+[mcp_servers.filesystem]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"]
 ```
@@ -182,7 +184,10 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"]
 &ensp;
 ## Configuration
 
-Main config file: `~/.codex/config.toml`
+Main config file: `~/.code/config.toml`
+
+> [!NOTE]
+> Code reads from both `~/.code/` and `~/.codex/` for backwards compatibility, but it only writes updates to `~/.code/`. If you switch back to Codex and it fails to start, remove `~/.codex/config.toml`. If Code appears to miss settings after upgrading, copy your legacy `~/.codex/config.toml` into `~/.code/`.
 
 ```toml
 # Model settings
@@ -220,7 +225,7 @@ model_reasoning_summary = "detailed"
 > This fork adds browser integration, multi-agent commands (`/plan`, `/solve`, `/code`), theme system, and enhanced reasoning controls while maintaining full compatibility.
 
 **Can I use my existing Codex configuration?**
-> Yes! This fork is fully backward compatible with existing `~/.codex/` configurations.
+> Yes. Code reads from both `~/.code/` (primary) and legacy `~/.codex/` directories. We only write to `~/.code/`, so Codex will keep running if you switch back; copy or remove legacy files if you notice conflicts.
 
 **Does this work with ChatGPT Plus?**
 > Absolutely. Use the same "Sign in with ChatGPT" flow as the original.
@@ -273,7 +278,7 @@ Using OpenAI, Anthropic or Google services through Code means you agree to **the
 - If you configure other model providers, you're responsible for their terms.
 
 ### Privacy
-- Your auth file lives at `~/.codex/auth.json`.
+- Your auth file lives at `~/.code/auth.json` (legacy `~/.codex/auth.json` is still read).
 - Inputs/outputs you send to AI providers are handled under their Terms and Privacy Policy; consult those documents (and any org-level data-sharing settings).
 
 ### Subject to change

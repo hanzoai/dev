@@ -5,19 +5,19 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use hanzo_dev::CodexConversation;
-use hanzo_dev::ConversationManager;
-use hanzo_dev::NewConversation;
-use hanzo_dev::config::Config as CodexConfig;
-use hanzo_dev::protocol::AgentMessageEvent;
-use hanzo_dev::protocol::ApplyPatchApprovalRequestEvent;
-use hanzo_dev::protocol::Event;
-use hanzo_dev::protocol::EventMsg;
-use hanzo_dev::protocol::ExecApprovalRequestEvent;
-use hanzo_dev::protocol::InputItem;
-use hanzo_dev::protocol::Op;
-use hanzo_dev::protocol::Submission;
-use hanzo_dev::protocol::TaskCompleteEvent;
+use codex_core::CodexConversation;
+use codex_core::ConversationManager;
+use codex_core::NewConversation;
+use codex_core::config::Config as CodexConfig;
+use codex_core::protocol::AgentMessageEvent;
+use codex_core::protocol::ApplyPatchApprovalRequestEvent;
+use codex_core::protocol::Event;
+use codex_core::protocol::EventMsg;
+use codex_core::protocol::ExecApprovalRequestEvent;
+use codex_core::protocol::InputItem;
+use codex_core::protocol::Op;
+use codex_core::protocol::Submission;
+use codex_core::protocol::TaskCompleteEvent;
 use mcp_types::CallToolResult;
 use mcp_types::ContentBlock;
 use mcp_types::RequestId;
@@ -33,10 +33,6 @@ use crate::patch_approval::handle_patch_approval_request;
 
 pub(crate) const INVALID_PARAMS_ERROR_CODE: i64 = -32602;
 
-// Aliases for compatibility
-pub use self::run_codex_tool_session as run_dev_tool_session;
-pub use self::run_codex_tool_session_reply as run_dev_tool_session_reply;
-
 /// Run a complete Codex session and stream events back to the client.
 ///
 /// On completion (success or error) the function sends the appropriate
@@ -46,6 +42,7 @@ pub async fn run_codex_tool_session(
     initial_prompt: String,
     config: CodexConfig,
     outgoing: Arc<OutgoingMessageSender>,
+    session_map: Arc<Mutex<HashMap<Uuid, Arc<CodexConversation>>>>,
     conversation_manager: Arc<ConversationManager>,
     running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
 ) {
@@ -69,6 +66,12 @@ pub async fn run_codex_tool_session(
             return;
         }
     };
+
+    let session_uuid: Uuid = conversation_id.into();
+    session_map
+        .lock()
+        .await
+        .insert(session_uuid, conversation.clone());
 
     let session_configured_event = Event {
         // Use a fake id value for now.
@@ -94,7 +97,7 @@ pub async fn run_codex_tool_session(
     running_requests_id_to_codex_uuid
         .lock()
         .await
-        .insert(id.clone(), conversation_id);
+        .insert(id.clone(), session_uuid);
     let submission = Submission {
         id: sub_id.clone(),
         op: Op::UserInput {
@@ -284,7 +287,12 @@ async fn run_codex_tool_session_inner(
                     | EventMsg::PlanUpdate(_)
                     | EventMsg::BrowserScreenshotUpdate(_)
                     | EventMsg::AgentStatusUpdate(_)
+                    | EventMsg::TurnAborted(_)
+                    | EventMsg::ConversationPath(_)
+                    | EventMsg::UserMessage(_)
                     | EventMsg::ShutdownComplete
+                    | EventMsg::EnteredReviewMode(_)
+                    | EventMsg::ExitedReviewMode(_)
                     | EventMsg::CustomToolCallBegin(_)
                     | EventMsg::CustomToolCallEnd(_) => {
                         // For now, we do not do anything extra for these

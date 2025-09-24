@@ -8,7 +8,7 @@ This file has moved. Please see the latest configuration documentation here:
   - Values can contain objects, such as `--config shell_environment_policy.include_only=["PATH", "HOME", "USER"]`.
   - For consistency with `config.toml`, values are in TOML format rather than JSON format, so use `{a = 1, b = 2}` rather than `{"a": 1, "b": 2}`.
   - If `value` cannot be parsed as a valid TOML value, it is treated as a string value. This means that both `-c model="o3"` and `-c model=o3` are equivalent.
-- The `$CODEX_HOME/config.toml` configuration file where the `CODEX_HOME` environment value defaults to `~/.codex`. (Note `CODEX_HOME` will also be where logs and other Codex-related information are stored.)
+- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Code also reads from `$CODEX_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
 
 Both the `--config` flag and the `config.toml` file support the following options:
 
@@ -170,6 +170,24 @@ Alternatively, you can have the model run until it is done, and never ask to run
 # something out. Note the `exec` subcommand always uses this mode.
 approval_policy = "never"
 ```
+
+## confirm_guard
+
+Adds custom regular-expression based guards for commands that should require an explicit `confirm:` prefix before running. Each pattern is checked against the raw command string (`argv` joined with spaces or the `bash -lc` script body). When a pattern matches, Codex blocks the command and instructs the model to resend it with `confirm:`.
+
+```toml
+[[confirm_guard.patterns]]
+regex = "^git\s+clean(\s+-[fxd])+"
+message = "Blocked git clean; it deletes untracked files. Resend with 'confirm:' if you're sure."
+
+[[confirm_guard.patterns]]
+regex = "rm\s+-rf\s+node_modules"
+# message is optional; a default explanation referencing the regex is shown when omitted.
+```
+
+Codex ships with built-in guards for destructive Git operations that can wipe working tree changes (`git reset`, `git checkout -- <paths>`, `git clean`, `git push --force`) and for common shell helpers that can recursively delete large portions of the workspace (`rm -rf` against `.`, `..`, `/`, or `*`, `find . … -delete`, `find . … -exec rm`, `trash -rf`, and `fd … --exec rm`). The snippet above shows how to add extra patterns or override the default messaging when needed.
+
+Patterns use the same syntax as the `regex` crate (via `regex-lite`). Invalid regexes cause config loading to fail with an explicit error so they can be corrected quickly.
 
 ## profiles
 
@@ -351,7 +369,7 @@ This config option is comparable to how Claude and Cursor define `mcpServers` in
 }
 ```
 
-Should be represented as follows in `~/.codex/config.toml`:
+Should be represented as follows in `~/.code/config.toml` (Code will also read the legacy `~/.codex/config.toml` if it exists):
 
 ```toml
 # IMPORTANT: the top-level key is `mcp_servers` rather than `mcpServers`.
@@ -482,7 +500,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-To have Codex use this script for notifications, you would configure it via `notify` in `~/.codex/config.toml` using the appropriate path to `notify.py` on your computer:
+To have Codex use this script for notifications, you would configure it via `notify` in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read) using the appropriate path to `notify.py` on your computer:
 
 ```toml
 notify = ["python3", "/Users/mbolin/.codex/notify.py"]

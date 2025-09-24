@@ -3,15 +3,15 @@
 
 use std::path::Path;
 
-use hanzo_dev::protocol::TurnAbortReason;
-use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
-use dev_protocol::mcp_protocol::AddConversationListenerParams;
-use dev_protocol::mcp_protocol::InterruptConversationParams;
-use dev_protocol::mcp_protocol::InterruptConversationResponse;
-use dev_protocol::mcp_protocol::NewConversationParams;
-use dev_protocol::mcp_protocol::NewConversationResponse;
-use dev_protocol::mcp_protocol::SendUserMessageParams;
-use dev_protocol::mcp_protocol::SendUserMessageResponse;
+use codex_protocol::protocol::TurnAbortReason;
+use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_protocol::mcp_protocol::AddConversationListenerParams;
+use codex_protocol::mcp_protocol::InterruptConversationParams;
+use codex_protocol::mcp_protocol::InterruptConversationResponse;
+use codex_protocol::mcp_protocol::NewConversationParams;
+use codex_protocol::mcp_protocol::NewConversationResponse;
+use codex_protocol::mcp_protocol::SendUserMessageParams;
+use codex_protocol::mcp_protocol::SendUserMessageResponse;
 use mcp_types::JSONRPCResponse;
 use mcp_types::RequestId;
 use tempfile::TempDir;
@@ -55,8 +55,8 @@ async fn shell_command_interruption() -> anyhow::Result<()> {
 
     let tmp = TempDir::new()?;
     // Temporary Codex home with config pointing at the mock server.
-    let dev_home = tmp.path().join("dev_home");
-    std::fs::create_dir(&dev_home)?;
+    let codex_home = tmp.path().join("codex_home");
+    std::fs::create_dir(&codex_home)?;
     let working_directory = tmp.path().join("workdir");
     std::fs::create_dir(&working_directory)?;
 
@@ -68,10 +68,10 @@ async fn shell_command_interruption() -> anyhow::Result<()> {
         "call_sleep",
     )?])
     .await;
-    create_config_toml(&dev_home, server.uri())?;
+    create_config_toml(&codex_home, server.uri())?;
 
     // Start MCP server and initialize.
-    let mut mcp = McpProcess::new(&dev_home).await?;
+    let mut mcp = McpProcess::new(&codex_home).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     // 1) newConversation
@@ -105,7 +105,7 @@ async fn shell_command_interruption() -> anyhow::Result<()> {
     let send_user_id = mcp
         .send_send_user_message_request(SendUserMessageParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "run first sleep command".to_string(),
             }],
         })
@@ -140,8 +140,8 @@ async fn shell_command_interruption() -> anyhow::Result<()> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn create_config_toml(dev_home: &Path, server_uri: String) -> std::io::Result<()> {
-    let config_toml = dev_home.join("config.toml");
+fn create_config_toml(codex_home: &Path, server_uri: String) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
         format!(

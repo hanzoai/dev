@@ -218,13 +218,13 @@ fn create_shell_tool() -> OpenAiTool {
     properties.insert(
         "timeout".to_string(),
         JsonSchema::Number {
-            description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
+            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "shell".to_string(),
-        description: "Runs a shell command and returns its output. Default timeout: 120000 ms (120s). Override via the `timeout` parameter.".to_string(),
+        description: "Runs a shell command and returns its output. Output streams live to the UI. Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks. Optional `timeout` can set a hard kill if needed.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -252,7 +252,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     properties.insert(
         "timeout_ms".to_string(),
         JsonSchema::Number {
-            description: Some("The timeout for the command in milliseconds (default: 120000 ms = 120s)".to_string()),
+            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
@@ -302,7 +302,7 @@ The shell tool is used to execute shell commands.
   - Provide the with_escalated_permissions parameter with the boolean value true
   - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter.
 
-Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#,
+Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks. Optional `timeout` can set a hard kill if needed."#,
                 roots_str,
                 if !network_access {
                     "\n    - Commands that require network access\n"
@@ -312,26 +312,10 @@ Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#,
             )
         }
         SandboxPolicy::DangerFullAccess => {
-            "Runs a shell command and returns its output. Default timeout: 120000 ms (120s). Override via the `timeout` parameter.".to_string()
+            "Runs a shell command and returns its output. Output streams live to the UI. Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks.".to_string()
         }
         SandboxPolicy::ReadOnly => {
-            r#"
-The shell tool is used to execute shell commands.
-- When invoking the shell tool, your call will be running in a sandbox, and some shell commands (including apply_patch) will require escalated permissions:
-  - Types of actions that require escalated privileges:
-    - Writing files
-    - Applying patches
-  - Examples of commands that require escalated privileges:
-    - apply_patch
-    - git commit
-    - npm install or pnpm install
-    - cargo build
-    - cargo test
-- When invoking a command that will require escalated privileges:
-  - Provide the with_escalated_permissions parameter with the boolean value true
-  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter
-
-Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#.to_string()
+            "Runs a shell command and returns its output. Output streams live to the UI. Long-running commands may be backgrounded after an initial window. Use `wait` to await background tasks.".to_string()
         }
     };
 
@@ -351,7 +335,7 @@ Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#.to_st
 /// Responses API:
 /// https://platform.openai.com/docs/guides/function-calling?api-mode=responses
 pub fn create_tools_json_for_responses_api(
-    tools: &Vec<OpenAiTool>,
+    tools: &[OpenAiTool],
 ) -> crate::error::Result<Vec<serde_json::Value>> {
     let mut tools_json = Vec::new();
 
@@ -366,7 +350,7 @@ pub fn create_tools_json_for_responses_api(
 /// Chat Completions API:
 /// https://platform.openai.com/docs/guides/function-calling?api-mode=chat
 pub(crate) fn create_tools_json_for_chat_completions_api(
-    tools: &Vec<OpenAiTool>,
+    tools: &[OpenAiTool],
 ) -> crate::error::Result<Vec<serde_json::Value>> {
     // We start with the JSON for the Responses API and than rewrite it to match
     // the chat completions tool call format.
@@ -549,6 +533,7 @@ pub(crate) fn get_openai_tools(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
     browser_enabled: bool,
+    agents_active: bool,
 ) -> Vec<OpenAiTool> {
     let mut tools: Vec<OpenAiTool> = Vec::new();
 
@@ -600,11 +585,16 @@ pub(crate) fn get_openai_tools(
 
     // Add agent management tools for calling external LLMs asynchronously
     tools.push(create_run_agent_tool());
-    tools.push(create_check_agent_status_tool());
-    tools.push(create_get_agent_result_tool());
-    tools.push(create_cancel_agent_tool());
-    tools.push(create_wait_for_agent_tool());
-    tools.push(create_list_agents_tool());
+    if agents_active {
+        tools.push(create_check_agent_status_tool());
+        tools.push(create_get_agent_result_tool());
+        tools.push(create_cancel_agent_tool());
+        tools.push(create_wait_for_agent_tool());
+        tools.push(create_list_agents_tool());
+    }
+
+    // Add general wait tool for background completions
+    tools.push(create_wait_tool());
 
     if config.web_search_request {
         let tool = match &config.web_search_allowed_domains {
@@ -638,6 +628,37 @@ pub(crate) fn get_openai_tools(
     }
 
     tools
+}
+
+// ——————————————————————————————————————————————————————————————
+// Background waiting tool (for long-running shell calls)
+// ——————————————————————————————————————————————————————————————
+
+pub fn create_wait_tool() -> OpenAiTool {
+    let mut properties = BTreeMap::new();
+    properties.insert(
+        "call_id".to_string(),
+        JsonSchema::String { description: Some("Optional: specific background call_id to wait for. If omitted, waits for any background completion.".to_string()) },
+    );
+    properties.insert(
+        "timeout_ms".to_string(),
+        JsonSchema::Number {
+            description: Some(
+                "Maximum time in milliseconds to wait (default 600000 = 10 minutes, max 3600000 = 60 minutes)."
+                    .to_string(),
+            ),
+        },
+    );
+    OpenAiTool::Function(ResponsesApiTool {
+        name: "wait".to_string(),
+        description: "Wait for background work to complete. If call_id is provided waits for that, otherwise returns when any background function completes (returns early).".to_string(),
+        strict: false,
+        parameters: JsonSchema::Object {
+            properties,
+            required: None,
+            additional_properties: Some(false),
+        },
+    })
 }
 
 #[cfg(test)]
@@ -687,7 +708,38 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
-        let tools = get_openai_tools(&config, Some(HashMap::new()), false);
+        let tools = get_openai_tools(&config, Some(HashMap::new()), false, false);
+
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "local_shell",
+                "update_plan",
+                "browser_open",
+                "browser_status",
+                "agent_run",
+                "wait",
+                "web_search",
+                "web_fetch",
+            ],
+        );
+    }
+
+    #[test]
+    fn test_get_openai_tools_with_active_agents() {
+        let model_family = find_family_for_model("codex-mini-latest")
+            .expect("codex-mini-latest should be a valid model family");
+        let config = ToolsConfig::new(
+            &model_family,
+            AskForApproval::Never,
+            SandboxPolicy::ReadOnly,
+            true,
+            false,
+            true,
+            /*use_experimental_streamable_shell_tool*/ false,
+            false,
+        );
+        let tools = get_openai_tools(&config, Some(HashMap::new()), false, true);
 
         assert_eq_tool_names(
             &tools,
@@ -702,6 +754,7 @@ mod tests {
                 "agent_cancel",
                 "agent_wait",
                 "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
             ],
@@ -721,7 +774,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
-        let tools = get_openai_tools(&config, Some(HashMap::new()), false);
+        let tools = get_openai_tools(&config, Some(HashMap::new()), false, false);
 
         assert_eq_tool_names(
             &tools,
@@ -731,11 +784,7 @@ mod tests {
                 "browser_open",
                 "browser_status",
                 "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
             ],
@@ -792,6 +841,7 @@ mod tests {
                 },
             )])),
             false,
+            true,
         );
 
         assert_eq_tool_names(
@@ -806,6 +856,7 @@ mod tests {
                 "agent_cancel",
                 "agent_wait",
                 "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
                 "test_server/do_something_cool",
@@ -813,7 +864,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[3],
+            tools[12],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
@@ -907,6 +958,7 @@ mod tests {
                 },
             )])),
             false,
+            true,
         );
 
         assert_eq_tool_names(
@@ -921,6 +973,7 @@ mod tests {
                 "agent_cancel",
                 "agent_wait",
                 "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
                 "dash/search",
@@ -928,7 +981,7 @@ mod tests {
         );
 
         assert_eq!(
-            tools[3],
+            tools[12],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
@@ -981,6 +1034,7 @@ mod tests {
                 },
             )])),
             false,
+            true,
         );
 
         assert_eq_tool_names(
@@ -995,13 +1049,14 @@ mod tests {
                 "agent_cancel",
                 "agent_wait",
                 "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
                 "dash/paginate",
             ],
         );
         assert_eq!(
-            tools[3],
+            tools[12],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
@@ -1052,6 +1107,7 @@ mod tests {
                 },
             )])),
             false,
+            true,
         );
 
         assert_eq_tool_names(
@@ -1066,13 +1122,14 @@ mod tests {
                 "agent_cancel",
                 "agent_wait",
                 "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
                 "dash/tags",
             ],
         );
         assert_eq!(
-            tools[3],
+            tools[12],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
@@ -1126,6 +1183,7 @@ mod tests {
                 },
             )])),
             false,
+            true,
         );
 
         assert_eq_tool_names(
@@ -1140,13 +1198,14 @@ mod tests {
                 "agent_cancel",
                 "agent_wait",
                 "agent_list",
+                "wait",
                 "web_search",
                 "web_fetch",
                 "dash/value",
             ],
         );
         assert_eq!(
-            tools[3],
+            tools[12],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {
@@ -1196,7 +1255,9 @@ The shell tool is used to execute shell commands.
     - cargo test
 - When invoking a command that will require escalated privileges:
   - Provide the with_escalated_permissions parameter with the boolean value true
-  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter."#;
+  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter.
+
+Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#;
         assert_eq!(description, expected);
     }
 
@@ -1211,21 +1272,7 @@ The shell tool is used to execute shell commands.
         };
         assert_eq!(name, "shell");
 
-        let expected = r#"
-The shell tool is used to execute shell commands.
-- When invoking the shell tool, your call will be running in a sandbox, and some shell commands (including apply_patch) will require escalated permissions:
-  - Types of actions that require escalated privileges:
-    - Writing files
-    - Applying patches
-  - Examples of commands that require escalated privileges:
-    - apply_patch
-    - git commit
-    - npm install or pnpm install
-    - cargo build
-    - cargo test
-- When invoking a command that will require escalated privileges:
-  - Provide the with_escalated_permissions parameter with the boolean value true
-  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter"#;
+        let expected = "Runs a shell command and returns its output.";
         assert_eq!(description, expected);
     }
 
@@ -1255,7 +1302,7 @@ fn create_browser_open_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "browser_open".to_string(),
-        description: "Opens a browser window and navigates to the specified URL. Screenshots will be automatically attached to subsequent messages.".to_string(),
+        description: "Opens a browser window and navigates to the specified URL. Screenshots will be automatically attached to subsequent messages. Once open, enables: browser_close, browser_click, browser_move, browser_type, browser_key, browser_javascript, browser_scroll, browser_history, browser_inspect, browser_console, browser_cleanup, browser_cdp.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
