@@ -52,10 +52,14 @@ use crate::protocol::ProPhase;
 use crate::protocol::ProStats;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
+use codex_protocol::mcp_protocol::AuthMode;
+use crate::account_usage;
+use crate::auth_accounts;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
 use shlex::try_join as shlex_try_join;
+use chrono::Utc;
 
 pub mod compact;
 use self::compact::build_compacted_history;
@@ -805,6 +809,39 @@ struct TurnScratchpad {
     partial_assistant_text: String,
     /// Last reasoning summary fragment received via deltas (not yet finalized)
     partial_reasoning_summary: String,
+}
+
+#[derive(Clone)]
+struct AccountUsageContext {
+    codex_home: PathBuf,
+    account_id: String,
+    plan: Option<String>,
+}
+
+fn account_usage_context(sess: &Session) -> Option<AccountUsageContext> {
+    let codex_home = sess.client.codex_home().to_path_buf();
+    let account_id = auth_accounts::get_active_account_id(&codex_home).ok().flatten()?;
+    let plan = auth_accounts::find_account(&codex_home, &account_id)
+        .ok()
+        .flatten()
+        .and_then(|account| {
+            account
+                .tokens
+                .as_ref()
+                .and_then(|tokens| tokens.id_token.get_chatgpt_plan_type())
+        });
+    Some(AccountUsageContext {
+        codex_home,
+        account_id,
+        plan,
+    })
+}
+
+fn spawn_usage_task<F>(task: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    let _ = tokio::task::spawn_blocking(task);
 }
 
 #[derive(Debug)]
@@ -2284,7 +2321,46 @@ impl Session {
             .collect();
 
         // Concatenate filtered history with current turn's extras (which includes current ephemeral images)
-        let result = [filtered_history, extra].concat();
+        let mut result = [filtered_history, extra].concat();
+
+        let current_auth_mode = self
+            .client
+            .get_auth_manager()
+            .and_then(|manager| manager.auth())
+            .map(|auth| auth.mode);
+        let sanitize_encrypted_reasoning = !matches!(current_auth_mode, Some(AuthMode::ChatGPT));
+
+        if sanitize_encrypted_reasoning {
+            let mut stripped = 0usize;
+            result = result
+                .into_iter()
+                .map(|item| match item {
+                    ResponseItem::Reasoning {
+                        id,
+                        summary,
+                        content,
+                        encrypted_content,
+                    } => {
+                        if encrypted_content.is_some() {
+                            stripped += 1;
+                        }
+                        ResponseItem::Reasoning {
+                            id,
+                            summary,
+                            content,
+                            encrypted_content: None,
+                        }
+                    }
+                    other => other,
+                })
+                .collect();
+            if stripped > 0 {
+                debug!(
+                    "Stripped encrypted reasoning from {} history items before sending request",
+                    stripped
+                );
+            }
+        }
 
         debug_history("turn_input_with_history", &result);
 
@@ -4139,6 +4215,25 @@ async fn run_turn(
             Err(CodexErr::Interrupted) => return Err(CodexErr::Interrupted),
             Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
             Err(e @ (CodexErr::UsageLimitReached(_) | CodexErr::UsageNotIncluded)) => {
+                if let CodexErr::UsageLimitReached(limit_err) = &e {
+                    if let Some(ctx) = account_usage_context(&sess) {
+                        let usage_home = ctx.codex_home.clone();
+                        let usage_account = ctx.account_id.clone();
+                        let usage_plan = ctx.plan.clone();
+                        let resets = limit_err.resets_in_seconds;
+                        spawn_usage_task(move || {
+                            if let Err(err) = account_usage::record_usage_limit_hint(
+                                &usage_home,
+                                &usage_account,
+                                usage_plan.as_deref(),
+                                resets,
+                                Utc::now(),
+                            ) {
+                                warn!("Failed to persist usage limit hint: {err}");
+                            }
+                        });
+                    }
+                }
                 return Err(e);
             }
             Err(e) => {
@@ -4548,6 +4643,26 @@ async fn try_run_turn(
                         .ok();
                 }
 
+                if let Some(usage) = token_usage.as_ref() {
+                    if let Some(ctx) = account_usage_context(sess) {
+                        let usage_home = ctx.codex_home.clone();
+                        let usage_account = ctx.account_id.clone();
+                        let usage_plan = ctx.plan.clone();
+                        let usage_clone = usage.clone();
+                        spawn_usage_task(move || {
+                            if let Err(err) = account_usage::record_token_usage(
+                                &usage_home,
+                                &usage_account,
+                                usage_plan.as_deref(),
+                                &usage_clone,
+                                Utc::now(),
+                            ) {
+                                warn!("Failed to persist token usage: {err}");
+                            }
+                        });
+                    }
+                }
+
                 let unified_diff = turn_diff_tracker.get_unified_diff();
                 if let Ok(Some(unified_diff)) = unified_diff {
                     let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
@@ -4610,6 +4725,23 @@ async fn try_run_turn(
                     primary_window_minutes: snapshot.primary_window_minutes,
                     secondary_window_minutes: snapshot.secondary_window_minutes,
                 });
+                if let Some(ctx) = account_usage_context(sess) {
+                    let usage_home = ctx.codex_home.clone();
+                    let usage_account = ctx.account_id.clone();
+                    let usage_plan = ctx.plan.clone();
+                    let snapshot_clone = snapshot.clone();
+                    spawn_usage_task(move || {
+                        if let Err(err) = account_usage::record_rate_limit_snapshot(
+                            &usage_home,
+                            &usage_account,
+                            usage_plan.as_deref(),
+                            &snapshot_clone,
+                            Utc::now(),
+                        ) {
+                            warn!("Failed to persist rate limit snapshot: {err}");
+                        }
+                    });
+                }
             }
             // Note: ReasoningSummaryPartAdded handled above without scratchpad mutation.
         }
