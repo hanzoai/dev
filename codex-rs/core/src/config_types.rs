@@ -5,11 +5,178 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use schemars::JsonSchema;
 use wildmatch::WildMatchPattern;
 
+use shlex::split as shlex_split;
+
+use serde::de::{self, Deserializer};
 use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
+
+/// Configuration for commands that require an explicit `confirm:` prefix.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct ConfirmGuardConfig {
+    /// List of regex patterns applied to the raw command (joined argv or shell script).
+    #[serde(default)]
+    pub patterns: Vec<ConfirmGuardPattern>,
+}
+
+impl Default for ConfirmGuardConfig {
+    fn default() -> Self {
+        Self { patterns: default_confirm_guard_patterns() }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ConfirmGuardPattern {
+    /// ECMA-style regular expression matched against the command string.
+    pub regex: String,
+    /// Optional custom guidance text surfaced when the guard triggers.
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+fn default_confirm_guard_patterns() -> Vec<ConfirmGuardPattern> {
+    vec![
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+reset\b".to_string(),
+            message: Some("Blocked git reset. Reset rewrites the working tree/index and may delete local work. Resend with 'confirm:' if you're certain.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+checkout\s+--\b".to_string(),
+            message: Some("Blocked git checkout -- <paths>. This overwrites local modifications; resend with 'confirm:' to proceed.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+checkout\s+(?:-b|-B|--orphan|--detach)\b".to_string(),
+            message: Some("Blocked git checkout with branch-changing flag. Switching branches can discard or hide in-progress changes.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+checkout\s+-\b".to_string(),
+            message: Some("Blocked git checkout -. Confirm before switching back to the previous branch.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+switch\b.*(?:-c|--detach)".to_string(),
+            message: Some("Blocked git switch creating or detaching a branch. Resend with 'confirm:' if requested.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+switch\s+[^\s-][^\s]*".to_string(),
+            message: Some("Blocked git switch <branch>. Branch changes can discard or hide work; confirm before continuing.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+clean\b.*(?:-f|--force|-x|-X|-d)".to_string(),
+            message: Some("Blocked git clean with destructive flags. This deletes untracked files or build artifacts.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*git\s+push\b.*(?:--force|-f)".to_string(),
+            message: Some("Blocked git push --force. Force pushes rewrite remote history; only continue if explicitly requested.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\s+-[a-z-]*rf[a-z-]*\s+(?:--\s+)?(?:\.|\.\.|\./|/|\*)(?:\s|$)".to_string(),
+            message: Some("Blocked rm -rf targeting a broad path (., .., /, or *). Confirm before destructive delete.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\s+-[a-z-]*r[a-z-]*\s+-[a-z-]*f[a-z-]*\s+(?:--\s+)?(?:\.|\.\.|\./|/|\*)(?:\s|$)".to_string(),
+            message: Some("Blocked rm -r/-f combination targeting broad paths. Resend with 'confirm:' if you intend to wipe this tree.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\s+-[a-z-]*f[a-z-]*\s+-[a-z-]*r[a-z-]*\s+(?:--\s+)?(?:\.|\.\.|\./|/|\*)(?:\s|$)".to_string(),
+            message: Some("Blocked rm -f/-r combination targeting broad paths. Confirm before running.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?find\s+\.(?:\s|$).*\s-delete\b".to_string(),
+            message: Some("Blocked find . ... -delete. Recursive deletes require confirmation.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?find\s+\.(?:\s|$).*\s-exec\s+rm\b".to_string(),
+            message: Some("Blocked find . ... -exec rm. Confirm before running recursive rm.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?trash\s+-[a-z-]*r[a-z-]*f[a-z-]*\b".to_string(),
+            message: Some("Blocked trash -rf. Bulk trash operations can delete large portions of the workspace.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?fd\b.*(?:--exec|-x)\s+rm\b".to_string(),
+            message: Some("Blocked fd … --exec rm. Confirm before piping search results into rm.".to_string()),
+        },
+    ]
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AllowedCommandMatchKind {
+    Exact,
+    Prefix,
+}
+
+impl Default for AllowedCommandMatchKind {
+    fn default() -> Self { Self::Exact }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AllowedCommand {
+    #[serde(default)]
+    pub argv: Vec<String>,
+    #[serde(default)]
+    pub match_kind: AllowedCommandMatchKind,
+}
+
+/// Configuration for a subagent slash command (e.g., plan/solve/code or custom)
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SubagentCommandConfig {
+    /// Name of the command (e.g., "plan", "solve", "code", or custom)
+    pub name: String,
+
+    /// Whether agents launched for this command should run in read-only mode
+    /// Defaults: plan/solve=true, code=false (applied if not specified here)
+    #[serde(default)]
+    pub read_only: bool,
+
+    /// Agent names to enable for this command. If empty, falls back to
+    /// enabled agents from `[[agents]]`, or built-in defaults.
+    #[serde(default)]
+    pub agents: Vec<String>,
+
+    /// Extra instructions to append to the orchestrator (Code) prompt.
+    #[serde(default)]
+    pub orchestrator_instructions: Option<String>,
+
+    /// Extra instructions that the orchestrator should append to the prompt
+    /// given to each launched agent.
+    #[serde(default)]
+    pub agent_instructions: Option<String>,
+}
+
+/// Top-level subagents section containing a list of commands.
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SubagentsToml {
+    #[serde(default)]
+    pub commands: Vec<SubagentCommandConfig>,
+}
+
+/// MCP tool identifiers that the client exposes to the agent.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientTools {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_permission: Option<McpToolId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_text_file: Option<McpToolId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_text_file: Option<McpToolId>,
+}
+
+/// Identifier for a client-hosted MCP tool.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolId {
+    pub mcp_server: String,
+    pub tool_name: String,
+}
 
 /// Configuration for external agent models
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -18,7 +185,9 @@ pub struct AgentConfig {
     /// Name of the agent (e.g., "claude", "gemini", "gpt-4")
     pub name: String,
 
-    /// Command to execute the agent (e.g., "claude", "gemini")
+    /// Command to execute the agent (e.g., "claude", "gemini").
+    /// If omitted, defaults to the agent `name` during config load.
+    #[serde(default)]
     pub command: String,
 
     /// Optional arguments to pass to the agent command
@@ -40,6 +209,23 @@ pub struct AgentConfig {
     /// Optional environment variables for the agent
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
+
+    /// Optional arguments to pass only when the agent is executed in
+    /// read-only mode. When present, these are preferred over `args` for
+    /// read-only runs.
+    #[serde(default)]
+    pub args_read_only: Option<Vec<String>>,
+
+    /// Optional arguments to pass only when the agent is executed with write
+    /// permissions. When present, these are preferred over `args` for write
+    /// runs.
+    #[serde(default)]
+    pub args_write: Option<Vec<String>>,
+
+    /// Optional per-agent instructions. When set, these are prepended to the
+    /// prompt provided to the agent whenever it runs.
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -55,6 +241,60 @@ pub struct GithubConfig {
     /// `[github]` with `check_workflows_on_push = false`.
     #[serde(default = "default_true")]
     pub check_workflows_on_push: bool,
+
+    /// When true, run `actionlint` on modified workflows during apply_patch.
+    #[serde(default)]
+    pub actionlint_on_patch: bool,
+
+    /// Optional explicit executable path for actionlint.
+    #[serde(default)]
+    pub actionlint_path: Option<PathBuf>,
+
+    /// Treat actionlint findings as blocking when composing approval text.
+    #[serde(default)]
+    pub actionlint_strict: bool,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ValidationConfig {
+    /// Master toggle for the patch validation harness.
+    #[serde(default)]
+    pub patch_harness: bool,
+
+    /// Optional allowlist restricting which external tools may run.
+    #[serde(default)]
+    pub tools_allowlist: Option<Vec<String>>,
+
+    /// Timeout (seconds) for each external tool invocation.
+    #[serde(default)]
+    pub timeout_seconds: Option<u64>,
+
+    /// Per-tool enable flags (unset implies enabled).
+    #[serde(default)]
+    pub tools: ValidationTools,
+}
+
+impl Default for ValidationConfig {
+    fn default() -> Self {
+        Self {
+            patch_harness: false,
+            tools_allowlist: None,
+            timeout_seconds: None,
+            tools: ValidationTools::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct ValidationTools {
+    pub shellcheck: Option<bool>,
+    pub markdownlint: Option<bool>,
+    pub hadolint: Option<bool>,
+    pub yamllint: Option<bool>,
+    #[serde(rename = "cargo-check")]
+    pub cargo_check: Option<bool>,
+    pub shfmt: Option<bool>,
+    pub prettier: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -105,7 +345,8 @@ impl UriBasedFileOpener {
     }
 }
 
-/// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+/// Settings that govern if and what will be written to `~/.code/history.jsonl`
+/// (Code still reads legacy `~/.codex/history.jsonl`).
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct History {
     /// If true, history entries will not be written to disk.
@@ -149,6 +390,11 @@ pub struct Tui {
     #[serde(default)]
     pub spinner: SpinnerSelection,
 
+    /// Enable desktop notifications from the TUI when the terminal is unfocused.
+    /// Defaults to `false`.
+    #[serde(default)]
+    pub notifications: Notifications,
+
     /// Whether to use the terminal's Alternate Screen (full-screen) mode.
     /// When false, Codex renders nothing and leaves the standard terminal
     /// buffer visible; users can toggle back to Alternate Screen at runtime
@@ -170,6 +416,7 @@ impl Default for Tui {
             show_reasoning: false,
             stream: StreamConfig::default(),
             spinner: SpinnerSelection::default(),
+            notifications: Notifications::default(),
             alternate_screen: true,
         }
     }
@@ -229,6 +476,14 @@ impl Default for StreamConfig {
             responsive: false,
         }
     }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReasoningSummaryFormat {
+    #[default]
+    None,
+    Experimental,
 }
 
 /// Theme configuration for the TUI
@@ -579,6 +834,103 @@ pub enum TextVerbosity {
     #[default]
     Medium,
     High,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CommandField {
+    List(Vec<String>),
+    String(String),
+}
+
+fn deserialize_command_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = CommandField::deserialize(deserializer)?;
+    match value {
+        CommandField::List(items) => Ok(items),
+        CommandField::String(text) => {
+            if text.trim().is_empty() {
+                Ok(Vec::new())
+            } else {
+                shlex_split(&text).ok_or_else(|| de::Error::custom("failed to parse command string"))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectHookEvent {
+    #[serde(rename = "session.start")]
+    SessionStart,
+    #[serde(rename = "session.end")]
+    SessionEnd,
+    #[serde(rename = "tool.before")]
+    ToolBefore,
+    #[serde(rename = "tool.after")]
+    ToolAfter,
+    #[serde(rename = "file.before_write")]
+    FileBeforeWrite,
+    #[serde(rename = "file.after_write")]
+    FileAfterWrite,
+}
+
+impl ProjectHookEvent {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProjectHookEvent::SessionStart => "session.start",
+            ProjectHookEvent::SessionEnd => "session.end",
+            ProjectHookEvent::ToolBefore => "tool.before",
+            ProjectHookEvent::ToolAfter => "tool.after",
+            ProjectHookEvent::FileBeforeWrite => "file.before_write",
+            ProjectHookEvent::FileAfterWrite => "file.after_write",
+        }
+    }
+
+    pub fn slug(&self) -> &'static str {
+        match self {
+            ProjectHookEvent::SessionStart => "session_start",
+            ProjectHookEvent::SessionEnd => "session_end",
+            ProjectHookEvent::ToolBefore => "tool_before",
+            ProjectHookEvent::ToolAfter => "tool_after",
+            ProjectHookEvent::FileBeforeWrite => "file_before_write",
+            ProjectHookEvent::FileAfterWrite => "file_after_write",
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ProjectHookConfig {
+    pub event: ProjectHookEvent,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(alias = "run", deserialize_with = "deserialize_command_vec")]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub run_in_background: Option<bool>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ProjectCommandConfig {
+    pub name: String,
+    #[serde(alias = "run", deserialize_with = "deserialize_command_vec")]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 impl From<codex_protocol::config_types::ReasoningEffort> for ReasoningEffort {

@@ -2,6 +2,7 @@ use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::config_types::ThemeName;
 use codex_core::protocol::Event;
+use codex_core::protocol::ApprovedCommandMatchKind;
 use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use crossterm::event::MouseEvent;
@@ -15,6 +16,7 @@ use crate::slash_command::SlashCommand;
 use codex_protocol::models::ResponseItem;
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::mpsc::Sender as StdSender;
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -23,6 +25,38 @@ impl<T> fmt::Debug for Redacted<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<redacted>")
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TerminalRunController {
+    pub tx: StdSender<TerminalRunEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TerminalLaunch {
+    pub id: u64,
+    pub title: String,
+    pub command: Vec<String>,
+    pub command_display: String,
+    pub controller: Option<TerminalRunController>,
+    pub auto_close_on_success: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalRunEvent {
+    Chunk { data: Vec<u8>, _is_stderr: bool },
+    Exit { exit_code: Option<i32>, _duration: Duration },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalCommandGate {
+    Run(String),
+    Cancel,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TerminalAfter {
+    RefreshAgentsAndClose { selected_index: usize },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -35,6 +69,9 @@ pub(crate) enum AppEvent {
 
     /// Actually draw the next frame.
     Redraw,
+
+    /// Update the terminal title override. `None` restores the default title.
+    SetTerminalTitle { title: Option<String> },
 
     /// Schedule a one-shot animation frame roughly after the given duration.
     /// Multiple requests are coalesced by the central frame scheduler.
@@ -71,14 +108,23 @@ pub(crate) enum AppEvent {
     /// Signal that agents are about to start (triggered when /plan, /solve, /code commands are entered)
     PrepareAgents,
 
-    /// Update the reasoning effort level
-    UpdateReasoningEffort(ReasoningEffort),
+    /// Update the model and optional reasoning effort preset
+    UpdateModelSelection {
+        model: String,
+        effort: Option<ReasoningEffort>,
+    },
 
     /// Update the text verbosity level
     UpdateTextVerbosity(TextVerbosity),
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
+    /// Update validation harness master toggle
+    UpdateValidationPatchHarness(bool),
+    /// Enable/disable a specific validation tool
+    UpdateValidationTool { name: String, enable: bool },
+    /// Start installing a validation tool through the terminal overlay
+    RequestValidationToolInstall { name: String, command: String },
 
     /// Enable/disable a specific MCP server
     UpdateMcpServer { name: String, enable: bool },
@@ -86,8 +132,26 @@ pub(crate) enum AppEvent {
     /// Prefill the composer input with the given text
     PrefillComposer(String),
 
+    /// Submit a message with hidden preface instructions
+    SubmitTextWithPreface { visible: String, preface: String },
+
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),
+    /// Add or update a subagent command in memory (UI already persisted to config.toml)
+    UpdateSubagentCommand(codex_core::config_types::SubagentCommandConfig),
+    /// Remove a subagent command from memory (UI already deleted from config.toml)
+    DeleteSubagentCommand(String),
+    /// Return to the Agents settings list view
+    // ShowAgentsSettings removed; overview replaces it
+    /// Return to the Agents overview (Agents + Commands)
+    ShowAgentsOverview,
+    /// Open the agent editor form for a specific agent name
+    ShowAgentEditor { name: String },
+    // ShowSubagentEditor removed; use ShowSubagentEditorForName or ShowSubagentEditorNew
+    /// Open the subagent editor for a specific command name; ChatWidget supplies data
+    ShowSubagentEditorForName { name: String },
+    /// Open a blank subagent editor to create a new command
+    ShowSubagentEditorNew,
 
     /// Preview theme (no history event)
     PreviewTheme(ThemeName),
@@ -124,6 +188,12 @@ pub(crate) enum AppEvent {
     /// Insert a background event near the top of the current request so it
     /// appears above imminent provider output (e.g. above Exec begin).
     InsertBackgroundEventEarly(String),
+    /// Insert a background event at the end of the current request so it
+    /// follows previously rendered content.
+    InsertBackgroundEventLate(String),
+
+    /// Background rate limit refresh failed (threaded request).
+    RateLimitFetchFailed { message: String },
 
     #[allow(dead_code)]
     StartCommitAnimation,
@@ -166,5 +236,64 @@ pub(crate) enum AppEvent {
     /// (clear spinner/status, finalize running exec/tool cells) while the core
     /// continues its own abort/cleanup in parallel.
     CancelRunningTask,
+    /// Register a command pattern as approved, optionally persisting to config.
+    RegisterApprovedCommand {
+        command: Vec<String>,
+        match_kind: ApprovedCommandMatchKind,
+        persist: bool,
+        semantic_prefix: Option<Vec<String>>,
+    },
+    /// Indicate that an approval was denied so the UI can clear transient
+    /// spinner/status state without interrupting the core task.
+    MarkTaskIdle,
+    OpenTerminal(TerminalLaunch),
+    TerminalChunk {
+        id: u64,
+        chunk: Vec<u8>,
+        _is_stderr: bool,
+    },
+    TerminalExit {
+        id: u64,
+        exit_code: Option<i32>,
+        _duration: Duration,
+    },
+    TerminalCancel { id: u64 },
+    TerminalRunCommand {
+        id: u64,
+        command: Vec<String>,
+        command_display: String,
+        controller: Option<TerminalRunController>,
+    },
+    TerminalRerun { id: u64 },
+    TerminalUpdateMessage { id: u64, message: String },
+    TerminalForceClose { id: u64 },
+    TerminalAfter(TerminalAfter),
+    TerminalSetAssistantMessage { id: u64, message: String },
+    TerminalAwaitCommand {
+        id: u64,
+        suggestion: String,
+        ack: Redacted<StdSender<TerminalCommandGate>>,
+    },
+    TerminalApprovalDecision { id: u64, approved: bool },
+    #[cfg(not(debug_assertions))]
+    RunUpdateCommand {
+        command: Vec<String>,
+        display: String,
+        latest_version: Option<String>,
+    },
+    #[cfg(not(debug_assertions))]
+    SetAutoUpgradeEnabled(bool),
+    RequestAgentInstall { name: String, selected_index: usize },
+    AgentsOverviewSelectionChanged { index: usize },
+    /// Add or update an agent's settings (enabled, params, instructions)
+    UpdateAgentConfig {
+        name: String,
+        enabled: bool,
+        args_read_only: Option<Vec<String>>,
+        args_write: Option<Vec<String>>,
+        instructions: Option<String>,
+    },
     
 }
+
+// No helper constructor; use `AppEvent::CodexEvent(ev)` directly to avoid shadowing.

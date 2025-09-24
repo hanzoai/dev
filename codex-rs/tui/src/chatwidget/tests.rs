@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
@@ -36,6 +37,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use tokio::sync::mpsc::unbounded_channel;
+use strip_ansi_escapes::strip as strip_ansi_bytes;
 
 fn test_config() -> Config {
     // Use base defaults to avoid depending on host state.
@@ -98,8 +100,20 @@ async fn helpers_are_available_and_do_not_panic() {
     let (tx_raw, _rx) = channel::<AppEvent>();
     let tx = AppEventSender::new(tx_raw);
     let cfg = test_config();
-    let conversation_manager = Arc::new(ConversationManager::default());
-    let mut w = ChatWidget::new(cfg, conversation_manager, tx, None, Vec::new(), false);
+    let term = crate::tui::TerminalInfo {
+        picker: None,
+        font_size: (8, 16),
+    };
+    let mut w = ChatWidget::new(
+        cfg,
+        tx,
+        None,
+        Vec::new(),
+        false,
+        term,
+        false,
+        None,
+    );
     // Basic construction sanity.
     let _ = &mut w;
 }
@@ -126,9 +140,15 @@ fn make_chatwidget_manual() -> (
         bottom_pane: bottom,
         active_exec_cell: None,
         config: cfg.clone(),
+        latest_upgrade_version: None,
         initial_user_message: None,
         total_token_usage: TokenUsage::default(),
         last_token_usage: TokenUsage::default(),
+        rate_limit_snapshot: None,
+        rate_limit_warnings: Default::default(),
+        rate_limit_fetch_inflight: false,
+        rate_limit_fetch_placeholder: None,
+        rate_limit_fetch_ack_pending: false,
         stream: StreamController::new(cfg),
         last_stream_kind: None,
         running_commands: HashMap::new(),
@@ -138,6 +158,17 @@ fn make_chatwidget_manual() -> (
         needs_redraw: false,
     };
     (widget, rx, op_rx)
+}
+
+pub(crate) fn make_chatwidget_manual_with_sender() -> (
+    ChatWidget,
+    AppEventSender,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    let (widget, rx, op_rx) = make_chatwidget_manual();
+    let app_event_tx = widget.app_event_tx.clone();
+    (widget, app_event_tx, rx, op_rx)
 }
 
 fn drain_insert_history(
@@ -163,6 +194,60 @@ fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
     s
 }
 
+#[derive(Clone, Copy)]
+enum ScriptStep {
+    Key(KeyCode, KeyModifiers),
+}
+
+impl ScriptStep {
+    fn key_char(c: char) -> Self {
+        ScriptStep::Key(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn enter() -> Self {
+        ScriptStep::Key(KeyCode::Enter, KeyModifiers::NONE)
+    }
+}
+
+fn run_script(chat: &mut ChatWidget<'_>, steps: &[ScriptStep], rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    for step in steps {
+        if let ScriptStep::Key(code, modifiers) = step {
+            chat.handle_key_event(KeyEvent::new(*code, *modifiers));
+            pump_app_events(chat, rx);
+        }
+    }
+    pump_app_events(chat, rx);
+}
+
+fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::PrepareAgents => chat.prepare_agents(),
+            AppEvent::DispatchCommand(SlashCommand::Agents, args) => {
+                chat.handle_agents_command(args);
+            }
+            AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
+            AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
+            _ => {}
+        }
+    }
+}
+
+fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+    let area = buffer.area();
+    let mut out = String::with_capacity((area.width as usize + 1) * area.height as usize);
+    for y in 0..area.height {
+        for x in 0..area.width {
+            out.push_str(buffer.get(x, y).symbol());
+        }
+        out.push('\n');
+    }
+    match strip_ansi_bytes(out.as_bytes()) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(_) => out,
+    }
+}
+
 fn open_fixture(name: &str) -> std::fs::File {
     // 1) Prefer fixtures within this crate
     {
@@ -185,6 +270,40 @@ fn open_fixture(name: &str) -> std::fs::File {
     }
     // 3) Last resort: CWD
     File::open(name).expect("open fixture file")
+}
+
+#[test]
+fn slash_agents_opens_overview() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('a'),
+        ScriptStep::key_char('g'),
+        ScriptStep::key_char('e'),
+        ScriptStep::key_char('n'),
+        ScriptStep::key_char('t'),
+        ScriptStep::key_char('s'),
+        ScriptStep::enter(),
+    ];
+    run_script(&mut chat, &script, &rx);
+
+    let width: u16 = 120;
+    let height = chat.desired_height(width).max(40);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw agents overview");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(lower.contains("agents"), "expected Agents heading\n{plain}");
+    assert!(lower.contains("commands"), "expected Commands section\n{plain}");
+    assert!(
+        lower.contains("add new"),
+        "expected Add new row in overview\n{plain}"
+    );
 }
 
 #[test]
@@ -411,7 +530,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
         lines.pop();
     }
     // Compare only after the last session banner marker, and start at the next 'thinking' line.
-    const MARKER_PREFIX: &str = ">_ You are using OpenAI Codex in ";
+    const MARKER_PREFIX: &str = ">_ You are using OpenAI Code in ";
     let last_marker_line_idx = lines
         .iter()
         .rposition(|l| l.starts_with(MARKER_PREFIX))
@@ -443,7 +562,7 @@ async fn binary_size_transcript_matches_ideal_fixture() {
 //
 // Snapshot test: command approval modal
 //
-// Synthesizes a Codex ExecApprovalRequest event to trigger the approval modal
+// Synthesizes a Code ExecApprovalRequest event to trigger the approval modal
 // and snapshots the visual output using the ratatui TestBackend.
 #[test]
 fn approval_modal_exec_snapshot() {
@@ -533,7 +652,7 @@ fn interrupt_restores_queued_messages_into_composer() {
     // Composer should now contain the queued messages joined by newlines, in order.
     assert_eq!(
         chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued"
+        "first queued\n\nsecond queued"
     );
 
     // Queue should be cleared and no new user input should have been auto-submitted.
@@ -622,7 +741,7 @@ fn status_widget_and_approval_modal_snapshot() {
         call_id: "call-approve-exec".into(),
         command: vec!["echo".into(), "hello world".into()],
         cwd: std::path::PathBuf::from("/tmp"),
-        reason: Some("Codex wants to run a command".into()),
+        reason: Some("Code wants to run a command".into()),
     };
     chat.handle_codex_event(Event {
         id: "sub-approve-exec".into(),
@@ -951,7 +1070,7 @@ fn apply_patch_request_shows_diff_summary() {
 fn plan_update_renders_history_cell() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
     let update = UpdatePlanArgs {
-        explanation: Some("Adapting plan".to_string()),
+        name: Some("Feature rollout plan".to_string()),
         plan: vec![
             PlanItemArg {
                 step: "Explore codebase".into(),
@@ -975,7 +1094,7 @@ fn plan_update_renders_history_cell() {
     assert!(!cells.is_empty(), "expected plan update cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.contains("Update plan"),
+        blob.contains("Feature rollout plan"),
         "missing plan header: {blob:?}"
     );
     assert!(blob.contains("Explore codebase"));

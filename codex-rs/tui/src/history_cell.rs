@@ -1,6 +1,12 @@
 use crate::diff_render::create_diff_summary_with_width;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::sanitize::Mode as SanitizeMode;
+use crate::sanitize::Options as SanitizeOptions;
+use crate::sanitize::sanitize_for_tui;
+use crate::rate_limits_view::{build_limits_view, LimitsView, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use crate::slash_command::SlashCommand;
+use crate::util::buffer::{fill_rect, write_line};
+use crate::insert_history::word_wrap_lines;
 use crate::text_formatting::format_json_compact;
 use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
@@ -14,8 +20,10 @@ use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
 use codex_core::protocol::FileChange;
 use codex_core::protocol::McpInvocation;
+use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TokenUsage;
+use codex_protocol::num_format::format_with_separators;
 use image::DynamicImage;
 use image::ImageReader;
 use mcp_types::EmbeddedResourceResource;
@@ -29,15 +37,19 @@ use ratatui::widgets::Padding;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
+use shlex::Shlex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Cursor;
+use std::path::Component;
+use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tracing::error;
-use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
 
 // ==================== Core Types ====================
 
@@ -92,7 +104,9 @@ pub(crate) enum ExecAction {
     Run,
 }
 
-pub(crate) fn action_enum_from_parsed(parsed: &Vec<codex_core::parse_command::ParsedCommand>) -> ExecAction {
+pub(crate) fn action_enum_from_parsed(
+    parsed: &[codex_core::parse_command::ParsedCommand],
+) -> ExecAction {
     use codex_core::parse_command::ParsedCommand;
     for p in parsed {
         match p {
@@ -182,11 +196,7 @@ pub(crate) trait HistoryCell {
             _ => crate::colors::background(),
         };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Ensure the entire allocated area is painted with the theme background
         // by attaching a background-styled Block to the Paragraph as well.
@@ -262,7 +272,8 @@ pub(crate) trait HistoryCell {
                 }
             }
             HistoryCellType::Patch { .. } => Some("↯"),
-            HistoryCellType::PlanUpdate => Some("◔"), // final glyph will be chosen in header line
+            // Plan updates supply their own gutter glyph dynamically.
+            HistoryCellType::PlanUpdate => None,
             HistoryCellType::BackgroundEvent => Some("»"),
             HistoryCellType::Notice => Some("★"),
             HistoryCellType::Diff => Some("↯"),
@@ -330,80 +341,737 @@ impl HistoryCell for Box<dyn HistoryCell> {
     }
 }
 
-// ==================== ReadAggregationCell ====================
-// Aggregates multiple Read preamble entries into a single history cell while
-// commands are still running, then flips to a finalized state without changing
-// position in the history. This prevents flicker where multiple transient
-// "Read" sections appear and later merge.
+// ==================== ExploreAggregationCell ====================
+// Collapses consecutive Read/Search/List commands into a single "Exploring" cell
+// while commands are executing, updating the entry status once the command finishes.
 
-pub(crate) struct ReadAggregationCell {
-    // Aggregated preamble lines (each line typically starts with "└ " or two spaces)
-    lines: Vec<Line<'static>>,
-    // When true, render as a finalized "Read" section (ExecStatus::Success);
-    // otherwise render with a running header style (ExecStatus::Running).
-    finalized: bool,
+#[derive(Clone)]
+pub(crate) enum ExploreEntryStatus {
+    Running,
+    Success,
+    NotFound,
+    Error { exit_code: Option<i32> },
 }
 
-impl ReadAggregationCell {
-    pub(crate) fn new() -> Self {
-        Self { lines: Vec::new(), finalized: false }
+#[derive(Clone)]
+struct CommandSummary {
+    display: String,
+    annotation: Option<String>,
+}
+
+#[derive(Clone)]
+enum ExploreSummary {
+    Search {
+        query: Option<String>,
+        path: Option<String>,
+    },
+    List {
+        path: Option<String>,
+    },
+    Read {
+        display_path: String,
+        annotation: Option<String>,
+        range: Option<(u32, u32)>,
+    },
+    Command {
+        command: CommandSummary,
+    },
+    Fallback {
+        text: String,
+    },
+}
+
+#[derive(Clone)]
+struct ExploreEntry {
+    action: ExecAction,
+    summary: ExploreSummary,
+    status: ExploreEntryStatus,
+}
+
+impl ExploreEntry {
+    fn label(&self) -> &'static str {
+        if matches!(self.summary, ExploreSummary::Command { .. }) {
+            return "Ran";
+        }
+        match self.action {
+            ExecAction::Read => "Read",
+            ExecAction::Search => "Search",
+            ExecAction::List => "List",
+            ExecAction::Run => "Run",
+        }
     }
 
-    pub(crate) fn push_lines(&mut self, mut more: Vec<Line<'static>>) {
-        // Trim completely empty prefix/suffix lines from the chunk to keep the block compact
-        more = trim_empty_lines(more);
-        if more.is_empty() { return; }
-        self.lines.extend(more);
+    fn summary_spans(&self) -> Vec<Span<'static>> {
+        match &self.summary {
+            ExploreSummary::Search { query, path } => {
+                let mut spans = Vec::new();
+                if let Some(q) = query {
+                    if !q.is_empty() {
+                        spans.push(Span::styled(
+                            q.clone(),
+                            Style::default().fg(crate::colors::text()),
+                        ));
+                    }
+                }
+                if let Some(p) = path {
+                    spans.push(Span::styled(
+                        format!(" in {}", p),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                if spans.is_empty() {
+                    spans.push(Span::styled(
+                        "search".to_string(),
+                        Style::default().fg(crate::colors::text()),
+                    ));
+                }
+                spans
+            }
+            ExploreSummary::List { path } => {
+                let target = path.as_ref().cloned().unwrap_or_else(|| "./".to_string());
+                vec![Span::styled(
+                    format!("{}", target),
+                    Style::default().fg(crate::colors::text_dim()),
+                )]
+            }
+            ExploreSummary::Read {
+                display_path,
+                annotation,
+                ..
+            } => {
+                let mut spans = vec![Span::styled(
+                    display_path.clone(),
+                    Style::default().fg(crate::colors::text()),
+                )];
+                if let Some(ann) = annotation {
+                    spans.push(Span::styled(
+                        format!(" {}", ann),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                spans
+            }
+            ExploreSummary::Command { command } => {
+                let mut spans = highlight_command_summary(&command.display);
+                if let Some(annotation) = &command.annotation {
+                    spans.push(Span::styled(
+                        format!(" {}", annotation),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                spans
+            }
+            ExploreSummary::Fallback { text } => vec![Span::styled(
+                text.clone(),
+                Style::default().fg(crate::colors::text()),
+            )],
+        }
     }
 
-    pub(crate) fn finalize(&mut self) { self.finalized = true; }
+    fn is_running(&self) -> bool {
+        matches!(self.status, ExploreEntryStatus::Running)
+    }
 
-    // Build a normalized copy of aggregated lines where only the very first
-    // visible line uses the corner connector "└ "; subsequent lines use two
-    // spaces. Also coalesce adjacent read ranges for the same file.
-    fn normalized_lines(&self) -> Vec<Line<'static>> {
-        let mut v = self.lines.clone();
-        // Ensure only the first content line shows the corner
-        let mut seen_first = false;
-        for line in v.iter_mut() {
-            if let Some(sp0) = line.spans.get_mut(0) {
-                let s = sp0.content.as_ref();
-                if s == "└ " || s == "  └ " {
-                    if seen_first {
-                        sp0.content = "  ".into();
-                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                    } else {
-                        // First occurrence keeps the corner but dim it consistently
-                        sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                        seen_first = true;
+    fn is_error(&self) -> bool {
+        matches!(self.status, ExploreEntryStatus::Error { .. })
+    }
+}
+
+fn highlight_command_summary(command: &str) -> Vec<Span<'static>> {
+    let normalized = normalize_shell_command_display(command);
+    let display_line = insert_line_breaks_after_double_ampersand(&normalized);
+    let highlighted = crate::syntax_highlight::highlight_code_block(&display_line, Some("bash"));
+    if let Some(mut first) = highlighted.into_iter().next() {
+        emphasize_shell_command_name(&mut first);
+        first.spans
+    } else {
+        vec![Span::styled(
+            display_line,
+            Style::default().fg(crate::colors::text()),
+        )]
+    }
+}
+
+pub(crate) fn clean_wait_command(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Some((first_token, rest)) = split_token(trimmed) else {
+        return trimmed.to_string();
+    };
+    if !looks_like_shell(first_token) {
+        return trimmed.to_string();
+    }
+    let rest = rest.trim_start();
+    let Some((second_token, remainder)) = split_token(rest) else {
+        return trimmed.to_string();
+    };
+    if second_token != "-lc" {
+        return trimmed.to_string();
+    }
+    let mut command = remainder.trim_start();
+    if command.len() >= 2 {
+        let bytes = command.as_bytes();
+        let first_char = bytes[0] as char;
+        let last_char = bytes[bytes.len().saturating_sub(1)] as char;
+        if (first_char == '"' && last_char == '"') || (first_char == '\'' && last_char == '\'') {
+            command = &command[1..command.len().saturating_sub(1)];
+        }
+    }
+    if command.is_empty() {
+        trimmed.to_string()
+    } else {
+        command.to_string()
+    }
+}
+
+fn split_token(input: &str) -> Option<(&str, &str)> {
+    let s = input.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(idx) = s.find(char::is_whitespace) {
+        let (token, rest) = s.split_at(idx);
+        Some((token, rest))
+    } else {
+        Some((s, ""))
+    }
+}
+
+fn looks_like_shell(token: &str) -> bool {
+    let trimmed = token.trim_matches('"').trim_matches('\'');
+    let basename = trimmed
+        .rsplit('/')
+        .next()
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(
+        basename.as_str(),
+        "bash"
+            | "bash.exe"
+            | "sh"
+            | "sh.exe"
+            | "zsh"
+            | "zsh.exe"
+            | "dash"
+            | "dash.exe"
+            | "ksh"
+            | "ksh.exe"
+            | "busybox"
+    )
+}
+
+fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
+    let display = select_command_display(cmd, original_command);
+    let (annotation, _) = parse_read_line_annotation_with_range(&display);
+    let display = if annotation.is_some() {
+        strip_redundant_line_filter_pipes(&display)
+    } else {
+        display
+    };
+    CommandSummary { display, annotation }
+}
+
+// Remove formatting-only pipes (sed/head/tail) when we already provide a line-range
+// annotation alongside the command summary. Keeps the core command intact for display.
+fn strip_redundant_line_filter_pipes(cmd: &str) -> String {
+    if !cmd.contains('|') { return cmd.to_string(); }
+
+    let mut segs: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    for ch in cmd.chars() {
+        match ch {
+            '\'' if !in_double => { in_single = !in_single; cur.push(ch); }
+            '"' if !in_single => { in_double = !in_double; cur.push(ch); }
+            '|' if !in_single && !in_double => {
+                segs.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(ch),
+        }
+    }
+    if !cur.is_empty() { segs.push(cur.trim().to_string()); }
+
+    let is_redundant = |s: &str| {
+        let lower = s.trim().to_lowercase();
+        if lower.is_empty() { return false; }
+        if lower.starts_with("sed ") || lower == "sed" {
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            if parts.len() >= 3 && parts[1] == "-n" {
+                let tok = parts[2].trim_matches('\'').trim_matches('"');
+                if tok.ends_with('p') {
+                    let core = &tok[..tok.len().saturating_sub(1)];
+                    if core.split_once(',').is_some() || core.chars().all(|c| c.is_ascii_digit()) {
+                        return true;
                     }
                 }
             }
         }
-        // Merge overlapping/touching ranges per file to keep the list succinct
-        coalesce_read_ranges_in_lines_local(&mut v);
-        v
+        if lower == "head" || lower.starts_with("head ") { return true; }
+        if lower == "tail" || lower.starts_with("tail ") { return true; }
+        false
+    };
+
+    while let Some(last) = segs.last() {
+        if is_redundant(last) { segs.pop(); } else { break; }
+    }
+
+    if segs.is_empty() { return cmd.to_string(); }
+    segs.join(" | ")
+}
+
+fn select_command_display(cmd: &str, original_command: &[String]) -> String {
+    if let Some(script) = extract_bash_script(original_command) {
+        let trimmed = script.trim();
+        if !trimmed.is_empty() {
+            if command_string_has_connector(trimmed) || trimmed != cmd {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    if command_tokens_have_connectors(original_command) {
+        let joined = original_command.join(" ").trim().to_string();
+        if !joined.is_empty() {
+            if command_string_has_connector(&joined) || joined != cmd {
+                return joined;
+            }
+        }
+    }
+
+    cmd.to_string()
+}
+
+fn extract_bash_script(command: &[String]) -> Option<String> {
+    if command.len() < 3 {
+        return None;
+    }
+    let exe = command[0].as_str();
+    let flag = command[1].as_str();
+    if looks_like_bash(exe) && (flag == "-c" || flag == "-lc") {
+        command.get(2).cloned()
+    } else {
+        None
     }
 }
 
-impl HistoryCell for ReadAggregationCell {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn kind(&self) -> HistoryCellType { HistoryCellType::Exec { kind: ExecKind::Read, status: if self.finalized { ExecStatus::Success } else { ExecStatus::Running } } }
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        let mut out: Vec<Line<'static>> = Vec::new();
-        // Always render a stable, completed-style header to avoid flicker
-        let header = Line::styled("Read", Style::default().fg(crate::colors::text()));
-        out.push(header);
-        out.extend(self.normalized_lines());
-        out
+fn looks_like_bash(exe: &str) -> bool {
+    if exe.eq_ignore_ascii_case("bash") || exe.eq_ignore_ascii_case("bash.exe") {
+        return true;
     }
+    Path::new(exe)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
+}
+
+fn command_tokens_have_connectors(command: &[String]) -> bool {
+    command.iter().any(|token| matches!(token.as_str(), "|" | "&&" | "||" | ";"))
+}
+
+fn command_string_has_connector(value: &str) -> bool {
+    value.contains('|') || value.contains("&&") || value.contains("||") || value.contains(';')
+}
+
+fn normalize_separators(mut value: String) -> String {
+    if value.is_empty() {
+        return value;
+    }
+    if std::path::MAIN_SEPARATOR != '/' {
+        value = value.replace(std::path::MAIN_SEPARATOR, "/");
+    }
+    value
+}
+
+fn ensure_dir_suffix(mut value: String) -> String {
+    if value.is_empty() {
+        value.push('.');
+    }
+    value = normalize_separators(value);
+    if !value.ends_with('/') {
+        value.push('/');
+    }
+    value
+}
+
+fn format_cwd_display(cwd: &Path, session_root: &Path) -> String {
+    if let Ok(rel) = cwd.strip_prefix(session_root) {
+        if rel.as_os_str().is_empty() {
+            return "./".to_string();
+        }
+        let mut parts: Vec<String> = Vec::new();
+        for comp in rel.components() {
+            match comp {
+                Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+                Component::ParentDir => parts.push("..".to_string()),
+                Component::CurDir => {}
+                _ => {}
+            }
+        }
+        if parts.is_empty() {
+            "./".to_string()
+        } else {
+            ensure_dir_suffix(parts.join("/"))
+        }
+    } else {
+        ensure_dir_suffix(cwd.display().to_string())
+    }
+}
+
+fn format_list_target(path: Option<&str>, cwd: &Path, session_root: &Path) -> Option<String> {
+    let trimmed = path.and_then(|p| {
+        let t = p.trim();
+        if t.is_empty() { None } else { Some(t) }
+    });
+
+    let display = match trimmed {
+        Some(".") | Some("./") => format_cwd_display(cwd, session_root),
+        Some("/") => normalize_separators("/".to_string()),
+        Some(raw) => {
+            let stripped = raw.trim_end_matches('/');
+            let base = if stripped.is_empty() { raw } else { stripped };
+            ensure_dir_suffix(base.to_string())
+        }
+        None => format_cwd_display(cwd, session_root),
+    };
+
+    Some(display)
+}
+
+fn format_search_target(path: Option<&str>, cwd: &Path, session_root: &Path) -> Option<String> {
+    let trimmed = path.and_then(|p| {
+        let t = p.trim();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    trimmed.map(|p| format_read_target(p, cwd, session_root))
+}
+
+fn format_read_target(name: &str, cwd: &Path, session_root: &Path) -> String {
+    let trimmed = name.trim();
+    let path = Path::new(trimmed);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+
+    let normalized = if let Ok(rel) = resolved.strip_prefix(session_root) {
+        if rel.as_os_str().is_empty() {
+            trimmed.to_string()
+        } else {
+            normalize_separators(rel.display().to_string())
+        }
+    } else {
+        normalize_separators(resolved.display().to_string())
+    };
+
+    if normalized.is_empty() {
+        trimmed.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn annotation_for_range(start: u32, end: u32) -> Option<String> {
+    if end == u32::MAX {
+        Some(format!("(from {} to end)", start))
+    } else {
+        Some(format!("(lines {} to {})", start, end))
+    }
+}
+
+pub(crate) struct ExploreAggregationCell {
+    entries: Vec<ExploreEntry>,
+    is_trailing: bool,
+}
+
+impl ExploreAggregationCell {
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            is_trailing: true,
+        }
+    }
+
+    pub(crate) fn set_trailing(&mut self, trailing: bool) {
+        self.is_trailing = trailing;
+    }
+
+    pub(crate) fn push_from_parsed(
+        &mut self,
+        parsed: &[ParsedCommand],
+        status: ExploreEntryStatus,
+        cwd: &Path,
+        session_root: &Path,
+        original_command: &[String],
+    ) -> Option<usize> {
+        let action = action_enum_from_parsed(parsed);
+        let summary = match action {
+            ExecAction::Search => parsed.iter().find_map(|p| match p {
+                ParsedCommand::Search { query, path, cmd } => {
+                    let formatted_path = format_search_target(path.as_deref(), cwd, session_root);
+                    let pretty_query =
+                        query.clone().filter(|q| !q.trim().is_empty()).or_else(|| {
+                            if query.is_none() {
+                                Some(cmd.clone())
+                            } else {
+                                None
+                            }
+                        });
+                    Some(ExploreSummary::Search {
+                        query: pretty_query,
+                        path: formatted_path,
+                    })
+                }
+                _ => None,
+            }),
+            ExecAction::List => parsed.iter().find_map(|p| match p {
+                ParsedCommand::ListFiles { path, .. } => {
+                    let display = format_list_target(path.as_deref(), cwd, session_root);
+                    Some(ExploreSummary::List { path: display })
+                }
+                _ => None,
+            }),
+            ExecAction::Read => parsed.iter().find_map(|p| match p {
+                ParsedCommand::Read { name, cmd, .. } => {
+                    let (annotation, range) = parse_read_line_annotation_with_range(cmd);
+                    let display_path = format_read_target(name, cwd, session_root);
+                    Some(ExploreSummary::Read {
+                        display_path,
+                        annotation,
+                        range,
+                    })
+                }
+                _ => None,
+            }),
+            ExecAction::Run => parsed.iter().find_map(|p| match p {
+                ParsedCommand::ReadCommand { cmd } => Some(ExploreSummary::Command {
+                    command: build_command_summary(cmd, original_command),
+                }),
+                _ => None,
+            }),
+        };
+
+        let summary = summary.or_else(|| {
+            let text = parsed
+                .iter()
+                .map(|p| match p {
+                    ParsedCommand::Unknown { cmd } => cmd.clone(),
+                    _ => String::new(),
+                })
+                .find(|s| !s.is_empty())
+                .unwrap_or_else(|| "exec".to_string());
+            Some(ExploreSummary::Fallback { text })
+        });
+
+        let summary = summary?;
+
+        if let ExploreSummary::Read {
+            display_path,
+            annotation,
+            range,
+        } = &summary
+        {
+            let path_key = display_path.clone();
+            let annot = annotation.clone();
+            let range_val = *range;
+            for idx in (0..self.entries.len()).rev() {
+                if let ExploreSummary::Read {
+                    display_path: existing_path,
+                    annotation: existing_ann,
+                    range: existing_range,
+                } = &mut self.entries[idx].summary
+                {
+                    if *existing_path == path_key {
+                        let reuse = match (*existing_range, range_val) {
+                            (Some((es, ee)), Some((ns, ne))) => {
+                                if ns <= es && ne >= ee {
+                                    *existing_range = Some((ns, ne));
+                                    *existing_ann =
+                                        annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                    true
+                                } else if es <= ns && ee >= ne {
+                                    true
+                                } else {
+                                    let start = es.min(ns);
+                                    let end = if ee == u32::MAX || ne == u32::MAX {
+                                        u32::MAX
+                                    } else {
+                                        ee.max(ne)
+                                    };
+                                    *existing_range = Some((start, end));
+                                    *existing_ann = annotation_for_range(start, end);
+                                    true
+                                }
+                            }
+                            (None, Some((ns, ne))) => {
+                                *existing_range = Some((ns, ne));
+                                *existing_ann =
+                                    annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                true
+                            }
+                            (Some(_), None) => {
+                                if annot.is_some() {
+                                    *existing_ann = annot.clone();
+                                }
+                                true
+                            }
+                            (None, None) => {
+                                if annot.is_some() {
+                                    *existing_ann = annot.clone();
+                                }
+                                true
+                            }
+                        };
+
+                        if reuse {
+                            self.entries[idx].status = status;
+                            return Some(idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let ExploreSummary::Command { command: new_cmd } = &summary {
+            for idx in (0..self.entries.len()).rev() {
+                if let ExploreSummary::Command { command: existing } = &mut self.entries[idx].summary
+                {
+                    if existing.display == new_cmd.display
+                        && existing.annotation == new_cmd.annotation
+                    {
+                        self.entries[idx].status = status;
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+
+        self.entries.push(ExploreEntry {
+            action,
+            summary,
+            status,
+        });
+        Some(self.entries.len().saturating_sub(1))
+    }
+
+    pub(crate) fn update_status(&mut self, idx: usize, status: ExploreEntryStatus) {
+        if let Some(entry) = self.entries.get_mut(idx) {
+            entry.status = status;
+        }
+    }
+
+    fn current_exec_status(&self) -> ExecStatus {
+        if self.entries.iter().any(|e| e.is_running()) {
+            ExecStatus::Running
+        } else if self.entries.iter().any(|e| e.is_error()) {
+            ExecStatus::Error
+        } else {
+            ExecStatus::Success
+        }
+    }
+}
+
+impl HistoryCell for ExploreAggregationCell {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Exec {
+            kind: ExecKind::Search,
+            status: self.current_exec_status(),
+        }
+    }
+
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        let header = if self.is_trailing {
+            "Exploring..."
+        } else {
+            "Explored"
+        };
+
+        if self.entries.is_empty() {
+            return vec![Line::styled(
+                header,
+                Style::default().fg(crate::colors::text()),
+            )];
+        }
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::styled(
+            header,
+            Style::default().fg(crate::colors::text()),
+        ));
+
+        let max_label_len = self
+            .entries
+            .iter()
+            .map(|e| e.label().chars().count())
+            .max()
+            .unwrap_or(0);
+
+        for (idx, entry) in self.entries.iter().enumerate() {
+            let prefix = if idx == 0 { "└ " } else { "  " };
+            let mut spans: Vec<Span<'static>> = vec![Span::styled(
+                prefix,
+                Style::default().add_modifier(Modifier::DIM),
+            )];
+            let label = entry.label();
+            let label_len = label.chars().count();
+            let padding = max_label_len.saturating_sub(label_len) + 1;
+            let mut padded_label = String::with_capacity(label.len() + padding);
+            padded_label.push_str(label);
+            padded_label.extend(std::iter::repeat(' ').take(padding));
+            spans.push(Span::styled(
+                padded_label,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+            spans.extend(entry.summary_spans());
+            match entry.status {
+                ExploreEntryStatus::Running => spans.push(Span::styled(
+                    "…",
+                    Style::default().fg(crate::colors::text_dim()),
+                )),
+                ExploreEntryStatus::NotFound => spans.push(Span::styled(
+                    " (not found)",
+                    Style::default().fg(crate::colors::text_dim()),
+                )),
+                ExploreEntryStatus::Error { exit_code } => {
+                    let msg = match (entry.action, exit_code) {
+                        (ExecAction::Search, Some(2)) => " (invalid pattern)".to_string(),
+                        (ExecAction::Search, _) => " (search error)".to_string(),
+                        (ExecAction::List, _) => " (list error)".to_string(),
+                        (ExecAction::Read, _) => " (read error)".to_string(),
+                        _ => exit_code
+                            .map(|code| format!(" (exit {})", code))
+                            .unwrap_or_else(|| " (failed)".to_string()),
+                    };
+                    spans.push(Span::styled(
+                        msg,
+                        Style::default().fg(crate::colors::error()),
+                    ));
+                }
+                ExploreEntryStatus::Success => {}
+            }
+            lines.push(Line::from(spans));
+        }
+        lines
+    }
+
     fn desired_height(&self, width: u16) -> u16 {
         Paragraph::new(Text::from(self.display_lines_trimmed()))
             .wrap(Wrap { trim: false })
             .line_count(width)
             .try_into()
             .unwrap_or(0)
+    }
+
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        None
     }
 }
 
@@ -413,6 +1081,165 @@ impl HistoryCell for ReadAggregationCell {
 pub(crate) struct PlainHistoryCell {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) kind: HistoryCellType,
+    cached_layout: std::cell::RefCell<Option<PlainLayoutCache>>,
+}
+
+pub(crate) struct LimitsHistoryCell {
+    view: LimitsView,
+}
+
+impl LimitsHistoryCell {
+    const TRANSCRIPT_WIDTH: u16 = 80;
+
+    fn lines_for_width(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = self.view.summary_lines.clone();
+        lines.extend(self.view.gauge_lines(width));
+        lines.extend(self.view.legend_lines.clone());
+        lines.extend(self.view.footer_lines.clone());
+        lines
+    }
+}
+
+impl HistoryCell for LimitsHistoryCell {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Notice
+    }
+
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.lines_for_width(Self::TRANSCRIPT_WIDTH)
+    }
+
+    fn has_custom_render(&self) -> bool {
+        true
+    }
+
+    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        let width = if area.width == 0 { 1 } else { area.width };
+        let lines = self.lines_for_width(width);
+        let text = Text::from(lines);
+
+        let cell_bg = crate::colors::background();
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+        fill_rect(buf, area, Some(' '), bg_style);
+
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .scroll((skip_rows, 0))
+            .block(Block::default().style(Style::default().bg(cell_bg)))
+            .style(Style::default().bg(cell_bg))
+            .render(area, buf);
+    }
+}
+
+struct PlainLayoutCache {
+    requested_width: u16,
+    effective_width: u16,
+    height: u16,
+    buffer: Option<Buffer>,
+}
+
+impl PlainHistoryCell {
+    pub(crate) fn new(lines: Vec<Line<'static>>, kind: HistoryCellType) -> Self {
+        Self {
+            lines,
+            kind,
+            cached_layout: std::cell::RefCell::new(None),
+        }
+    }
+
+    pub(crate) fn invalidate_layout_cache(&self) {
+        self.cached_layout.borrow_mut().take();
+    }
+
+    fn ensure_layout(&self, requested_width: u16, effective_width: u16) {
+        let mut cache = self.cached_layout.borrow_mut();
+        let needs_rebuild = cache
+            .as_ref()
+            .map_or(true, |cached| {
+                cached.requested_width != requested_width
+                    || cached.effective_width != effective_width
+            });
+        if needs_rebuild {
+            *cache = Some(self.build_layout(requested_width, effective_width));
+        }
+    }
+
+    fn build_layout(&self, requested_width: u16, effective_width: u16) -> PlainLayoutCache {
+        if requested_width == 0 || effective_width == 0 {
+            return PlainLayoutCache {
+                requested_width,
+                effective_width,
+                height: 0,
+                buffer: None,
+            };
+        }
+
+        let cell_bg = match self.kind {
+            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ => crate::colors::background(),
+        };
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+
+        let trimmed_lines = self.display_lines_trimmed();
+        let text = Text::from(trimmed_lines.clone());
+        let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+        let height: u16 = paragraph
+            .line_count(effective_width)
+            .try_into()
+            .unwrap_or(0);
+
+        if height == 0 {
+            return PlainLayoutCache {
+                requested_width,
+                effective_width,
+                height,
+                buffer: None,
+            };
+        }
+
+        let render_height = height.max(1);
+        let render_area = Rect::new(0, 0, requested_width, render_height);
+        let mut buffer = Buffer::empty(render_area);
+        fill_rect(&mut buffer, render_area, Some(' '), bg_style);
+
+        if matches!(self.kind, HistoryCellType::User) {
+            let block = Block::default()
+                .style(bg_style)
+                .padding(Padding {
+                    left: 0,
+                    right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
+                    top: 0,
+                    bottom: 0,
+                });
+            Paragraph::new(Text::from(trimmed_lines))
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .style(bg_style)
+                .render(render_area, &mut buffer);
+        } else {
+            let block = Block::default().style(Style::default().bg(cell_bg));
+            Paragraph::new(Text::from(trimmed_lines))
+                .block(block)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().bg(cell_bg))
+                .render(render_area, &mut buffer);
+        }
+
+        PlainLayoutCache {
+            requested_width,
+            effective_width,
+            height,
+            buffer: Some(buffer),
+        }
+    }
 }
 
 impl HistoryCell for PlainHistoryCell {
@@ -448,80 +1275,177 @@ impl HistoryCell for PlainHistoryCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        if matches!(self.kind, HistoryCellType::User) {
+        let effective_width = if matches!(self.kind, HistoryCellType::User) {
             // Match input composer wrapping by reserving shared right padding.
             // Keep this in sync with the composer constants.
-            let inner_w = width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into());
-            let text = Text::from(self.display_lines_trimmed());
-            Paragraph::new(text)
-                .wrap(Wrap { trim: false })
-                .line_count(inner_w)
-                .try_into()
-                .unwrap_or(0)
+            width.saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
         } else {
-            Paragraph::new(Text::from(self.display_lines_trimmed()))
-                .wrap(Wrap { trim: false })
-                .line_count(width)
-                .try_into()
-                .unwrap_or(0)
-        }
+            width
+        };
+
+        self.ensure_layout(width, effective_width);
+        self.cached_layout
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.height)
+            .unwrap_or(0)
     }
 
-    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        if !matches!(self.kind, HistoryCellType::User) {
-            // Fallback to default behavior for non-user cells
-            return HistoryCell::custom_render_with_skip(self, area, buf, skip_rows);
+    fn render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
+        let requested_width = area.width;
+        let effective_width = if matches!(self.kind, HistoryCellType::User) {
+            requested_width
+                .saturating_sub(crate::layout_consts::USER_HISTORY_RIGHT_PAD.into())
+        } else {
+            requested_width
+        };
+
+        let cell_bg = match self.kind {
+            HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ => crate::colors::background(),
+        };
+        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+        fill_rect(buf, area, Some(' '), bg_style);
+
+        if requested_width == 0 || effective_width == 0 {
+            return;
         }
 
-        // Render User cells with extra right padding to mirror the composer input padding.
-        let cell_bg = crate::colors::background();
-        let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
+        self.ensure_layout(requested_width, effective_width);
+        let cache_ref = self.cached_layout.borrow();
+        let Some(cache) = cache_ref.as_ref() else {
+            return;
+        };
+        let Some(src_buffer) = cache.buffer.as_ref() else {
+            return;
+        };
 
-        // Clear area
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
+        let content_height = cache.height as usize;
+        if content_height == 0 || skip_rows as usize >= content_height {
+            return;
+        }
+
+        let src_area = src_buffer.area();
+        let copy_width = usize::from(src_area.width.min(area.width));
+        let max_rows = usize::from(area.height);
+
+        for row_offset in 0..max_rows {
+            let src_y = skip_rows as usize + row_offset;
+            if src_y >= content_height || src_y >= usize::from(src_area.height) {
+                break;
+            }
+            let dest_y = area.y + row_offset as u16;
+            for col_offset in 0..copy_width {
+                let dest_x = area.x + col_offset as u16;
+                let src_cell = &src_buffer[(col_offset as u16, src_y as u16)];
+                buf[(dest_x, dest_y)] = src_cell.clone();
             }
         }
+    }
+}
 
-        let lines = self.display_lines_trimmed();
-        let text = Text::from(lines);
+pub(crate) struct PlanUpdateCell {
+    lines: Vec<Line<'static>>,
+    icon: &'static str,
+    is_complete: bool,
+}
 
-        // Add Block with padding: reserve shared columns on the right.
-        let block = Block::default().style(bg_style).padding(Padding {
-            left: 0,
-            right: crate::layout_consts::USER_HISTORY_RIGHT_PAD.into(),
-            top: 0,
-            bottom: 0,
-        });
+impl PlanUpdateCell {
+    pub(crate) fn is_complete(&self) -> bool {
+        self.is_complete
+    }
+}
 
-        Paragraph::new(text)
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((skip_rows, 0))
-            .style(bg_style)
-            .render(area, buf);
+impl HistoryCell for PlanUpdateCell {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::PlanUpdate
+    }
+
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.lines.clone()
+    }
+
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        Some(self.icon)
     }
 }
 
 // ==================== ExecCell ====================
+
+#[derive(Clone, PartialEq, Eq)]
+struct ExecWaitNote {
+    text: String,
+    is_error: bool,
+}
+
+#[derive(Clone, Default)]
+struct ExecWaitState {
+    total_wait: Option<Duration>,
+    run_duration: Option<Duration>,
+    waiting: bool,
+    notes: Vec<ExecWaitNote>,
+}
 
 pub(crate) struct ExecCell {
     pub(crate) command: Vec<String>,
     pub(crate) parsed: Vec<ParsedCommand>,
     pub(crate) output: Option<CommandOutput>,
     pub(crate) start_time: Option<Instant>,
+    pub(crate) stream_preview: Option<CommandOutput>,
     // Caches to avoid recomputing expensive line construction for completed execs
     cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
     cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    // Cached per-width wrap totals (rows) for finalized execs
-    cached_wrap: std::cell::RefCell<Option<ExecWrapCache>>, 
+    // Cached per-width layout (wrapped rows + totals) while content is stable
+    cached_layout: std::cell::RefCell<Option<Rc<ExecLayoutCache>>>,
+    cached_command_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    cached_wait_extras: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    parsed_meta: Option<ParsedExecMetadata>,
+    has_bold_command: bool,
+    wait_state: std::cell::RefCell<ExecWaitState>,
 }
 
-// Cache of wrapped-row totals for ExecCell at a given width.
-#[derive(Clone, Copy)]
-struct ExecWrapCache { width: u16, pre_total: u16, out_total: u16 }
+#[derive(Clone)]
+struct ExecLayoutCache {
+    width: u16,
+    pre_lines: Vec<Line<'static>>,
+    out_lines: Vec<Line<'static>>,
+    pre_total: u16,
+    out_block_total: u16,
+}
+
+#[derive(Clone)]
+struct ParsedExecMetadata {
+    action: ExecAction,
+    ctx_path: Option<String>,
+    search_paths: HashSet<String>,
+}
+
+impl ParsedExecMetadata {
+    fn from_commands(parsed: &[ParsedCommand]) -> Self {
+        let action = action_enum_from_parsed(parsed);
+        let ctx_path = first_context_path(parsed);
+        let mut search_paths: HashSet<String> = HashSet::new();
+        for pc in parsed {
+            if let ParsedCommand::Search { path: Some(p), .. } = pc {
+                search_paths.insert(p.to_string());
+            }
+        }
+        Self {
+            action,
+            ctx_path,
+            search_paths,
+        }
+    }
+}
 
 // ==================== AssistantMarkdownCell ====================
 // Stores raw assistant markdown and rebuilds on demand (e.g., theme/syntax changes)
@@ -534,7 +1458,7 @@ pub(crate) struct AssistantMarkdownCell {
     // Pre-rendered lines (first line is a hidden "codex" header)
     pub(crate) lines: Vec<Line<'static>>, // includes hidden header "codex"
     // Cached per-width wrap plan to avoid re-segmentation and re-measure
-    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>, 
+    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>,
 }
 
 impl AssistantMarkdownCell {
@@ -574,60 +1498,140 @@ impl AssistantMarkdownCell {
 
 // Cached layout for AssistantMarkdownCell (per width)
 #[derive(Clone)]
-struct AssistantLayoutCache {
+pub(crate) struct AssistantLayoutCache {
     width: u16,
     segs: Vec<AssistantSeg>,
     seg_rows: Vec<u16>,
     total_rows_with_padding: u16,
 }
 
+impl AssistantLayoutCache {
+    pub(crate) fn total_rows(&self) -> u16 {
+        self.total_rows_with_padding
+    }
+}
+
 #[derive(Clone, Debug)]
 enum AssistantSeg {
     Text(Vec<Line<'static>>),
     Bullet(Vec<Line<'static>>),
-    Code(Vec<Line<'static>>),
+    Code {
+        lines: Vec<Line<'static>>,
+        lang_label: Option<String>,
+        max_line_width: u16,
+    },
 }
 
 impl AssistantMarkdownCell {
-    fn ensure_layout(&self, width: u16) -> AssistantLayoutCache {
+    pub(crate) fn ensure_layout(&self, width: u16) -> AssistantLayoutCache {
         if let Some(cache) = self.cached_layout.borrow().as_ref() {
             if cache.width == width {
                 return cache.clone();
             }
         }
+
         let text_wrap_width = width;
         let mut segs: Vec<AssistantSeg> = Vec::new();
         let mut text_buf: Vec<Line<'static>> = Vec::new();
         let mut iter = self.display_lines_trimmed().into_iter().peekable();
+        let measure_line = |line: &Line<'_>| -> u16 {
+            line.spans
+                .iter()
+                .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+                .sum::<usize>()
+                .min(u16::MAX as usize) as u16
+        };
+
         while let Some(line) = iter.next() {
             if crate::render::line_utils::is_code_block_painted(&line) {
-                if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                if !text_buf.is_empty() {
+                    let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+                    segs.push(AssistantSeg::Text(wrapped));
+                    text_buf.clear();
+                }
+
                 let mut chunk = vec![line];
-                while let Some(n) = iter.peek() {
-                    if crate::render::line_utils::is_code_block_painted(n) { chunk.push(iter.next().unwrap()); } else { break; }
+                while let Some(next) = iter.peek() {
+                    if crate::render::line_utils::is_code_block_painted(next) {
+                        chunk.push(iter.next().unwrap());
+                    } else {
+                        break;
+                    }
                 }
-                // Remove language sentinel and trim blank padding rows (as in render)
-                if let Some(first) = chunk.first() {
-                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                    if flat.contains("⟦LANG:") { let _ = chunk.remove(0); }
+
+                let mut lang_label: Option<String> = None;
+                let mut content_lines: Vec<Line<'static>> = Vec::new();
+                for (idx, candidate) in chunk.into_iter().enumerate() {
+                    if idx == 0 {
+                        let flat: String = candidate
+                            .spans
+                            .iter()
+                            .map(|s| s.content.as_ref())
+                            .collect();
+                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
+                            if let Some(end) = s.find('⟧') {
+                                lang_label = Some(s[..end].to_string());
+                                continue;
+                            }
+                        }
+                    }
+                    content_lines.push(candidate);
                 }
-                while chunk.first().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { let _ = chunk.remove(0); }
-                while chunk.last().is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l)) { let _ = chunk.pop(); }
-                segs.push(AssistantSeg::Code(chunk));
+
+                while content_lines
+                    .first()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
+                    let _ = content_lines.remove(0);
+                }
+                while content_lines
+                    .last()
+                    .is_some_and(|l| crate::render::line_utils::is_blank_line_spaces_only(l))
+                {
+                    let _ = content_lines.pop();
+                }
+
+                if content_lines.is_empty() {
+                    continue;
+                }
+
+                let max_line_width = content_lines
+                    .iter()
+                    .map(|l| measure_line(l))
+                    .max()
+                    .unwrap_or(0);
+
+                segs.push(AssistantSeg::Code {
+                    lines: content_lines,
+                    lang_label,
+                    max_line_width,
+                });
                 continue;
             }
+
             if text_wrap_width > 4 && is_horizontal_rule_line(&line) {
-                if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                if !text_buf.is_empty() {
+                    let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+                    segs.push(AssistantSeg::Text(wrapped));
+                    text_buf.clear();
+                }
                 let hr = Line::from(Span::styled(
-                    std::iter::repeat('─').take(text_wrap_width as usize).collect::<String>(),
+                    std::iter::repeat('─')
+                        .take(text_wrap_width as usize)
+                        .collect::<String>(),
                     Style::default().fg(crate::colors::assistant_hr()),
                 ));
                 segs.push(AssistantSeg::Bullet(vec![hr]));
                 continue;
             }
+
             if text_wrap_width > 4 {
                 if let Some((indent_spaces, bullet_char)) = detect_bullet_prefix(&line) {
-                    if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
+                    if !text_buf.is_empty() {
+                        let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+                        segs.push(AssistantSeg::Text(wrapped));
+                        text_buf.clear();
+                    }
                     segs.push(AssistantSeg::Bullet(wrap_bullet_line(
                         line,
                         indent_spaces,
@@ -637,30 +1641,184 @@ impl AssistantMarkdownCell {
                     continue;
                 }
             }
+
             text_buf.push(line);
         }
-        if !text_buf.is_empty() { segs.push(AssistantSeg::Text(std::mem::take(&mut text_buf))); }
 
-        // Precompute rows per segment and total with top/bottom padding
+        if !text_buf.is_empty() {
+            let wrapped = word_wrap_lines(&text_buf, text_wrap_width);
+            segs.push(AssistantSeg::Text(wrapped));
+            text_buf.clear();
+        }
+
         let mut seg_rows: Vec<u16> = Vec::with_capacity(segs.len());
         let mut total: u16 = 0;
         for seg in &segs {
             let rows = match seg {
-                AssistantSeg::Bullet(lines) => lines.len() as u16,
-                AssistantSeg::Text(lines) => Paragraph::new(Text::from(lines.clone()))
-                    .wrap(Wrap { trim: false })
-                    .line_count(text_wrap_width)
-                    .try_into()
-                    .unwrap_or(0),
-                AssistantSeg::Code(lines) => lines.len() as u16 + 2,
+                AssistantSeg::Text(lines) | AssistantSeg::Bullet(lines) => lines.len() as u16,
+                AssistantSeg::Code { lines, .. } => lines.len() as u16 + 2,
             };
             seg_rows.push(rows);
             total = total.saturating_add(rows);
         }
-        total = total.saturating_add(2); // top+bottom padding
-        let cache = AssistantLayoutCache { width, segs, seg_rows, total_rows_with_padding: total };
+        total = total.saturating_add(2);
+
+        let cache = AssistantLayoutCache {
+            width,
+            segs,
+            seg_rows,
+            total_rows_with_padding: total,
+        };
         *self.cached_layout.borrow_mut() = Some(cache.clone());
         cache
+    }
+
+    pub(crate) fn render_with_layout(
+        &self,
+        plan: &AssistantLayoutCache,
+        area: Rect,
+        buf: &mut Buffer,
+        skip_rows: u16,
+    ) {
+        let cell_bg = crate::colors::assistant_bg();
+        let bg_style = Style::default().bg(cell_bg);
+        fill_rect(buf, area, Some(' '), bg_style);
+
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let segs = &plan.segs;
+        let seg_rows = &plan.seg_rows;
+        let mut remaining_skip = skip_rows;
+        let mut cur_y = area.y;
+        let end_y = area.y.saturating_add(area.height);
+
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        }
+        remaining_skip = remaining_skip.saturating_sub(1);
+
+        for (seg_idx, seg) in segs.iter().enumerate() {
+            if cur_y >= end_y {
+                break;
+            }
+            let rows = seg_rows.get(seg_idx).copied().unwrap_or(0);
+            if remaining_skip >= rows {
+                remaining_skip -= rows;
+                continue;
+            }
+
+            match seg {
+                AssistantSeg::Text(lines) | AssistantSeg::Bullet(lines) => {
+                    let total = lines.len() as u16;
+                    if total == 0 {
+                        continue;
+                    }
+                    let start = usize::from(remaining_skip);
+                    let visible = total.saturating_sub(remaining_skip);
+                    let avail = end_y.saturating_sub(cur_y);
+                    let draw_count = visible.min(avail);
+                    if draw_count == 0 {
+                        remaining_skip = 0;
+                        continue;
+                    }
+                    for line in lines.iter().skip(start).take(draw_count as usize) {
+                        if cur_y >= end_y {
+                            break;
+                        }
+                        write_line(buf, area.x, cur_y, area.width, line, bg_style);
+                        cur_y = cur_y.saturating_add(1);
+                    }
+                    remaining_skip = 0;
+                }
+                AssistantSeg::Code {
+                    lines,
+                    lang_label,
+                    max_line_width,
+                } => {
+                    let avail = end_y.saturating_sub(cur_y);
+                    if avail == 0 {
+                        break;
+                    }
+
+                    let full_height = lines.len() as u16 + 2;
+                    let card_w = max_line_width
+                        .saturating_add(6)
+                        .min(area.width.max(6));
+
+                    let temp_area = Rect::new(0, 0, card_w, full_height);
+                    let mut temp_buf = Buffer::empty(temp_area);
+                    let code_bg = crate::colors::code_block_bg();
+                    let blk = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(crate::colors::border()))
+                        .style(Style::default().bg(code_bg))
+                        .padding(Padding {
+                            left: 2,
+                            right: 2,
+                            top: 0,
+                            bottom: 0,
+                        });
+                    let blk = if let Some(lang) = lang_label {
+                        blk.title(Span::styled(
+                            format!(" {} ", lang),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ))
+                    } else {
+                        blk
+                    };
+                    let inner_rect = blk.inner(temp_area);
+                    blk.clone().render(temp_area, &mut temp_buf);
+                    for (idx, line) in lines.iter().enumerate() {
+                        let target_y = inner_rect.y.saturating_add(idx as u16);
+                        if target_y >= inner_rect.y.saturating_add(inner_rect.height) {
+                            break;
+                        }
+                        write_line(
+                            &mut temp_buf,
+                            inner_rect.x,
+                            target_y,
+                            inner_rect.width,
+                            line,
+                            Style::default().bg(code_bg),
+                        );
+                    }
+
+                    let start_row = remaining_skip.min(full_height);
+                    let draw_rows = avail.min(full_height.saturating_sub(remaining_skip));
+                    if draw_rows == 0 {
+                        remaining_skip = 0;
+                        continue;
+                    }
+
+                    for row_offset in 0..usize::from(draw_rows) {
+                        let src_y = start_row + row_offset as u16;
+                        let dest_y = cur_y.saturating_add(row_offset as u16);
+                        if dest_y >= end_y {
+                            break;
+                        }
+                        for col in 0..usize::from(card_w) {
+                            let dest_x = area.x + col as u16;
+                            if dest_x >= area.x.saturating_add(area.width) {
+                                break;
+                            }
+                            let cell = temp_buf[(col as u16, src_y)].clone();
+                            buf[(dest_x, dest_y)] = cell;
+                        }
+                    }
+                    cur_y = cur_y.saturating_add(draw_rows);
+                    remaining_skip = 0;
+                }
+            }
+        }
+
+        if remaining_skip == 0 && cur_y < end_y {
+            cur_y = cur_y.saturating_add(1);
+        } else {
+            remaining_skip = remaining_skip.saturating_sub(1);
+        }
+        let _ = (cur_y, remaining_skip);
     }
 }
 
@@ -689,220 +1847,8 @@ impl HistoryCell for AssistantMarkdownCell {
         self.ensure_layout(width).total_rows_with_padding
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        // Mirror StreamingContentCell rendering so finalized assistant cells look
-        // identical to streaming ones (gutter alignment, padding, bg tint).
-        let cell_bg = crate::colors::assistant_bg();
-        let bg_style = Style::default().bg(cell_bg);
-
-        // Clear full area with assistant background
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
-
-        // Build or reuse cached segments for this width
         let plan = self.ensure_layout(area.width);
-        let segs = &plan.segs;
-        let seg_rows = &plan.seg_rows;
-        let text_wrap_width = area.width;
-
-        // Streaming-style top padding row for the entire assistant cell
-        let mut remaining_skip = skip_rows;
-        let mut cur_y = area.y;
-        let end_y = area.y.saturating_add(area.height);
-        if remaining_skip == 0 && cur_y < end_y {
-            cur_y = cur_y.saturating_add(1);
-        }
-        remaining_skip = remaining_skip.saturating_sub(1);
-
-        // Helpers
-        #[derive(Debug, Clone)]
-        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
-        use unicode_width::UnicodeWidthStr as UW;
-        let measure_line =
-            |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
-        let mut draw_segment = |seg: &Seg, y: &mut u16, skip: &mut u16| {
-            if *y >= end_y {
-                return;
-            }
-            match seg {
-                Seg::Text(lines) => {
-                    // Measure height with wrap
-                    let txt = Text::from(lines.clone());
-                    let total: u16 = Paragraph::new(txt.clone())
-                        .wrap(Wrap { trim: false })
-                        .line_count(text_wrap_width)
-                        .try_into()
-                        .unwrap_or(0);
-                    if *skip >= total {
-                        *skip -= total;
-                        return;
-                    }
-                    // Visible height in remaining space
-                    let avail = end_y.saturating_sub(*y);
-                    let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 {
-                        return;
-                    }
-                    let rect = Rect {
-                        x: area.x,
-                        y: *y,
-                        width: area.width,
-                        height: draw_h,
-                    };
-                    Paragraph::new(txt)
-                        .block(Block::default().style(bg_style))
-                        .wrap(Wrap { trim: false })
-                        .scroll((*skip, 0))
-                        .style(bg_style)
-                        .render(rect, buf);
-                    *y = y.saturating_add(draw_h);
-                    *skip = 0;
-                }
-                Seg::Bullet(lines) => {
-                    let total = lines.len() as u16;
-                    if *skip >= total { *skip -= total; return; }
-                    let avail = end_y.saturating_sub(*y);
-                    let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
-                    let txt = Text::from(lines.clone());
-                    Paragraph::new(txt)
-                        .block(Block::default().style(bg_style))
-                        .scroll((*skip, 0))
-                        .style(bg_style)
-                        .render(rect, buf);
-                    *y = y.saturating_add(draw_h);
-                    *skip = 0;
-                }
-                Seg::Code(lines_in) => {
-                    if lines_in.is_empty() {
-                        return;
-                    }
-                    // Extract language sentinel and drop it from visible lines
-                    let mut lang_label: Option<String> = None;
-                    let mut lines = lines_in.clone();
-                    if let Some(first) = lines.first() {
-                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
-                            if let Some(end) = s.find('⟧') {
-                                lang_label = Some(s[..end].to_string());
-                                lines.remove(0);
-                            }
-                        }
-                    }
-                    if lines.is_empty() {
-                        return;
-                    }
-                    // Determine target width for the code card (content width) and add borders (2) + inner pads (left/right = 2 each)
-                    let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
-                    let inner_w = max_w.max(1);
-                    // Borders (2) + inner horizontal padding (2 left, 2 right) => +6
-                    let card_w = inner_w.saturating_add(6).min(area.width.max(6));
-                    let total = lines.len() as u16 + 2; // top/bottom border only
-                    if *skip >= total {
-                        *skip -= total;
-                        return;
-                    }
-                    let avail = end_y.saturating_sub(*y);
-                    if avail == 0 {
-                        return;
-                    }
-                    // Compute visible slice (accounting for top/bottom border + inner padding rows)
-                    let mut local_skip = *skip;
-                    let mut top_border = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(top_border);
-                        top_border -= drop;
-                        local_skip -= drop;
-                    }
-                    let code_skip = local_skip.min(lines.len() as u16);
-                    local_skip -= code_skip;
-                    let mut bottom_border = 1u16;
-                    if local_skip > 0 {
-                        let drop = local_skip.min(bottom_border);
-                        bottom_border -= drop;
-                    }
-                    // Compute drawable height in this pass
-                    let visible = top_border
-                        + (lines.len() as u16 - code_skip)
-                        + bottom_border;
-                    let draw_h = visible.min(avail);
-                    if draw_h == 0 {
-                        return;
-                    }
-                    // No outer horizontal padding; align card to content area.
-                    let content_x = area.x;
-                    let _content_w = area.width;
-                    let rect_x = content_x;
-                    // Draw bordered block for visible rows
-                    let rect = Rect {
-                        x: rect_x,
-                        y: *y,
-                        width: card_w,
-                        height: draw_h,
-                    };
-                    let code_bg = crate::colors::code_block_bg();
-                    let mut blk = Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(crate::colors::border()))
-                        .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 2, right: 2, top: 0, bottom: 0 });
-                    if let Some(lang) = &lang_label {
-                        blk = blk.title(Span::styled(
-                            format!(" {} ", lang),
-                            Style::default().fg(crate::colors::text_dim()),
-                        ));
-                    }
-                    // Clone before render so we can compute inner rect after drawing borders
-                    let blk_for_inner = blk.clone();
-                    blk.render(rect, buf);
-                    // Inner paragraph area (exclude borders)
-                    let inner_rect = blk_for_inner.inner(rect);
-                    let inner_h = inner_rect.height.min(rect.height);
-                    if inner_h > 0 {
-                        let slice_start = code_skip as usize;
-                        let slice_end = lines.len();
-                        let txt = Text::from(lines[slice_start..slice_end].to_vec());
-                        Paragraph::new(txt)
-                            .style(Style::default().bg(code_bg))
-                            .block(Block::default().style(Style::default().bg(code_bg)))
-                            .render(inner_rect, buf);
-                    }
-                    // No outside padding stripes.
-                    *y = y.saturating_add(draw_h);
-                    *skip = 0;
-                }
-            }
-        };
-
-        for (seg_idx, seg) in segs.iter().enumerate() {
-            if cur_y >= end_y {
-                break;
-            }
-            // Clamp skip to precomputed rows for this segment to avoid extra measure work
-            let _before = remaining_skip;
-            let rows = seg_rows.get(seg_idx).copied().unwrap_or(0);
-            if remaining_skip >= rows {
-                remaining_skip -= rows;
-                continue;
-            }
-            let seg_draw = match seg {
-                AssistantSeg::Text(v) => Seg::Text(v.clone()),
-                AssistantSeg::Bullet(v) => Seg::Bullet(v.clone()),
-                AssistantSeg::Code(v) => Seg::Code(v.clone()),
-            };
-            draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
-        }
-        // Bottom padding row (blank): area is already cleared to bg
-        if remaining_skip == 0 && cur_y < end_y {
-            cur_y = cur_y.saturating_add(1);
-        } else {
-            remaining_skip = remaining_skip.saturating_sub(1);
-        }
-        // Mark as used to satisfy unused_assignments lint
-        let _ = (cur_y, remaining_skip);
+        self.render_with_layout(&plan, area, buf, skip_rows);
     }
 }
 
@@ -914,7 +1860,7 @@ impl HistoryCell for ExecCell {
         self
     }
     fn kind(&self) -> HistoryCellType {
-        let kind = match action_enum_from_parsed(&self.parsed) {
+        let kind = match self.parsed_action() {
             ExecAction::Read => ExecKind::Read,
             ExecAction::Search => ExecKind::Search,
             ExecAction::List => ExecKind::List,
@@ -927,6 +1873,24 @@ impl HistoryCell for ExecCell {
         };
         HistoryCellType::Exec { kind, status }
     }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        match self.kind() {
+            HistoryCellType::Exec {
+                kind: ExecKind::Run,
+                status,
+            } => {
+                if matches!(status, ExecStatus::Error) {
+                    Some("✖")
+                } else if self.has_bold_command {
+                    Some("❯")
+                } else {
+                    None
+                }
+            }
+            HistoryCellType::Exec { .. } => None,
+            _ => None,
+        }
+    }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Fallback textual representation (used for height measurement only when custom rendering).
         // For completed executions, cache the computed lines since they are immutable.
@@ -937,6 +1901,7 @@ impl HistoryCell for ExecCell {
             &self.command,
             &self.parsed,
             self.output.as_ref(),
+            self.stream_preview.as_ref(),
             self.start_time,
         );
         if self.output.is_some() {
@@ -947,79 +1912,85 @@ impl HistoryCell for ExecCell {
     fn has_custom_render(&self) -> bool {
         true
     }
+    fn is_animating(&self) -> bool {
+        self.output.is_none() && self.start_time.is_some()
+    }
     fn desired_height(&self, width: u16) -> u16 {
-        let (pre_total, out_total) = self.ensure_wrap_totals(width);
-        pre_total.saturating_add(out_total)
+        let (pre_total, _out_block_total, out_total_with_status) = self.ensure_wrap_totals(width);
+        pre_total.saturating_add(out_total_with_status)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        // Render command header/content above and stdout/stderr preview inside a left-bordered block.
-        let (pre_lines, out_lines) = self.exec_render_parts();
+        let plan = self.ensure_layout(area.width);
+        let plan_ref = plan.as_ref();
 
-        // Prepare texts and total heights (after wrapping). Keep the visual prefix
-        // (e.g., "└ ") in the preamble to show the connector on the first line.
-        let pre_text = Text::from(trim_empty_lines(pre_lines));
-        let out_text = Text::from(trim_empty_lines(out_lines));
-        // Measure with cached/fast-path totals.
-        let (pre_total, out_total) = self.ensure_wrap_totals(area.width);
+        let pre_total = plan_ref.pre_total;
+        let out_block_total = plan_ref.out_block_total;
 
-        // Compute how many rows to skip from the preamble, then from the output
         let pre_skip = skip_rows.min(pre_total);
-        let out_skip = skip_rows.saturating_sub(pre_total).min(out_total);
+        let after_pre_skip = skip_rows.saturating_sub(pre_total);
+        let block_skip = after_pre_skip.min(out_block_total);
+        let after_block_skip = after_pre_skip.saturating_sub(block_skip);
 
-        // Compute how much height is available for pre and out segments in this area
-        let pre_remaining = pre_total.saturating_sub(pre_skip);
-        let pre_height = pre_remaining.min(area.height);
-        let out_available = area.height.saturating_sub(pre_height);
-        let out_remaining = out_total.saturating_sub(out_skip);
-        let out_height = out_available.min(out_remaining);
+        let pre_height = pre_total
+            .saturating_sub(pre_skip)
+            .min(area.height);
+        let mut remaining_height = area.height.saturating_sub(pre_height);
 
-        // Render preamble (scrolled) if any space. Do not strip or offset the
-        // leading "└ ": render at the left edge so the angle is visible.
+        let block_height = out_block_total
+            .saturating_sub(block_skip)
+            .min(remaining_height);
+        remaining_height = remaining_height.saturating_sub(block_height);
+
+        let status_line_to_render = if self.output.is_none()
+            && after_block_skip == 0
+            && remaining_height > 0
+        {
+            self.streaming_status_line()
+        } else {
+            None
+        };
+        let status_height = status_line_to_render.is_some().then_some(1).unwrap_or(0);
+
+        let mut cur_y = area.y;
+
         if pre_height > 0 {
             let pre_area = Rect {
                 x: area.x,
-                y: area.y,
+                y: cur_y,
                 width: area.width,
                 height: pre_height,
             };
-            // Hard clear: fill pre_area with spaces using theme background. This prevents
-            // artifacts when the preamble shrinks or when scrolling reveals previously
-            // longer content.
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text());
-            for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
-                for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
+            fill_rect(buf, pre_area, Some(' '), bg_style);
+            for (idx, line) in plan_ref
+                .pre_lines
+                .iter()
+                .skip(pre_skip as usize)
+                .take(pre_height as usize)
+                .enumerate()
+            {
+                let y = pre_area.y.saturating_add(idx as u16);
+                if y >= pre_area.y.saturating_add(pre_area.height) {
+                    break;
                 }
+                write_line(buf, pre_area.x, y, pre_area.width, line, bg_style);
             }
-            let pre_block =
-                Block::default().style(Style::default().bg(crate::colors::background()));
-            Paragraph::new(pre_text)
-                .block(pre_block)
-                .wrap(Wrap { trim: false })
-                .scroll((pre_skip, 0))
-                .style(Style::default().bg(crate::colors::background()))
-                .render(pre_area, buf);
+            cur_y = cur_y.saturating_add(pre_height);
         }
 
-        // Render output (scrolled) with a left border block if any space
-        if out_height > 0 {
+        if block_height > 0 && area.width > 0 {
             let out_area = Rect {
                 x: area.x,
-                y: area.y.saturating_add(pre_height),
+                y: cur_y,
                 width: area.width,
-                height: out_height,
+                height: block_height,
             };
-            // Hard clear: fill out_area with spaces before drawing the bordered paragraph.
             let bg_style = Style::default()
                 .bg(crate::colors::background())
                 .fg(crate::colors::text_dim());
-            for y in out_area.y..out_area.y.saturating_add(out_area.height) {
-                for x in out_area.x..out_area.x.saturating_add(out_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            fill_rect(buf, out_area, Some(' '), bg_style);
             let block = Block::default()
                 .borders(Borders::LEFT)
                 .border_style(
@@ -1034,99 +2005,544 @@ impl HistoryCell for ExecCell {
                     top: 0,
                     bottom: 0,
                 });
-            Paragraph::new(out_text)
-                .block(block)
-                .wrap(Wrap { trim: false })
-                // Scroll count is based on the wrapped text rows at out_wrap_width
-                .scroll((out_skip, 0))
-                .style(
-                    Style::default()
-                        .bg(crate::colors::background())
-                        .fg(crate::colors::text_dim()),
-                )
-                .render(out_area, buf);
+            let inner_rect = block.inner(out_area);
+            block.render(out_area, buf);
+
+            if inner_rect.width > 0 {
+                for (idx, line) in plan_ref
+                    .out_lines
+                    .iter()
+                    .skip(block_skip as usize)
+                    .take(block_height as usize)
+                    .enumerate()
+                {
+                    let y = inner_rect.y.saturating_add(idx as u16);
+                    if y >= inner_rect.y.saturating_add(inner_rect.height) {
+                        break;
+                    }
+                    write_line(buf, inner_rect.x, y, inner_rect.width, line, bg_style);
+                }
+            }
+            cur_y = cur_y.saturating_add(block_height);
+        }
+
+        if let Some(line) = status_line_to_render {
+            if status_height > 0 {
+                let status_area = Rect {
+                    x: area.x,
+                    y: cur_y,
+                    width: area.width,
+                    height: status_height,
+                };
+                let bg_style = Style::default().bg(crate::colors::background());
+                fill_rect(buf, status_area, Some(' '), bg_style);
+                write_line(buf, status_area.x, status_area.y, status_area.width, &line, bg_style);
+            }
         }
     }
 }
 
 impl ExecCell {
+    fn invalidate_render_caches(&self) {
+        self.cached_display_lines.borrow_mut().take();
+        self.cached_pre_lines.borrow_mut().take();
+        self.cached_out_lines.borrow_mut().take();
+        self.cached_layout.borrow_mut().take();
+        self.cached_wait_extras.borrow_mut().take();
+    }
+
+    fn parsed_action(&self) -> ExecAction {
+        self
+            .parsed_meta
+            .as_ref()
+            .map(|meta| meta.action)
+            .unwrap_or(ExecAction::Run)
+    }
+
+
+    pub(crate) fn set_waiting(&self, waiting: bool) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.waiting != waiting {
+            state.waiting = waiting;
+            drop(state);
+            self.invalidate_render_caches();
+        }
+    }
+
+    pub(crate) fn set_wait_total(&self, total: Option<Duration>) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.total_wait != total {
+            state.total_wait = total;
+            drop(state);
+            self.invalidate_render_caches();
+        }
+    }
+
+    pub(crate) fn set_run_duration(&self, duration: Option<Duration>) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.run_duration != duration {
+            state.run_duration = duration;
+            drop(state);
+            self.invalidate_render_caches();
+        }
+    }
+
+    pub(crate) fn wait_total(&self) -> Option<Duration> {
+        self.wait_state.borrow().total_wait
+    }
+
+    pub(crate) fn clear_wait_notes(&self) {
+        let mut state = self.wait_state.borrow_mut();
+        if state.notes.is_empty() {
+            return;
+        }
+        state.notes.clear();
+        drop(state);
+        self.invalidate_render_caches();
+    }
+
+    pub(crate) fn push_wait_note(&self, text: &str, is_error: bool) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let mut state = self.wait_state.borrow_mut();
+        if state
+            .notes
+            .last()
+            .map(|note| note.text == trimmed && note.is_error == is_error)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        state.notes.push(ExecWaitNote {
+            text: trimmed.to_string(),
+            is_error,
+        });
+        drop(state);
+        self.invalidate_render_caches();
+    }
+
+    pub(crate) fn set_wait_notes(&self, notes: &[(String, bool)]) {
+        let mut state = self.wait_state.borrow_mut();
+        let mut changed = state.notes.len() != notes.len();
+        if !changed {
+            for (existing, (text, is_error)) in state.notes.iter().zip(notes.iter()) {
+                if existing.text != text.trim() || existing.is_error != *is_error {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if !changed {
+            return;
+        }
+        state.notes = notes
+            .iter()
+            .map(|(text, is_error)| ExecWaitNote {
+                text: text.trim().to_string(),
+                is_error: *is_error,
+            })
+            .filter(|note| !note.text.is_empty())
+            .collect();
+        drop(state);
+        self.invalidate_render_caches();
+    }
+
+    fn wait_note_lines(&self, state: &ExecWaitState) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for note in &state.notes {
+            let mut line = Line::from(note.text.clone());
+            let mut style = Style::default().fg(if note.is_error {
+                crate::colors::error()
+            } else {
+                crate::colors::text_dim()
+            });
+            if note.is_error {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            for span in line.spans.iter_mut() {
+                span.style = style;
+            }
+            lines.push(line);
+        }
+        lines
+    }
+
+    fn wait_state_snapshot(&self) -> ExecWaitState {
+        self.wait_state.borrow().clone()
+    }
+
+    fn wait_summary_line(&self, state: &ExecWaitState) -> Option<Line<'static>> {
+        if state.waiting {
+            return None;
+        }
+        if let Some(run_duration) = state.run_duration {
+            if run_duration.is_zero() {
+                return None;
+            }
+            let text = format!("Ran for {}", format_duration(run_duration));
+            return Some(Line::styled(
+                text,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+        }
+        let total = state.total_wait?;
+        if total.is_zero() {
+            return None;
+        }
+        let text = format!("Waited {}", format_duration(total));
+        Some(Line::styled(
+            text,
+            Style::default().fg(crate::colors::text_dim()),
+        ))
+    }
+
+    fn wait_extras(&self, state: &ExecWaitState) -> Vec<Line<'static>> {
+        if let Some(cached) = self.cached_wait_extras.borrow().as_ref() {
+            return cached.clone();
+        }
+        let mut extra_lines: Vec<Line<'static>> = Vec::new();
+        if let Some(summary_line) = self.wait_summary_line(state) {
+            extra_lines.push(summary_line);
+        }
+        extra_lines.extend(self.wait_note_lines(state));
+        if self.output.is_some() && !extra_lines.is_empty() {
+            *self.cached_wait_extras.borrow_mut() = Some(extra_lines.clone());
+        }
+        extra_lines
+    }
+
+    #[cfg(test)]
+    fn has_bold_command(&self) -> bool {
+        self.has_bold_command
+    }
+
+    pub(crate) fn replace_command_metadata(
+        &mut self,
+        command: Vec<String>,
+        parsed: Vec<ParsedCommand>,
+    ) {
+        self.command = command;
+        self.parsed = parsed;
+        self.has_bold_command = command_has_bold_token(&self.command);
+        self.cached_command_lines.borrow_mut().take();
+        self.cached_wait_extras.borrow_mut().take();
+        self.parsed_meta = if self.parsed.is_empty() {
+            None
+        } else {
+            Some(ParsedExecMetadata::from_commands(&self.parsed))
+        };
+        self.invalidate_render_caches();
+    }
     /// Compute wrapped row totals for the preamble and the output at the given width.
-    /// Uses an ASCII fast path when all spans are ASCII; caches totals for finalized execs.
-    fn ensure_wrap_totals(&self, width: u16) -> (u16, u16) {
-        if self.output.is_some() {
-            if let Some(cache) = self.cached_wrap.borrow().as_ref() {
-                if cache.width == width { return (cache.pre_total, cache.out_total); }
+    /// Delegates to the per-width layout cache to avoid redundant reflow work.
+    fn ensure_wrap_totals(&self, width: u16) -> (u16, u16, u16) {
+        let layout = self.ensure_layout(width);
+        let status_height = if self.output.is_none() {
+            self.streaming_status_line().map(|_| 1).unwrap_or(0)
+        } else {
+            0
+        };
+        (
+            layout.pre_total,
+            layout.out_block_total,
+            layout
+                .out_block_total
+                .saturating_add(status_height),
+        )
+    }
+
+    fn ensure_layout(&self, width: u16) -> Rc<ExecLayoutCache> {
+        if let Some(layout) = self.cached_layout.borrow().as_ref() {
+            if layout.width == width {
+                return layout.clone();
             }
         }
 
-        let (pre_lines, out_lines) = self.exec_render_parts();
-        let pre = trim_empty_lines(pre_lines);
-        let out = trim_empty_lines(out_lines);
+        let (pre_lines_raw, out_lines_raw, _status_line_opt) = self.exec_render_parts();
+        let pre_trimmed = trim_empty_lines(pre_lines_raw);
+        let out_trimmed = trim_empty_lines(out_lines_raw);
 
         let pre_wrap_width = width;
         let out_wrap_width = width.saturating_sub(2);
 
-        fn ascii_rows(lines: &[Line<'_>], wrap_w: u16) -> Option<u16> {
-            if wrap_w == 0 { return Some(0); }
-            let w = wrap_w as usize;
-            let mut rows: u64 = 0;
-            for line in lines {
-                let mut len = 0usize;
-                for sp in &line.spans {
-                    let s = sp.content.as_ref();
-                    if !s.is_ascii() { return None; }
-                    len += s.len();
-                }
-                let row = if len == 0 { 1 } else { (len + w - 1) / w };
-                rows = rows.saturating_add(row as u64);
-                if rows > u16::MAX as u64 { return Some(u16::MAX); }
-            }
-            Some(rows as u16)
-        }
+        let pre_wrapped = if pre_wrap_width == 0 {
+            Vec::new()
+        } else {
+            word_wrap_lines(&pre_trimmed, pre_wrap_width)
+        };
+        let out_wrapped = if out_wrap_width == 0 {
+            Vec::new()
+        } else {
+            word_wrap_lines(&out_trimmed, out_wrap_width)
+        };
 
-        let pre_total = ascii_rows(&pre, pre_wrap_width).unwrap_or_else(|| {
-            Paragraph::new(Text::from(pre.clone()))
-                .wrap(Wrap { trim: false })
-                .line_count(pre_wrap_width)
-                .try_into()
-                .unwrap_or(0)
-        });
-        let out_total = ascii_rows(&out, out_wrap_width).unwrap_or_else(|| {
-            Paragraph::new(Text::from(out.clone()))
-                .wrap(Wrap { trim: false })
-                .line_count(out_wrap_width)
-                .try_into()
-                .unwrap_or(0)
-        });
+        let clamp_len = |len: usize| -> u16 { len.min(u16::MAX as usize) as u16 };
+        let pre_total = clamp_len(pre_wrapped.len());
+        let out_block_total = clamp_len(out_wrapped.len());
 
-        if self.output.is_some() {
-            *self.cached_wrap.borrow_mut() = Some(ExecWrapCache { width, pre_total, out_total });
-        }
-        (pre_total, out_total)
+        let layout = Rc::new(ExecLayoutCache {
+            width,
+            pre_lines: pre_wrapped,
+            out_lines: out_wrapped,
+            pre_total,
+            out_block_total,
+        });
+        *self.cached_layout.borrow_mut() = Some(layout.clone());
+        layout
     }
     // Build separate segments: (preamble lines, output lines)
-    fn exec_render_parts(&self) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-        // For completed executions, cache pre/output segments since they are immutable.
-        if let (true, Some(pre), Some(out)) = (
-            self.output.is_some(),
+    fn exec_render_parts(
+        &self,
+    ) -> (
+        Vec<Line<'static>>,
+        Vec<Line<'static>>,
+        Option<Line<'static>>,
+    ) {
+        if let (Some(pre), Some(out)) = (
             self.cached_pre_lines.borrow().as_ref(),
             self.cached_out_lines.borrow().as_ref(),
         ) {
-            return (pre.clone(), out.clone());
+            if self.output.is_some() {
+                return (pre.clone(), out.clone(), None);
+            }
+            if self.stream_preview.is_some() {
+                let wait_state = self.wait_state_snapshot();
+                let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+                let status = self.streaming_status_line_for_label(status_label);
+                return (pre.clone(), out.clone(), status);
+            }
         }
 
-        let parts = if self.parsed.is_empty() {
-            exec_render_parts_generic(&self.command, self.output.as_ref(), self.start_time)
+        let wait_state = self.wait_state_snapshot();
+        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+
+        let (pre, mut out, status) = if self.parsed.is_empty() {
+            if let (Some(pre_cached), Some(out_cached)) = (
+                self.cached_pre_lines.borrow().as_ref(),
+                self.cached_out_lines.borrow().as_ref(),
+            ) {
+                let status_cached = if self.output.is_none() {
+                    self.streaming_status_line_for_label(status_label)
+                } else {
+                    None
+                };
+                return (pre_cached.clone(), out_cached.clone(), status_cached);
+            }
+
+            self.exec_render_parts_generic(status_label)
         } else {
-            exec_render_parts_parsed(&self.parsed, self.output.as_ref(), self.start_time)
+            if self.output.is_some() {
+                if let (Some(pre_cached), Some(out_cached)) = (
+                    self.cached_pre_lines.borrow().as_ref(),
+                    self.cached_out_lines.borrow().as_ref(),
+                ) {
+                    return (pre_cached.clone(), out_cached.clone(), None);
+                }
+            }
+
+            match self.parsed_meta.as_ref() {
+                Some(meta) => exec_render_parts_parsed_with_meta(
+                    &self.parsed,
+                    meta,
+                    self.output.as_ref(),
+                    self.stream_preview.as_ref(),
+                    self.start_time,
+                    status_label,
+                ),
+                None => exec_render_parts_parsed(
+                    &self.parsed,
+                    self.output.as_ref(),
+                    self.stream_preview.as_ref(),
+                    self.start_time,
+                    status_label,
+                ),
+            }
         };
 
         if self.output.is_some() {
-            let (pre, out) = parts.clone();
-            *self.cached_pre_lines.borrow_mut() = Some(pre);
-            *self.cached_out_lines.borrow_mut() = Some(out);
+            let extra_lines = self.wait_extras(&wait_state);
+            if !extra_lines.is_empty() {
+                let is_blank_line = |line: &Line<'static>| {
+                    line.spans
+                        .iter()
+                        .all(|span| span.content.as_ref().trim().is_empty())
+                };
+                let is_error_line = |line: &Line<'static>| {
+                    line.spans
+                        .first()
+                        .map(|span| span.content.as_ref().starts_with("Error (exit code"))
+                        .unwrap_or(false)
+                };
+                let insert_at = if let Some(pos) = out.iter().position(is_error_line) {
+                    pos
+                } else {
+                    out.len()
+                };
+
+                let mut block: Vec<Line<'static>> = Vec::new();
+                if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
+                    block.push(Line::from(""));
+                }
+                block.extend(extra_lines.into_iter());
+                if insert_at < out.len() {
+                    if !is_blank_line(&out[insert_at]) {
+                        block.push(Line::from(""));
+                    }
+                } else {
+                    block.push(Line::from(""));
+                }
+
+                out.splice(insert_at..insert_at, block);
+            }
+            *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
+            *self.cached_out_lines.borrow_mut() = Some(out.clone());
+        } else if self.output.is_none() {
+            *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
+            *self.cached_out_lines.borrow_mut() = Some(out.clone());
         }
-        parts
+        (pre, out, status)
+    }
+
+    pub(crate) fn update_stream_preview(&mut self, stdout: &str, stderr: &str) {
+        if stdout.is_empty() && stderr.is_empty() {
+            if self.stream_preview.is_none() {
+                return;
+            }
+            self.stream_preview = None;
+        } else {
+            self.stream_preview = Some(CommandOutput {
+                exit_code: STREAMING_EXIT_CODE,
+                stdout: stdout.to_string(),
+                stderr: stderr.to_string(),
+            });
+        }
+        self.invalidate_render_caches();
+    }
+
+    fn exec_render_parts_generic(
+        &self,
+        status_label: &str,
+    ) -> (
+        Vec<Line<'static>>,
+        Vec<Line<'static>>,
+        Option<Line<'static>>,
+    ) {
+        let mut pre = self.generic_command_lines();
+        let display_output = self
+            .output
+            .as_ref()
+            .or(self.stream_preview.as_ref());
+        let mut out = output_lines(display_output, false, false);
+        let has_output = !trim_empty_lines(out.clone()).is_empty();
+
+        if self.output.is_none() && has_output {
+            if let Some(last) = pre.last_mut() {
+                last.spans.insert(
+                    0,
+                    Span::styled(
+                        "┌ ",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                );
+            }
+        }
+
+        let mut status = None;
+        if self.output.is_none() {
+            let status_line = self.streaming_status_line_for_label(status_label);
+            if status_line.is_some() {
+                if let Some(last) = out.last() {
+                    let is_blank = last
+                        .spans
+                        .iter()
+                        .all(|sp| sp.content.as_ref().trim().is_empty());
+                    if is_blank {
+                        out.pop();
+                    }
+                }
+            }
+            status = status_line;
+        }
+
+        (pre, out, status)
+    }
+
+    fn generic_command_lines(&self) -> Vec<Line<'static>> {
+        if let Some(cached) = self.cached_command_lines.borrow().as_ref() {
+            return cached.clone();
+        }
+
+        let command_escaped = strip_bash_lc_and_escape(&self.command);
+        let formatted = format_inline_script_for_display(&command_escaped);
+        let normalized = normalize_shell_command_display(&formatted);
+        let command_display = insert_line_breaks_after_double_ampersand(&normalized);
+
+        let mut highlighted_cmd =
+            crate::syntax_highlight::highlight_code_block(&command_display, Some("bash"));
+        for (idx, line) in highlighted_cmd.iter_mut().enumerate() {
+            emphasize_shell_command_name(line);
+            if idx > 0 {
+                line.spans.insert(
+                    0,
+                    Span::styled(
+                        "  ",
+                        Style::default().fg(crate::colors::text()),
+                    ),
+                );
+            }
+        }
+
+        let owned: Vec<Line<'static>> = highlighted_cmd;
+        *self.cached_command_lines.borrow_mut() = Some(owned.clone());
+        owned
+    }
+
+    fn streaming_status_line(&self) -> Option<Line<'static>> {
+        if self.output.is_some() {
+            return None;
+        }
+        let wait_state = self.wait_state_snapshot();
+        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
+        self.streaming_status_line_for_label(status_label)
+    }
+
+    fn streaming_status_line_for_label(&self, status_label: &str) -> Option<Line<'static>> {
+        if self.output.is_some() {
+            return None;
+        }
+
+        if self.parsed.is_empty() {
+            let mut message = format!("{status_label}...");
+            if let Some(start) = self.start_time {
+                let elapsed = start.elapsed();
+                if !elapsed.is_zero() {
+                    message = format!("{message} ({})", format_duration(elapsed));
+                }
+            }
+            return Some(running_status_line(message));
+        }
+
+        let meta = match self.parsed_meta.as_ref() {
+            Some(meta) => meta,
+            None => return None,
+        };
+        if !matches!(meta.action, ExecAction::Run) {
+            return None;
+        }
+
+        let mut message = match meta.ctx_path.as_deref() {
+            Some(p) => format!("{status_label}... in {p}"),
+            None => format!("{status_label}..."),
+        };
+        if let Some(start) = self.start_time {
+            let elapsed = start.elapsed();
+            if !elapsed.is_zero() {
+                message = format!("{message} ({})", format_duration(elapsed));
+            }
+        }
+        Some(running_status_line(message))
     }
 }
 
@@ -1158,11 +2574,7 @@ impl HistoryCell for DiffCell {
         // Hard clear the entire area: write spaces + background so any
         // previously longer content does not bleed into shorter frames.
         let bg = Style::default().bg(crate::colors::background());
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg);
 
         // Center the sign in the two-column gutter by leaving one leading
         // space and drawing the sign in the second column.
@@ -1288,8 +2700,8 @@ impl MergedExecCell {
         self.kind
     }
     pub(crate) fn from_exec(exec: &ExecCell) -> Self {
-        let (pre, out) = exec.exec_render_parts();
-        let kind = match action_enum_from_parsed(&exec.parsed) {
+        let (pre, out, _) = exec.exec_render_parts();
+        let kind = match exec.parsed_action() {
             ExecAction::Read => ExecKind::Read,
             ExecAction::Search => ExecKind::Search,
             ExecAction::List => ExecKind::List,
@@ -1301,7 +2713,7 @@ impl MergedExecCell {
         }
     }
     pub(crate) fn push_exec(&mut self, exec: &ExecCell) {
-        let (pre, out) = exec.exec_render_parts();
+        let (pre, out, _) = exec.exec_render_parts();
         self.segments.push((pre, out));
     }
 
@@ -1419,16 +2831,31 @@ mod tests {
     #[test]
     fn action_enum_from_parsed_variants() {
         // Read
-        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into() }];
+        let parsed = vec![ParsedCommand::Read {
+            name: "foo.txt".into(),
+            cmd: "sed -n '1,10p' foo.txt".into(),
+        }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Read));
         // Search
-        let parsed = vec![ParsedCommand::Search { query: Some("term".into()), path: Some("src".into()), cmd: "rg term src".into() }];
-        assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Search));
-        // List files
-        let parsed = vec![ParsedCommand::ListFiles { cmd: "ls -la".into(), path: Some(".".into()) }];
+        let parsed = vec![ParsedCommand::Search {
+            query: Some("term".into()),
+            path: Some("src".into()),
+            cmd: "rg term src".into(),
+        }];
+        assert!(matches!(
+            action_enum_from_parsed(&parsed),
+            ExecAction::Search
+        ));
+        // Listå
+        let parsed = vec![ParsedCommand::ListFiles {
+            cmd: "ls -la".into(),
+            path: Some(".".into()),
+        }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::List));
         // Default → Run
-        let parsed = vec![ParsedCommand::Unknown { cmd: "echo hi".into() }];
+        let parsed = vec![ParsedCommand::Unknown {
+            cmd: "echo hi".into(),
+        }];
         assert!(matches!(action_enum_from_parsed(&parsed), ExecAction::Run));
         // Empty → Run
         let parsed: Vec<ParsedCommand> = vec![];
@@ -1436,18 +2863,131 @@ mod tests {
     }
 
     #[test]
+    fn format_inline_python_breaks_semicolons() {
+        let command = vec![
+            "python".to_string(),
+            "-c".to_string(),
+            "import os; print('hi')".to_string(),
+        ];
+        let escaped = strip_bash_lc_and_escape(&command);
+        let formatted = format_inline_python_for_display(&escaped);
+        assert!(formatted.contains("python -c '\n"));
+        assert!(formatted.contains("    import os"));
+        assert!(formatted.contains("    print('hi')"));
+    }
+
+    #[test]
+    fn format_inline_python_preserves_simple_snippet() {
+        let command = vec![
+            "python".to_string(),
+            "-c".to_string(),
+            "print('hi')".to_string(),
+        ];
+        let escaped = strip_bash_lc_and_escape(&command);
+        let formatted = format_inline_python_for_display(&escaped);
+        assert_eq!(formatted, escaped);
+    }
+
+    #[test]
+    fn inspect_python_heredoc_strip() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "python3 - <<'PY'\nimport os\nroot = '/tmp'\nprint(root)\nPY".to_string(),
+        ];
+        let escaped = strip_bash_lc_and_escape(&command);
+        assert!(escaped.contains("\n"));
+        assert!(escaped.contains("<<'PY'"));
+    }
+
+    #[test]
+    fn format_inline_python_formats_heredoc() {
+        let sanitized = "python3 - <<'PY' from pathlib import Path root = Path(.) candidates = [] for path in root.rglob(*.py): try: size = path.stat().st_size except (PermissionError, FileNotFoundError): continue candidates.append((size, path)) candidates.sort(reverse=True) for size, path in candidates[:10]: print(f{size:>9} bytes - {path}) PY";
+        let formatted = format_inline_python_for_display(sanitized);
+        assert!(formatted.contains("'<<PY'\n"));
+        assert!(formatted.contains("from pathlib import Path"));
+        assert!(formatted.contains("root = Path(.)"));
+        assert!(formatted.contains("    candidates = []"));
+        assert!(formatted.contains("    for path in root.rglob(*.py):"));
+        assert!(formatted.contains("        try:"));
+        assert!(formatted.contains("            size = path.stat().st_size"));
+        assert!(formatted.contains(
+            "        except (PermissionError, FileNotFoundError):"
+        ));
+        assert!(formatted.contains("            continue"));
+        assert!(formatted.contains("    candidates.append((size, path))"));
+        assert!(formatted.contains("    candidates.sort(reverse=True)"));
+        assert!(formatted.contains("    for size, path in candidates[:10]:"));
+        assert!(formatted.contains(
+            "        print(f{size:>9} bytes - {path})"
+        ));
+        assert!(formatted.trim_end().ends_with("PY"));
+    }
+
+    #[test]
+    fn format_inline_python_splits_chained_assignments() {
+        let sanitized = "python3 - <<'PY' import os py_count = 0 total_size = 0 for root, _, files in os.walk(.): for name in files: if name.endswith(.py): py_count += 1 total_size += os.path.getsize(os.path.join(root, name)) print(Total Python files:, py_count) print(Approx total size (KB):, round(total_size / 1024, 1)) PY";
+        let formatted = format_inline_python_for_display(sanitized);
+        assert!(formatted.contains("    py_count = 0"));
+        assert!(formatted.contains("    total_size = 0"));
+        assert!(formatted.contains("            py_count += 1"));
+        assert!(formatted.contains(
+            "            total_size += os.path.getsize(os.path.join(root, name))"
+        ));
+        assert!(formatted.contains("        print(Total Python files:, py_count)"));
+        assert!(formatted.contains(
+            "        print(Approx total size (KB):, round(total_size / 1024, 1))"
+        ));
+    }
+
+    #[test]
+    fn format_inline_node_script_indents_blocks() {
+        let sanitized = "node -e 'const fs = require(\'fs\'); let count = 0; [\'a.js\', \'b.js\'].forEach(file => { count += 1; console.log(file); }); if (count > 0) { console.log(`Total: ${count}`); }'";
+        let formatted = format_inline_script_for_display(sanitized);
+        assert!(formatted.contains("node -e '\n"));
+        assert!(formatted.contains("    const fs = require(fs);"));
+        assert!(formatted.contains("    let count = 0;"));
+        assert!(formatted.contains("    [a.js, b.js].forEach(file => { count += 1; console.log(file); });"));
+        assert!(formatted.contains("    if (count > 0) { console.log(`Total: ${count}`); }"));
+    }
+
+    #[test]
+    fn format_inline_shell_script_breaks_on_semicolons() {
+        let sanitized = "bash -c 'set -e; echo start; for f in *.rs; do echo $f; done'";
+        let formatted = format_inline_script_for_display(sanitized);
+        assert!(formatted.contains("bash -c '\n"));
+        assert!(formatted.contains("    set -e;"));
+        assert!(formatted.contains("    echo start;"));
+        assert!(formatted.contains("    for f in *.rs"));
+        assert!(formatted.contains("    do echo $f;"));
+        assert!(formatted.contains("    done"));
+        assert!(formatted.trim_end().ends_with("'"));
+    }
+
+    #[test]
     fn merged_exec_cell_push_and_kind() {
         // Build two completed ExecCell instances for Read
-        let parsed = vec![ParsedCommand::Read { name: "foo.txt".into(), cmd: "sed -n '1,10p' foo.txt".into() }];
+        let parsed = vec![ParsedCommand::Read {
+            name: "foo.txt".into(),
+            cmd: "sed -n '1,10p' foo.txt".into(),
+        }];
         let e1 = new_completed_exec_command(
             vec!["sed".into(), "-n".into(), "1,10p".into(), "foo.txt".into()],
             parsed.clone(),
-            CommandOutput { exit_code: 0, stdout: "ok".into(), stderr: String::new() },
+            CommandOutput {
+                exit_code: 0,
+                stdout: "ok".into(),
+                stderr: String::new(),
+            },
         );
         let e2 = new_completed_exec_command(
             vec!["sed".into(), "-n".into(), "11,20p".into(), "foo.txt".into()],
             parsed,
-            CommandOutput { exit_code: 0, stdout: "ok2".into(), stderr: String::new() },
+            CommandOutput {
+                exit_code: 0,
+                stdout: "ok2".into(),
+                stderr: String::new(),
+            },
         );
         let mut merged = MergedExecCell::from_exec(&e1);
         assert!(matches!(merged.exec_kind(), ExecKind::Read));
@@ -1470,6 +3010,11 @@ mod tests {
             parse_read_line_annotation("head -n 100 foo.txt"),
             Some("(lines 1 to 100)".into())
         );
+        // bare head => default 10
+        assert_eq!(
+            parse_read_line_annotation("git show HEAD:file | head"),
+            Some("(lines 1 to 10)".into())
+        );
         // tail -n +K
         assert_eq!(
             parse_read_line_annotation("tail -n +20 foo.txt"),
@@ -1480,8 +3025,93 @@ mod tests {
             parse_read_line_annotation("tail -n 50 foo.txt"),
             Some("(last 50 lines)".into())
         );
+        // bare tail => default 10
+        assert_eq!(
+            parse_read_line_annotation("git show HEAD:file | tail"),
+            Some("(last 10 lines)".into())
+        );
         // Unrelated command
         assert_eq!(parse_read_line_annotation("cat foo.txt"), None);
+    }
+
+    #[test]
+    fn strip_redundant_pipes_when_annotated() {
+        let cmd = "git show upstream/main:codex-rs/core/src/codex.rs | sed -n '2160,2640p'";
+        let (ann, _) = parse_read_line_annotation_with_range(cmd);
+        assert!(ann.is_some());
+        let cleaned = strip_redundant_line_filter_pipes(cmd);
+        assert!(cleaned.starts_with("git show upstream/main:codex-rs/core/src/codex.rs"));
+        assert!(!cleaned.contains("| sed -n"));
+
+        let cmd2 = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'";
+        let (ann2, _) = parse_read_line_annotation_with_range(cmd2);
+        assert!(ann2.is_some());
+        let cleaned2 = strip_redundant_line_filter_pipes(cmd2);
+        assert_eq!(cleaned2, "nl -ba core/src/parse_command.rs");
+
+        let cmd3 = "git show HEAD:file | head";
+        let (ann3, _) = parse_read_line_annotation_with_range(cmd3);
+        assert!(ann3.is_some());
+        let cleaned3 = strip_redundant_line_filter_pipes(cmd3);
+        assert_eq!(cleaned3, "git show HEAD:file");
+    }
+
+    #[test]
+    fn bold_detection_sets_flag_for_long_commands() {
+        let cell = new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+        );
+        assert!(cell.has_bold_command());
+    }
+
+    #[test]
+    fn short_commands_do_not_set_bold_flag() {
+        let cell = new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "ls".into()],
+            vec![ParsedCommand::Unknown { cmd: "ls".into() }],
+        );
+        assert!(!cell.has_bold_command());
+    }
+
+    #[test]
+    fn gutter_symbol_shows_for_long_run_commands() {
+        let cell = new_active_exec_command(
+            vec!["bash".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+        );
+        assert_eq!(cell.gutter_symbol(), Some("❯"));
+    }
+
+    #[test]
+    fn completed_exec_preserves_gutter_symbol_for_long_commands() {
+        let cell = new_completed_exec_command(
+            vec!["bash".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+            CommandOutput {
+                exit_code: 0,
+                stdout: "ok".into(),
+                stderr: String::new(),
+            },
+        );
+        assert_eq!(cell.gutter_symbol(), Some("❯"));
+    }
+
+    #[test]
+    fn shell_wrappers_still_preserve_gutter_symbol() {
+        let cell = new_active_exec_command(
+            vec!["/bin/sh".into(), "-lc".into(), "cargo build".into()],
+            vec![ParsedCommand::Unknown {
+                cmd: "cargo build".into(),
+            }],
+        );
+        assert_eq!(cell.gutter_symbol(), Some("❯"));
     }
 }
 
@@ -1500,13 +3130,13 @@ impl HistoryCell for MergedExecCell {
     }
     fn desired_height(&self, width: u16) -> u16 {
         // Match custom_render_with_skip exactly:
-        // - Single shared header row (1)
+        // - Shared header row for non-Run kinds (1)
         // - For each segment:
-        //   - Measure preamble after dropping the per-segment header
+        //   - Measure preamble after dropping the per-segment header when present
         //     and normalizing the leading "└ " prefix at full `width`.
         //   - Measure output inside a left-bordered block with left padding,
         //     which reduces the effective wrapping width by 2 columns.
-        let mut total: u16 = 1; // shared header (e.g., "Ran", "Read")
+        let mut total: u16 = if self.kind == ExecKind::Run { 0 } else { 1 };
         let pre_wrap_width = width;
         let out_wrap_width = width.saturating_sub(2);
 
@@ -1533,27 +3163,29 @@ impl HistoryCell for MergedExecCell {
         for (pre_raw, out_raw) in &self.segments {
             // Build preamble like the renderer: trim, drop first header line, ensure prefix
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() {
+            if self.kind != ExecKind::Run && !pre.is_empty() {
                 pre.remove(0);
             }
-            if let Some(first) = pre.first_mut() {
-                let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                let has_corner = flat.trim_start().starts_with("└ ");
-                let has_spaced_corner = flat.trim_start().starts_with("  └ ");
-                if !added_corner {
-                    if !(has_corner || has_spaced_corner) {
-                        first.spans.insert(
-                            0,
-                            Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
-                        );
-                    }
-                    added_corner = true;
-                } else {
-                    // For subsequent segments, ensure no leading corner; use two spaces instead.
-                    if let Some(sp0) = first.spans.get_mut(0) {
-                        if sp0.content.as_ref() == "└ " {
-                            sp0.content = "  ".into();
-                            sp0.style = sp0.style.add_modifier(Modifier::DIM);
+            if self.kind != ExecKind::Run {
+                if let Some(first) = pre.first_mut() {
+                    let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
+                    let has_corner = flat.trim_start().starts_with("└ ");
+                    let has_spaced_corner = flat.trim_start().starts_with("  └ ");
+                    if !added_corner {
+                        if !(has_corner || has_spaced_corner) {
+                            first.spans.insert(
+                                0,
+                                Span::styled("└ ", Style::default().fg(crate::colors::text_dim())),
+                            );
+                        }
+                        added_corner = true;
+                    } else {
+                        // For subsequent segments, ensure no leading corner; use two spaces instead.
+                        if let Some(sp0) = first.spans.get_mut(0) {
+                            if sp0.content.as_ref() == "└ " {
+                                sp0.content = "  ".into();
+                                sp0.style = sp0.style.add_modifier(Modifier::DIM);
+                            }
                         }
                     }
                 }
@@ -1590,62 +3222,63 @@ impl HistoryCell for MergedExecCell {
         true
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
-        // Single shared header (e.g., "Ran") then each segment's command + output.
+        // Shared header for non-Run kinds (e.g., "Read") then each segment's command + output.
         let bg = Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
         // Hard clear area first
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg);
 
         // Build one header line based on exec kind
         let header_line = match self.kind {
-            ExecKind::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
-            ExecKind::Search => {
-                Line::styled("Searched", Style::default().fg(crate::colors::text()))
-            }
-            ExecKind::List => {
-                Line::styled("List Files", Style::default().fg(crate::colors::text()))
-            }
-            ExecKind::Run => Line::styled(
-                "Ran",
-                Style::default()
-                    .fg(crate::colors::text_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
+            ExecKind::Read => Some(Line::styled(
+                "Read",
+                Style::default().fg(crate::colors::text()),
+            )),
+            ExecKind::Search => Some(Line::styled(
+                "Search",
+                Style::default().fg(crate::colors::text_dim()),
+            )),
+            ExecKind::List => Some(Line::styled(
+                "List",
+                Style::default().fg(crate::colors::text()),
+            )),
+            ExecKind::Run => None,
         };
 
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
 
         // Render or skip header line
-        if skip_rows == 0 {
-            if cur_y < end_y {
-                let txt = Text::from(vec![header_line.clone()]);
-                Paragraph::new(txt)
-                    .block(Block::default().style(bg))
-                    .wrap(Wrap { trim: false })
-                    .render(
-                        Rect {
-                            x: area.x,
-                            y: cur_y,
-                            width: area.width,
-                            height: 1,
-                        },
-                        buf,
-                    );
-                cur_y = cur_y.saturating_add(1);
+        if let Some(header_line) = header_line {
+            if skip_rows == 0 {
+                if cur_y < end_y {
+                    let txt = Text::from(vec![header_line]);
+                    Paragraph::new(txt)
+                        .block(Block::default().style(bg))
+                        .wrap(Wrap { trim: false })
+                        .render(
+                            Rect {
+                                x: area.x,
+                                y: cur_y,
+                                width: area.width,
+                                height: 1,
+                            },
+                            buf,
+                        );
+                    cur_y = cur_y.saturating_add(1);
+                }
+            } else {
+                skip_rows = skip_rows.saturating_sub(1);
             }
-        } else {
-            skip_rows = skip_rows.saturating_sub(1);
         }
 
         // Helper: ensure only the very first preamble line across all segments gets the corner
         let mut added_corner: bool = false;
         let mut ensure_prefix = |lines: &mut Vec<Line<'static>>| {
+            if self.kind == ExecKind::Run {
+                return;
+            }
             if let Some(first) = lines.first_mut() {
                 let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
                 let has_corner = flat.trim_start().starts_with("└ ");
@@ -1797,7 +3430,7 @@ impl HistoryCell for MergedExecCell {
             }
             // Drop the per-segment header line (first element)
             let mut pre = trim_empty_lines(pre_raw.clone());
-            if !pre.is_empty() {
+            if self.kind != ExecKind::Run && !pre.is_empty() {
                 pre.remove(0);
             }
             // Normalize command prefix for generic execs (only on the first segment)
@@ -1893,171 +3526,123 @@ impl HistoryCell for MergedExecCell {
     }
 }
 
-fn exec_render_parts_generic(
-    command: &[String],
-    output: Option<&CommandOutput>,
-    start_time: Option<Instant>,
-) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    let mut pre: Vec<Line<'static>> = Vec::new();
-    let command_escaped = strip_bash_lc_and_escape(command);
-    // Highlight the full command as a bash snippet; we will append
-    // the running duration (when applicable) to the first visual line.
-    let mut highlighted_cmd: Vec<Line<'static>> =
-        crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
-
-    let header_line = match output {
-        None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            Line::styled(
-                "Running...".to_string() + &duration_str,
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-        Some(o) if o.exit_code == 0 => Line::styled(
-            "Ran",
-            Style::default()
-                .fg(crate::colors::text_bright())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Some(_) => Line::styled(
-            "Ran",
-            Style::default()
-                .fg(crate::colors::text_bright())
-                .add_modifier(Modifier::BOLD),
-        ),
-    };
-
-    // Compute output first so we know whether to draw a downward corner on the command.
-    let out = output_lines(output, false, false);
-    let has_output = !trim_empty_lines(out.clone()).is_empty();
-
-    pre.push(header_line.clone());
-    if let Some(first) = highlighted_cmd.first_mut() {
-        // Append duration (dim) to the first highlighted line when running
-        if output.is_none() && start_time.is_some() {
-            let elapsed = start_time.unwrap().elapsed();
-            let duration_str = format!(" ({})", format_duration(elapsed));
-            first.spans.push(Span::styled(
-                duration_str,
-                Style::default().fg(crate::colors::text_dim()),
-            ));
-        }
-        // Corner is added on the last command line, not the first
-    }
-    if has_output {
-        if let Some(last) = highlighted_cmd.last_mut() {
-            last.spans.insert(
-                0,
-                Span::styled("┌ ", Style::default().fg(crate::colors::text_dim())),
-            );
-        }
-    }
-    pre.extend(highlighted_cmd);
-    // Output: already computed above
-    (pre, out)
-}
-
-fn exec_render_parts_parsed(
+fn exec_render_parts_parsed_with_meta(
     parsed_commands: &[ParsedCommand],
+    meta: &ParsedExecMetadata,
     output: Option<&CommandOutput>,
+    stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
-) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
-    let action = action_enum_from_parsed(&parsed_commands.to_vec());
-    let ctx_path = first_context_path(parsed_commands);
-    let mut pre: Vec<Line<'static>> = vec![match output {
-        None => {
-            match action {
-                // For these informational actions, remove the transient “running” style
-                // and render exactly like the finalized state (no duration, normal text color).
-                ExecAction::Read => Line::styled("Read", Style::default().fg(crate::colors::text())),
-                ExecAction::Search => Line::styled("Searched", Style::default().fg(crate::colors::text())),
-                ExecAction::List => Line::styled("List Files", Style::default().fg(crate::colors::text())),
-                // Keep rich running header for real Run commands
+    status_label: &str,
+) -> (
+    Vec<Line<'static>>,
+    Vec<Line<'static>>,
+    Option<Line<'static>>,
+) {
+    let action = meta.action;
+    let ctx_path = meta.ctx_path.as_deref();
+    let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
+    let mut pre: Vec<Line<'static>> = Vec::new();
+    let mut running_status: Option<Line<'static>> = None;
+    if !suppress_run_header {
+        match output {
+            None => match action {
+                ExecAction::Read => pre.push(Line::styled(
+                    "Read",
+                    Style::default().fg(crate::colors::text()),
+                )),
+                ExecAction::Search => pre.push(Line::styled(
+                    "Search",
+                    Style::default().fg(crate::colors::text_dim()),
+                )),
+                ExecAction::List => pre.push(Line::styled(
+                    "List",
+                    Style::default().fg(crate::colors::text()),
+                )),
                 ExecAction::Run => {
-                    let duration_str = if let Some(start) = start_time {
-                        let elapsed = start.elapsed();
-                        format!(" ({})", format_duration(elapsed))
-                    } else { String::new() };
-                    let header = match &ctx_path {
-                        Some(p) => format!("Running... in {}", p),
-                        None => "Running...".to_string(),
+                    let mut message = match &ctx_path {
+                        Some(p) => format!("{}... in {p}", status_label),
+                        None => format!("{}...", status_label),
                     };
-                    Line::styled(
-                        header + &duration_str,
-                        Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD),
-                    )
+                    if let Some(start) = start_time {
+                        let elapsed = start.elapsed();
+                        message = format!("{message} ({})", format_duration(elapsed));
+                    }
+                    running_status = Some(running_status_line(message));
+                }
+            },
+            Some(o) if o.exit_code == 0 => {
+                let done = match action {
+                    ExecAction::Read => "Read".to_string(),
+                    ExecAction::Search => "Search".to_string(),
+                    ExecAction::List => "List".to_string(),
+                    ExecAction::Run => match &ctx_path {
+                        Some(p) => format!("Ran in {}", p),
+                        None => "Ran".to_string(),
+                    },
+                };
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    pre.push(Line::styled(
+                        done,
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                } else {
+                    pre.push(Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
+            Some(_) => {
+                let done = match action {
+                    ExecAction::Read => "Read".to_string(),
+                    ExecAction::Search => "Search".to_string(),
+                    ExecAction::List => "List".to_string(),
+                    ExecAction::Run => match &ctx_path {
+                        Some(p) => format!("Ran in {}", p),
+                        None => "Ran".to_string(),
+                    },
+                };
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    pre.push(Line::styled(
+                        done,
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                } else {
+                    pre.push(Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 }
             }
         }
-        Some(o) if o.exit_code == 0 => {
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {}", p),
-                    None => "Ran".to_string(),
-                },
-            };
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
-            }
-        }
-        Some(_) => {
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {}", p),
-                    None => "Ran".to_string(),
-                },
-            };
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
-            }
-        }
-    }];
+    }
 
     // Reuse the same parsed-content rendering as new_parsed_command
-    let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for pc in parsed_commands.iter() {
-        if let ParsedCommand::Search { path: Some(p), .. } = pc {
-            search_paths.insert(p.to_string());
-        }
-    }
+    let search_paths = &meta.search_paths;
     // Compute output preview first to know whether to draw the downward corner.
     let show_stdout = matches!(action, ExecAction::Run);
-    let out = output_lines(output, !show_stdout, false);
+    let display_output = output.or(stream_preview);
+    let mut out = output_lines(display_output, !show_stdout, false);
     let mut any_content_emitted = false;
     // Determine allowed label(s) for this cell's primary action
     let expected_label: Option<&'static str> = match action {
         ExecAction::Read => Some("Read"),
         ExecAction::Search => Some("Search"),
-        ExecAction::List => Some("List Files"),
+        ExecAction::List => Some("List"),
         ExecAction::Run => None, // run: allow a set of labels
     };
+    let use_content_connectors = !(matches!(action, ExecAction::Run) && output.is_none());
+
     for parsed in parsed_commands.iter() {
         let (label, content) = match parsed {
             ParsedCommand::Read { name, cmd, .. } => {
@@ -2077,10 +3662,10 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("List Files".to_string(), format!("in {}", display_p))
+                        ("List".to_string(), format!("{}", display_p))
                     }
                 }
-                None => ("List Files".to_string(), "in ./".to_string()),
+                None => ("List".to_string(), "./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Make search terms human-readable:
@@ -2155,11 +3740,12 @@ fn exec_render_parts_parsed(
                         } else {
                             format!("{}/", p)
                         };
-                        ("Search".to_string(), format!("in {}", display_p))
+                        ("Search".to_string(), format!(" in {}", display_p))
                     }
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
+            ParsedCommand::ReadCommand { cmd } => ("Run".to_string(), cmd.clone()),
             // Upstream variants not present in our core parser are ignored or treated as generic runs
             ParsedCommand::Unknown { cmd } => {
                 // Suppress separator helpers like `echo ---` which are used
@@ -2169,11 +3755,10 @@ fn exec_render_parts_parsed(
                 if lower.starts_with("echo") && lower.contains("---") {
                     (String::new(), String::new()) // drop from preamble
                 } else {
-                    ("Run".to_string(), cmd.clone())
+                    ("Run".to_string(), format_inline_script_for_display(cmd))
                 }
-            }
-            // Noop variant not present in our core parser
-            // ParsedCommand::Noop { .. } => continue,
+            } // Noop variant not present in our core parser
+              // ParsedCommand::Noop { .. } => continue,
         };
         // Enforce per-action grouping: only keep entries matching this cell's action.
         if let Some(exp) = expected_label {
@@ -2191,11 +3776,24 @@ fn exec_render_parts_parsed(
             if line_text.is_empty() {
                 continue;
             }
-            let prefix = if !any_content_emitted { "└ " } else { "  " };
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                prefix,
-                Style::default().add_modifier(Modifier::DIM),
-            )];
+            let prefix = if !any_content_emitted {
+                if suppress_run_header || !use_content_connectors {
+                    ""
+                } else {
+                    "└ "
+                }
+            } else if suppress_run_header || !use_content_connectors {
+                ""
+            } else {
+                "  "
+            };
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            if !prefix.is_empty() {
+                spans.push(Span::styled(
+                    prefix,
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
             match label.as_str() {
                 "Search" => {
                     let remaining = line_text.to_string();
@@ -2282,7 +3880,7 @@ fn exec_render_parts_parsed(
                         ));
                     }
                 }
-                "List Files" => {
+                "List" => {
                     spans.push(Span::styled(
                         line_text.to_string(),
                         Style::default().fg(crate::colors::text()),
@@ -2291,16 +3889,16 @@ fn exec_render_parts_parsed(
                 _ => {
                     // Apply shell syntax highlighting to executed command lines.
                     // We highlight the single logical line as bash and append its spans inline.
+                    let normalized = normalize_shell_command_display(line_text);
+                    let display_line = insert_line_breaks_after_double_ampersand(&normalized);
                     let mut hl =
-                        crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
-                    if let Some(mut first) = hl.pop() {
-                        // `highlight_code_block` returns exactly one line for single-line input.
-                        // Append the highlighted spans inline after the prefix.
-                        spans.extend(first.spans.drain(..));
+                        crate::syntax_highlight::highlight_code_block(&display_line, Some("bash"));
+                    if let Some(mut first_line) = hl.pop() {
+                        emphasize_shell_command_name(&mut first_line);
+                        spans.extend(first_line.spans.into_iter());
                     } else {
-                        // Fallback: plain text if highlighting yields nothing.
                         spans.push(Span::styled(
-                            line_text.to_string(),
+                            display_line,
                             Style::default().fg(crate::colors::text()),
                         ));
                     }
@@ -2311,18 +3909,25 @@ fn exec_render_parts_parsed(
         }
     }
 
-    // If this is a List Files cell and nothing emitted (e.g., suppressed due to matching Search path),
+    // If this is a List cell and nothing emitted (e.g., suppressed due to matching Search path),
     // still show a single contextual line so users can see where we listed.
     if matches!(action, ExecAction::List) && !any_content_emitted {
         let display_p = match &ctx_path {
             Some(p) if !p.is_empty() => {
-                if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+                if p.ends_with('/') {
+                    p.to_string()
+                } else {
+                    format!("{p}/")
+                }
             }
             _ => "./".to_string(),
         };
         pre.push(Line::from(vec![
             Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(format!("in {display_p}"), Style::default().fg(crate::colors::text())),
+            Span::styled(
+                format!("{display_p}"),
+                Style::default().fg(crate::colors::text()),
+            ),
         ]));
     }
 
@@ -2330,24 +3935,76 @@ fn exec_render_parts_parsed(
     coalesce_read_ranges_in_lines_local(&mut pre);
 
     // Output: show stdout only for real run commands; errors always included
-    (pre, out)
+    // Collapse adjacent Read ranges for the same file inside a single exec's preamble
+    coalesce_read_ranges_in_lines_local(&mut pre);
+
+    if running_status.is_some() {
+        if let Some(last) = out.last() {
+            let is_blank = last
+                .spans
+                .iter()
+                .all(|sp| sp.content.as_ref().trim().is_empty());
+            if is_blank {
+                out.pop();
+            }
+        }
+    }
+
+    (pre, out, running_status)
+}
+
+fn exec_render_parts_parsed(
+    parsed_commands: &[ParsedCommand],
+    output: Option<&CommandOutput>,
+    stream_preview: Option<&CommandOutput>,
+    start_time: Option<Instant>,
+    status_label: &str,
+) -> (
+    Vec<Line<'static>>,
+    Vec<Line<'static>>,
+    Option<Line<'static>>,
+) {
+    let meta = ParsedExecMetadata::from_commands(parsed_commands);
+    exec_render_parts_parsed_with_meta(
+        parsed_commands,
+        &meta,
+        output,
+        stream_preview,
+        start_time,
+        status_label,
+    )
 }
 
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
 fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
-    use ratatui::style::{Modifier, Style};
+    use ratatui::style::Modifier;
+    use ratatui::style::Style;
     use ratatui::text::Span;
     // Nothing to do for empty/single line vectors
-    if lines.len() <= 1 { return; }
+    if lines.len() <= 1 {
+        return;
+    }
 
     // Parse a content line of the form
     //   "└ <file> (lines A to B)" or "  <file> (lines A to B)"
     // into (filename, start, end, prefix, original_index).
-    fn parse_read_line_with_index(idx: usize, line: &Line<'_>) -> Option<(String, u32, u32, String, usize)> {
-        if line.spans.is_empty() { return None; }
+    fn parse_read_line_with_index(
+        idx: usize,
+        line: &Line<'_>,
+    ) -> Option<(String, u32, u32, String, usize)> {
+        if line.spans.is_empty() {
+            return None;
+        }
         let prefix = line.spans[0].content.to_string();
-        if !(prefix == "└ " || prefix == "  ") { return None; }
-        let rest: String = line.spans.iter().skip(1).map(|s| s.content.as_ref()).collect();
+        if !(prefix == "└ " || prefix == "  ") {
+            return None;
+        }
+        let rest: String = line
+            .spans
+            .iter()
+            .skip(1)
+            .map(|s| s.content.as_ref())
+            .collect();
         if let Some(i) = rest.rfind(" (lines ") {
             let fname = rest[..i].to_string();
             let tail = &rest[i + 1..];
@@ -2366,7 +4023,11 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
     // Collect read ranges grouped by filename, preserving first-seen order.
     // Also track the earliest prefix to reuse when emitting a single line per file.
     #[derive(Default)]
-    struct FileRanges { prefix: String, first_index: usize, ranges: Vec<(u32, u32)> }
+    struct FileRanges {
+        prefix: String,
+        first_index: usize,
+        ranges: Vec<(u32, u32)>,
+    }
 
     let mut files: Vec<(String, FileRanges)> = Vec::new();
     let mut non_read_lines: Vec<Line<'static>> = Vec::new();
@@ -2377,25 +4038,39 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
             if let Some((_name, fr)) = files.iter_mut().find(|(n, _)| n == &fname) {
                 fr.ranges.push((a.min(b), a.max(b)));
                 // Keep earliest index as stable ordering anchor
-                if orig_idx < fr.first_index { fr.first_index = orig_idx; }
+                if orig_idx < fr.first_index {
+                    fr.first_index = orig_idx;
+                }
             } else {
-                files.push((fname, FileRanges { prefix, first_index: orig_idx, ranges: vec![(a.min(b), a.max(b))] }));
+                files.push((
+                    fname,
+                    FileRanges {
+                        prefix,
+                        first_index: orig_idx,
+                        ranges: vec![(a.min(b), a.max(b))],
+                    },
+                ));
             }
         } else {
             non_read_lines.push(line.clone());
         }
     }
 
-    if files.is_empty() { return; }
+    if files.is_empty() {
+        return;
+    }
 
     // For each file: merge overlapping/touching ranges; then sort ascending and emit one line.
     fn merge_and_sort(mut v: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
-        if v.len() <= 1 { return v; }
+        if v.len() <= 1 {
+            return v;
+        }
         v.sort_by_key(|(s, _)| *s);
         let mut out: Vec<(u32, u32)> = Vec::with_capacity(v.len());
         let mut cur = v[0];
         for &(s, e) in v.iter().skip(1) {
-            if s <= cur.1.saturating_add(1) { // touching or overlap
+            if s <= cur.1.saturating_add(1) {
+                // touching or overlap
                 cur.1 = cur.1.max(e);
             } else {
                 out.push(cur);
@@ -2412,7 +4087,12 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
 
     // Heuristic: preserve an initial header line that does not start with a connector.
     if !lines.is_empty() {
-        if lines[0].spans.first().map(|s| s.content.as_ref() != "└ " && s.content.as_ref() != "  ").unwrap_or(false) {
+        if lines[0]
+            .spans
+            .first()
+            .map(|s| s.content.as_ref() != "└ " && s.content.as_ref() != "  ")
+            .unwrap_or(false)
+        {
             rebuilt.push(lines[0].clone());
         }
     }
@@ -2427,7 +4107,9 @@ fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
         ann.push_str(" (");
         ann.push_str("lines ");
         for (i, (s, e)) in fr.ranges.iter().enumerate() {
-            if i > 0 { ann.push_str(", "); }
+            if i > 0 {
+                ann.push_str(", ");
+            }
             ann.push_str(&format!("{} to {}", s, e));
         }
         ann.push(')');
@@ -2736,6 +4418,9 @@ pub(crate) struct RunningToolCallCell {
     title: String,
     start_time: Instant,
     arg_lines: Vec<Line<'static>>,
+    wait_has_target: bool,
+    wait_has_call_id: bool,
+    wait_cap_ms: Option<u64>,
 }
 
 impl HistoryCell for RunningToolCallCell {
@@ -2750,25 +4435,138 @@ impl HistoryCell for RunningToolCallCell {
             status: ToolStatus::Running,
         }
     }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if self.title == "Waiting" {
+            if self.wait_has_call_id {
+                None
+            } else {
+                Some(self.spinner_frame())
+            }
+        } else {
+            Some("⚙")
+        }
+    }
     fn is_animating(&self) -> bool {
         true
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         let elapsed = self.start_time.elapsed();
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::styled(
-            format!("{} ({})", self.title, format_duration(elapsed)),
-            Style::default()
-                .fg(crate::colors::info())
-                .add_modifier(Modifier::BOLD),
-        ));
+        if self.title == "Waiting" {
+            let show_elapsed = !self.wait_has_target;
+            let mut spans = Vec::new();
+            spans.push(
+                Span::styled(
+                    "Waiting...",
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            );
+            let cap_ms = self.wait_cap_ms.unwrap_or(600_000);
+            let cap_str = Self::strip_zero_seconds_suffix(
+                format_duration(Duration::from_millis(cap_ms)),
+            );
+            let suffix = if show_elapsed {
+                let elapsed_str = Self::strip_zero_seconds_suffix(format_duration(elapsed));
+                format!(" ({} / up to {})", elapsed_str, cap_str)
+            } else {
+                format!(" (up to {})", cap_str)
+            };
+            spans.push(Span::styled(
+                suffix,
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+            lines.push(Line::from(spans));
+        } else {
+            lines.push(Line::styled(
+                format!("{} ({})", self.title, format_duration(elapsed)),
+                Style::default()
+                    .fg(crate::colors::info())
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
         lines.extend(self.arg_lines.clone());
         lines.push(Line::from(""));
         lines
     }
 }
 
+// ==================== WaitStatusCell (completed wait) ====================
+
+pub(crate) struct WaitStatusCell {
+    lines: Vec<Line<'static>>,
+}
+
+impl WaitStatusCell {
+    pub(crate) fn retint(&mut self, old: &crate::theme::Theme, new: &crate::theme::Theme) {
+        retint_lines_in_place(&mut self.lines, old, new);
+    }
+}
+
+impl HistoryCell for WaitStatusCell {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn kind(&self) -> HistoryCellType {
+        HistoryCellType::Plain
+    }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.lines.clone()
+    }
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        Some("◓")
+    }
+}
+
+pub(crate) fn new_completed_wait_tool_call(target: String, duration: Duration) -> WaitStatusCell {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut duration_str = format_duration(duration);
+    if duration_str.ends_with(" 00s") {
+        duration_str.truncate(duration_str.len() - 4);
+    }
+    let mut header_spans = Vec::new();
+    header_spans.push(
+        Span::styled(
+            "Waited",
+            Style::default()
+                .fg(crate::colors::success())
+                .add_modifier(Modifier::BOLD),
+        ),
+    );
+    header_spans.push(Span::styled(
+        format!(" ({duration_str})"),
+        Style::default().fg(crate::colors::text_dim()),
+    ));
+    lines.push(Line::from(header_spans));
+
+    if !target.is_empty() {
+        lines.push(Line::styled(
+            format!("for {target}"),
+            Style::default().fg(crate::colors::text_dim()),
+        ));
+    }
+
+    lines.push(Line::from(""));
+
+    WaitStatusCell { lines }
+}
+
 impl RunningToolCallCell {
+    fn strip_zero_seconds_suffix(mut duration: String) -> String {
+        if duration.ends_with(" 00s") {
+            duration.truncate(duration.len() - 4);
+        }
+        duration
+    }
+    fn spinner_frame(&self) -> &'static str {
+        const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
+        let idx = ((self.start_time.elapsed().as_millis() / 100) as usize) % FRAMES.len();
+        FRAMES[idx]
+    }
     pub(crate) fn has_title(&self, title: &str) -> bool {
         self.title == title
     }
@@ -2834,6 +4632,7 @@ pub(crate) struct CollapsibleReasoningCell {
     pub(crate) in_progress: std::cell::Cell<bool>,
     // Optional stream id to anchor routing of deltas/finals
     pub(crate) id: Option<String>,
+    hide_when_collapsed: std::cell::Cell<bool>,
 }
 
 impl CollapsibleReasoningCell {
@@ -2843,6 +4642,7 @@ impl CollapsibleReasoningCell {
             collapsed: std::cell::Cell::new(true), // Default to collapsed
             in_progress: std::cell::Cell::new(false),
             id,
+            hide_when_collapsed: std::cell::Cell::new(false),
         }
     }
 
@@ -2852,10 +4652,15 @@ impl CollapsibleReasoningCell {
     ///   existing tail (overlap), ignoring ephemeral debug marker lines like
     ///   "[sN ...]" on both sides so markers don't break matching.
     pub fn append_lines_dedup(&mut self, mut new_lines: Vec<Line<'static>>) {
-        if new_lines.is_empty() { return; }
+        if new_lines.is_empty() {
+            return;
+        }
 
         let to_plain = |l: &Line<'_>| -> String {
-            l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
         };
         let is_marker = |l: &Line<'_>| -> bool {
             let t = to_plain(l).trim().to_string();
@@ -2883,7 +4688,7 @@ impl CollapsibleReasoningCell {
         let mut overlap = 0usize;
         for k in (1..=max_overlap).rev() {
             if existing_plain.len() >= k && incoming_plain.len() >= k {
-                if existing_plain[existing_plain.len()-k..] == incoming_plain[..k] {
+                if existing_plain[existing_plain.len() - k..] == incoming_plain[..k] {
                     overlap = k;
                     break;
                 }
@@ -2910,7 +4715,9 @@ impl CollapsibleReasoningCell {
                 .last()
                 .map(|last| to_plain(last) == to_plain(&nl))
                 .unwrap_or(false);
-            if !dup { self.lines.push(nl); }
+            if !dup {
+                self.lines.push(nl);
+            }
         }
     }
 
@@ -2925,10 +4732,9 @@ impl CollapsibleReasoningCell {
             // Same rule as extract_section_titles: line is a heading if all spans are bold
             // (ignoring spans that are purely whitespace when trimmed).
             let is_title = !l.spans.is_empty()
-                && l
-                    .spans
-                    .iter()
-                    .all(|s| s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty());
+                && l.spans.iter().all(|s| {
+                    s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty()
+                });
             if is_title {
                 title_idxs.push(i);
                 let mut text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -2936,7 +4742,8 @@ impl CollapsibleReasoningCell {
                 // Reserve 1 col for the ellipsis when truncation occurs.
                 let maxw = 60usize;
                 if text.width() > maxw {
-                    let (prefix, _suffix, _w) = crate::live_wrap::take_prefix_by_width(&text, maxw.saturating_sub(1));
+                    let (prefix, _suffix, _w) =
+                        crate::live_wrap::take_prefix_by_width(&text, maxw.saturating_sub(1));
                     text = format!("{}…", prefix);
                 }
                 title_previews.push(text);
@@ -2945,7 +4752,16 @@ impl CollapsibleReasoningCell {
         let total = lines.len();
         let titles = title_previews.len();
         // Also record final line width to catch cut-offs
-        let lastw = lines.last().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>().width()).unwrap_or(0);
+        let lastw = lines
+            .last()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+                    .width()
+            })
+            .unwrap_or(0);
         format!(
             "rtitles={} idx={:?} total_lines={} lastw={} prevs={:?}",
             titles, title_idxs, total, lastw, title_previews
@@ -2967,6 +4783,10 @@ impl CollapsibleReasoningCell {
 
     pub fn set_in_progress(&self, in_progress: bool) {
         self.in_progress.set(in_progress);
+    }
+
+    pub fn set_hide_when_collapsed(&self, hide: bool) {
+        self.hide_when_collapsed.set(hide);
     }
 
     /// Normalize reasoning content lines by splitting any line that begins
@@ -3065,7 +4885,9 @@ impl CollapsibleReasoningCell {
             for l in lines.iter() {
                 let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
                 let trimmed = text.trim();
-                if trimmed.is_empty() { continue; }
+                if trimmed.is_empty() {
+                    continue;
+                }
                 titles.push(l.clone());
                 break;
             }
@@ -3112,22 +4934,27 @@ impl HistoryCell for CollapsibleReasoningCell {
         let start_idx = 0;
 
         if self.collapsed.get() {
+            if self.hide_when_collapsed.get() {
+                return Vec::new();
+            }
             // When collapsed, show extracted section titles (or at least one summary)
             let mut titles = self.extract_section_titles();
-            if self.in_progress.get() {
+            let collapsed_line = if self.in_progress.get() {
                 if let Some(last) = titles.pop() {
                     let mut spans = last.spans;
                     spans.push(Span::styled(
                         "…",
                         Style::default().fg(crate::colors::text_dim()),
                     ));
-                    titles.push(Line::from(spans));
+                    Some(Line::from(spans))
                 } else {
-                    // No title yet — show a dim ellipsis placeholder
-                    titles.push(Line::from("…".dim()));
+                    Some(Line::from("…".dim()))
                 }
-            }
-            titles
+            } else {
+                titles.pop()
+            };
+
+            collapsed_line.into_iter().collect()
         } else {
             // When expanded, show all lines; append an ellipsis if in progress
             let mut out = normalized[start_idx..].to_vec();
@@ -3143,18 +4970,21 @@ impl HistoryCell for CollapsibleReasoningCell {
         None
     }
 
-    fn has_custom_render(&self) -> bool { true }
+    fn has_custom_render(&self) -> bool {
+        true
+    }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
         // Collapsed path: simple paragraph (titles only), already dimmed by extract_section_titles
         if self.collapsed.get() {
-            // Clear background
-            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
-            for y in area.y..area.y.saturating_add(area.height) {
-                for x in area.x..area.x.saturating_add(area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
+            if self.hide_when_collapsed.get() {
+                return;
             }
+            // Clear background
+            let bg_style = Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text());
+            fill_rect(buf, area, Some(' '), bg_style);
             let lines = self.display_lines_trimmed();
             Paragraph::new(Text::from(lines))
                 .block(Block::default().style(Style::default().bg(crate::colors::background())))
@@ -3183,18 +5013,19 @@ impl HistoryCell for CollapsibleReasoningCell {
         // Clear area
         let bg = crate::colors::background();
         let bg_style = Style::default().bg(bg).fg(dim);
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Left border like exec output: 1px border + 1px left padding
         let block = Block::default()
             .borders(Borders::LEFT)
             .border_style(Style::default().fg(crate::colors::border_dim()).bg(bg))
             .style(Style::default().bg(bg))
-            .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+            .padding(Padding {
+                left: 1,
+                right: 0,
+                top: 0,
+                bottom: 0,
+            });
 
         // Scroll across wrapped content considering reduced inner width (area.width - 2)
         Paragraph::new(text)
@@ -3242,7 +5073,9 @@ impl HistoryCell for StreamingContentCell {
     fn desired_height(&self, width: u16) -> u16 {
         let plan = self.ensure_stream_layout(width);
         let mut total = plan.total_rows_with_padding;
-        if self.show_ellipsis { total = total.saturating_add(1); }
+        if self.show_ellipsis {
+            total = total.saturating_add(1);
+        }
         total
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
@@ -3251,11 +5084,7 @@ impl HistoryCell for StreamingContentCell {
         let bg_style = Style::default().bg(cell_bg);
 
         // Hard clear area with assistant background
-        for y in area.y..area.y.saturating_add(area.height) {
-            for x in area.x..area.x.saturating_add(area.width) {
-                buf[(x, y)].set_char(' ').set_style(bg_style);
-            }
-        }
+        fill_rect(buf, area, Some(' '), bg_style);
 
         // Build or reuse cached segments for this width
         let plan = self.ensure_stream_layout(area.width);
@@ -3271,17 +5100,17 @@ impl HistoryCell for StreamingContentCell {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis()
-                / 200) as usize % FRAMES.len();
+                / 200) as usize
+                % FRAMES.len();
             let frame = FRAMES[frame_idx];
 
-            segs.push(AssistantSeg::Text(vec![
-                Line::styled(frame.to_string(), Style::default().fg(crate::colors::text_dim())),
-            ]));
-            seg_rows.push(Paragraph::new(Text::from(vec![Line::from(frame)]))
-                .wrap(Wrap { trim: false })
-                .line_count(text_wrap_width)
-                .try_into()
-                .unwrap_or(1));
+            let ellipsis_line = Line::styled(
+                frame.to_string(),
+                Style::default().fg(crate::colors::text_dim()),
+            );
+            let wrapped = word_wrap_lines(&[ellipsis_line], text_wrap_width);
+            seg_rows.push(wrapped.len() as u16);
+            segs.push(AssistantSeg::Text(wrapped));
         }
 
         // Streaming-style top padding row
@@ -3295,7 +5124,11 @@ impl HistoryCell for StreamingContentCell {
 
         // Helpers
         #[derive(Debug, Clone)]
-        enum Seg { Text(Vec<Line<'static>>), Bullet(Vec<Line<'static>>), Code(Vec<Line<'static>>) }
+        enum Seg {
+            Text(Vec<Line<'static>>),
+            Bullet(Vec<Line<'static>>),
+            Code(Vec<Line<'static>>),
+        }
         use unicode_width::UnicodeWidthStr as UW;
         let measure_line =
             |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
@@ -3337,11 +5170,21 @@ impl HistoryCell for StreamingContentCell {
                 }
                 Seg::Bullet(lines) => {
                     let total = lines.len() as u16;
-                    if *skip >= total { *skip -= total; return; }
+                    if *skip >= total {
+                        *skip -= total;
+                        return;
+                    }
                     let avail = end_y.saturating_sub(*y);
                     let draw_h = (total.saturating_sub(*skip)).min(avail);
-                    if draw_h == 0 { return; }
-                    let rect = Rect { x: area.x, y: *y, width: area.width, height: draw_h };
+                    if draw_h == 0 {
+                        return;
+                    }
+                    let rect = Rect {
+                        x: area.x,
+                        y: *y,
+                        width: area.width,
+                        height: draw_h,
+                    };
                     let txt = Text::from(lines.clone());
                     Paragraph::new(txt)
                         .block(Block::default().style(bg_style))
@@ -3400,9 +5243,7 @@ impl HistoryCell for StreamingContentCell {
                         let drop = local_skip.min(bottom_border);
                         bottom_border -= drop;
                     }
-                    let visible = top_border
-                        + (lines.len() as u16 - code_skip)
-                        + bottom_border;
+                    let visible = top_border + (lines.len() as u16 - code_skip) + bottom_border;
                     let draw_h = visible.min(avail);
                     if draw_h == 0 {
                         return;
@@ -3422,7 +5263,12 @@ impl HistoryCell for StreamingContentCell {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
                         .style(Style::default().bg(code_bg))
-                        .padding(Padding { left: 2, right: 2, top: 0, bottom: 0 });
+                        .padding(Padding {
+                            left: 2,
+                            right: 2,
+                            top: 0,
+                            bottom: 0,
+                        });
                     if let Some(lang) = &lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
@@ -3462,7 +5308,7 @@ impl HistoryCell for StreamingContentCell {
             let seg_draw = match seg {
                 AssistantSeg::Text(lines) => Seg::Text(lines.clone()),
                 AssistantSeg::Bullet(lines) => Seg::Bullet(lines.clone()),
-                AssistantSeg::Code(lines) => Seg::Code(lines.clone()),
+                AssistantSeg::Code { lines, .. } => Seg::Code(lines.clone()),
             };
             draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
         }
@@ -3482,13 +5328,22 @@ impl HistoryCell for StreamingContentCell {
         let has_leading_header = self
             .lines
             .first()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()
-                .trim()
-                .eq_ignore_ascii_case("codex"))
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+                    .trim()
+                    .eq_ignore_ascii_case("codex")
+            })
             .unwrap_or(false);
 
         if has_leading_header {
-            if self.lines.len() == 1 { Vec::new() } else { self.lines[1..].to_vec() }
+            if self.lines.len() == 1 {
+                Vec::new()
+            } else {
+                self.lines[1..].to_vec()
+            }
         } else {
             self.lines.clone()
         }
@@ -3497,7 +5352,9 @@ impl HistoryCell for StreamingContentCell {
 
 impl StreamingContentCell {
     pub(crate) fn extend_lines(&mut self, mut new_lines: Vec<Line<'static>>) {
-        if new_lines.is_empty() { return; }
+        if new_lines.is_empty() {
+            return;
+        }
         self.lines.append(&mut new_lines);
         // Invalidate cached plan so next render recomputes incrementally for current width
         *self.cached_layout.borrow_mut() = None;
@@ -3596,22 +5453,25 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
     }
     // Fallback: derive from flattened text if span structure is unexpected.
     // This guards against upstream changes that merge or split the bullet/space spans.
-    let flat: String = line
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect();
+    let flat: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     let mut chars = flat.chars().peekable();
     let mut indent_count = 0usize;
-    while matches!(chars.peek(), Some(' ')) { chars.next(); indent_count += 1; }
+    while matches!(chars.peek(), Some(' ')) {
+        chars.next();
+        indent_count += 1;
+    }
     // Capture token up to first whitespace
     let mut token = String::new();
     while let Some(&ch) = chars.peek() {
-        if ch.is_whitespace() { break; }
+        if ch.is_whitespace() {
+            break;
+        }
         token.push(ch);
         chars.next();
         // Limit token length to avoid scanning entire lines on odd inputs
-        if token.len() > 8 { break; }
+        if token.len() > 8 {
+            break;
+        }
     }
     // Require at least one whitespace after the token
     let has_space = matches!(chars.peek(), Some(c) if c.is_whitespace());
@@ -3620,14 +5480,13 @@ fn detect_bullet_prefix(line: &ratatui::text::Line<'_>) -> Option<(usize, String
         if bullets.contains(&token.as_str())
             || (token.len() >= 2
                 && token.ends_with('.')
-                && token[..token.len()-1].chars().all(|c| c.is_ascii_digit()))
+                && token[..token.len() - 1].chars().all(|c| c.is_ascii_digit()))
         {
             return Some((indent_count, token));
         }
     }
     None
 }
-
 
 // Wrap a bullet line with a hanging indent so wrapped lines align under the content start.
 fn wrap_bullet_line(
@@ -3663,14 +5522,15 @@ fn wrap_bullet_line(
     }
     // Consume bullet span and optional following single-space span. Support
     // cases where the bullet span already contains a trailing space (e.g., "☐ ").
-    let bullet_style = if i < spans.len() { spans[i].style } else { Style::default() };
+    let bullet_style = if i < spans.len() {
+        spans[i].style
+    } else {
+        Style::default()
+    };
     if i < spans.len() {
         let bullet_span_text = spans[i].content.as_ref().to_string();
         i += 1; // consume bullet span
-        if !bullet_span_text.ends_with(' ')
-            && i < spans.len()
-            && spans[i].content.as_ref() == " "
-        {
+        if !bullet_span_text.ends_with(' ') && i < spans.len() && spans[i].content.as_ref() == " " {
             i += 1; // consume separate following space span
         }
     }
@@ -3693,7 +5553,8 @@ fn wrap_bullet_line(
     // align perfectly under the start of the sentence.
     let mut leading_content_spaces: usize = 0;
     while leading_content_spaces < clusters.len()
-        && (clusters[leading_content_spaces].0 == " " || clusters[leading_content_spaces].0 == "\u{3000}")
+        && (clusters[leading_content_spaces].0 == " "
+            || clusters[leading_content_spaces].0 == "\u{3000}")
     {
         leading_content_spaces += 1;
     }
@@ -3731,7 +5592,9 @@ fn wrap_bullet_line(
                 break;
             }
             cols += w;
-            if g == " " || g == "\u{3000}" { last_space_idx = Some(pos + taken); }
+            if g == " " || g == "\u{3000}" {
+                last_space_idx = Some(pos + taken);
+            }
             taken += 1;
             if cols == avail_cols {
                 break;
@@ -3798,12 +5661,16 @@ fn wrap_bullet_line(
             if cur_style.map(|cs| cs == *st).unwrap_or(false) {
                 buf.push_str(g);
             } else {
-                if !buf.is_empty() { seg_spans.push(Span::styled(std::mem::take(&mut buf), cur_style.unwrap())); }
+                if !buf.is_empty() {
+                    seg_spans.push(Span::styled(std::mem::take(&mut buf), cur_style.unwrap()));
+                }
                 cur_style = Some(*st);
                 buf.push_str(g);
             }
         }
-        if !buf.is_empty() { seg_spans.push(Span::styled(buf, cur_style.unwrap())); }
+        if !buf.is_empty() {
+            seg_spans.push(Span::styled(buf, cur_style.unwrap()));
+        }
         out.push(ratatui::text::Line::from(seg_spans));
         pos = next_start;
         first = false;
@@ -4002,11 +5869,12 @@ fn bold_first_sentence(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
 // Unified preview format: show first 2 and last 5 non-empty lines with an ellipsis between.
 const PREVIEW_HEAD_LINES: usize = 2;
 const PREVIEW_TAIL_LINES: usize = 5;
+const STREAMING_EXIT_CODE: i32 = i32::MIN;
 
 /// Normalize common TTY overwrite sequences within a text block so that
 /// progress lines using carriage returns, backspaces, or ESC[K erase behave as
 /// expected when rendered in a pure-buffered UI (no cursor movement).
-fn normalize_overwrite_sequences(input: &str) -> String {
+pub(crate) fn normalize_overwrite_sequences(input: &str) -> String {
     // Process per line, but keep CR/BS/CSI semantics within logical lines.
     // Treat "\n" as committing a line and resetting the cursor.
     let mut out = String::with_capacity(input.len());
@@ -4170,10 +6038,15 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     let stripped_plain = sanitize_for_tui(
         text,
         SanitizeMode::Plain,
-        SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false },
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
     );
     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&stripped_plain) {
-        let pretty = serde_json::to_string_pretty(&json_val).unwrap_or_else(|_| json_val.to_string());
+        let pretty =
+            serde_json::to_string_pretty(&json_val).unwrap_or_else(|_| json_val.to_string());
         let highlighted = crate::syntax_highlight::highlight_code_block(&pretty, Some("json"));
         return select_preview_from_lines(&highlighted, PREVIEW_HEAD_LINES, PREVIEW_TAIL_LINES);
     }
@@ -4181,7 +6054,15 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     // Otherwise, compact valid JSON (without ANSI) to improve wrap, or pass original through.
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let processed = sanitize_for_tui(
+        &processed,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
 
     enum Seg<'a> {
@@ -4193,17 +6074,23 @@ fn build_preview_lines(text: &str, _include_left_pipe: bool) -> Vec<Line<'static
     } else {
         let mut v: Vec<Seg> = Vec::with_capacity(PREVIEW_HEAD_LINES + PREVIEW_TAIL_LINES + 1);
         // Head
-        for i in 0..PREVIEW_HEAD_LINES { v.push(Seg::Line(non_empty[i])); }
+        for i in 0..PREVIEW_HEAD_LINES {
+            v.push(Seg::Line(non_empty[i]));
+        }
         v.push(Seg::Ellipsis);
         // Tail
         let start = non_empty.len().saturating_sub(PREVIEW_TAIL_LINES);
-        for s in &non_empty[start..] { v.push(Seg::Line(s)); }
+        for s in &non_empty[start..] {
+            v.push(Seg::Line(s));
+        }
         v
     };
 
     fn ansi_line_with_theme_bg(s: &str) -> Line<'static> {
         let mut ln = ansi_escape_line(s);
-        for sp in ln.spans.iter_mut() { sp.style.bg = None; }
+        for sp in ln.spans.iter_mut() {
+            sp.style.bg = None;
+        }
         ln
     }
 
@@ -4232,20 +6119,31 @@ fn output_lines(
     };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let is_streaming_preview = *exit_code == STREAMING_EXIT_CODE;
 
     if !only_err && !stdout.is_empty() {
         lines.extend(build_preview_lines(stdout, include_angle_pipe));
     }
 
-    if !stderr.is_empty() && *exit_code != 0 {
+    if !stderr.is_empty() && (is_streaming_preview || *exit_code != 0) {
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
-        lines.push(Line::styled(
-            format!("Error (exit code {})", exit_code),
-            Style::default().fg(crate::colors::error()),
-        ));
-        let stderr_norm = sanitize_for_tui(&normalize_overwrite_sequences(stderr), SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+        if !is_streaming_preview {
+            lines.push(Line::styled(
+                format!("Error (exit code {})", exit_code),
+                Style::default().fg(crate::colors::error()),
+            ));
+        }
+        let stderr_norm = sanitize_for_tui(
+            &normalize_overwrite_sequences(stderr),
+            SanitizeMode::AnsiPreserving,
+            SanitizeOptions {
+                expand_tabs: true,
+                tabstop: 4,
+                debug_markers: false,
+            },
+        );
         for line in stderr_norm.lines().filter(|line| !line.is_empty()) {
             lines.push(ansi_escape_line(line).style(Style::default().fg(crate::colors::error())));
         }
@@ -4295,16 +6193,14 @@ pub(crate) fn new_background_event(message: String) -> PlainHistoryCell {
     let msg_norm = normalize_overwrite_sequences(&message);
     lines.extend(msg_norm.lines().map(|line| ansi_escape_line(line).dim()));
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::BackgroundEvent,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::BackgroundEvent)
 }
 
 pub(crate) fn new_session_info(
     config: &Config,
     event: SessionConfiguredEvent,
     is_first_event: bool,
+    latest_version: Option<&str>,
 ) -> PlainHistoryCell {
     let SessionConfiguredEvent {
         model,
@@ -4317,50 +6213,52 @@ pub(crate) fn new_session_info(
     if is_first_event {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from("notice".dim()));
-        lines.extend(popular_commands_lines());
-        PlainHistoryCell { lines, kind: HistoryCellType::Notice }
+        lines.extend(popular_commands_lines(latest_version));
+        PlainHistoryCell::new(lines, HistoryCellType::Notice)
     } else if config.model == model {
-        PlainHistoryCell {
-            lines: Vec::new(),
-            kind: HistoryCellType::Notice,
-        }
+        PlainHistoryCell::new(Vec::new(), HistoryCellType::Notice)
     } else {
         let lines = vec![
-        Line::from("model changed:")
-            .fg(crate::colors::keyword())
-            .bold(),
+            Line::from("model changed:")
+                .fg(crate::colors::keyword())
+                .bold(),
             Line::from(format!("requested: {}", config.model)),
             Line::from(format!("used: {model}")),
             // No empty line at end - trimming and spacing handled by renderer
         ];
-        PlainHistoryCell {
-            lines,
-            kind: HistoryCellType::Notice,
-        }
+        PlainHistoryCell::new(lines, HistoryCellType::Notice)
     }
 }
 
 /// Build the common lines for the "Popular commands" section (without the leading
 /// "notice" marker). Shared between the initial session info and the startup prelude.
-fn popular_commands_lines() -> Vec<Line<'static>> {
+fn popular_commands_lines(latest_version: Option<&str>) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::styled(
         "Popular commands:",
         Style::default().fg(crate::colors::text_bright()),
     ));
     lines.push(Line::from(vec![
+        Span::styled("/agents", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Agents.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/model", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Model.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            " NEW with GPT-5-Codex!",
+            Style::default().fg(crate::colors::primary()),
+        ),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Chrome.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled(
-            "/browser <url>",
-            Style::default().fg(crate::colors::primary()),
-        ),
-        Span::from(" - "),
-        Span::from(SlashCommand::Browser.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
@@ -4382,10 +6280,11 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/reasoning", Style::default().fg(crate::colors::primary())),
+        Span::styled("/branch", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
-        Span::from(SlashCommand::Reasoning.description())
+        Span::from(SlashCommand::Branch.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/resume", Style::default().fg(crate::colors::primary())),
@@ -4393,19 +6292,37 @@ fn popular_commands_lines() -> Vec<Line<'static>> {
         Span::from(SlashCommand::Resume.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
+
+    if let Some(version) = latest_version {
+        let primary = Style::default()
+            .fg(crate::colors::primary())
+            .add_modifier(Modifier::BOLD);
+        lines.push(Line::from(vec![
+            Span::styled("★ Update Available!", primary),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("   Use "),
+            Span::styled("/update", Style::default().fg(crate::colors::primary())),
+            Span::raw(format!(" to install version {version}")),
+        ]));
+    }
+
     lines
 }
 
 /// Create a notice cell that shows the "Popular commands" immediately.
 /// If `connecting_mcp` is true, include a dim status line to inform users
 /// that external MCP servers are being connected in the background.
-pub(crate) fn new_popular_commands_notice(_connecting_mcp: bool) -> PlainHistoryCell {
+pub(crate) fn new_popular_commands_notice(
+    _connecting_mcp: bool,
+    latest_version: Option<&str>,
+) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from("notice".dim()));
-    lines.extend(popular_commands_lines());
+    lines.extend(popular_commands_lines(latest_version));
     // Connecting status is now rendered as a separate BackgroundEvent cell
     // with its own gutter icon and spacing. Keep this notice focused.
-    PlainHistoryCell { lines, kind: HistoryCellType::Notice }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 /// Background status cell shown during startup while external MCP servers
@@ -4421,7 +6338,7 @@ pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
         "Connecting MCP servers…",
         Style::default().fg(crate::colors::text_dim()),
     )));
-    PlainHistoryCell { lines, kind: HistoryCellType::BackgroundEvent }
+    PlainHistoryCell::new(lines, HistoryCellType::BackgroundEvent)
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
@@ -4432,16 +6349,21 @@ pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
     // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
     // - Parse ANSI sequences into spans so we never emit raw control bytes
     let normalized = normalize_overwrite_sequences(&message);
-    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let sanitized = sanitize_for_tui(
+        &normalized,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     // Build content lines with ANSI converted to styled spans
     let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
     lines.extend(content);
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::User,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::User)
 }
 
 /// Render a queued user message that will be sent in the next turn.
@@ -4458,14 +6380,19 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
     ]));
     // Normalize and render body like normal user messages
     let normalized = normalize_overwrite_sequences(&message);
-    let sanitized = sanitize_for_tui(&normalized, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
-    let content: Vec<Line<'static>> = sanitized
-        .lines()
-        .map(|l| ansi_escape_line(l))
-        .collect();
+    let sanitized = sanitize_for_tui(
+        &normalized,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
+    let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
     let content = trim_empty_lines(content);
     lines.extend(content);
-    PlainHistoryCell { lines, kind: HistoryCellType::User }
+    PlainHistoryCell::new(lines, HistoryCellType::User)
 }
 
 /// Expand horizontal tabs to spaces using a fixed tab stop.
@@ -4476,21 +6403,28 @@ pub(crate) fn new_queued_user_prompt(message: String) -> PlainHistoryCell {
 
 #[allow(dead_code)]
 pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
-    PlainHistoryCell {
-        lines: vec![line],
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(vec![line], HistoryCellType::Notice)
 }
 
 pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
-    StreamingContentCell { id: None, lines, show_ellipsis: true, cached_layout: std::cell::RefCell::new(None) }
+    StreamingContentCell {
+        id: None,
+        lines,
+        show_ellipsis: true,
+        cached_layout: std::cell::RefCell::new(None),
+    }
 }
 
 pub(crate) fn new_streaming_content_with_id(
     id: Option<String>,
     lines: Vec<Line<'static>>,
 ) -> StreamingContentCell {
-    StreamingContentCell { id, lines, show_ellipsis: true, cached_layout: std::cell::RefCell::new(None) }
+    StreamingContentCell {
+        id,
+        lines,
+        show_ellipsis: true,
+        cached_layout: std::cell::RefCell::new(None),
+    }
 }
 
 pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
@@ -4524,6 +6458,16 @@ pub(crate) fn new_completed_exec_command(
     new_exec_cell(command, parsed, Some(output))
 }
 
+fn command_has_bold_token(command: &[String]) -> bool {
+    let command_escaped = strip_bash_lc_and_escape(command);
+    let normalized = normalize_shell_command_display(&command_escaped);
+    let trimmed = normalized.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.chars().take_while(|ch| !ch.is_whitespace()).count() > 4
+}
+
 fn new_exec_cell(
     command: Vec<String>,
     parsed: Vec<ParsedCommand>,
@@ -4534,15 +6478,27 @@ fn new_exec_cell(
     } else {
         None
     };
+    let has_bold_command = command_has_bold_token(&command);
+    let parsed_meta = if parsed.is_empty() {
+        None
+    } else {
+        Some(ParsedExecMetadata::from_commands(&parsed))
+    };
     ExecCell {
         command,
         parsed,
         output,
         start_time,
+        stream_preview: None,
         cached_display_lines: std::cell::RefCell::new(None),
         cached_pre_lines: std::cell::RefCell::new(None),
         cached_out_lines: std::cell::RefCell::new(None),
-        cached_wrap: std::cell::RefCell::new(None),
+        cached_layout: std::cell::RefCell::new(None),
+        cached_command_lines: std::cell::RefCell::new(None),
+        cached_wait_extras: std::cell::RefCell::new(None),
+        parsed_meta,
+        has_bold_command,
+        wait_state: std::cell::RefCell::new(ExecWaitState::default()),
     }
 }
 
@@ -4550,11 +6506,12 @@ fn exec_command_lines(
     command: &[String],
     parsed: &[ParsedCommand],
     output: Option<&CommandOutput>,
+    stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
 ) -> Vec<Line<'static>> {
     match parsed.is_empty() {
-        true => new_exec_command_generic(command, output, start_time),
-        false => new_parsed_command(parsed, output, start_time),
+        true => new_exec_command_generic(command, output, stream_preview, start_time),
+        false => new_parsed_command(parsed, output, stream_preview, start_time),
     }
 }
 
@@ -4579,7 +6536,7 @@ fn first_context_path(parsed_commands: &[ParsedCommand]) -> Option<String> {
     None
 }
 
-fn parse_read_line_annotation(cmd: &str) -> Option<String> {
+fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(u32, u32)>) {
     let lower = cmd.to_lowercase();
     // Try sed -n '<start>,<end>p'
     if lower.contains("sed") && lower.contains("-n") {
@@ -4591,7 +6548,10 @@ fn parse_read_line_annotation(cmd: &str) -> Option<String> {
                 if let Some((a, b)) = core.split_once(',') {
                     if let (Ok(start), Ok(end)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>())
                     {
-                        return Some(format!("(lines {} to {})", start, end));
+                        return (
+                            Some(format!("(lines {} to {})", start, end)),
+                            Some((start, end)),
+                        );
                     }
                 }
             }
@@ -4607,9 +6567,16 @@ fn parse_read_line_annotation(cmd: &str) -> Option<String> {
                     .trim_matches('\'')
                     .parse::<u32>()
                 {
-                    return Some(format!("(lines 1 to {})", n));
+                    return (Some(format!("(lines 1 to {})", n)), Some((1, n)));
                 }
             }
+        }
+    }
+    // bare `head` => default 10 lines
+    if lower.contains("head") && !lower.contains("-n") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.iter().any(|p| *p == "head") {
+            return (Some("(lines 1 to 10)".to_string()), Some((1, 10)));
         }
     }
     // tail -n +K => from K to end; tail -n N => last N lines
@@ -4620,124 +6587,1321 @@ fn parse_read_line_annotation(cmd: &str) -> Option<String> {
                 let val = parts[i + 1].trim_matches('"').trim_matches('\'');
                 if let Some(rest) = val.strip_prefix('+') {
                     if let Ok(k) = rest.parse::<u32>() {
-                        return Some(format!("(from {} to end)", k));
+                        return (Some(format!("(from {} to end)", k)), Some((k, u32::MAX)));
                     }
                 } else if let Ok(n) = val.parse::<u32>() {
-                    return Some(format!("(last {} lines)", n));
+                    return (Some(format!("(last {} lines)", n)), None);
                 }
             }
         }
     }
+    // bare `tail` => default 10 lines
+    if lower.contains("tail") && !lower.contains("-n") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.iter().any(|p| *p == "tail") {
+            return (Some("(last 10 lines)".to_string()), None);
+        }
+    }
+    (None, None)
+}
+
+fn parse_read_line_annotation(cmd: &str) -> Option<String> {
+    parse_read_line_annotation_with_range(cmd).0
+}
+
+fn normalize_shell_command_display(cmd: &str) -> String {
+    let first_non_ws = cmd
+        .char_indices()
+        .find(|(_, ch)| !ch.is_whitespace())
+        .map(|(idx, _)| idx);
+    let Some(start) = first_non_ws else {
+        return cmd.to_string();
+    };
+    if cmd[start..].starts_with("./") {
+        let mut normalized = String::with_capacity(cmd.len().saturating_sub(2));
+        normalized.push_str(&cmd[..start]);
+        normalized.push_str(&cmd[start + 2..]);
+        normalized
+    } else {
+        cmd.to_string()
+    }
+}
+
+fn insert_line_breaks_after_double_ampersand(cmd: &str) -> String {
+    if !cmd.contains("&&") {
+        return cmd.to_string();
+    }
+
+    let mut result = String::with_capacity(cmd.len() + 8);
+    let mut i = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while i < cmd.len() {
+        let ch = cmd[i..].chars().next().expect("valid char boundary");
+        let ch_len = ch.len_utf8();
+
+        match ch {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                result.push(ch);
+                i += ch_len;
+                continue;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                result.push(ch);
+                i += ch_len;
+                continue;
+            }
+            '&' if !in_single && !in_double => {
+                let next_idx = i + ch_len;
+                if next_idx < cmd.len() {
+                    if let Some(next_ch) = cmd[next_idx..].chars().next() {
+                        if next_ch == '&' {
+                            result.push('&');
+                            result.push('&');
+                            i = next_idx + next_ch.len_utf8();
+                            while i < cmd.len() {
+                                let ahead = cmd[i..].chars().next().expect("valid char boundary");
+                                if ahead.is_whitespace() {
+                                    i += ahead.len_utf8();
+                                    continue;
+                                }
+                                break;
+                            }
+                            if i < cmd.len() {
+                                result.push('\n');
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        result.push(ch);
+        i += ch_len;
+    }
+
+    result
+}
+
+fn emphasize_shell_command_name(line: &mut Line<'static>) {
+    let mut emphasized = false;
+    let mut rebuilt: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
+
+    for span in line.spans.drain(..) {
+        if emphasized {
+            rebuilt.push(span);
+            continue;
+        }
+
+        let style = span.style;
+        let content_owned = span.content.into_owned();
+
+        if content_owned.trim().is_empty() {
+            rebuilt.push(Span::styled(content_owned, style));
+            continue;
+        }
+
+        let mut token_start: Option<usize> = None;
+        for (idx, ch) in content_owned.char_indices() {
+            if !ch.is_whitespace() {
+                token_start = Some(idx);
+                break;
+            }
+        }
+
+        let Some(start) = token_start else {
+            rebuilt.push(Span::styled(content_owned, style));
+            continue;
+        };
+
+        let mut end = content_owned.len();
+        for (offset, ch) in content_owned[start..].char_indices() {
+            if ch.is_whitespace() {
+                end = start + offset;
+                break;
+            }
+        }
+
+        let before = &content_owned[..start];
+        let token = &content_owned[start..end];
+        let after = &content_owned[end..];
+
+        if !before.is_empty() {
+            rebuilt.push(Span::styled(before.to_string(), style));
+        }
+
+        if token.chars().count() <= 4 {
+            rebuilt.push(Span::styled(token.to_string(), style));
+        } else {
+            let bright_style = style
+                .fg(crate::colors::text_bright())
+                .add_modifier(Modifier::BOLD);
+            rebuilt.push(Span::styled(token.to_string(), bright_style));
+        }
+
+        if !after.is_empty() {
+            rebuilt.push(Span::styled(after.to_string(), style));
+        }
+
+        emphasized = true;
+    }
+
+    if emphasized {
+        line.spans = rebuilt;
+    } else if !rebuilt.is_empty() {
+        line.spans = rebuilt;
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn format_inline_python_for_display(command_escaped: &str) -> String {
+    try_format_inline_python(command_escaped).unwrap_or_else(|| command_escaped.to_string())
+}
+
+fn format_inline_script_for_display(command_escaped: &str) -> String {
+    if let Some(formatted) = try_format_inline_python(command_escaped) {
+        return formatted;
+    }
+    if let Some(formatted) = format_inline_node_for_display(command_escaped) {
+        return formatted;
+    }
+    if let Some(formatted) = format_inline_shell_for_display(command_escaped) {
+        return formatted;
+    }
+    command_escaped.to_string()
+}
+
+fn try_format_inline_python(command_escaped: &str) -> Option<String> {
+    if let Some(formatted) = format_python_dash_c(command_escaped) {
+        return Some(formatted);
+    }
+    if let Some(formatted) = format_python_heredoc(command_escaped) {
+        return Some(formatted);
+    }
     None
+}
+
+fn format_python_dash_c(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let python_idx = tokens
+        .iter()
+        .position(|token| is_python_invocation_token(token))?;
+
+    let c_idx = tokens
+        .iter()
+        .enumerate()
+        .skip(python_idx + 1)
+        .find_map(|(idx, token)| if token == "-c" { Some(idx) } else { None })?;
+
+    let script_idx = c_idx + 1;
+    if script_idx >= tokens.len() {
+        return None;
+    }
+
+    let script_raw = tokens[script_idx].as_str();
+    if script_raw.is_empty() {
+        return None;
+    }
+
+    let script_block = build_python_script_block(script_raw)?;
+
+    let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == script_idx {
+            parts.push(script_block.clone());
+        } else {
+            parts.push(escape_token_for_display(token));
+        }
+    }
+
+    Some(parts.join(" "))
+}
+
+fn build_python_script_block(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let lines: Vec<String> = if normalized.contains('\n') {
+        normalized
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect()
+    } else if script_has_semicolon_outside_quotes(&normalized) {
+        split_semicolon_statements(&normalized)
+    } else {
+        return None;
+    };
+
+    let meaningful: Vec<String> = merge_from_import_lines(lines)
+        .into_iter()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    if meaningful.len() <= 1 {
+        return None;
+    }
+
+    let indented = indent_python_lines(meaningful);
+
+    let mut block = String::from("'\n");
+    for line in indented {
+        block.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
+        block.push('\n');
+    }
+    block.push('\'');
+    Some(block)
+}
+
+fn format_python_heredoc(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let python_idx = tokens
+        .iter()
+        .position(|token| is_python_invocation_token(token))?;
+
+    let heredoc_idx = tokens
+        .iter()
+        .enumerate()
+        .skip(python_idx + 1)
+        .find_map(|(idx, token)| heredoc_delimiter(token).map(|delim| (idx, delim)))?;
+
+    let (marker_idx, terminator) = heredoc_idx;
+    let closing_idx = tokens
+        .iter()
+        .enumerate()
+        .skip(marker_idx + 1)
+        .rev()
+        .find_map(|(idx, token)| (token == &terminator).then_some(idx))?;
+
+    if closing_idx <= marker_idx + 1 {
+        return None;
+    }
+
+    let script_tokens = &tokens[marker_idx + 1..closing_idx];
+    if script_tokens.is_empty() {
+        return None;
+    }
+
+    let script_lines = split_heredoc_script_lines(script_tokens);
+    if script_lines.is_empty() {
+        return None;
+    }
+
+    let script_lines = indent_python_lines(merge_from_import_lines(script_lines));
+
+    let header_tokens: Vec<String> = tokens[..=marker_idx]
+        .iter()
+        .map(|t| escape_token_for_display(t))
+        .collect();
+
+    let mut result = header_tokens.join(" ");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+
+    for line in script_lines {
+        result.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.trim_end());
+        result.push_str(escaped.as_str());
+        result.push('\n');
+    }
+
+    result.push_str(&escape_token_for_display(&tokens[closing_idx]));
+
+    if closing_idx + 1 < tokens.len() {
+        let tail: Vec<String> = tokens[closing_idx + 1..]
+            .iter()
+            .map(|t| escape_token_for_display(t))
+            .collect();
+        if !tail.is_empty() {
+            result.push(' ');
+            result.push_str(&tail.join(" "));
+        }
+    }
+
+    Some(result)
+}
+
+fn heredoc_delimiter(token: &str) -> Option<String> {
+    if !token.starts_with("<<") {
+        return None;
+    }
+    let mut delim = token.trim_start_matches("<<").to_string();
+    if delim.is_empty() {
+        return None;
+    }
+    if delim.starts_with('"') && delim.ends_with('"') && delim.len() >= 2 {
+        delim = delim[1..delim.len() - 1].to_string();
+    } else if delim.starts_with('\'') && delim.ends_with('\'') && delim.len() >= 2 {
+        delim = delim[1..delim.len() - 1].to_string();
+    }
+    if delim.is_empty() {
+        None
+    } else {
+        Some(delim)
+    }
+}
+
+fn split_heredoc_script_lines(script_tokens: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut paren_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut current_has_assignment = false;
+
+    for (idx, token) in script_tokens.iter().enumerate() {
+        if !current.is_empty()
+            && paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+        {
+            let token_lower = token.to_ascii_lowercase();
+            let current_first = current.first().map(|s| s.to_ascii_lowercase());
+            let should_flush_before = is_statement_boundary_token(token)
+                && !(token_lower == "import"
+                    && current_first.as_deref() == Some("from"));
+            if should_flush_before {
+                let line = current.join(" ");
+                lines.push(line.trim().to_string());
+                current.clear();
+                current_has_assignment = false;
+            }
+        }
+
+        current.push(token.clone());
+        adjust_bracket_depth(token, &mut paren_depth, &mut bracket_depth, &mut brace_depth);
+
+        if is_assignment_operator(token) {
+            current_has_assignment = true;
+        }
+
+        let next = script_tokens.get(idx + 1);
+        let mut should_break = false;
+        let mut break_here = false;
+
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            if next.is_none() {
+                should_break = true;
+            } else {
+                let next_token = next.unwrap();
+                if is_statement_boundary_token(next_token) {
+                    should_break = true;
+                } else if current
+                    .first()
+                    .map(|s| s.as_str() == "import" || s.as_str() == "from")
+                    .unwrap_or(false)
+                {
+                    if current.len() > 1 && next_token != "as" && next_token != "," {
+                        should_break = true;
+                    }
+                } else if current_has_assignment
+                    && !is_assignment_operator(token)
+                    && next_token
+                        .chars()
+                        .next()
+                        .map(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                        .unwrap_or(false)
+                    && !next_token.contains('(')
+                {
+                    should_break = true;
+                }
+
+                let token_trimmed = token.trim_matches(|c| c == ')' || c == ']' || c == '}');
+                if token_trimmed.ends_with(':') {
+                    break_here = true;
+                }
+
+                let lowered = token.trim().to_ascii_lowercase();
+                if matches!(lowered.as_str(), "return" | "break" | "continue" | "pass") {
+                    break_here = true;
+                }
+
+                if let Some(next_token) = next {
+                    let next_str = next_token.as_str();
+                    if token.ends_with(')')
+                        && (next_str.contains('.')
+                            || next_str.contains('=')
+                            || next_str.starts_with("print"))
+                    {
+                        break_here = true;
+                    }
+                }
+            }
+        }
+
+        if break_here {
+            let line = current.join(" ");
+            lines.push(line.trim().to_string());
+            current.clear();
+            current_has_assignment = false;
+            continue;
+        }
+
+        if should_break {
+            let line = current.join(" ");
+            lines.push(line.trim().to_string());
+            current.clear();
+            current_has_assignment = false;
+        }
+    }
+
+    if !current.is_empty() {
+        let line = current.join(" ");
+        lines.push(line.trim().to_string());
+    }
+
+    lines.into_iter().filter(|line| !line.is_empty()).collect()
+}
+
+fn is_statement_boundary_token(token: &str) -> bool {
+    matches!(
+        token,
+        "import"
+            | "from"
+            | "def"
+            | "class"
+            | "if"
+            | "elif"
+            | "else"
+            | "for"
+            | "while"
+            | "try"
+            | "except"
+            | "with"
+            | "return"
+            | "raise"
+            | "pass"
+            | "continue"
+            | "break"
+    ) || token.starts_with("print")
+}
+
+fn indent_python_lines(lines: Vec<String>) -> Vec<String> {
+    let mut indented: Vec<String> = Vec::with_capacity(lines.len());
+    let mut indent_level: usize = 0;
+    let mut pending_dedent_after_flow = false;
+
+    for raw in lines {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            indented.push(String::new());
+            continue;
+        }
+
+        let lowered_first = trimmed
+            .split_whitespace()
+            .next()
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        if pending_dedent_after_flow
+            && !matches!(
+                lowered_first.as_str(),
+                "elif" | "else" | "except" | "finally"
+            )
+        {
+            if indent_level > 0 {
+                indent_level -= 1;
+            }
+        }
+        pending_dedent_after_flow = false;
+
+        if matches!(
+            lowered_first.as_str(),
+            "elif" | "else" | "except" | "finally"
+        ) {
+            if indent_level > 0 {
+                indent_level -= 1;
+            }
+        }
+
+        let mut line = String::with_capacity(trimmed.len() + indent_level * 4);
+        for _ in 0..indent_level {
+            line.push_str("    ");
+        }
+        line.push_str(trimmed);
+        indented.push(line);
+
+        if trimmed.ends_with(':')
+            && !matches!(
+                lowered_first.as_str(),
+                "return" | "break" | "continue" | "pass" | "raise"
+            )
+        {
+            indent_level += 1;
+        } else if matches!(
+            lowered_first.as_str(),
+            "return" | "break" | "continue" | "pass" | "raise"
+        ) {
+            pending_dedent_after_flow = true;
+        }
+    }
+
+    indented
+}
+
+fn merge_from_import_lines(lines: Vec<String>) -> Vec<String> {
+    let mut merged: Vec<String> = Vec::with_capacity(lines.len());
+    let mut idx = 0;
+    while idx < lines.len() {
+        let line = lines[idx].trim().to_string();
+        if line.starts_with("from ")
+            && idx + 1 < lines.len()
+            && lines[idx + 1].trim_start().starts_with("import ")
+        {
+            let combined = format!(
+                "{} {}",
+                line.trim_end(),
+                lines[idx + 1].trim_start()
+            );
+            merged.push(combined);
+            idx += 2;
+        } else {
+            merged.push(line);
+            idx += 1;
+        }
+    }
+    merged
+}
+
+fn is_assignment_operator(token: &str) -> bool {
+    matches!(
+        token,
+        "="
+            | "+="
+            | "-="
+            | "*="
+            | "/="
+            | "//="
+            | "%="
+            | "^="
+            | "|="
+            | "&="
+            | "**="
+            | "<<="
+            | ">>="
+    )
+}
+
+fn is_shell_executable(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
+    let lowered = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(
+        lowered.as_str(),
+        "bash"
+            | "bash.exe"
+            | "sh"
+            | "sh.exe"
+            | "dash"
+            | "dash.exe"
+            | "zsh"
+            | "zsh.exe"
+            | "ksh"
+            | "ksh.exe"
+            | "busybox"
+    )
+}
+
+fn escape_single_quotes_for_shell(s: &str) -> String {
+    if !s.contains('\'') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut iter = s.split('\'');
+    if let Some(first) = iter.next() {
+        out.push_str(first);
+    }
+    for segment in iter {
+        out.push_str("'\\''");
+        out.push_str(segment);
+    }
+    out
+}
+
+fn is_node_invocation_token(token: &str) -> bool {
+    let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
+    let base = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(base.as_str(), "node" | "node.exe" | "nodejs" | "nodejs.exe")
+}
+
+fn format_node_script(tokens: &[String], script_idx: usize, script: &str) -> Option<String> {
+    let block = build_js_script_block(script)?;
+    let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == script_idx {
+            parts.push(block.clone());
+        } else {
+            parts.push(escape_token_for_display(token));
+        }
+    }
+    Some(parts.join(" "))
+}
+
+fn build_js_script_block(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let lines: Vec<String> = if normalized.contains('\n') {
+        normalized
+            .lines()
+            .map(|line| line.trim_end().to_string())
+            .collect()
+    } else {
+        split_js_statements(&normalized)
+    };
+
+    let meaningful: Vec<String> = lines
+        .into_iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    if meaningful.len() <= 1 {
+        return None;
+    }
+
+    let indented = indent_js_lines(meaningful);
+    let mut block = String::from("'\n");
+    for line in indented {
+        block.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
+        block.push('\n');
+    }
+    block.push('\'');
+    Some(block)
+}
+
+fn split_js_statements(script: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut escape = false;
+    let mut paren_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut bracket_depth = 0i32;
+
+    for ch in script.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_single || in_double || in_backtick => {
+                escape = true;
+                current.push(ch);
+                continue;
+            }
+            '\'' if !in_double && !in_backtick => {
+                in_single = !in_single;
+                current.push(ch);
+                continue;
+            }
+            '"' if !in_single && !in_backtick => {
+                in_double = !in_double;
+                current.push(ch);
+                continue;
+            }
+            '`' if !in_single && !in_double => {
+                in_backtick = !in_backtick;
+                current.push(ch);
+                continue;
+            }
+            _ => {}
+        }
+
+        if !(in_single || in_double || in_backtick) {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => {
+                    if brace_depth > 0 {
+                        brace_depth -= 1;
+                    }
+                }
+                '(' => paren_depth += 1,
+                ')' => {
+                    if paren_depth > 0 {
+                        paren_depth -= 1;
+                    }
+                }
+                '[' => bracket_depth += 1,
+                ']' => {
+                    if bracket_depth > 0 {
+                        bracket_depth -= 1;
+                    }
+                }
+                ';' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                    current.push(ch);
+                    let seg = current.trim().to_string();
+                    if !seg.is_empty() {
+                        segments.push(seg);
+                    }
+                    current.clear();
+                    continue;
+                }
+                '\n' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
+                    let seg = current.trim().to_string();
+                    if !seg.is_empty() {
+                        segments.push(seg);
+                    }
+                    current.clear();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        current.push(ch);
+    }
+
+    let seg = current.trim().to_string();
+    if !seg.is_empty() {
+        segments.push(seg);
+    }
+    segments
+}
+
+fn indent_js_lines(lines: Vec<String>) -> Vec<String> {
+    let mut indented: Vec<String> = Vec::with_capacity(lines.len());
+    let mut indent_level: usize = 0;
+
+    for raw in lines {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            indented.push(String::new());
+            continue;
+        }
+
+        let mut leading_closers = 0usize;
+        let mut cut = trimmed.len();
+        for (idx, ch) in trimmed.char_indices() {
+            match ch {
+                '}' | ']' => {
+                    leading_closers += 1;
+                    cut = idx + ch.len_utf8();
+                    continue;
+                }
+                _ => {
+                    cut = idx;
+                    break;
+                }
+            }
+        }
+
+        if leading_closers > 0 && cut >= trimmed.len() {
+            cut = trimmed.len();
+        }
+
+        if leading_closers > 0 {
+            indent_level = indent_level.saturating_sub(leading_closers);
+        }
+
+        let remainder = trimmed[cut..].trim_start();
+        let mut line = String::with_capacity(remainder.len() + indent_level * 4);
+        for _ in 0..indent_level {
+            line.push_str("    ");
+        }
+        if remainder.is_empty() && cut < trimmed.len() {
+            line.push_str(trimmed);
+        } else {
+            line.push_str(remainder);
+        }
+        indented.push(line);
+
+        let (opens, closes) = js_brace_deltas(trimmed);
+        indent_level = indent_level + opens;
+        indent_level = indent_level.saturating_sub(closes);
+    }
+
+    indented
+}
+
+fn js_brace_deltas(line: &str) -> (usize, usize) {
+    let mut opens = 0usize;
+    let mut closes = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut escape = false;
+
+    for ch in line.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double || in_backtick => {
+                escape = true;
+            }
+            '\'' if !in_double && !in_backtick => in_single = !in_single,
+            '"' if !in_single && !in_backtick => in_double = !in_double,
+            '`' if !in_single && !in_double => in_backtick = !in_backtick,
+            '{' if !(in_single || in_double || in_backtick) => opens += 1,
+            '}' if !(in_single || in_double || in_backtick) => closes += 1,
+            _ => {}
+        }
+    }
+
+    (opens, closes)
+}
+
+fn is_shell_invocation_token(token: &str) -> bool {
+    is_shell_executable(token)
+}
+
+fn format_shell_script(tokens: &[String], script_idx: usize, script: &str) -> Option<String> {
+    let block = build_shell_script_block(script)?;
+    let mut parts: Vec<String> = Vec::with_capacity(tokens.len());
+    for (idx, token) in tokens.iter().enumerate() {
+        if idx == script_idx {
+            parts.push(block.clone());
+        } else {
+            parts.push(escape_token_for_display(token));
+        }
+    }
+    Some(parts.join(" "))
+}
+
+fn build_shell_script_block(script: &str) -> Option<String> {
+    let normalized = script.replace("\r\n", "\n");
+    let segments = split_shell_statements(&normalized);
+    let meaningful: Vec<String> = segments
+        .into_iter()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if meaningful.len() <= 1 {
+        return None;
+    }
+    let indented = indent_shell_lines(meaningful);
+    let mut block = String::from("'\n");
+    for line in indented {
+        block.push_str("    ");
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
+        block.push('\n');
+    }
+    block.push('\'');
+    Some(block)
+}
+
+fn split_shell_statements(script: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    let chars: Vec<char> = script.chars().collect();
+    let mut idx = 0;
+    while idx < chars.len() {
+        let ch = chars[idx];
+        if escape {
+            current.push(ch);
+            escape = false;
+            idx += 1;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double => {
+                escape = true;
+                current.push(ch);
+                idx += 1;
+                continue;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+                idx += 1;
+                continue;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+                idx += 1;
+                continue;
+            }
+            ';' if !(in_single || in_double) => {
+                current.push(ch);
+                segments.push(current.trim().to_string());
+                current.clear();
+                idx += 1;
+                continue;
+            }
+            '&' | '|' if !(in_single || in_double) => {
+                let current_op = ch;
+                if idx + 1 < chars.len() && chars[idx + 1] == current_op {
+                    if !current.trim().is_empty() {
+                        segments.push(current.trim().to_string());
+                    }
+                    segments.push(format!("{}{}", current_op, current_op));
+                    current.clear();
+                    idx += 2;
+                    continue;
+                }
+            }
+            '\n' if !(in_single || in_double) => {
+                segments.push(current.trim().to_string());
+                current.clear();
+                idx += 1;
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+        idx += 1;
+    }
+
+    if !current.trim().is_empty() {
+        segments.push(current.trim().to_string());
+    }
+
+    segments
+}
+
+fn indent_shell_lines(lines: Vec<String>) -> Vec<String> {
+    let mut indented: Vec<String> = Vec::with_capacity(lines.len());
+    let mut indent_level: usize = 0;
+
+    for raw in lines {
+        if raw == "&&" || raw == "||" {
+            let mut line = String::new();
+            for _ in 0..indent_level {
+                line.push_str("    ");
+            }
+            line.push_str(raw.as_str());
+            indented.push(line);
+            continue;
+        }
+
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            indented.push(String::new());
+            continue;
+        }
+
+        if trimmed.starts_with("fi") || trimmed.starts_with("done") || trimmed.starts_with("esac") {
+            indent_level = indent_level.saturating_sub(1);
+        }
+
+        let mut line = String::new();
+        for _ in 0..indent_level {
+            line.push_str("    ");
+        }
+        line.push_str(trimmed);
+        indented.push(line);
+
+        if trimmed.ends_with("do")
+            || trimmed.ends_with("then")
+            || trimmed.ends_with("{")
+            || trimmed.starts_with("case ")
+        {
+            indent_level += 1;
+        }
+    }
+
+    indented
+}
+
+fn adjust_bracket_depth(token: &str, paren: &mut i32, bracket: &mut i32, brace: &mut i32) {
+    for ch in token.chars() {
+        match ch {
+            '(' => *paren += 1,
+            ')' => *paren -= 1,
+            '[' => *bracket += 1,
+            ']' => *bracket -= 1,
+            '{' => *brace += 1,
+            '}' => *brace -= 1,
+            _ => {}
+        }
+    }
+    *paren = (*paren).max(0);
+    *bracket = (*bracket).max(0);
+    *brace = (*brace).max(0);
+}
+
+fn is_python_invocation_token(token: &str) -> bool {
+    if token.is_empty() || token.contains('=') {
+        return false;
+    }
+
+    let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
+    let base = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+
+    if !base.starts_with("python") {
+        return false;
+    }
+
+    let suffix = &base["python".len()..];
+    suffix.is_empty()
+        || suffix
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == 'w')
+}
+
+fn escape_token_for_display(token: &str) -> String {
+    if is_shell_word(token) {
+        token.to_string()
+    } else {
+        let mut escaped = String::from("'");
+        for ch in token.chars() {
+            if ch == '\'' {
+                escaped.push_str("'\\''");
+            } else {
+                escaped.push(ch);
+            }
+        }
+        escaped.push('\'');
+        escaped
+    }
+}
+
+fn is_shell_word(token: &str) -> bool {
+    token.chars().all(|ch| matches!(
+        ch,
+        'a'..='z'
+            | 'A'..='Z'
+            | '0'..='9'
+            | '_'
+            | '-'
+            | '.'
+            | '/'
+            | ':'
+            | ','
+            | '@'
+            | '%'
+            | '+'
+            | '='
+            | '['
+            | ']'
+    ))
+}
+
+fn script_has_semicolon_outside_quotes(script: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    for ch in script.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double => {
+                escape = true;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
+            ';' if !in_single && !in_double => return true,
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn split_semicolon_statements(script: &str) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape = false;
+
+    for ch in script.chars() {
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_single || in_double => {
+                escape = true;
+                current.push(ch);
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                current.push(ch);
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                current.push(ch);
+            }
+            ';' if !in_single && !in_double => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    segments.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        segments.push(trimmed.to_string());
+    }
+
+    segments
+}
+
+fn running_status_line(message: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("└ ", Style::default().fg(crate::colors::border_dim())),
+        Span::styled(message, Style::default().fg(crate::colors::text_dim())),
+    ])
 }
 
 fn new_parsed_command(
     parsed_commands: &[ParsedCommand],
     output: Option<&CommandOutput>,
+    stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
 ) -> Vec<Line<'static>> {
-    let action = action_enum_from_parsed(&parsed_commands.to_vec());
-    let ctx_path = first_context_path(parsed_commands);
-    let mut lines: Vec<Line> = vec![match output {
-        None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            // Running state per action
-            let header = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Running... in {p}"),
-                    None => "Running...".to_string(),
-                },
-            };
-            // Use non-bold styling for informational actions; use info color
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(
-                    format!("{header}{duration_str}"),
-                    Style::default().fg(crate::colors::info()),
-                )
-            } else {
-                Line::styled(
-                    format!("{header}{duration_str}"),
-                    Style::default()
-                        .fg(crate::colors::info())
-                        .add_modifier(Modifier::BOLD),
-                )
+    let meta = ParsedExecMetadata::from_commands(parsed_commands);
+    let action = meta.action;
+    let ctx_path = meta.ctx_path.as_deref();
+    let suppress_run_header = matches!(action, ExecAction::Run) && output.is_some();
+    let mut lines: Vec<Line> = Vec::new();
+    let mut running_status: Option<Line<'static>> = None;
+    if !suppress_run_header {
+        match output {
+            None => {
+                if matches!(action, ExecAction::Run) {
+                    let mut message = match &ctx_path {
+                        Some(p) => format!("Running... in {p}"),
+                        None => "Running...".to_string(),
+                    };
+                    if let Some(start) = start_time {
+                        let elapsed = start.elapsed();
+                        message = format!("{message} ({})", format_duration(elapsed));
+                    }
+                    running_status = Some(running_status_line(message));
+                } else {
+                    let duration_suffix = if let Some(start) = start_time {
+                        let elapsed = start.elapsed();
+                        format!(" ({})", format_duration(elapsed))
+                    } else {
+                        String::new()
+                    };
+                    let header = match action {
+                        ExecAction::Read => "Read",
+                        ExecAction::Search => "Search",
+                        ExecAction::List => "List",
+                        ExecAction::Run => unreachable!(),
+                    };
+                    lines.push(Line::styled(
+                        format!("{header}{duration_suffix}"),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
             }
-        }
-        Some(o) if o.exit_code == 0 => {
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {p}"),
-                    None => "Ran".to_string(),
-                },
-            };
-            // Color by action: informational (Read/Search/List) use normal text; execution uses primary
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
+            Some(o) if o.exit_code == 0 => {
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    lines.push(Line::styled(
+                        match action {
+                            ExecAction::Read => "Read",
+                            ExecAction::Search => "Search",
+                            ExecAction::List => "List",
+                            ExecAction::Run => unreachable!(),
+                        },
+                        Style::default().fg(crate::colors::text()),
+                    ));
+                } else {
+                    let done = match ctx_path {
+                        Some(p) => format!("Ran in {p}"),
+                        None => "Ran".to_string(),
+                    };
+                    lines.push(Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
             }
-        }
-        Some(_o) => {
-            // Preserve the action header (e.g., "Searched") on error so users
-            // can still see what operation was attempted. Error details are
-            // rendered below via `output_lines`.
-            let done = match action {
-                ExecAction::Read => "Read".to_string(),
-                ExecAction::Search => "Searched".to_string(),
-                ExecAction::List => "List Files".to_string(),
-                ExecAction::Run => match &ctx_path {
-                    Some(p) => format!("Ran in {p}"),
-                    None => "Ran".to_string(),
-                },
-            };
-            // Use the same styling as success to keep headers stable/recognizable.
-            if matches!(action, ExecAction::Read | ExecAction::Search | ExecAction::List) {
-                Line::styled(done, Style::default().fg(crate::colors::text()))
-            } else {
-                Line::styled(
-                    done,
-                    Style::default()
-                        .fg(crate::colors::text_bright())
-                        .add_modifier(Modifier::BOLD),
-                )
+            Some(_o) => {
+                if matches!(
+                    action,
+                    ExecAction::Read | ExecAction::Search | ExecAction::List
+                ) {
+                    lines.push(Line::styled(
+                        match action {
+                            ExecAction::Read => "Read",
+                            ExecAction::Search => "Search",
+                            ExecAction::List => "List",
+                            ExecAction::Run => unreachable!(),
+                        },
+                        Style::default().fg(crate::colors::text()),
+                    ));
+                } else {
+                    let done = match ctx_path {
+                        Some(p) => format!("Ran in {p}"),
+                        None => "Ran".to_string(),
+                    };
+                    lines.push(Line::styled(
+                        done,
+                        Style::default()
+                            .fg(crate::colors::text_bright())
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
             }
-        }
-    }];
-
-    // Collect any paths referenced by search commands to suppress redundant directory lines
-    let mut search_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for pc in parsed_commands.iter() {
-        if let ParsedCommand::Search { path: Some(p), .. } = pc {
-            search_paths.insert(p.to_string());
         }
     }
 
+    // Collect any paths referenced by search commands to suppress redundant directory lines
+    let search_paths = &meta.search_paths;
+
     // We'll emit only content lines here; the header above already communicates the action.
-    // Use a single leading "└ " for the very first content line, then indent subsequent ones.
+    // Use a single leading "└ " for the very first content line, then indent subsequent ones,
+    // except when we're showing an inline running status for ExecAction::Run.
     let mut any_content_emitted = false;
+    let use_content_connectors = !(matches!(action, ExecAction::Run) && output.is_none());
 
     // Restrict displayed entries to the primary action for this cell.
     // For the generic "run" header, allow Run/Test/Lint/Format entries.
     let expected_label: Option<&'static str> = match action {
         ExecAction::Read => Some("Read"),
         ExecAction::Search => Some("Search"),
-        ExecAction::List => Some("List Files"),
+        ExecAction::List => Some("List"),
         ExecAction::Run => None,
     };
 
@@ -4761,10 +7925,10 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("List Files".to_string(), format!("in {display_p}"))
+                        ("List".to_string(), format!("{display_p}"))
                     }
                 }
-                None => ("List Files".to_string(), "in ./".to_string()),
+                None => ("List".to_string(), "./".to_string()),
             },
             ParsedCommand::Search { query, path, cmd } => {
                 // Format query for display: unescape backslash-escapes and close common unbalanced delimiters
@@ -4834,11 +7998,12 @@ fn new_parsed_command(
                         } else {
                             format!("{p}/")
                         };
-                        ("Search".to_string(), format!("in {}", display_p))
+                        ("Search".to_string(), format!(" in {}", display_p))
                     }
                     (None, None) => ("Search".to_string(), cmd.clone()),
                 }
             }
+            ParsedCommand::ReadCommand { cmd } => ("Run".to_string(), cmd.clone()),
             // Upstream-only variants handled as generic runs in this fork
             ParsedCommand::Unknown { cmd } => {
                 let t = cmd.trim();
@@ -4846,10 +8011,9 @@ fn new_parsed_command(
                 if lower.starts_with("echo") && lower.contains("---") {
                     (String::new(), String::new())
                 } else {
-                    ("Run".to_string(), cmd.clone())
+                    ("Run".to_string(), format_inline_script_for_display(cmd))
                 }
-            }
-            // ParsedCommand::Noop { .. } => continue,
+            } // ParsedCommand::Noop { .. } => continue,
         };
 
         // Keep only entries that match the primary action grouping.
@@ -4871,11 +8035,24 @@ fn new_parsed_command(
             if line_text.is_empty() {
                 continue;
             }
-            let prefix = if !any_content_emitted { "└ " } else { "  " };
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                prefix,
-                Style::default().add_modifier(Modifier::DIM),
-            )];
+            let prefix = if !any_content_emitted {
+                if suppress_run_header || !use_content_connectors {
+                    ""
+                } else {
+                    "└ "
+                }
+            } else if suppress_run_header || !use_content_connectors {
+                ""
+            } else {
+                "  "
+            };
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            if !prefix.is_empty() {
+                spans.push(Span::styled(
+                    prefix,
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
 
             match label.as_str() {
                 // Highlight searched terms in normal text color; keep connectors/path dim
@@ -4972,8 +8149,8 @@ fn new_parsed_command(
                         ));
                     }
                 }
-                // List Files: highlight directory names
-                "List Files" => {
+                // List: highlight directory names
+                "List" => {
                     spans.push(Span::styled(
                         line_text.to_string(),
                         Style::default().fg(crate::colors::text()),
@@ -4981,30 +8158,17 @@ fn new_parsed_command(
                 }
                 _ => {
                     // For executed commands (Run/Test/Lint/etc.), use shell syntax highlighting.
+                    let normalized = normalize_shell_command_display(line_text);
+                    let display_line = insert_line_breaks_after_double_ampersand(&normalized);
                     let mut hl =
-                        crate::syntax_highlight::highlight_code_block(line_text, Some("bash"));
-                    if let Some(mut first) = hl.pop() {
-                        // If the exec has completed ("Ran"), render command in a unified
-                        // completed color to make the state change clear; otherwise keep
-                        // full syntax highlighting while running.
-                        if output.is_some() {
-                            for s in first.spans.drain(..) {
-                                spans.push(Span::styled(
-                                    s.content.to_string(),
-                                    Style::default().fg(crate::colors::text_bright()),
-                                ));
-                            }
-                        } else {
-                            spans.extend(first.spans.drain(..));
-                        }
+                        crate::syntax_highlight::highlight_code_block(&display_line, Some("bash"));
+                    if let Some(mut first_line) = hl.pop() {
+                        emphasize_shell_command_name(&mut first_line);
+                        spans.extend(first_line.spans.into_iter());
                     } else {
                         spans.push(Span::styled(
-                            line_text.to_string(),
-                            Style::default().fg(if output.is_some() {
-                                crate::colors::text_bright()
-                            } else {
-                                crate::colors::text()
-                            }),
+                            display_line,
+                            Style::default().fg(crate::colors::text()),
                         ));
                     }
                 }
@@ -5015,19 +8179,26 @@ fn new_parsed_command(
         }
     }
 
-    // If this is a List Files cell and the loop above produced no content (e.g.,
+    // If this is a List cell and the loop above produced no content (e.g.,
     // the list path was suppressed because a Search referenced the same path),
     // emit a single contextual line so the location is always visible.
     if matches!(action, ExecAction::List) && !any_content_emitted {
-        let display_p = match &ctx_path {
+        let display_p = match ctx_path {
             Some(p) if !p.is_empty() => {
-                if p.ends_with('/') { p.to_string() } else { format!("{p}/") }
+                if p.ends_with('/') {
+                    p.to_string()
+                } else {
+                    format!("{p}/")
+                }
             }
             _ => "./".to_string(),
         };
         lines.push(Line::from(vec![
             Span::styled("└ ", Style::default().add_modifier(Modifier::DIM)),
-            Span::styled(format!("in {display_p}"), Style::default().fg(crate::colors::text())),
+            Span::styled(
+                format!("{display_p}"),
+                Style::default().fg(crate::colors::text()),
+            ),
         ]));
         // no-op: avoid unused assignment warning; the variable's value is not consumed later
     }
@@ -5035,7 +8206,21 @@ fn new_parsed_command(
     // Show stdout for real run commands; keep read/search/list concise unless error
     let show_stdout = matches!(action, ExecAction::Run);
     let use_angle_pipe = show_stdout; // add "> " prefix for run output
-    lines.extend(output_lines(output, !show_stdout, use_angle_pipe));
+    let display_output = output.or(stream_preview);
+    let mut preview_lines = output_lines(display_output, !show_stdout, use_angle_pipe);
+    if let Some(status_line) = running_status {
+        if let Some(last) = preview_lines.last() {
+            let is_blank = last
+                .spans
+                .iter()
+                .all(|sp| sp.content.as_ref().trim().is_empty());
+            if is_blank {
+                preview_lines.pop();
+            }
+        }
+        preview_lines.push(status_line);
+    }
+    lines.extend(preview_lines);
     lines.push(Line::from(""));
     lines
 }
@@ -5043,62 +8228,65 @@ fn new_parsed_command(
 fn new_exec_command_generic(
     command: &[String],
     output: Option<&CommandOutput>,
+    stream_preview: Option<&CommandOutput>,
     start_time: Option<Instant>,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let command_escaped = strip_bash_lc_and_escape(command);
+    let normalized = normalize_shell_command_display(&command_escaped);
+    let command_display = insert_line_breaks_after_double_ampersand(&normalized);
     // Highlight the command as bash and then append a dimmed duration to the
     // first visual line while running.
     let mut highlighted_cmd =
-        crate::syntax_highlight::highlight_code_block(&command_escaped, Some("bash"));
+        crate::syntax_highlight::highlight_code_block(&command_display, Some("bash"));
 
-    let header_line = match output {
-        None => {
-            let duration_str = if let Some(start) = start_time {
-                let elapsed = start.elapsed();
-                format!(" ({})", format_duration(elapsed))
-            } else {
-                String::new()
-            };
-            Line::styled(
-                format!("Running...{duration_str}"),
-                Style::default()
-                    .fg(crate::colors::info())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-        Some(o) if o.exit_code == 0 => Line::styled(
-            "Ran",
-            Style::default()
-                .fg(crate::colors::text_bright())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Some(_o) => {
-            // Preserve the header as "Ran" even on error; detailed error output
-            // (including exit code and stderr) will be shown below by `output_lines`.
-            Line::styled(
-                "Ran",
-                Style::default()
-                    .fg(crate::colors::text_bright())
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
-    };
-
-    lines.push(header_line.clone());
-    if let Some(first) = highlighted_cmd.first_mut() {
-        if output.is_none() && start_time.is_some() {
-            let elapsed = start_time.unwrap().elapsed();
-            let duration_str = format!(" ({})", format_duration(elapsed));
-            first.spans.push(Span::styled(
-                duration_str,
-                Style::default().fg(crate::colors::text_dim()),
-            ));
+    for (idx, line) in highlighted_cmd.iter_mut().enumerate() {
+        emphasize_shell_command_name(line);
+        if idx > 0 {
+            line.spans.insert(
+                0,
+                Span::styled("  ", Style::default().fg(crate::colors::text())),
+            );
         }
     }
+
+    let render_running_header = output.is_none();
+    let display_output = output.or(stream_preview);
+    let mut running_status = None;
+    if render_running_header {
+        let mut message = "Running...".to_string();
+        if let Some(start) = start_time {
+            let elapsed = start.elapsed();
+            message = format!("{message} ({})", format_duration(elapsed));
+        }
+        running_status = Some(running_status_line(message));
+    }
+
+    if output.is_some() {
+        for line in highlighted_cmd.iter_mut() {
+            for span in line.spans.iter_mut() {
+                span.style = span.style.fg(crate::colors::text_bright());
+            }
+        }
+    }
+
     lines.extend(highlighted_cmd);
 
-    lines.extend(output_lines(output, false, true));
+    let mut preview_lines = output_lines(display_output, false, true);
+    if let Some(status_line) = running_status {
+        if let Some(last) = preview_lines.last() {
+            let is_blank = last
+                .spans
+                .iter()
+                .all(|sp| sp.content.as_ref().trim().is_empty());
+            if is_blank {
+                preview_lines.pop();
+            }
+        }
+        preview_lines.push(status_line);
+    }
+
+    lines.extend(preview_lines);
     lines
 }
 
@@ -5179,10 +8367,16 @@ pub(crate) fn new_running_browser_tool_call(
         title: browser_running_title(&tool_name).to_string(),
         start_time: Instant::now(),
         arg_lines,
+        wait_has_target: false,
+        wait_has_call_id: false,
+        wait_cap_ms: None,
     }
 }
 
 fn custom_tool_running_title(tool_name: &str) -> String {
+    if tool_name == "wait" {
+        return "Waiting".to_string();
+    }
     if tool_name.starts_with("agent_") {
         // Reuse agent title and append ellipsis
         format!("{}...", agent_tool_title(tool_name))
@@ -5212,11 +8406,41 @@ pub(crate) fn new_running_custom_tool_call(
 ) -> RunningToolCallCell {
     // Parse args JSON and format as key/value lines
     let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    let mut wait_has_target = false;
+    let mut wait_has_call_id = false;
+    let mut wait_cap_ms = None;
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
-            arg_lines.extend(format_browser_args_line(&json));
+            if tool_name == "wait" {
+                wait_cap_ms = json.get("timeout_ms").and_then(|v| v.as_u64());
+                if let Some(for_what) = json.get("for").and_then(|v| v.as_str()) {
+                    let cleaned = clean_wait_command(for_what);
+                    let mut spans = vec![
+                        Span::styled("└ for ", Style::default().fg(crate::colors::text_dim())),
+                    ];
+                    spans.push(Span::styled(
+                        cleaned,
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                    arg_lines.push(Line::from(spans));
+                    wait_has_target = true;
+                }
+                if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
+                    if !wait_has_target {
+                        arg_lines.push(Line::from(vec![
+                            Span::styled(
+                                "└ call_id: ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            Span::styled(cid.to_string(), Style::default().fg(crate::colors::text())),
+                        ]));
+                    }
+                    wait_has_call_id = true;
+                }
+            } else {
+                arg_lines.extend(format_browser_args_line(&json));
+            }
         } else {
-            // Fallback to showing raw args string
             arg_lines.push(Line::from(vec![
                 Span::styled("└ args: ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled(args_str, Style::default().fg(crate::colors::text())),
@@ -5227,6 +8451,9 @@ pub(crate) fn new_running_custom_tool_call(
         title: custom_tool_running_title(&tool_name),
         start_time: Instant::now(),
         arg_lines,
+        wait_has_target,
+        wait_has_call_id,
+        wait_cap_ms,
     }
 }
 
@@ -5243,6 +8470,9 @@ pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCe
         title: "Web Search...".to_string(),
         start_time: Instant::now(),
         arg_lines,
+        wait_has_target: false,
+        wait_has_call_id: false,
+        wait_cap_ms: None,
     }
 }
 
@@ -5253,6 +8483,9 @@ pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToo
         title: "Working...".to_string(),
         start_time: Instant::now(),
         arg_lines: vec![line],
+        wait_has_target: false,
+        wait_has_call_id: false,
+        wait_cap_ms: None,
     }
 }
 
@@ -5381,20 +8614,35 @@ pub(crate) fn new_completed_web_fetch_tool_call(
     // Fallback: compact preview if JSON parse failed or no markdown present
     if !appended_markdown && !result.is_empty() {
         // Fallback to plain text/JSON preview with ANSI preserved.
-        let mut pv = select_preview_from_plain_text(&result, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
+        let mut pv =
+            select_preview_from_plain_text(&result, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
         dim_webfetch_emphasis_and_links(&mut pv);
         body_lines.extend(pv);
     }
 
     // Spacer below header and below body to match exec styling
     pre_lines.push(Line::from(""));
-    if !body_lines.is_empty() { body_lines.push(Line::from("")); }
+    if !body_lines.is_empty() {
+        body_lines.push(Line::from(""));
+    }
 
-    WebFetchToolCell { pre_lines, body_lines, state: if success { ToolState::Success } else { ToolState::Failed } }
+    WebFetchToolCell {
+        pre_lines,
+        body_lines,
+        state: if success {
+            ToolState::Success
+        } else {
+            ToolState::Failed
+        },
+    }
 }
 
 // Helper: choose first `head` and last `tail` non-empty lines from a styled line list
-fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) -> Vec<Line<'static>> {
+fn select_preview_from_lines(
+    lines: &[Line<'static>],
+    head: usize,
+    tail: usize,
+) -> Vec<Line<'static>> {
     fn is_non_empty(l: &Line<'_>) -> bool {
         let s: String = l.spans.iter().map(|sp| sp.content.as_ref()).collect();
         !s.trim().is_empty()
@@ -5412,7 +8660,14 @@ fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) 
         out.push(lines[i].clone());
     }
     out.push(Line::from("⋮".dim()));
-    for &i in non_empty_idx.iter().rev().take(tail).collect::<Vec<_>>().iter().rev() {
+    for &i in non_empty_idx
+        .iter()
+        .rev()
+        .take(tail)
+        .collect::<Vec<_>>()
+        .iter()
+        .rev()
+    {
         out.push(lines[*i].clone());
     }
     out
@@ -5422,38 +8677,64 @@ fn select_preview_from_lines(lines: &[Line<'static>], head: usize, tail: usize) 
 fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<Line<'static>> {
     let processed = format_json_compact(text).unwrap_or_else(|| text.to_string());
     let processed = normalize_overwrite_sequences(&processed);
-    let processed = sanitize_for_tui(&processed, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let processed = sanitize_for_tui(
+        &processed,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     let non_empty: Vec<&str> = processed.lines().filter(|line| !line.is_empty()).collect();
     fn ansi_line_with_theme_bg(s: &str) -> Line<'static> {
         let mut ln = ansi_escape_line(s);
-        for sp in ln.spans.iter_mut() { sp.style.bg = None; }
+        for sp in ln.spans.iter_mut() {
+            sp.style.bg = None;
+        }
         ln
     }
     let mut out: Vec<Line<'static>> = Vec::new();
     if non_empty.len() <= head + tail {
-        for s in non_empty { out.push(ansi_line_with_theme_bg(s)); }
+        for s in non_empty {
+            out.push(ansi_line_with_theme_bg(s));
+        }
         return out;
     }
-    for s in non_empty.iter().take(head) { out.push(ansi_line_with_theme_bg(s)); }
+    for s in non_empty.iter().take(head) {
+        out.push(ansi_line_with_theme_bg(s));
+    }
     out.push(Line::from("⋮".dim()));
     let start = non_empty.len().saturating_sub(tail);
-    for s in &non_empty[start..] { out.push(ansi_line_with_theme_bg(s)); }
+    for s in &non_empty[start..] {
+        out.push(ansi_line_with_theme_bg(s));
+    }
     out
 }
 
 // ==================== WebFetchToolCell ====================
 
 pub(crate) struct WebFetchToolCell {
-    pre_lines: Vec<Line<'static>>,   // header/invocation
-    body_lines: Vec<Line<'static>>,  // bordered, dim preview
+    pre_lines: Vec<Line<'static>>,  // header/invocation
+    body_lines: Vec<Line<'static>>, // bordered, dim preview
     state: ToolState,
 }
 
 impl HistoryCell for WebFetchToolCell {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
     fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Tool { status: match self.state { ToolState::Running => ToolStatus::Running, ToolState::Success => ToolStatus::Success, ToolState::Failed => ToolStatus::Failed } }
+        HistoryCellType::Tool {
+            status: match self.state {
+                ToolState::Running => ToolStatus::Running,
+                ToolState::Success => ToolStatus::Success,
+                ToolState::Failed => ToolStatus::Failed,
+            },
+        }
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Fallback textual representation used only for measurement outside custom render
@@ -5462,12 +8743,22 @@ impl HistoryCell for WebFetchToolCell {
         v.extend(self.body_lines.clone());
         v
     }
-    fn has_custom_render(&self) -> bool { true }
+    fn has_custom_render(&self) -> bool {
+        true
+    }
     fn desired_height(&self, width: u16) -> u16 {
         let pre_text = Text::from(trim_empty_lines(self.pre_lines.clone()));
         let body_text = Text::from(trim_empty_lines(self.body_lines.clone()));
-        let pre_total: u16 = Paragraph::new(pre_text).wrap(Wrap { trim: false }).line_count(width).try_into().unwrap_or(0);
-        let body_total: u16 = Paragraph::new(body_text).wrap(Wrap { trim: false }).line_count(width.saturating_sub(2)).try_into().unwrap_or(0);
+        let pre_total: u16 = Paragraph::new(pre_text)
+            .wrap(Wrap { trim: false })
+            .line_count(width)
+            .try_into()
+            .unwrap_or(0);
+        let body_total: u16 = Paragraph::new(body_text)
+            .wrap(Wrap { trim: false })
+            .line_count(width.saturating_sub(2))
+            .try_into()
+            .unwrap_or(0);
         pre_total.saturating_add(body_total)
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
@@ -5476,8 +8767,16 @@ impl HistoryCell for WebFetchToolCell {
         let body_text = Text::from(trim_empty_lines(self.body_lines.clone()));
         let pre_wrap_width = area.width;
         let body_wrap_width = area.width.saturating_sub(2);
-        let pre_total: u16 = Paragraph::new(pre_text.clone()).wrap(Wrap { trim: false }).line_count(pre_wrap_width).try_into().unwrap_or(0);
-        let body_total: u16 = Paragraph::new(body_text.clone()).wrap(Wrap { trim: false }).line_count(body_wrap_width).try_into().unwrap_or(0);
+        let pre_total: u16 = Paragraph::new(pre_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(pre_wrap_width)
+            .try_into()
+            .unwrap_or(0);
+        let body_total: u16 = Paragraph::new(body_text.clone())
+            .wrap(Wrap { trim: false })
+            .line_count(body_wrap_width)
+            .try_into()
+            .unwrap_or(0);
 
         let pre_skip = skip_rows.min(pre_total);
         let body_skip = skip_rows.saturating_sub(pre_total).min(body_total);
@@ -5490,36 +8789,61 @@ impl HistoryCell for WebFetchToolCell {
 
         // Render preamble
         if pre_height > 0 {
-            let pre_area = Rect { x: area.x, y: area.y, width: area.width, height: pre_height };
-            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
-            for y in pre_area.y..pre_area.y.saturating_add(pre_area.height) {
-                for x in pre_area.x..pre_area.x.saturating_add(pre_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
-            let pre_block = Block::default().style(Style::default().bg(crate::colors::background()));
-            Paragraph::new(pre_text).block(pre_block).wrap(Wrap { trim: false }).scroll((pre_skip, 0)).style(Style::default().bg(crate::colors::background())).render(pre_area, buf);
+            let pre_area = Rect {
+                x: area.x,
+                y: area.y,
+                width: area.width,
+                height: pre_height,
+            };
+            let bg_style = Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text());
+            fill_rect(buf, pre_area, Some(' '), bg_style);
+            let pre_block =
+                Block::default().style(Style::default().bg(crate::colors::background()));
+            Paragraph::new(pre_text)
+                .block(pre_block)
+                .wrap(Wrap { trim: false })
+                .scroll((pre_skip, 0))
+                .style(Style::default().bg(crate::colors::background()))
+                .render(pre_area, buf);
         }
 
         // Render body with left border + dim text
         if body_height > 0 {
-            let body_area = Rect { x: area.x, y: area.y.saturating_add(pre_height), width: area.width, height: body_height };
-            let bg_style = Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim());
-            for y in body_area.y..body_area.y.saturating_add(body_area.height) {
-                for x in body_area.x..body_area.x.saturating_add(body_area.width) {
-                    buf[(x, y)].set_char(' ').set_style(bg_style);
-                }
-            }
+            let body_area = Rect {
+                x: area.x,
+                y: area.y.saturating_add(pre_height),
+                width: area.width,
+                height: body_height,
+            };
+            let bg_style = Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text_dim());
+            fill_rect(buf, body_area, Some(' '), bg_style);
             let block = Block::default()
                 .borders(Borders::LEFT)
-                .border_style(Style::default().fg(crate::colors::border_dim()).bg(crate::colors::background()))
+                .border_style(
+                    Style::default()
+                        .fg(crate::colors::border_dim())
+                        .bg(crate::colors::background()),
+                )
                 .style(Style::default().bg(crate::colors::background()))
-                .padding(Padding { left: 1, right: 0, top: 0, bottom: 0 });
+                .padding(Padding {
+                    left: 1,
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                });
             Paragraph::new(body_text)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .scroll((body_skip, 0))
-                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+                .style(
+                    Style::default()
+                        .bg(crate::colors::background())
+                        .fg(crate::colors::text_dim()),
+                )
                 .render(body_area, buf);
         }
     }
@@ -5567,7 +8891,11 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
             // Heading: 1-6 leading # followed by a space
             let mut level = 0usize;
             for ch in trimmed.chars() {
-                if ch == '#' { level += 1; } else { break; }
+                if ch == '#' {
+                    level += 1;
+                } else {
+                    break;
+                }
             }
             if level >= 1 && level <= 6 {
                 if trimmed.chars().nth(level).map_or(false, |c| c == ' ') {
@@ -5580,7 +8908,9 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
 
     // Helper to render a slice of raw markdown lines
     let render_slice = |start: usize, end_excl: usize, out: &mut Vec<Line<'static>>| {
-        if start >= end_excl || start >= lines.len() { return; }
+        if start >= end_excl || start >= lines.len() {
+            return;
+        }
         let end = end_excl.min(lines.len());
         let segment = lines[start..end].join("\n");
         let mut seg_lines: Vec<Line<'static>> = Vec::new();
@@ -5594,18 +8924,26 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
     // First 2 lines
     if !first_non_empty.is_empty() {
         let start = first_non_empty[0];
-        let end = first_non_empty.last().copied().unwrap_or(start).saturating_add(1);
+        let end = first_non_empty
+            .last()
+            .copied()
+            .unwrap_or(start)
+            .saturating_add(1);
         render_slice(start, end, &mut out);
     }
 
     // Sections
     if !section_heads.is_empty() {
-        if !out.is_empty() { out.push(Line::from("⋮".dim())); }
+        if !out.is_empty() {
+            out.push(Line::from("⋮".dim()));
+        }
         for (idx, &h) in section_heads.iter().enumerate() {
             // heading + next 4 lines (total up to 5)
             let end = (h + 5).min(lines.len());
             render_slice(h, end, &mut out);
-            if idx + 1 < section_heads.len() { out.push(Line::from("⋮".dim())); }
+            if idx + 1 < section_heads.len() {
+                out.push(Line::from("⋮".dim()));
+            }
         }
     }
 
@@ -5613,8 +8951,14 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
     if !last_non_empty.is_empty() {
         // Avoid duplicating lines if they overlap with earlier content
         let last_start = *last_non_empty.first().unwrap_or(&0);
-        if !out.is_empty() { out.push(Line::from("⋮".dim())); }
-        let last_end = last_non_empty.last().copied().unwrap_or(last_start).saturating_add(1);
+        if !out.is_empty() {
+            out.push(Line::from("⋮".dim()));
+        }
+        let last_end = last_non_empty
+            .last()
+            .copied()
+            .unwrap_or(last_start)
+            .saturating_add(1);
         render_slice(last_start, last_end, &mut out);
     }
 
@@ -5622,7 +8966,11 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
         // Fallback: if nothing matched, show head/tail preview
         let mut all_md_lines: Vec<Line<'static>> = Vec::new();
         crate::markdown::append_markdown(md, &mut all_md_lines, cfg);
-        return select_preview_from_lines(&all_md_lines, WEB_FETCH_HEAD_LINES, WEB_FETCH_TAIL_LINES);
+        return select_preview_from_lines(
+            &all_md_lines,
+            WEB_FETCH_HEAD_LINES,
+            WEB_FETCH_TAIL_LINES,
+        );
     }
 
     out
@@ -5634,18 +8982,10 @@ fn dim_webfetch_emphasis_and_links(lines: &mut Vec<Line<'static>>) {
     let text_dim = crate::colors::text_dim();
     let code_bg = crate::colors::code_block_bg();
     // Recompute the link color logic used by the markdown renderer to detect link spans
-    let link_fg = crate::colors::mix_toward(
-        crate::colors::text(),
-        crate::colors::primary(),
-        0.35,
-    );
+    let link_fg = crate::colors::mix_toward(crate::colors::text(), crate::colors::primary(), 0.35);
     for line in lines.iter_mut() {
         // Heuristic list detection on the plain text form
-        let s: String = line
-            .spans
-            .iter()
-            .map(|sp| sp.content.as_ref())
-            .collect();
+        let s: String = line.spans.iter().map(|sp| sp.content.as_ref()).collect();
         let t = s.trim_start();
         let is_list = t.starts_with('-')
             || t.starts_with('*')
@@ -5659,7 +8999,9 @@ fn dim_webfetch_emphasis_and_links(lines: &mut Vec<Line<'static>>) {
 
         for sp in line.spans.iter_mut() {
             // Skip code block spans (have a solid code background)
-            if sp.style.bg == Some(code_bg) { continue; }
+            if sp.style.bg == Some(code_bg) {
+                continue;
+            }
             let style = &mut sp.style;
             let is_bold = style.add_modifier.contains(Modifier::BOLD);
             let is_under = style.add_modifier.contains(Modifier::UNDERLINED);
@@ -6120,10 +9462,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
             .map(|line| ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))),
     );
     // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Error,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Error)
 }
 
 pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
@@ -6147,18 +9486,33 @@ pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
 pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainHistoryCell {
     let lines = vec![
         Line::from(""),
-        Line::from("Reasoning Effort").fg(crate::colors::keyword()).bold(),
+        Line::from("Reasoning Effort")
+            .fg(crate::colors::keyword())
+            .bold(),
         Line::from(format!("Value: {}", reasoning_effort)),
     ];
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
-    }
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
+}
+
+pub(crate) fn new_model_output(model: &str, effort: ReasoningEffort) -> PlainHistoryCell {
+    let lines = vec![
+        Line::from(""),
+        Line::from("Model Selection")
+            .fg(crate::colors::keyword())
+            .bold(),
+        Line::from(format!("Model: {}", model)),
+        Line::from(format!("Reasoning Effort: {}", effort)),
+    ];
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 // Continue with more factory functions...
 // I'll add the rest in the next part to keep this manageable
-pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHistoryCell {
+pub(crate) fn new_status_output(
+    config: &Config,
+    total_usage: &TokenUsage,
+    last_usage: &TokenUsage,
+) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     lines.push(Line::from("/status").fg(crate::colors::keyword()));
@@ -6225,7 +9579,10 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     // 🔐 Authentication
     lines.push(Line::from(vec!["🔐 ".into(), "Authentication".bold()]));
     {
-        use codex_login::{AuthMode, CodexAuth, OPENAI_API_KEY_ENV_VAR, try_read_auth_json};
+        use codex_login::AuthMode;
+        use codex_login::CodexAuth;
+        use codex_login::OPENAI_API_KEY_ENV_VAR;
+        use codex_login::try_read_auth_json;
 
         // Determine effective auth mode the core would choose
         let auth_result = CodexAuth::from_codex_home(
@@ -6238,15 +9595,16 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
             Ok(Some(auth)) => match auth.mode {
                 AuthMode::ApiKey => {
                     // Prefer suffix from auth.json; fall back to env var if needed
-                    let suffix = try_read_auth_json(&codex_login::get_auth_file(&config.codex_home))
-                        .ok()
-                        .and_then(|a| a.openai_api_key)
-                        .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
-                        .map(|k| {
-                            let n = k.len().saturating_sub(4);
-                            k[n..].to_string()
-                        })
-                        .unwrap_or_else(|| "????".to_string());
+                    let suffix =
+                        try_read_auth_json(&codex_login::get_auth_file(&config.codex_home))
+                            .ok()
+                            .and_then(|a| a.openai_api_key)
+                            .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
+                            .map(|k| {
+                                let n = k.len().saturating_sub(4);
+                                k[n..].to_string()
+                            })
+                            .unwrap_or_else(|| "????".to_string());
                     lines.push(Line::from(format!("  • Method: API key (…{suffix})")));
                 }
                 AuthMode::ChatGPT => {
@@ -6271,29 +9629,135 @@ pub(crate) fn new_status_output(config: &Config, usage: &TokenUsage) -> PlainHis
     // Input: <input> [+ <cached> cached]
     let mut input_line_spans: Vec<Span<'static>> = vec![
         "  • Input: ".into(),
-        usage.non_cached_input().to_string().into(),
+        format_with_separators(last_usage.non_cached_input()).into(),
     ];
-    if let Some(cached) = usage.cached_input_tokens {
-        if cached > 0 {
-            input_line_spans.push(format!(" (+ {cached} cached)").into());
-        }
+    if last_usage.cached_input_tokens > 0 {
+        input_line_spans.push(
+            format!(
+                " (+ {} cached)",
+                format_with_separators(last_usage.cached_input_tokens)
+            )
+            .into(),
+        );
     }
     lines.push(Line::from(input_line_spans));
     // Output: <output>
     lines.push(Line::from(vec![
         "  • Output: ".into(),
-        usage.output_tokens.to_string().into(),
+        format_with_separators(last_usage.output_tokens).into(),
     ]));
     // Total: <total>
     lines.push(Line::from(vec![
         "  • Total: ".into(),
-        usage.blended_total().to_string().into(),
+        format_with_separators(last_usage.blended_total()).into(),
+    ]));
+    lines.push(Line::from(vec![
+        "  • Session total: ".into(),
+        format_with_separators(total_usage.blended_total()).into(),
     ]));
 
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
+    // 📐 Model Limits
+    let context_window = config.model_context_window;
+    let max_output_tokens = config.model_max_output_tokens;
+    let auto_compact_limit = config.model_auto_compact_token_limit;
+
+    if context_window.is_some() || max_output_tokens.is_some() || auto_compact_limit.is_some() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec!["📐 ".into(), "Model Limits".bold()]));
+
+        if let Some(context_window) = context_window {
+            let used = last_usage.tokens_in_context_window().min(context_window);
+            let percent_full = if context_window > 0 {
+                ((used as f64 / context_window as f64) * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            lines.push(Line::from(format!(
+                "  • Context window: {} used of {} ({:.0}% full)",
+                format_with_separators(used),
+                format_with_separators(context_window),
+                percent_full
+            )));
+        }
+
+        if let Some(max_output_tokens) = max_output_tokens {
+            lines.push(Line::from(format!(
+                "  • Max output tokens: {}",
+                format_with_separators(max_output_tokens)
+            )));
+        }
+
+        match auto_compact_limit {
+            Some(limit) if limit > 0 => {
+                let limit_u64 = limit as u64;
+                let remaining = limit_u64.saturating_sub(total_usage.total_tokens);
+                lines.push(Line::from(format!(
+                    "  • Auto-compact threshold: {} ({} remaining)",
+                    format_with_separators(limit_u64),
+                    format_with_separators(remaining)
+                )));
+                if total_usage.total_tokens > limit_u64 {
+                    lines.push(Line::from("    • Compacting will trigger on the next turn".dim()));
+                }
+            }
+            _ => {
+                if let Some(window) = context_window {
+                    if window > 0 {
+                        let used = last_usage.tokens_in_context_window();
+                        let remaining = window.saturating_sub(used);
+                        let percent_left = if window == 0 {
+                            0.0
+                        } else {
+                            (remaining as f64 / window as f64) * 100.0
+                        };
+                        lines.push(Line::from(format!(
+                            "  • Context window: {} used of {} ({:.0}% left)",
+                            format_with_separators(used),
+                            format_with_separators(window),
+                            percent_left
+                        )));
+                        lines.push(Line::from(format!(
+                            "  • {} tokens before overflow",
+                            format_with_separators(remaining)
+                        )));
+                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    } else {
+                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    }
+                } else {
+                    lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                }
+            }
+        }
     }
+
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
+}
+
+pub(crate) fn new_limits_output(
+    snapshot: &RateLimitSnapshotEvent,
+    reset_info: RateLimitResetInfo,
+) -> LimitsHistoryCell {
+    LimitsHistoryCell {
+        view: build_limits_view(snapshot, reset_info, DEFAULT_GRID_CONFIG),
+    }
+}
+
+pub(crate) fn new_warning_event(message: String) -> PlainHistoryCell {
+    let warn_style = Style::default().fg(crate::colors::warning());
+    PlainHistoryCell::new(
+        vec![Line::from(vec![Span::styled(format!("⚠ {message}"), warn_style)])],
+        HistoryCellType::Notice,
+    )
+}
+
+pub(crate) fn new_limits_fetching() -> PlainHistoryCell {
+    let lines: Vec<Line<'static>> = vec![
+        Line::from("/limits").fg(crate::colors::keyword()),
+        Line::from(""),
+        Line::from("Requesting latest rate limit data…".dim()),
+    ];
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {
@@ -6308,22 +9772,39 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
         Line::from(" 6. Improve documentation in @filename"),
         Line::from(""),
     ];
-    PlainHistoryCell {
-        lines,
-        kind: HistoryCellType::Notice,
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
+}
+
+fn plan_progress_icon(total: usize, completed: usize) -> &'static str {
+    if total == 0 || completed == 0 {
+        "○"
+    } else if completed >= total {
+        "●"
+    } else if completed.saturating_mul(3) <= total {
+        "◔"
+    } else if completed.saturating_mul(3) < total.saturating_mul(2) {
+        "◑"
+    } else {
+        "◕"
     }
 }
 
-pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
-    let UpdatePlanArgs { explanation, plan } = update;
+pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
+    let UpdatePlanArgs { name, plan } = update;
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    // Header with progress summary
     let total = plan.len();
     let completed = plan
         .iter()
         .filter(|p| matches!(p.status, StepStatus::Completed))
         .count();
+    let icon = plan_progress_icon(total, completed);
+    let is_complete = total > 0 && completed >= total;
+    let header_color = if is_complete {
+        crate::colors::success()
+    } else {
+        crate::colors::info()
+    };
 
     let width: usize = 10;
     let filled = if total > 0 {
@@ -6335,15 +9816,15 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
 
     // Build header without leading icon; icon will render in the gutter
     let mut header: Vec<Span> = Vec::new();
-    let total = plan.len();
-    let completed = plan
-        .iter()
-        .filter(|p| matches!(p.status, StepStatus::Completed))
-        .count();
+    let title = name
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Plan");
     header.push(Span::styled(
-        " Update plan",
+        title.to_string(),
         Style::default()
-            .fg(crate::colors::primary())
+            .fg(header_color)
             .add_modifier(Modifier::BOLD),
     ));
     header.push(Span::raw(" ["));
@@ -6363,17 +9844,6 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
     header.push(Span::raw(format!("{completed}/{total}")));
     lines.push(Line::from(header));
 
-    // Optional explanation/note from the model
-    if let Some(expl) = explanation.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
-    }) {
-        lines.push(Line::from("note".dim().italic()));
-        for l in expl.lines() {
-            lines.push(Line::from(l.to_string()).dim());
-        }
-    }
-
     // Steps styled as checkbox items
     if plan.is_empty() {
         lines.push(Line::from("(no steps provided)".dim().italic()));
@@ -6389,12 +9859,7 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
                 ),
                 StepStatus::InProgress => (
                     Span::raw("□"),
-                    Span::styled(
-                        step,
-                        Style::default()
-                            .fg(crate::colors::info())
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(step, Style::default().fg(crate::colors::info())),
                 ),
                 StepStatus::Pending => (
                     Span::raw("□"),
@@ -6415,9 +9880,10 @@ pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlainHistoryCell {
         }
     }
 
-    PlainHistoryCell {
+    PlanUpdateCell {
         lines,
-        kind: HistoryCellType::PlanUpdate,
+        icon,
+        is_complete,
     }
 }
 
@@ -6427,7 +9893,7 @@ pub(crate) fn new_patch_event(
 ) -> PatchSummaryCell {
     let title = match event_type {
         PatchEventType::ApprovalRequest => "proposed patch".to_string(),
-        PatchEventType::ApplyBegin { .. } => "Updating...".to_string(),
+        PatchEventType::ApplyBegin { .. } => "Updated".to_string(),
     };
     let kind = match event_type {
         PatchEventType::ApprovalRequest => PatchKind::Proposed,
@@ -6444,12 +9910,22 @@ pub(crate) fn new_patch_event(
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     let mut lines: Vec<Line<'static>> = vec![
-        Line::from("❌ Patch application failed").fg(crate::colors::error()).bold(),
+        Line::from("❌ Patch application failed")
+            .fg(crate::colors::error())
+            .bold(),
         Line::from(""),
     ];
 
     let norm = normalize_overwrite_sequences(&stderr);
-    let norm = sanitize_for_tui(&norm, SanitizeMode::AnsiPreserving, SanitizeOptions { expand_tabs: true, tabstop: 4, debug_markers: false });
+    let norm = sanitize_for_tui(
+        &norm,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
     for line in norm.lines() {
         if !line.is_empty() {
             lines.push(ansi_escape_line(line).fg(crate::colors::error()));
@@ -6457,12 +9933,12 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
     }
 
     lines.push(Line::from(""));
-    PlainHistoryCell {
+    PlainHistoryCell::new(
         lines,
-        kind: HistoryCellType::Patch {
+        HistoryCellType::Patch {
             kind: PatchKind::ApplyFailure,
         },
-    }
+    )
 }
 
 // ==================== PatchSummaryCell ====================
@@ -6476,16 +9952,21 @@ pub(crate) struct PatchSummaryCell {
     pub(crate) kind: PatchKind,
     // Cache width-specific rendered lines to avoid repeated filesystem reads
     // and pre-wrapping work inside create_diff_summary_with_width.
-    cached: std::cell::RefCell<Option<PatchLayoutCache>>, 
+    cached: std::cell::RefCell<Option<PatchLayoutCache>>,
 }
 
 #[derive(Clone)]
-struct PatchLayoutCache { width: u16, lines: Vec<Line<'static>> }
+struct PatchLayoutCache {
+    width: u16,
+    lines: Vec<Line<'static>>,
+}
 
 impl PatchSummaryCell {
     fn ensure_lines(&self, width: u16) -> Vec<Line<'static>> {
         if let Some(c) = self.cached.borrow().as_ref() {
-            if c.width == width { return c.lines.clone(); }
+            if c.width == width {
+                return c.lines.clone();
+            }
         }
         let lines: Vec<Line<'static>> = create_diff_summary_with_width(
             &self.title,
@@ -6495,7 +9976,10 @@ impl PatchSummaryCell {
         )
         .into_iter()
         .collect();
-        *self.cached.borrow_mut() = Some(PatchLayoutCache { width, lines: lines.clone() });
+        *self.cached.borrow_mut() = Some(PatchLayoutCache {
+            width,
+            lines: lines.clone(),
+        });
         lines
     }
 }
@@ -6513,7 +9997,9 @@ impl HistoryCell for PatchSummaryCell {
 
     // We compute lines based on width at render time; provide a conservative
     // default for non-width callers (not normally used in our pipeline).
-    fn display_lines(&self) -> Vec<Line<'static>> { self.ensure_lines(80) }
+    fn display_lines(&self) -> Vec<Line<'static>> {
+        self.ensure_lines(80)
+    }
 
     fn has_custom_render(&self) -> bool {
         true
@@ -6726,4 +10212,59 @@ pub(crate) fn retint_lines_in_place(
         }
         line.spans = new_spans;
     }
+}
+fn format_inline_node_for_display(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 2 {
+        return None;
+    }
+
+    let node_idx = tokens
+        .iter()
+        .position(|token| is_node_invocation_token(token))?;
+
+    let mut idx = node_idx + 1;
+    while idx < tokens.len() {
+        match tokens[idx].as_str() {
+            "-e" | "--eval" | "-p" | "--print" => {
+                let script_idx = idx + 1;
+                if script_idx >= tokens.len() {
+                    return None;
+                }
+                return format_node_script(&tokens, script_idx, tokens[script_idx].as_str());
+            }
+            "--" => break,
+            _ => idx += 1,
+        }
+    }
+
+    None
+}
+
+fn format_inline_shell_for_display(command_escaped: &str) -> Option<String> {
+    let tokens: Vec<String> = Shlex::new(command_escaped).collect();
+    if tokens.len() < 3 {
+        return None;
+    }
+
+    let shell_idx = tokens
+        .iter()
+        .position(|t| is_shell_invocation_token(t))?;
+
+    let flag_idx = shell_idx + 1;
+    if flag_idx >= tokens.len() {
+        return None;
+    }
+
+    let flag = tokens[flag_idx].as_str();
+    if flag != "-c" && flag != "-lc" {
+        return None;
+    }
+
+    let script_idx = flag_idx + 1;
+    if script_idx >= tokens.len() {
+        return None;
+    }
+
+    format_shell_script(&tokens, script_idx, tokens[script_idx].as_str())
 }

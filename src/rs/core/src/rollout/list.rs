@@ -4,7 +4,7 @@ use std::io::{self};
 use std::path::Path;
 use std::path::PathBuf;
 
-use dev_file_search as file_search;
+use codex_file_search as file_search;
 use std::num::NonZero;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -15,9 +15,9 @@ use time::macros::format_description;
 use uuid::Uuid;
 
 use super::SESSIONS_SUBDIR;
-use dev_protocol::protocol::EventMsg as ProtocolEventMsg;
-use dev_protocol::protocol::RolloutItem;
-use dev_protocol::protocol::RolloutLine;
+use codex_protocol::protocol::RolloutItem;
+use codex_protocol::protocol::RolloutLine;
+use crate::config::resolve_codex_path_for_read;
 
 /// Returned page of conversation summaries.
 #[derive(Debug, Default, PartialEq)]
@@ -91,8 +91,7 @@ pub(crate) async fn get_conversations(
     page_size: usize,
     cursor: Option<&Cursor>,
 ) -> io::Result<ConversationsPage> {
-    let mut root = codex_home.to_path_buf();
-    root.push(SESSIONS_SUBDIR);
+    let root = resolve_codex_path_for_read(codex_home, Path::new(SESSIONS_SUBDIR));
 
     if !root.exists() {
         return Ok(ConversationsPage {
@@ -118,7 +117,8 @@ pub(crate) async fn get_conversation(path: &Path) -> io::Result<String> {
 
 /// Load conversation file paths from disk using directory traversal.
 ///
-/// Directory layout: `~/.codex/sessions/YYYY/MM/DD/rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl`
+/// Directory layout: `~/.code/sessions/YYYY/MM/DD/rollout-YYYY-MM-DDThh-mm-ss-<uuid>.jsonl`
+/// (Code still reads legacy `~/.codex/sessions/...`).
 /// Returned newest (latest) first.
 async fn traverse_directories_for_paths(
     root: PathBuf,
@@ -323,16 +323,21 @@ async fn read_head_and_flags(
                     head.push(val);
                 }
             }
-            RolloutItem::EventMsg(ev) => {
-                if matches!(ev, ProtocolEventMsg::AgentMessage(_)) {
-                    saw_user_event = true;
+            RolloutItem::Event(event) => {
+                if let Some(msg) = crate::protocol::event_msg_from_protocol(&event.msg) {
+                    if matches!(msg, crate::protocol::EventMsg::AgentMessage(_)) {
+                        saw_user_event = true;
+                    }
                 }
             }
+            // Skip variants not displayed in list summaries.
+            RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => {}
         }
     }
 
     Ok((head, saw_session_meta, saw_user_event))
 }
+
 
 /// Locate a recorded conversation rollout file by its UUID string using the existing
 /// paginated listing implementation. Returns `Ok(Some(path))` if found, `Ok(None)` if not present

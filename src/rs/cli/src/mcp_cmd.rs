@@ -20,7 +20,7 @@ use hanzo_dev::config_types::McpServerConfig;
 /// - `serve`  — run the MCP server on stdio
 /// - `list`   — list configured servers (with `--json`)
 /// - `get`    — show a single server (with `--json`)
-/// - `add`    — add a server launcher entry to `~/.codex/config.toml`
+/// - `add`    — add a server launcher entry to `~/.code/config.toml` (Code also reads legacy `~/.codex/config.toml`)
 /// - `remove` — delete a server entry
 #[derive(Debug, clap::Parser)]
 pub struct McpCli {
@@ -96,7 +96,7 @@ impl McpCli {
 
         match subcommand {
             McpSubcommand::Serve => {
-                codex_mcp_server::run_main(codex_linux_sandbox_exe, config_overrides).await?;
+                code_mcp_server::run_main(codex_linux_sandbox_exe, config_overrides).await?;
             }
             McpSubcommand::List(args) => {
                 run_list(&config_overrides, args)?;

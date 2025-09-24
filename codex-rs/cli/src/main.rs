@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use anyhow::Context;
 use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::Shell;
@@ -15,11 +17,21 @@ use codex_cli::proto;
 mod llm;
 use llm::{LlmCli, run_llm};
 use codex_common::CliConfigOverrides;
+use codex_core::find_conversation_path_by_id_str;
+use codex_core::RolloutRecorder;
 use codex_exec::Cli as ExecCli;
 use codex_tui::Cli as TuiCli;
+use std::path::Path;
 use std::path::PathBuf;
+use std::process;
+use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioHandle};
 
+mod mcp_cmd;
+
+use crate::mcp_cmd::McpCli;
 use crate::proto::ProtoCli;
+
+const CLI_COMMAND_NAME: &str = "code";
 
 /// Codex CLI
 ///
@@ -33,7 +45,7 @@ use crate::proto::ProtoCli;
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
     // `codex-x86_64-unknown-linux-musl`, but the help output should always use
-    // the generic `codex` command name that users run.
+    // the generic `code` command name that users run.
     bin_name = "code"
 )]
 struct MultitoolCli {
@@ -59,8 +71,9 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// Experimental: run Codex as an MCP server.
-    Mcp,
+    /// [experimental] Run Codex as an MCP server and manage MCP servers.
+    #[clap(visible_alias = "acp")]
+    Mcp(McpCli),
 
     /// Run the Protocol stream via stdin/stdout
     #[clap(visible_alias = "p")]
@@ -79,6 +92,9 @@ enum Subcommand {
     /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
+
+    /// Resume a previous interactive session (picker by default; use --last to continue the most recent).
+    Resume(ResumeCommand),
 
     /// Internal: generate TypeScript protocol bindings.
     #[clap(hide = true)]
@@ -99,6 +115,21 @@ struct CompletionCommand {
     /// Shell to generate completions for
     #[clap(value_enum, default_value_t = Shell::Bash)]
     shell: Shell,
+}
+
+#[derive(Debug, Parser)]
+struct ResumeCommand {
+    /// Conversation/session id (UUID). When provided, resumes this session.
+    /// If omitted, use --last to pick the most recent recorded session.
+    #[arg(value_name = "SESSION_ID")]
+    session_id: Option<String>,
+
+    /// Continue the most recent session without showing the picker.
+    #[arg(long = "last", default_value_t = false, conflicts_with = "session_id")]
+    last: bool,
+
+    #[clap(flatten)]
+    config_overrides: TuiCli,
 }
 
 #[derive(Debug, Parser)]
@@ -153,9 +184,11 @@ struct GenerateTsCommand {
 
 #[derive(Debug, Parser)]
 struct OrderReplayArgs {
-    /// Path to a response.json captured under ~/.codex/debug_logs/*_response.json
+    /// Path to a response.json captured under ~/.code/debug_logs/*_response.json
+    /// (legacy ~/.codex/debug_logs/ is still read).
     response_json: std::path::PathBuf,
-    /// Path to codex-tui.log (typically ~/.codex/log/codex-tui.log)
+    /// Path to codex-tui.log (typically ~/.code/log/codex-tui.log; legacy
+    /// ~/.codex/log/codex-tui.log is still read).
     tui_log: std::path::PathBuf,
 }
 
@@ -182,26 +215,57 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
-    let cli = MultitoolCli::parse();
+    let MultitoolCli {
+        config_overrides: root_config_overrides,
+        mut interactive,
+        subcommand,
+    } = MultitoolCli::parse();
 
-    match cli.subcommand {
+    interactive.finalize_defaults();
+
+    match subcommand {
         None => {
-            let mut tui_cli = cli.interactive;
-            prepend_config_flags(&mut tui_cli.config_overrides, cli.config_overrides);
-            let usage = codex_tui::run_main(tui_cli, codex_linux_sandbox_exe).await?;
+            prepend_config_flags(
+                &mut interactive.config_overrides,
+                root_config_overrides.clone(),
+            );
+            let usage = codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
             if !usage.is_zero() {
                 println!("{}", codex_core::protocol::FinalOutput::from(usage));
             }
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
-            prepend_config_flags(&mut exec_cli.config_overrides, cli.config_overrides);
+            prepend_config_flags(
+                &mut exec_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
             codex_exec::run_main(exec_cli, codex_linux_sandbox_exe).await?;
         }
-        Some(Subcommand::Mcp) => {
-            codex_mcp_server::run_main(codex_linux_sandbox_exe, cli.config_overrides).await?;
+        Some(Subcommand::Mcp(mut mcp_cli)) => {
+            // Propagate any root-level config overrides (e.g. `-c key=value`).
+            prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
+            mcp_cli.run(codex_linux_sandbox_exe).await?;
+        }
+        Some(Subcommand::Resume(ResumeCommand {
+            session_id,
+            last,
+            mut config_overrides,
+        })) => {
+            config_overrides.finalize_defaults();
+            interactive = finalize_resume_interactive(
+                interactive,
+                root_config_overrides.clone(),
+                session_id,
+                last,
+                config_overrides,
+            );
+            codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
         }
         Some(Subcommand::Login(mut login_cli)) => {
-            prepend_config_flags(&mut login_cli.config_overrides, cli.config_overrides);
+            prepend_config_flags(
+                &mut login_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
             match login_cli.action {
                 Some(LoginSubcommand::Status) => {
                     run_login_status(login_cli.config_overrides).await;
@@ -216,11 +280,17 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             }
         }
         Some(Subcommand::Logout(mut logout_cli)) => {
-            prepend_config_flags(&mut logout_cli.config_overrides, cli.config_overrides);
+            prepend_config_flags(
+                &mut logout_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
             run_logout(logout_cli.config_overrides).await;
         }
         Some(Subcommand::Proto(mut proto_cli)) => {
-            prepend_config_flags(&mut proto_cli.config_overrides, cli.config_overrides);
+            prepend_config_flags(
+                &mut proto_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
             proto::run_main(proto_cli).await?;
         }
         Some(Subcommand::Completion(completion_cli)) => {
@@ -228,7 +298,10 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
         }
         Some(Subcommand::Debug(debug_args)) => match debug_args.cmd {
             DebugCommand::Seatbelt(mut seatbelt_cli) => {
-                prepend_config_flags(&mut seatbelt_cli.config_overrides, cli.config_overrides);
+                prepend_config_flags(
+                    &mut seatbelt_cli.config_overrides,
+                    root_config_overrides.clone(),
+                );
                 codex_cli::debug_sandbox::run_command_under_seatbelt(
                     seatbelt_cli,
                     codex_linux_sandbox_exe,
@@ -236,7 +309,10 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 .await?;
             }
             DebugCommand::Landlock(mut landlock_cli) => {
-                prepend_config_flags(&mut landlock_cli.config_overrides, cli.config_overrides);
+                prepend_config_flags(
+                    &mut landlock_cli.config_overrides,
+                    root_config_overrides.clone(),
+                );
                 codex_cli::debug_sandbox::run_command_under_landlock(
                     landlock_cli,
                     codex_linux_sandbox_exe,
@@ -245,7 +321,10 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             }
         },
         Some(Subcommand::Apply(mut apply_cli)) => {
-            prepend_config_flags(&mut apply_cli.config_overrides, cli.config_overrides);
+            prepend_config_flags(
+                &mut apply_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
             run_apply_command(apply_cli, None).await?;
         }
         Some(Subcommand::GenerateTs(gen_cli)) => {
@@ -261,7 +340,10 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             preview_main(args).await?;
         }
         Some(Subcommand::Llm(mut llm_cli)) => {
-            prepend_config_flags(&mut llm_cli.config_overrides, cli.config_overrides);
+            prepend_config_flags(
+                &mut llm_cli.config_overrides,
+                root_config_overrides.clone(),
+            );
             run_llm(llm_cli).await?;
         }
     }
@@ -280,10 +362,170 @@ fn prepend_config_flags(
         .splice(0..0, cli_config_overrides.raw_overrides);
 }
 
-fn print_completion(cmd: CompletionCommand) {
+/// Build the final `TuiCli` for a `codex resume` invocation.
+fn finalize_resume_interactive(
+    mut interactive: TuiCli,
+    root_config_overrides: CliConfigOverrides,
+    session_id: Option<String>,
+    last: bool,
+    mut resume_cli: TuiCli,
+) -> TuiCli {
+    // Our fork does not expose explicit resume fields on the TUI CLI.
+    // We simply merge resume-scoped flags and root overrides and run the TUI.
+
+    interactive.finalize_defaults();
+    resume_cli.finalize_defaults();
+
+    // Merge resume-scoped flags and overrides with highest precedence.
+    merge_resume_cli_flags(&mut interactive, resume_cli);
+
+    if let Err(err) = apply_resume_directives(&mut interactive, session_id, last) {
+        eprintln!("{}", err);
+        process::exit(1);
+    }
+
+    // Propagate any root-level config overrides (e.g. `-c key=value`).
+    prepend_config_flags(&mut interactive.config_overrides, root_config_overrides);
+
+    interactive
+}
+
+/// Merge flags provided to `codex resume` so they take precedence over any
+/// root-level flags. Only overrides fields explicitly set on the resume-scoped
+/// CLI. Also appends `-c key=value` overrides with highest precedence.
+fn merge_resume_cli_flags(interactive: &mut TuiCli, resume_cli: TuiCli) {
+    if let Some(model) = resume_cli.model {
+        interactive.model = Some(model);
+    }
+    if resume_cli.oss {
+        interactive.oss = true;
+    }
+    if let Some(profile) = resume_cli.config_profile {
+        interactive.config_profile = Some(profile);
+    }
+    if let Some(sandbox) = resume_cli.sandbox_mode {
+        interactive.sandbox_mode = Some(sandbox);
+    }
+    if let Some(approval) = resume_cli.approval_policy {
+        interactive.approval_policy = Some(approval);
+    }
+    if resume_cli.full_auto {
+        interactive.full_auto = true;
+    }
+    if resume_cli.dangerously_bypass_approvals_and_sandbox {
+        interactive.dangerously_bypass_approvals_and_sandbox = true;
+    }
+    if let Some(cwd) = resume_cli.cwd {
+        interactive.cwd = Some(cwd);
+    }
+    if !resume_cli.images.is_empty() {
+        interactive.images = resume_cli.images;
+    }
+    if let Some(prompt) = resume_cli.prompt {
+        interactive.prompt = Some(prompt);
+    }
+
+    if resume_cli.enable_web_search || resume_cli.disable_web_search {
+        interactive.enable_web_search = resume_cli.enable_web_search;
+        interactive.disable_web_search = resume_cli.disable_web_search;
+        interactive.web_search = resume_cli.web_search;
+    }
+
+    interactive
+        .config_overrides
+        .raw_overrides
+        .extend(resume_cli.config_overrides.raw_overrides);
+}
+
+fn apply_resume_directives(
+    interactive: &mut TuiCli,
+    session_id: Option<String>,
+    last: bool,
+) -> anyhow::Result<()> {
+    interactive.resume_picker = false;
+    interactive.resume_last = false;
+    interactive.resume_session_id = None;
+
+    match (session_id, last) {
+        (Some(id), _) => {
+            let path = resolve_resume_path(Some(id.as_str()), false)?
+                .ok_or_else(|| anyhow!("No recorded session found with id {id}"))?;
+            interactive.resume_session_id = Some(id);
+            push_experimental_resume_override(interactive, &path);
+        }
+        (None, true) => {
+            let path = resolve_resume_path(None, true)?
+                .ok_or_else(|| anyhow!("No recent sessions found to resume. Start a session with `code` first."))?;
+            interactive.resume_last = true;
+            push_experimental_resume_override(interactive, &path);
+        }
+        (None, false) => {
+            interactive.resume_picker = true;
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<Option<PathBuf>> {
+    if session_id.is_none() && !last {
+        return Ok(None);
+    }
+
+    let codex_home = codex_core::config::find_codex_home()
+        .context("failed to locate Codex home directory")?;
+
+    // Build the async work once, then execute it either on the existing
+    // runtime (from a helper thread) or a fresh current-thread runtime.
+    // Clone borrowed inputs so the async task can be 'static when spawned.
+    let sess = session_id.map(|s| s.to_string());
+    let fetch = async move {
+        if let Some(id) = sess.as_deref() {
+            let maybe = find_conversation_path_by_id_str(&codex_home, id)
+                .await
+                .context("failed to look up session by id")?;
+            Ok(maybe)
+        } else if last {
+            let page = RolloutRecorder::list_conversations(&codex_home, 1, None)
+                .await
+                .context("failed to list recorded sessions")?;
+            Ok(page.items.first().map(|it| it.path.clone()))
+        } else {
+            Ok(None)
+        }
+    };
+
+    match TokioHandle::try_current() {
+        Ok(handle) => {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.block_on(fetch))
+                .join()
+                .map_err(|_| anyhow!("resume lookup thread panicked"))?
+        }
+        Err(_) => TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("failed to create async runtime for resume lookup")?
+            .block_on(fetch),
+    }
+}
+
+fn push_experimental_resume_override(interactive: &mut TuiCli, path: &Path) {
+    let raw = path.to_string_lossy();
+    let escaped = raw.replace('\\', "\\\\").replace('"', "\\\"");
+    interactive
+        .config_overrides
+        .raw_overrides
+        .push(format!("experimental_resume=\"{escaped}\""));
+}
+
+fn write_completion<W: std::io::Write>(shell: Shell, out: &mut W) {
     let mut app = MultitoolCli::command();
-    let name = "codex";
-    generate(cmd.shell, &mut app, name, &mut std::io::stdout());
+    generate(shell, &mut app, CLI_COMMAND_NAME, out);
+}
+
+fn print_completion(cmd: CompletionCommand) {
+    write_completion(cmd.shell, &mut std::io::stdout());
 }
 
 fn order_replay_main(args: OrderReplayArgs) -> anyhow::Result<()> {
@@ -681,4 +923,144 @@ async fn doctor_main() -> anyhow::Result<()> {
     println!("  - Prefer using 'coder' to avoid conflicts with VS Code's 'code'.");
 
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bash_completion_uses_code_command_name() {
+        let mut buf = Vec::new();
+        write_completion(Shell::Bash, &mut buf);
+        let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
+        assert!(script.contains("_code()"), "expected bash completion function to be named _code");
+        assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
+    }
+
+    fn finalize_from_args(args: &[&str]) -> TuiCli {
+        let cli = MultitoolCli::try_parse_from(args).expect("parse");
+        let MultitoolCli {
+            interactive,
+            config_overrides: root_overrides,
+            subcommand,
+        } = cli;
+
+        let Subcommand::Resume(ResumeCommand {
+            session_id,
+            last,
+            config_overrides: resume_cli,
+        }) = subcommand.expect("resume present")
+        else {
+            unreachable!()
+        };
+
+        finalize_resume_interactive(interactive, root_overrides, session_id, last, resume_cli)
+    }
+
+    #[test]
+    fn resume_model_flag_applies_when_no_root_flags() {
+        let interactive = finalize_from_args(["codex", "resume", "-m", "gpt-5-test"].as_ref());
+
+        assert_eq!(interactive.model.as_deref(), Some("gpt-5-test"));
+        assert!(interactive.resume_picker);
+        assert!(!interactive.resume_last);
+        assert_eq!(interactive.resume_session_id, None);
+    }
+
+    #[test]
+    fn resume_picker_logic_none_and_not_last() {
+        let interactive = finalize_from_args(["codex", "resume"].as_ref());
+        assert!(interactive.resume_picker);
+        assert!(!interactive.resume_last);
+        assert_eq!(interactive.resume_session_id, None);
+    }
+
+    #[test]
+    fn resume_picker_logic_last() {
+        let interactive = finalize_from_args(["codex", "resume", "--last"].as_ref());
+        assert!(!interactive.resume_picker);
+        assert!(interactive.resume_last);
+        assert_eq!(interactive.resume_session_id, None);
+    }
+
+    #[test]
+    fn resume_picker_logic_with_session_id() {
+        let interactive = finalize_from_args(["codex", "resume", "1234"].as_ref());
+        assert!(!interactive.resume_picker);
+        assert!(!interactive.resume_last);
+        assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
+    }
+
+    #[test]
+    fn resume_merges_option_flags_and_full_auto() {
+        let interactive = finalize_from_args(
+            [
+                "codex",
+                "resume",
+                "sid",
+                "--oss",
+                "--full-auto",
+                "--search",
+                "--sandbox",
+                "workspace-write",
+                "--ask-for-approval",
+                "on-request",
+                "-m",
+                "gpt-5-test",
+                "-p",
+                "my-profile",
+                "-C",
+                "/tmp",
+                "-i",
+                "/tmp/a.png,/tmp/b.png",
+            ]
+            .as_ref(),
+        );
+
+        assert_eq!(interactive.model.as_deref(), Some("gpt-5-test"));
+        assert!(interactive.oss);
+        assert_eq!(interactive.config_profile.as_deref(), Some("my-profile"));
+        assert!(matches!(
+            interactive.sandbox_mode,
+            Some(codex_common::SandboxModeCliArg::WorkspaceWrite)
+        ));
+        assert!(matches!(
+            interactive.approval_policy,
+            Some(codex_common::ApprovalModeCliArg::OnRequest)
+        ));
+        assert!(interactive.full_auto);
+        assert_eq!(
+            interactive.cwd.as_deref(),
+            Some(std::path::Path::new("/tmp"))
+        );
+        assert!(interactive.web_search);
+        let has_a = interactive
+            .images
+            .iter()
+            .any(|p| p == std::path::Path::new("/tmp/a.png"));
+        let has_b = interactive
+            .images
+            .iter()
+            .any(|p| p == std::path::Path::new("/tmp/b.png"));
+        assert!(has_a && has_b);
+        assert!(!interactive.resume_picker);
+        assert!(!interactive.resume_last);
+        assert_eq!(interactive.resume_session_id.as_deref(), Some("sid"));
+    }
+
+    #[test]
+    fn resume_merges_dangerously_bypass_flag() {
+        let interactive = finalize_from_args(
+            [
+                "codex",
+                "resume",
+                "--dangerously-bypass-approvals-and-sandbox",
+            ]
+            .as_ref(),
+        );
+        assert!(interactive.dangerously_bypass_approvals_and_sandbox);
+        assert!(interactive.resume_picker);
+        assert!(!interactive.resume_last);
+        assert_eq!(interactive.resume_session_id, None);
+    }
 }

@@ -1,15 +1,19 @@
 //! Configuration object accepted by the `codex` MCP tool-call.
 
-use hanzo_dev::protocol::AskForApproval;
-use dev_protocol::config_types::SandboxMode;
+use agent_client_protocol as acp;
+use codex_core::config_types::ClientTools;
+use codex_core::protocol::AskForApproval;
+use codex_protocol::config_types::SandboxMode;
 use mcp_types::Tool;
 use mcp_types::ToolInputSchema;
+use mcp_types::ToolOutputSchema;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaSettings;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use serde_json::json;
 
 use crate::json_to_toml::json_to_toml;
 
@@ -99,7 +103,7 @@ impl From<CodexToolCallSandboxMode> for SandboxMode {
 }
 
 /// Builds a `Tool` definition (JSON schema etc.) for the Codex tool-call.
-pub(crate) fn create_tool_for_dev_tool_call_param() -> Tool {
+pub(crate) fn create_tool_for_codex_tool_call_param() -> Tool {
     let schema = SchemaSettings::draft2019_09()
         .with(|s| {
             s.inline_subschemas = true;
@@ -130,13 +134,81 @@ pub(crate) fn create_tool_for_dev_tool_call_param() -> Tool {
     }
 }
 
+/// Builds a `Tool` definition for the `acp/new_session` tool-call.
+pub(crate) fn create_tool_for_acp_new_session() -> Tool {
+    let input_schema = ToolInputSchema {
+        r#type: "object".to_string(),
+        required: Some(vec!["cwd".to_string()]),
+        properties: Some(json!({
+            "cwd": {"type": "string"},
+            "mcpServers": {"type": "array"},
+            "clientTools": {"type": "object"}
+        })),
+    };
+    let output_schema = ToolOutputSchema {
+        r#type: "object".to_string(),
+        properties: None,
+        required: None,
+    };
+
+    Tool {
+        name: acp::AGENT_METHOD_NAMES.session_new.to_string(),
+        title: Some(acp::AGENT_METHOD_NAMES.session_new.to_string()),
+        input_schema,
+        output_schema: Some(output_schema),
+        description: Some("Start a Codex session over ACP.".to_string()),
+        annotations: None,
+    }
+}
+
+/// Builds a `Tool` definition for the `acp/prompt` tool-call.
+pub(crate) fn create_tool_for_acp_prompt() -> Tool {
+    let input_schema = ToolInputSchema {
+        r#type: "object".to_string(),
+        required: Some(vec!["sessionId".to_string(), "prompt".to_string()]),
+        properties: Some(json!({
+            "sessionId": {"type": "string"},
+            "prompt": {"type": "array"},
+            "meta": {"type": "object"}
+        })),
+    };
+
+    Tool {
+        name: acp::AGENT_METHOD_NAMES.session_prompt.to_string(),
+        title: Some(acp::AGENT_METHOD_NAMES.session_prompt.to_string()),
+        input_schema,
+        output_schema: None,
+        description: Some("Send a prompt to an existing ACP Codex session.".to_string()),
+        annotations: None,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpNewSessionToolArgs {
+    #[serde(flatten)]
+    pub request: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_tools: Option<ClientTools>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPromptToolArgs {
+    #[serde(rename = "sessionId")]
+    pub session_id: acp::SessionId,
+    pub prompt: Vec<acp::ContentBlock>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
+}
+
 impl CodexToolCallParam {
     /// Returns the initial user prompt to start the Codex conversation and the
     /// effective Config object generated from the supplied parameters.
     pub fn into_config(
         self,
-        dev_linux_sandbox_exe: Option<PathBuf>,
-    ) -> std::io::Result<(String, hanzo_dev::config::Config)> {
+        codex_linux_sandbox_exe: Option<PathBuf>,
+    ) -> std::io::Result<(String, codex_core::config::Config)> {
         let Self {
             prompt,
             model,
@@ -150,21 +222,25 @@ impl CodexToolCallParam {
         } = self;
 
         // Build the `ConfigOverrides` recognized by codex-core.
-        let overrides = hanzo_dev::config::ConfigOverrides {
+        let overrides = codex_core::config::ConfigOverrides {
             model,
-            // review_model field doesn't exist in ConfigOverrides
+            review_model: None,
             config_profile: profile,
             cwd: cwd.map(PathBuf::from),
             approval_policy: approval_policy.map(Into::into),
             sandbox_mode: sandbox.map(Into::into),
             model_provider: None,
-            codex_linux_sandbox_exe: dev_linux_sandbox_exe,
+            codex_linux_sandbox_exe,
             base_instructions,
             include_plan_tool,
+            include_apply_patch_tool: None,
+            include_view_image_tool: None,
             disable_response_storage: None,
             show_raw_agent_reasoning: None,
             debug: None,
             tools_web_search_request: None,
+            mcp_servers: None,
+            experimental_client_tools: None,
         };
 
         let cli_overrides = cli_overrides
@@ -173,7 +249,7 @@ impl CodexToolCallParam {
             .map(|(k, v)| (k, json_to_toml(v)))
             .collect();
 
-        let cfg = hanzo_dev::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
+        let cfg = codex_core::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
 
         Ok((prompt, cfg))
     }
@@ -190,7 +266,7 @@ pub struct CodexToolCallReplyParam {
 }
 
 /// Builds a `Tool` definition for the `codex-reply` tool-call.
-pub(crate) fn create_tool_for_dev_tool_call_reply_param() -> Tool {
+pub(crate) fn create_tool_for_codex_tool_call_reply_param() -> Tool {
     let schema = SchemaSettings::draft2019_09()
         .with(|s| {
             s.inline_subschemas = true;
@@ -237,8 +313,8 @@ mod tests {
     /// As of 2025-05-04, there is an open PR for this:
     /// https://github.com/modelcontextprotocol/inspector/pull/196
     #[test]
-    fn verify_dev_tool_json_schema() {
-        let tool = create_tool_for_dev_tool_call_param();
+    fn verify_codex_tool_json_schema() {
+        let tool = create_tool_for_codex_tool_call_param();
         #[expect(clippy::expect_used)]
         let tool_json = serde_json::to_value(&tool).expect("tool serializes");
         let expected_tool_json = serde_json::json!({
@@ -306,8 +382,8 @@ mod tests {
     }
 
     #[test]
-    fn verify_dev_tool_reply_json_schema() {
-        let tool = create_tool_for_dev_tool_call_reply_param();
+    fn verify_codex_tool_reply_json_schema() {
+        let tool = create_tool_for_codex_tool_call_reply_param();
         #[expect(clippy::expect_used)]
         let tool_json = serde_json::to_value(&tool).expect("tool serializes");
         let expected_tool_json = serde_json::json!({

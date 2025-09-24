@@ -1,12 +1,12 @@
 #![cfg(target_os = "linux")]
-use hanzo_dev::config_types::ShellEnvironmentPolicy;
-use hanzo_dev::error::CodexErr;
-use hanzo_dev::error::SandboxErr;
-use hanzo_dev::exec::ExecParams;
-use hanzo_dev::exec::SandboxType;
-use hanzo_dev::exec::process_exec_tool_call;
-use hanzo_dev::exec_env::create_env;
-use hanzo_dev::protocol::SandboxPolicy;
+use codex_core::config_types::ShellEnvironmentPolicy;
+use codex_core::error::CodexErr;
+use codex_core::error::SandboxErr;
+use codex_core::exec::ExecParams;
+use codex_core::exec::SandboxType;
+use codex_core::exec::process_exec_tool_call;
+use codex_core::exec_env::create_env;
+use codex_core::protocol::SandboxPolicy;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -35,9 +35,11 @@ fn create_env_from_core_vars() -> HashMap<String, String> {
 
 #[expect(clippy::print_stdout, clippy::expect_used, clippy::unwrap_used)]
 async fn run_cmd(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) {
+    let cwd = std::env::current_dir().expect("cwd should exist");
+    let sandbox_cwd = cwd.clone();
     let params = ExecParams {
         command: cmd.iter().map(|elm| elm.to_string()).collect(),
-        cwd: std::env::current_dir().expect("cwd should exist"),
+        cwd,
         timeout_ms: Some(timeout_ms),
         env: create_env_from_core_vars(),
         with_escalated_permissions: None,
@@ -54,12 +56,13 @@ async fn run_cmd(cmd: &[&str], writable_roots: &[PathBuf], timeout_ms: u64) {
         exclude_slash_tmp: true,
     };
     let sandbox_program = env!("CARGO_BIN_EXE_codex-linux-sandbox");
-    let dev_linux_sandbox_exe = Some(PathBuf::from(sandbox_program));
+    let codex_linux_sandbox_exe = Some(PathBuf::from(sandbox_program));
     let res = process_exec_tool_call(
         params,
         SandboxType::LinuxSeccomp,
         &sandbox_policy,
-        &dev_linux_sandbox_exe,
+        sandbox_cwd.as_path(),
+        &codex_linux_sandbox_exe,
         None,
     )
     .await
@@ -133,6 +136,7 @@ async fn test_timeout() {
 #[expect(clippy::expect_used)]
 async fn assert_network_blocked(cmd: &[&str]) {
     let cwd = std::env::current_dir().expect("cwd should exist");
+    let sandbox_cwd = cwd.clone();
     let params = ExecParams {
         command: cmd.iter().map(|s| s.to_string()).collect(),
         cwd,
@@ -146,12 +150,13 @@ async fn assert_network_blocked(cmd: &[&str]) {
 
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let sandbox_program = env!("CARGO_BIN_EXE_codex-linux-sandbox");
-    let dev_linux_sandbox_exe: Option<PathBuf> = Some(PathBuf::from(sandbox_program));
+    let codex_linux_sandbox_exe: Option<PathBuf> = Some(PathBuf::from(sandbox_program));
     let result = process_exec_tool_call(
         params,
         SandboxType::LinuxSeccomp,
         &sandbox_policy,
-        &dev_linux_sandbox_exe,
+        sandbox_cwd.as_path(),
+        &codex_linux_sandbox_exe,
         None,
     )
     .await;

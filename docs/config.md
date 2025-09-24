@@ -12,7 +12,7 @@ Codex supports several mechanisms for setting config values:
   - If `value` cannot be parsed as a valid TOML value, it is treated as a string value. This means that `-c model='"o3"'` and `-c model=o3` are equivalent.
     - In the first case, the value is the TOML string `"o3"`, while in the second the value is `o3`, which is not valid TOML and therefore treated as the TOML string `"o3"`.
     - Because quotes are interpreted by one's shell, `-c key="true"` will be correctly interpreted in TOML as `key = true` (a boolean) and not `key = "true"` (a string). If for some reason you needed the string `"true"`, you would need to use `-c key='"true"'` (note the two sets of quotes).
-- The `$CODEX_HOME/config.toml` configuration file where the `CODEX_HOME` environment value defaults to `~/.codex`. (Note `CODEX_HOME` will also be where logs and other Codex-related information are stored.)
+- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Code also reads from `$CODEX_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
 
 Both the `--config` flag and the `config.toml` file support the following options:
 
@@ -69,17 +69,6 @@ base_url = "https://api.mistral.ai/v1"
 env_key = "MISTRAL_API_KEY"
 ```
 
-Note that Azure requires `api-version` to be passed as a query parameter, so be sure to specify it as part of `query_params` when defining the Azure provider:
-
-```toml
-[model_providers.azure]
-name = "Azure"
-# Make sure you set the appropriate subdomain for this URL.
-base_url = "https://YOUR_PROJECT_NAME.openai.azure.com/openai"
-env_key = "AZURE_OPENAI_API_KEY"  # Or "OPENAI_API_KEY", whichever you use.
-query_params = { api-version = "2025-04-01-preview" }
-```
-
 It is also possible to configure a provider to include extra HTTP headers with a request. These can be hardcoded values (`http_headers`) or values read from environment variables (`env_http_headers`):
 
 ```toml
@@ -95,6 +84,22 @@ http_headers = { "X-Example-Header" = "example-value" }
 # _if_ the environment variable is set and its value is non-empty.
 env_http_headers = { "X-Example-Features" = "EXAMPLE_FEATURES" }
 ```
+
+### Azure model provider example
+
+Note that Azure requires `api-version` to be passed as a query parameter, so be sure to specify it as part of `query_params` when defining the Azure provider:
+
+```toml
+[model_providers.azure]
+name = "Azure"
+# Make sure you set the appropriate subdomain for this URL.
+base_url = "https://YOUR_PROJECT_NAME.openai.azure.com/openai"
+env_key = "AZURE_OPENAI_API_KEY"  # Or "OPENAI_API_KEY", whichever you use.
+query_params = { api-version = "2025-04-01-preview" }
+wire_api = "responses"
+```
+
+Export your key before launching Codex: `export AZURE_OPENAI_API_KEY=…`
 
 ### Per-provider network tuning
 
@@ -360,7 +365,7 @@ This config option is comparable to how Claude and Cursor define `mcpServers` in
 }
 ```
 
-Should be represented as follows in `~/.codex/config.toml`:
+Should be represented as follows in `~/.code/config.toml` (Code will also read the legacy `~/.codex/config.toml` if it exists):
 
 ```toml
 # IMPORTANT: the top-level key is `mcp_servers` rather than `mcpServers`.
@@ -372,7 +377,48 @@ env = { "API_KEY" = "value" }
 startup_timeout_ms = 20_000
 ```
 
-You can also manage these entries from the CLI [experimental]:
+## validation
+
+Controls the quick validation harness that runs before applying patches. The
+master toggle lives under `[validation]` with per-tool overrides in the nested
+`[validation.tools]` table. The harness is disabled by default—enable it via the
+config file or `/validation` when needed:
+
+```toml
+[validation]
+patch_harness = false
+
+[validation.tools]
+shellcheck = true
+markdownlint = true
+hadolint = true
+yamllint = true
+cargo-check = true
+shfmt = true
+prettier = true
+```
+
+When enabled, Codex can also run `actionlint` against modified workflows. This
+is configured under `[github]`:
+
+```toml
+[github]
+actionlint_on_patch = true
+# Optional: provide an explicit binary path
+actionlint_path = "/usr/local/bin/actionlint"
+```
+
+## disable_response_storage
+
+Currently, customers whose accounts are set to use Zero Data Retention (ZDR) must set `disable_response_storage` to `true` so that Codex uses an alternative to the Responses API that works with ZDR:
+
+```toml
+disable_response_storage = true
+```
+
+### Managing MCP servers from CLI (experimental)
+
+You can also manage these entries from the CLI:
 
 ```shell
 # Add a server (env can be repeated; `--` separates the launcher command)
@@ -388,14 +434,6 @@ codex mcp get docs --json
 
 # Remove a server
 codex mcp remove docs
-```
-
-## disable_response_storage
-
-Currently, customers whose accounts are set to use Zero Data Retention (ZDR) must set `disable_response_storage` to `true` so that Codex uses an alternative to the Responses API that works with ZDR:
-
-```toml
-disable_response_storage = true
 ```
 
 ## shell_environment_policy
@@ -511,7 +549,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-To have Codex use this script for notifications, you would configure it via `notify` in `~/.codex/config.toml` using the appropriate path to `notify.py` on your computer:
+To have Codex use this script for notifications, you would configure it via `notify` in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read) using the appropriate path to `notify.py` on your computer:
 
 ```toml
 notify = ["python3", "/Users/mbolin/.codex/notify.py"]
@@ -607,6 +645,69 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 > [!NOTE]
 > `tui.notifications` is built‑in and limited to the TUI session. For programmatic or cross‑environment notifications—or to integrate with OS‑specific notifiers—use the top‑level `notify` option to run an external program that receives event JSON. The two settings are independent and can be used together.
 
+## Project Hooks
+
+Use the `[projects]` table to scope settings to a specific workspace path. In addition to `trust_level`, `approval_policy`, and `always_allow_commands`, you can attach lifecycle hooks that run commands automatically when notable events occur.
+
+```toml
+[projects."/Users/me/src/my-app"]
+trust_level = "trusted"
+
+[[projects."/Users/me/src/my-app".hooks]]
+name = "bootstrap"
+event = "session.start"
+run = ["./scripts/bootstrap.sh"]
+timeout_ms = 60000
+
+[[projects."/Users/me/src/my-app".hooks]]
+event = "tool.after"
+run = "npm run lint -- --changed"
+```
+
+Supported hook events:
+
+- `session.start`: after the session is configured (once per launch)
+- `session.end`: before shutdown completes
+- `tool.before`: immediately before each exec/tool command runs
+- `tool.after`: once an exec/tool command finishes (regardless of exit code)
+- `file.before_write`: right before an `apply_patch` is applied
+- `file.after_write`: after an `apply_patch` completes and diffs are emitted
+
+Hook commands run inside the same sandbox mode as the session and appear in the TUI as their own exec cells. Failures are surfaced as background events but do not block the main task. Each invocation receives environment variables such as `CODE_HOOK_EVENT`, `CODE_HOOK_NAME`, `CODE_HOOK_INDEX`, `CODE_HOOK_CALL_ID`, `CODE_HOOK_PAYLOAD` (JSON describing the context), `CODE_SESSION_CWD`, and—when applicable—`CODE_HOOK_SOURCE_CALL_ID`. Hooks may also set `cwd`, provide additional `env` entries, and specify `timeout_ms`.
+
+Example `tool.after` payload:
+
+```json
+{
+  "event": "tool.after",
+  "call_id": "tool_12",
+  "cwd": "/Users/me/src/my-app",
+  "command": ["npm", "test"],
+  "exit_code": 1,
+  "duration_ms": 1832,
+  "stdout": "…output truncated…",
+  "stderr": "…",
+  "timed_out": false
+}
+```
+
+## Project Commands
+
+Define project-scoped commands under `[[projects."<path>".commands]]`. Each command needs a unique `name` and either an array (`command`) or string (`run`) describing how to invoke it. Optional fields include `description`, `cwd`, `env`, and `timeout_ms`.
+
+```toml
+[[projects."/Users/me/src/my-app".commands]]
+name = "setup"
+description = "Install dependencies"
+run = ["pnpm", "install"]
+
+[[projects."/Users/me/src/my-app".commands]]
+name = "unit"
+run = "cargo test --lib"
+```
+
+Project commands appear in the TUI via `/cmd <name>` and run through the standard execution pipeline. During execution Codex sets `CODE_PROJECT_COMMAND_NAME`, `CODE_PROJECT_COMMAND_DESCRIPTION` (when provided), and `CODE_SESSION_CWD` so scripts can tailor their behaviour.
+
 ## Config reference
 
 | Key | Type / Values | Notes |
@@ -639,6 +740,9 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 | `model_providers.<id>.stream_max_retries` | number | SSE stream retry count (default: 5). |
 | `model_providers.<id>.stream_idle_timeout_ms` | number | SSE idle timeout (ms) (default: 300000). |
 | `project_doc_max_bytes` | number | Max bytes to read from `AGENTS.md`. |
+| `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
+| `projects.<path>.hooks` | array<table> | Lifecycle hooks for that workspace (see "Project Hooks"). |
+| `projects.<path>.commands` | array<table> | Project commands exposed via `/cmd`. |
 | `profile` | string | Active profile name. |
 | `profiles.<name>.*` | various | Profile‑scoped overrides of the same keys. |
 | `history.persistence` | `save-all` \| `none` | History file persistence (default: `save-all`). |
@@ -658,6 +762,5 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 | `experimental_use_exec_command_tool` | boolean | Use experimental exec command tool. |
 | `use_experimental_reasoning_summary` | boolean | Use experimental summary for reasoning chain. |
 | `responses_originator_header_internal_override` | string | Override `originator` header value. |
-| `projects.<path>.trust_level` | string | Mark project/worktree as trusted (only `"trusted"` is recognized). |
 | `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
 | `tools.web_search_allowed_domains` | array<string> | Optional allow-list for web search (filters.allowed_domains). |

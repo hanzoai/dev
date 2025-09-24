@@ -58,9 +58,9 @@ Sometimes it is not convenient to `cd` to the directory you want Codex to use as
 Generate shell completion scripts via:
 
 ```shell
-codex completion bash
-codex completion zsh
-codex completion fish
+code completion bash
+code completion zsh
+code completion fish
 ```
 
 ### Experimenting with the Codex Sandbox
@@ -90,7 +90,7 @@ codex --sandbox workspace-write
 codex --sandbox danger-full-access
 ```
 
-The same setting can be persisted in `~/.codex/config.toml` via the top-level `sandbox_mode = "MODE"` key, e.g. `sandbox_mode = "workspace-write"`.
+The same setting can be persisted in `~/.code/config.toml` via the top-level `sandbox_mode = "MODE"` key (Code will also read legacy `~/.codex/config.toml`), e.g. `sandbox_mode = "workspace-write"`.
 
 If you want to prevent the agent from updating Git metadata (e.g., local safety), you can opt‑out with a workspace‑write tweak:
 
@@ -125,4 +125,3 @@ This folder is the root of a Cargo workspace. It contains quite a bit of experim
 - [`exec/`](./exec) "headless" CLI for use in automation.
 - [`tui/`](./tui) CLI that launches a fullscreen TUI built with [Ratatui](https://ratatui.rs/).
 - [`cli/`](./cli) CLI multitool that provides the aforementioned CLIs via subcommands.
-

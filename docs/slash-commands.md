@@ -25,16 +25,26 @@ Notes
 - `/init`: create an `AGENTS.md` file with instructions for Codex.
 - `/diff`: show `git diff` (including untracked files).
 - `/branch [task]`: create a worktree branch and switch to it. If a
-  task/description is provided, it is used when naming the branch.
+  task/description is provided, it is used when naming the branch. Must be run
+  from the repository root (not inside another branch worktree).
+- `/merge`: merge the current worktree branch back into the default branch and
+  remove the worktree. Run this from inside the worktree created by `/branch`.
+- `/cmd <name>`: run a project command defined for the current workspace.
 
 ## UX & Display
 
 - `/theme`: switch between color themes.
 - `/verbosity (high|medium|low)`: change text verbosity.
+- `/model`: choose what model and reasoning effort to use.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
+- `/limits`: visualize current hourly and weekly rate-limit usage.
+- `/update`: check the installed version, detect available upgrades, and run the
+  appropriate installer when possible.
 - `/mcp`: manage MCP servers (status/on/off/add).
+- `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
+  harness settings.
 
 ## Search & Mentions
 

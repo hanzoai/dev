@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use hanzo_dev::NewConversation;
-use hanzo_dev::config::Config as CodexConfig;
-use hanzo_dev::config::ConfigOverrides;
+use codex_core::NewConversation;
+use codex_core::config::Config as CodexConfig;
+use codex_core::config::ConfigOverrides;
 use mcp_types::RequestId;
 
 use crate::conversation_loop::run_conversation_loop;
@@ -49,13 +49,17 @@ pub(crate) async fn handle_create_conversation(
         sandbox_mode: sandbox,
         model_provider: None,
         config_profile: profile,
-        dev_linux_sandbox_exe: None,
+        codex_linux_sandbox_exe: None,
         base_instructions,
         include_plan_tool: None,
+        include_apply_patch_tool: None,
+        include_view_image_tool: None,
         disable_response_storage: None,
         show_raw_agent_reasoning: None,
         debug: None,
         tools_web_search_request: None,
+        mcp_servers: None,
+        experimental_client_tools: None,
     };
 
     let cfg: CodexConfig = match CodexConfig::load_with_cli_overrides(cli_overrides, overrides) {

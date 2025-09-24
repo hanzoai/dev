@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+# Code alias wrapper script
+# This script provides backward compatibility by calling the hanzo wrapper
+
+# Find the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Call the hanzo wrapper with all arguments
+exec "$SCRIPT_DIR/hanzo" "$@"

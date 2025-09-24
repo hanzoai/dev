@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# Hanzo wrapper script
+# This script wraps the underlying dev executable to present it as "hanzo"
+
+# Find the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Look for the dev executable in various locations
+DEV_EXECUTABLE=""
+
+# First, try the target/release directory (built with cargo build --release)
+if [[ -x "$PROJECT_ROOT/codex-rs/target/release/dev" ]]; then
+    DEV_EXECUTABLE="$PROJECT_ROOT/codex-rs/target/release/dev"
+# Then, try the target/debug directory (built with cargo build)
+elif [[ -x "$PROJECT_ROOT/codex-rs/target/debug/dev" ]]; then
+    DEV_EXECUTABLE="$PROJECT_ROOT/codex-rs/target/debug/dev"
+# Try src/rs target directories as well
+elif [[ -x "$PROJECT_ROOT/src/rs/target/release/dev" ]]; then
+    DEV_EXECUTABLE="$PROJECT_ROOT/src/rs/target/release/dev"
+elif [[ -x "$PROJECT_ROOT/src/rs/target/debug/dev" ]]; then
+    DEV_EXECUTABLE="$PROJECT_ROOT/src/rs/target/debug/dev"
+# Finally, try to find it via cargo
+else
+    # Try to build if not found
+    if command -v cargo >/dev/null 2>&1; then
+        echo "Building hanzo executable..." >&2
+        cd "$PROJECT_ROOT/codex-rs" && cargo build --release --bin dev >/dev/null 2>&1
+        if [[ -x "$PROJECT_ROOT/codex-rs/target/release/dev" ]]; then
+            DEV_EXECUTABLE="$PROJECT_ROOT/codex-rs/target/release/dev"
+        fi
+    fi
+fi
+
+if [[ -z "$DEV_EXECUTABLE" || ! -x "$DEV_EXECUTABLE" ]]; then
+    echo "Error: Could not find the dev executable. Please build the project first:" >&2
+    echo "  cd $PROJECT_ROOT/codex-rs && cargo build --release --bin dev" >&2
+    exit 1
+fi
+
+# Execute the underlying dev command with all arguments
+exec "$DEV_EXECUTABLE" "$@"

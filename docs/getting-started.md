@@ -4,41 +4,22 @@
 
 | Command            | Purpose                            | Example                         |
 | ------------------ | ---------------------------------- | ------------------------------- |
-| `hanzo`            | Interactive TUI                    | `hanzo`                         |
-| `hanzo "..."`      | Initial prompt for interactive TUI | `hanzo "fix lint errors"`       |
-| `hanzo exec "..."` | Non-interactive "automation mode"  | `hanzo exec "explain utils.ts"` |
+| `codex`            | Interactive TUI                    | `codex`                         |
+| `codex "..."`      | Initial prompt for interactive TUI | `codex "fix lint errors"`       |
+| `codex exec "..."` | Non-interactive "automation mode"  | `codex exec "explain utils.ts"` |
 
 Key flags: `--model/-m`, `--ask-for-approval/-a`.
 
-### Resuming interactive sessions
-
-- Run `hanzo resume` to display the session picker UI
-- Resume most recent: `hanzo resume --last`
-- Resume by id: `hanzo resume <SESSION_ID>` (You can get session ids from /status or `~/~/.hanzo/sessions/`)
-
-Examples:
-
-```shell
-# Open a picker of recent sessions
-hanzo resume
-
-# Resume the most recent session
-hanzo resume --last
-
-# Resume a specific session by id
-hanzo resume 7f9f9a2e-1b3c-4c7a-9b0e-123456789abc
-```
-
 ### Running with a prompt as input
 
-You can also run Hanzo Dev with a prompt as input:
+You can also run Codex CLI with a prompt as input:
 
 ```shell
-hanzo "explain this codebase to me"
+codex "explain this codebase to me"
 ```
 
 ```shell
-hanzo --full-auto "create the fanciest todo-list app"
+codex --full-auto "create the fanciest todo-list app"
 ```
 
 That's it - Codex will scaffold a file, run it inside a sandbox, install any
@@ -51,19 +32,19 @@ Below are a few bite-size examples you can copy-paste. Replace the text in quote
 
 | ✨  | What you type                                                                   | What happens                                                               |
 | --- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 1   | `hanzo "Refactor the Dashboard component to React Hooks"`                       | Codex rewrites the class component, runs `npm test`, and shows the diff.   |
-| 2   | `hanzo "Generate SQL migrations for adding a users table"`                      | Infers your ORM, creates migration files, and runs them in a sandboxed DB. |
-| 3   | `hanzo "Write unit tests for utils/date.ts"`                                    | Generates tests, executes them, and iterates until they pass.              |
-| 4   | `hanzo "Bulk-rename *.jpeg -> *.jpg with git mv"`                               | Safely renames files and updates imports/usages.                           |
-| 5   | `hanzo "Explain what this regex does: ^(?=.*[A-Z]).{8,}$"`                      | Outputs a step-by-step human explanation.                                  |
-| 6   | `hanzo "Carefully review this repo, and propose 3 high impact well-scoped PRs"` | Suggests impactful PRs in the current codebase.                            |
-| 7   | `hanzo "Look for vulnerabilities and create a security review report"`          | Finds and explains security bugs.                                          |
+| 1   | `codex "Refactor the Dashboard component to React Hooks"`                       | Codex rewrites the class component, runs `npm test`, and shows the diff.   |
+| 2   | `codex "Generate SQL migrations for adding a users table"`                      | Infers your ORM, creates migration files, and runs them in a sandboxed DB. |
+| 3   | `codex "Write unit tests for utils/date.ts"`                                    | Generates tests, executes them, and iterates until they pass.              |
+| 4   | `codex "Bulk-rename *.jpeg -> *.jpg with git mv"`                               | Safely renames files and updates imports/usages.                           |
+| 5   | `codex "Explain what this regex does: ^(?=.*[A-Z]).{8,}$"`                      | Outputs a step-by-step human explanation.                                  |
+| 6   | `codex "Carefully review this repo, and propose 3 high impact well-scoped PRs"` | Suggests impactful PRs in the current codebase.                            |
+| 7   | `codex "Look for vulnerabilities and create a security review report"`          | Finds and explains security bugs.                                          |
 
 ### Memory with AGENTS.md
 
 You can give Codex extra instructions and guidance using `AGENTS.md` files. Codex looks for `AGENTS.md` files in the following places, and merges them top-down:
 
-1. `~/~/.hanzo/AGENTS.md` - personal global guidance
+1. `~/.code/AGENTS.md` - personal global guidance (Code will also read a legacy `~/.codex/AGENTS.md` if present)
 2. `AGENTS.md` at repo root - shared project notes
 3. `AGENTS.md` in the current working directory - sub-folder/feature specifics
 
@@ -80,8 +61,8 @@ Typing `@` triggers a fuzzy-filename search over the workspace root. Use up/down
 Paste images directly into the composer (Ctrl+V / Cmd+V) to attach them to your prompt. You can also attach files via the CLI using `-i/--image` (comma‑separated):
 
 ```bash
-hanzo -i screenshot.png "Explain this error"
-hanzo --image img1.png,img2.jpg "Summarize these diagrams"
+codex -i screenshot.png "Explain this error"
+codex --image img1.png,img2.jpg "Summarize these diagrams"
 ```
 
 #### Esc–Esc to edit a previous message
@@ -95,11 +76,11 @@ In the transcript preview, the footer shows an `Esc edit prev` hint while editin
 Generate shell completion scripts via:
 
 ```shell
-hanzo completion bash
-hanzo completion zsh
-hanzo completion fish
+code completion bash
+code completion zsh
+code completion fish
 ```
 
 #### `--cd`/`-C` flag
 
-Sometimes it is not convenient to `cd` to the directory you want Codex to use as the "working root" before running Codex. Fortunately, `hanzo` supports a `--cd` option so you can specify whatever folder you want. You can confirm that Codex is honoring `--cd` by double-checking the **workdir** it reports in the TUI at the start of a new session.
+Sometimes it is not convenient to `cd` to the directory you want Codex to use as the "working root" before running Codex. Fortunately, `codex` supports a `--cd` option so you can specify whatever folder you want. You can confirm that Codex is honoring `--cd` by double-checking the **workdir** it reports in the TUI at the start of a new session.

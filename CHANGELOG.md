@@ -3,6 +3,100 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.162] - 2025-09-22
+
+- CLI/Resume: fix --last to reliably select the most recent session under active runtimes. (1a2521ff)
+- Stability: avoid nested Tokio runtime creation during resume lookup to prevent sporadic failures. (1a2521ff)
+
+## [0.2.161] - 2025-09-22
+
+- TUI/Slash: add more /review options for richer reviews (5996ee0e)
+- TUI: fix merge fallout and remove unused const to eliminate warnings (cf031b67)
+
+## [0.2.160] - 2025-09-22
+
+- Core/Config: coerce auto-upgrade booleans for correct behavior (158cb551)
+- TUI/Slash: route exit aliases through quit for consistency (f527c1d1)
+- Core/Exec: block redundant cd and Python file writer commands (e8c78311)
+
+## [0.2.159] - 2025-09-22
+
+- Docs: streamline Zed integration guide (ceb8804c)
+- No user-facing code changes; release metadata only (2e77ed94, 323b6563)
+
+## [0.2.158] - 2025-09-22
+
+- Core/ACP: integrate ACP support and sync protocol updates (1eeae7f8, fbe8beb5)
+- CLI: expose MCP via code subcommand and add acp alias; ship code-mcp-server on install (f15d2e2f, d41e9064, 33f498e1)
+- TUI/Limits: refresh layout, show compact usage, align hourly/weekly windows (20aaecb3, 06bcddfd, fecaf661)
+- TUI/Limits: fix hourly window display and reset timing (388975ac)
+- Stability: respect web search flag; clear spinner after final answer; accept numeric MCP protocolVersion (c5dfc88d, d95c24b1, 763e08c5)
+
+## [0.2.157] - 2025-09-22
+
+- CLI: restore coder resume support. (b46786d3)
+- CLI: generate completion scripts with code command name. (b8961ec0)
+- TUI: avoid showing agents HUD on handoff. (8ab7367c)
+- TUI/Limits: refresh usage header copy; move rate‑limit polling off main thread. (ddc23f6a, 2d3a9f55)
+- TUI: show Ctrl+T exit hint in standard mode. (6243cf27)
+
+## [0.2.156] - 2025-09-22
+
+- TUI/Limits: add /limits view with live snapshots and persisted reset times. (70ee0986, a9fc289a, b2567a0e)
+- Performance: speed up exec/history rendering via layout and metadata caching. (50399898, fbf6a9d6, 9f2b39a0)
+- Approval: require confirmation for manual terminal commands; add semantic prefix matching. (d9be45a8, 57ecce7c)
+- Core: report OS and tool info for better diagnostics. (5142926c)
+- TUI/History: show run duration, collapse wait tool output, and finalize cells cleanly. (8cdba3a6, 3aa2e17a, 5378e55d)
+
+## [0.2.155] - 2025-09-18
+
+- Auth: fix onboarding auth prompt gating. (87a76d25)
+- CLI: add long-run calculator script. (b01e2b38)
+- TUI: add pulldown-cmark dependency to fix build. (f1718b03)
+- Docs: clarify config directories. (cc22fbd9)
+
+## [0.2.154] - 2025-09-18
+
+- TUI/Input: fix Shift+Tab crash. (354a6faa)
+- TUI/Agents: improve visibility for multi‑agent commands. (8add2c42)
+- TUI/Slash: make @ shortcut work with /solve and /plan. (db324a6c)
+
+## [0.2.153] - 2025-09-18
+
+- Core/Config: prioritize ~/.code for legacy config reads and writes. (d268969, 2629790)
+- TUI/History: strip sed/head/tail pipes when showing line ranges. (d1880bb)
+- TUI: skip alternate scroll on Apple Terminal for smoother scrolling. (f712474)
+- Resume: restore full history replay. (6d1bfdd)
+- Core: persist GPT-5 overrides across sessions. (26e538a)
+
+## [0.2.152] - 2025-09-17
+
+- TUI: add terminal overlay and agent install flow. (104a5f9f, c678d670)
+- TUI/Explore: enrich run summaries with pipeline context; polish explore labels. (e25f8faa, d7ce1345)
+- Core/Exec: enforce dry-run guard for formatter commands. (360fbf94)
+- Explore: support read-only git commands. (b6b9fc41)
+- TUI: add plan names and sync terminal title. (29eda799)
+
+## [0.2.151] - 2025-09-16
+
+- TUI/History: append merge completion banner for clearer post-merge status. (736293a9)
+- TUI: add intersection checks for parameter inputs in AgentEditorView. (6d1775cf)
+
+## [0.2.150] - 2025-09-16
+
+- TUI/Branch: add /merge command and show diff summary in merge handoff. (eb4c2bc0, 0f254d9e, b19b2d16)
+- TUI/Agents: refine editor UX and persistence; keep instructions/buttons visible and tidy spacing. (639fe9dd, f8e51fb9, 508e187f)
+- TUI/History: render exec status separately, keep gutter icon, and refine short-command and path labels. (2ec5e655, fd8f7258, 59975907, a27f3aab)
+- Core/TUI: restore jq search and alt-screen scrolling; treat jq filters as searches. (8c250e46, ec1f12cb, 764cd276)
+
+## [0.2.149] - 2025-09-16
+
+- TUI/Agents: redesign editor and list; keep Save/Cancel visible, add Delete, better navigation and scrolling. (eb024bee, 8c2caf76, 647fed36)
+- TUI/Model: restore /model selector and presets; persist model defaults; default local agent is "code". (84fbdda1, 85159d1f, 60408ab1)
+- TUI/Reasoning: show reasoning level in header; keep reasoning cell visible; polish run cells and log claims. (d7d9d96d, 2f471aee, 8efe4723)
+- Exec/Resume: detect absolute bash and flag risky paths; fix race in unified exec; show abort and header when resuming. (4744c220, d555b684, 50262a44, 6581da9b)
+- UX: skip animations on small terminals, update splash, and refine onboarding messaging. (934d7289, 9baa5c33, 5c583fe8)
+
 ## [0.2.148] - 2025-09-14
 
 - Core/Agents: mirror Qwen/DashScope API vars; respect QWEN_MODEL; add qwen examples in config.toml.example. (8a935c18)

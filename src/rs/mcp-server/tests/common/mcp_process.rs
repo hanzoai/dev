@@ -11,15 +11,15 @@ use tokio::process::ChildStdout;
 
 use anyhow::Context;
 use assert_cmd::prelude::*;
-use codex_mcp_server::CodexToolCallParam;
-use dev_protocol::mcp_protocol::AddConversationListenerParams;
-use dev_protocol::mcp_protocol::CancelLoginChatGptParams;
-use dev_protocol::mcp_protocol::GetAuthStatusParams;
-use dev_protocol::mcp_protocol::InterruptConversationParams;
-use dev_protocol::mcp_protocol::NewConversationParams;
-use dev_protocol::mcp_protocol::RemoveConversationListenerParams;
-use dev_protocol::mcp_protocol::SendUserMessageParams;
-use dev_protocol::mcp_protocol::SendUserTurnParams;
+use code_mcp_server::CodexToolCallParam;
+use codex_protocol::mcp_protocol::AddConversationListenerParams;
+use codex_protocol::mcp_protocol::CancelLoginChatGptParams;
+use codex_protocol::mcp_protocol::GetAuthStatusParams;
+use codex_protocol::mcp_protocol::InterruptConversationParams;
+use codex_protocol::mcp_protocol::NewConversationParams;
+use codex_protocol::mcp_protocol::RemoveConversationListenerParams;
+use codex_protocol::mcp_protocol::SendUserMessageParams;
+use codex_protocol::mcp_protocol::SendUserTurnParams;
 
 use mcp_types::CallToolRequestParams;
 use mcp_types::ClientCapabilities;
@@ -64,8 +64,8 @@ impl McpProcess {
         env_overrides: &[(&str, Option<&str>)],
     ) -> anyhow::Result<Self> {
         // Use assert_cmd to locate the binary path and then switch to tokio::process::Command
-        let std_cmd = StdCommand::cargo_bin("codex-mcp-server")
-            .context("should find binary for codex-mcp-server")?;
+        let std_cmd = StdCommand::cargo_bin("code-mcp-server")
+            .context("should find binary for code-mcp-server")?;
 
         let program = std_cmd.get_program().to_owned();
 
@@ -91,7 +91,7 @@ impl McpProcess {
         let mut process = cmd
             .kill_on_drop(true)
             .spawn()
-            .context("codex-mcp-server proc should start")?;
+            .context("code-mcp-server proc should start")?;
         let stdin = process
             .stdin
             .take()
@@ -156,7 +156,7 @@ impl McpProcess {
             os_info.os_type(),
             os_info.version(),
             os_info.architecture().unwrap_or("unknown"),
-            hanzo_dev::terminal::user_agent()
+            codex_core::terminal::user_agent()
         );
         assert_eq!(
             JSONRPCMessage::Response(JSONRPCResponse {
@@ -169,7 +169,7 @@ impl McpProcess {
                         },
                     },
                     "serverInfo": {
-                        "name": "codex-mcp-server",
+                        "name": "code-mcp-server",
                         "title": "Codex",
                         "version": "0.0.0",
                         "user_agent": user_agent
@@ -206,6 +206,27 @@ impl McpProcess {
             Some(serde_json::to_value(codex_tool_call_params)?),
         )
         .await
+    }
+
+    pub async fn send_tool_call(
+        &mut self,
+        name: &str,
+        arguments: Option<serde_json::Value>,
+    ) -> anyhow::Result<i64> {
+        let params = CallToolRequestParams {
+            name: name.to_string(),
+            arguments,
+        };
+        self.send_request(
+            mcp_types::CallToolRequest::METHOD,
+            Some(serde_json::to_value(params)?),
+        )
+        .await
+    }
+
+    pub async fn send_list_tools_request(&mut self) -> anyhow::Result<i64> {
+        self.send_request(mcp_types::ListToolsRequest::METHOD, None)
+            .await
     }
 
     /// Send a `newConversation` JSON-RPC request.
@@ -336,7 +357,7 @@ impl McpProcess {
         Ok(())
     }
 
-    async fn read_jsonrpc_message(&mut self) -> anyhow::Result<JSONRPCMessage> {
+    pub async fn read_jsonrpc_message(&mut self) -> anyhow::Result<JSONRPCMessage> {
         let mut line = String::new();
         self.stdout.read_line(&mut line).await?;
         let message = serde_json::from_str::<JSONRPCMessage>(&line)?;

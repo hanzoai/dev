@@ -1,21 +1,21 @@
 use std::path::Path;
 
-use hanzo_dev::protocol::AskForApproval;
-use hanzo_dev::protocol::SandboxPolicy;
-use hanzo_dev::protocol_config_types::ReasoningEffort;
-use hanzo_dev::protocol_config_types::ReasoningSummary;
-use hanzo_dev::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
-use dev_protocol::mcp_protocol::AddConversationListenerParams;
-use dev_protocol::mcp_protocol::AddConversationSubscriptionResponse;
-use dev_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
-use dev_protocol::mcp_protocol::NewConversationParams;
-use dev_protocol::mcp_protocol::NewConversationResponse;
-use dev_protocol::mcp_protocol::RemoveConversationListenerParams;
-use dev_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
-use dev_protocol::mcp_protocol::SendUserMessageParams;
-use dev_protocol::mcp_protocol::SendUserMessageResponse;
-use dev_protocol::mcp_protocol::SendUserTurnParams;
-use dev_protocol::mcp_protocol::SendUserTurnResponse;
+use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::SandboxPolicy;
+use codex_core::protocol_config_types::ReasoningEffort;
+use codex_core::protocol_config_types::ReasoningSummary;
+use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_protocol::mcp_protocol::AddConversationListenerParams;
+use codex_protocol::mcp_protocol::AddConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::EXEC_COMMAND_APPROVAL_METHOD;
+use codex_protocol::mcp_protocol::NewConversationParams;
+use codex_protocol::mcp_protocol::NewConversationResponse;
+use codex_protocol::mcp_protocol::RemoveConversationListenerParams;
+use codex_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
+use codex_protocol::mcp_protocol::SendUserMessageParams;
+use codex_protocol::mcp_protocol::SendUserMessageResponse;
+use codex_protocol::mcp_protocol::SendUserTurnParams;
+use codex_protocol::mcp_protocol::SendUserTurnResponse;
 use mcp_test_support::McpProcess;
 use mcp_test_support::create_final_assistant_message_sse_response;
 use mcp_test_support::create_mock_chat_completions_server;
@@ -90,6 +90,7 @@ async fn test_codex_jsonrpc_conversation_flow() {
     let NewConversationResponse {
         conversation_id,
         model,
+        ..
     } = new_conv_resp;
     assert_eq!(model, "mock-model");
 
@@ -113,7 +114,7 @@ async fn test_codex_jsonrpc_conversation_flow() {
     let send_user_id = mcp
         .send_send_user_message_request(SendUserMessageParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "text".to_string(),
             }],
         })
@@ -263,7 +264,7 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     let send_user_id = mcp
         .send_send_user_message_request(SendUserMessageParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "run python".to_string(),
             }],
         })
@@ -293,7 +294,7 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     // Approve so the first turn can complete
     mcp.send_response(
         request.id,
-        serde_json::json!({ "decision": hanzo_dev::protocol::ReviewDecision::Approved }),
+        serde_json::json!({ "decision": codex_core::protocol::ReviewDecision::Approved }),
     )
     .await
     .expect("send approval response");
@@ -311,7 +312,7 @@ async fn test_send_user_turn_changes_approval_policy_behavior() {
     let send_turn_id = mcp
         .send_send_user_turn_request(SendUserTurnParams {
             conversation_id,
-            items: vec![dev_protocol::mcp_protocol::InputItem::Text {
+            items: vec![codex_protocol::mcp_protocol::InputItem::Text {
                 text: "run python again".to_string(),
             }],
             cwd: working_directory.clone(),

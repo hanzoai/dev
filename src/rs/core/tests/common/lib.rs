@@ -2,19 +2,22 @@
 
 use tempfile::TempDir;
 
-use hanzo_dev::CodexConversation;
-use hanzo_dev::config::Config;
-use hanzo_dev::config::ConfigOverrides;
-use hanzo_dev::config::ConfigToml;
+use codex_core::CodexConversation;
+use codex_core::config::Config;
+use codex_core::config::ConfigOverrides;
+use codex_core::config::ConfigToml;
+
+pub mod responses;
 
 /// Returns a default `Config` whose on-disk state is confined to the provided
 /// temporary directory. Using a per-test directory keeps tests hermetic and
-/// avoids clobbering a developer’s real `~/.codex`.
-pub fn load_default_config_for_test(dev_home: &TempDir) -> Config {
+/// avoids clobbering a developer’s real `~/.code` directory (legacy `~/.codex`
+/// is still read).
+pub fn load_default_config_for_test(codex_home: &TempDir) -> Config {
     Config::load_from_base_config_with_overrides(
         ConfigToml::default(),
         ConfigOverrides::default(),
-        dev_home.path().to_path_buf(),
+        codex_home.path().to_path_buf(),
     )
     .expect("defaults for test should always succeed")
 }
@@ -92,35 +95,35 @@ pub fn load_sse_fixture_with_id(path: impl AsRef<std::path::Path>, id: &str) -> 
         .collect()
 }
 
-// TODO: Fix these functions after refactoring CodexConversation to expose event handling
-// The tests expect CodexConversation to have next_event() method but it's only a simple
-// struct now. Either CodexConversation needs to wrap Codex or tests need refactoring.
-
 pub async fn wait_for_event<F>(
-    _codex: &CodexConversation,
-    _predicate: F,
-) -> hanzo_dev::protocol::EventMsg
+    codex: &CodexConversation,
+    predicate: F,
+) -> codex_core::protocol::EventMsg
 where
-    F: FnMut(&hanzo_dev::protocol::EventMsg) -> bool,
+    F: FnMut(&codex_core::protocol::EventMsg) -> bool,
 {
-    // Temporarily return a dummy event to make tests compile
-    // This needs proper implementation after architecture is fixed
-    hanzo_dev::protocol::EventMsg::TaskComplete(hanzo_dev::protocol::TaskCompleteEvent {
-        last_agent_message: None,
-    })
+    use tokio::time::Duration;
+    wait_for_event_with_timeout(codex, predicate, Duration::from_secs(1)).await
 }
 
 pub async fn wait_for_event_with_timeout<F>(
-    _codex: &CodexConversation,
-    _predicate: F,
-    _wait_time: tokio::time::Duration,
-) -> hanzo_dev::protocol::EventMsg
+    codex: &CodexConversation,
+    mut predicate: F,
+    wait_time: tokio::time::Duration,
+) -> codex_core::protocol::EventMsg
 where
-    F: FnMut(&hanzo_dev::protocol::EventMsg) -> bool,
+    F: FnMut(&codex_core::protocol::EventMsg) -> bool,
 {
-    // Temporarily return a dummy event to make tests compile
-    // This needs proper implementation after architecture is fixed
-    hanzo_dev::protocol::EventMsg::TaskComplete(hanzo_dev::protocol::TaskCompleteEvent {
-        last_agent_message: None,
-    })
+    use tokio::time::Duration;
+    use tokio::time::timeout;
+    loop {
+        // Allow a bit more time to accommodate async startup work (e.g. config IO, tool discovery)
+        let ev = timeout(wait_time.max(Duration::from_secs(5)), codex.next_event())
+            .await
+            .expect("timeout waiting for event")
+            .expect("stream ended unexpectedly");
+        if predicate(&ev.msg) {
+            return ev.msg;
+        }
+    }
 }
