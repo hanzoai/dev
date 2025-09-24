@@ -225,17 +225,35 @@ impl ModelClient {
 
         let input_with_instructions = prompt.get_formatted_input();
 
-        // Create text parameter with verbosity and optional format.
-        // Historically not supported with ChatGPT auth, but allow it when a
-        // caller explicitly requests a `text.format` (side-channel usage).
-        let want_format = prompt.text_format.as_ref();
-        let text = if auth_mode == Some(AuthMode::ChatGPT) && want_format.is_none() {
-            None
-        } else {
-            Some(crate::client_common::Text {
-                verbosity: self.verbosity.into(),
-                format: prompt.text_format.clone(),
+        // Build `text` parameter with conditional verbosity and optional format.
+        // - Omit entirely for ChatGPT auth unless a `text.format` or output schema is present.
+        // - Only include `text.verbosity` for GPT-5 family models; warn and ignore otherwise.
+        // - When a structured `format` is present, omit `verbosity` in serialization.
+        let want_format = prompt.text_format.clone().or_else(|| {
+            prompt.output_schema.as_ref().map(|schema| crate::client_common::TextFormat {
+                r#type: "json_schema".to_string(),
+                name: Some("codex_output_schema".to_string()),
+                strict: Some(true),
+                schema: Some(schema.clone()),
             })
+        });
+
+        let verbosity = match &self.config.model_family.family {
+            family if family == "gpt-5" => Some(self.config.model_text_verbosity),
+            _ => None,
+        };
+
+        let text = match (auth_mode, want_format, verbosity) {
+            (Some(AuthMode::ChatGPT), None, _) => None,
+            (_, Some(fmt), _) => Some(crate::client_common::Text {
+                verbosity: self.verbosity.into(),
+                format: Some(fmt),
+            }),
+            (_, None, Some(_)) => Some(crate::client_common::Text {
+                verbosity: self.verbosity.into(),
+                format: None,
+            }),
+            (_, None, None) => None,
         };
 
         // In general, we want to explicitly send `store: false` when using the Responses API,
