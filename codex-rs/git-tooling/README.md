@@ -13,7 +13,7 @@ let repo = Path::new("/path/to/repo");
 // Capture the current working tree as an unreferenced commit.
 let ghost = create_ghost_commit(&CreateGhostCommitOptions::new(repo))?;
 
-// Later, roll back to that state.
+// Later, undo back to that state.
 restore_ghost_commit(repo, &ghost)?;
 ```
 

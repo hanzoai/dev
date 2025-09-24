@@ -227,7 +227,7 @@ impl ModelClient {
 
         // Create text parameter with verbosity and optional format.
         // Historically not supported with ChatGPT auth, but allow it when a
-        // caller explicitly requests a `text.format` (side‑channel usage).
+        // caller explicitly requests a `text.format` (side-channel usage).
         let want_format = prompt.text_format.as_ref();
         let text = if auth_mode == Some(AuthMode::ChatGPT) && want_format.is_none() {
             None
