@@ -800,6 +800,27 @@ impl App<'_> {
                                 if self.non_enhanced_pressed_keys.remove(&key_code) {
                                     continue;
                                 }
+
+                                let mut release_handled = false;
+                                if let KeyCode::Char(ch) = key_code {
+                                    let alts: Vec<char> = ch
+                                        .to_lowercase()
+                                        .chain(ch.to_uppercase())
+                                        .filter(|&c| c != ch)
+                                        .collect();
+
+                                    for alt in alts {
+                                        if self.non_enhanced_pressed_keys.remove(&KeyCode::Char(alt)) {
+                                            release_handled = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if release_handled {
+                                    continue;
+                                }
+
                                 key_event = KeyEvent::new(key_event.code, key_event.modifiers);
                             }
                         }
