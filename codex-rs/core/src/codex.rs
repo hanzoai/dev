@@ -2746,13 +2746,12 @@ impl AgentTask {
             let tc_clone = Arc::clone(&turn_context);
             let sub_clone = sub_id.clone();
             tokio::spawn(async move {
-                let _ = compact::perform_compaction(
+                compact::run_compact_task(
                     sess_clone,
                     tc_clone,
                     sub_clone,
                     input,
                     compact_instructions,
-                    true,
                 )
                 .await;
             })
