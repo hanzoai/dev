@@ -45,6 +45,7 @@ mod theme_selection_view;
 mod verbosity_selection_view;
 pub(crate) mod validation_settings_view;
 mod update_settings_view;
+mod undo_restore_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -72,6 +73,7 @@ use codex_core::config_types::ThemeName;
 use model_selection_view::ModelSelectionView;
 use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
+pub(crate) use undo_restore_view::UndoRestoreView;
 
 /// Pane displayed in the lower half of the chat UI.
 pub(crate) struct BottomPane<'a> {
@@ -597,6 +599,12 @@ impl BottomPane<'_> {
     pub fn show_github_settings(&mut self, watcher_enabled: bool, token_status: String, ready: bool) {
         use github_settings_view::GithubSettingsView;
         let view = GithubSettingsView::new(watcher_enabled, token_status, ready, self.app_event_tx.clone());
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub fn show_undo_restore_view(&mut self, view: UndoRestoreView) {
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();

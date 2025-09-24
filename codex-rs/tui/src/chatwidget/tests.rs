@@ -290,6 +290,15 @@ fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<App
             AppEvent::DispatchCommand(SlashCommand::Agents, args) => {
                 chat.handle_agents_command(args);
             }
+            AppEvent::DispatchCommand(SlashCommand::Undo, _command_text) => {
+                chat.handle_undo_command();
+            }
+            AppEvent::ShowUndoOptions { index } => {
+                chat.show_undo_restore_options(index);
+            }
+            AppEvent::PerformUndoRestore { index, restore_files, restore_conversation } => {
+                chat.perform_undo_restore(index, restore_files, restore_conversation);
+            }
             AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
             AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
             _ => {}
@@ -367,6 +376,84 @@ fn slash_agents_opens_overview() {
     assert!(
         lower.contains("add new"),
         "expected Add new row in overview\n{plain}"
+    );
+}
+
+#[test]
+fn slash_undo_shows_no_snapshot_state() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('u'),
+        ScriptStep::key_char('n'),
+        ScriptStep::key_char('d'),
+        ScriptStep::key_char('o'),
+        ScriptStep::enter(),
+    ];
+    run_script(&mut chat, &script, &rx);
+
+    assert!(
+        chat.bottom_pane.has_active_modal_view(),
+        "expected undo modal to be active"
+    );
+
+    let width: u16 = 120;
+    let height = chat.desired_height(width).max(40);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw undo status");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(
+        lower.contains("no snapshots yet"),
+        "expected undo status title\n{plain}"
+    );
+    assert!(
+        lower.contains("no snapshot is available to restore"),
+        "expected undo status detail\n{plain}"
+    );
+    assert!(
+        lower.contains("chat history stays unchanged"),
+        "expected scope hint to mention chat history\n{plain}"
+    );
+}
+
+#[test]
+fn undo_options_view_shows_toggles() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push(history_cell::new_user_prompt("latest change".to_string()));
+
+    let commit = codex_git_tooling::GhostCommit::new("abcdef1234567890".to_string(), None);
+    chat.ghost_snapshots.push(GhostSnapshot::new(
+        commit,
+        Some("Initial checkpoint".to_string()),
+        ConversationSnapshot::new(0, 0),
+    ));
+
+    chat.show_undo_restore_options(0);
+
+    let width: u16 = 100;
+    let height = chat.desired_height(width).max(24);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw undo options");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(
+        lower.contains("restore workspace files"),
+        "expected workspace toggle\n{plain}"
+    );
+    assert!(
+        lower.contains("restore conversation"),
+        "expected conversation toggle\n{plain}"
     );
 }
 
