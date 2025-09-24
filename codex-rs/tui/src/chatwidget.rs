@@ -448,6 +448,9 @@ pub(crate) struct ChatWidget<'a> {
     // Persisted selection for Agents overview
     agents_overview_selected_index: usize,
 
+    // State for the Agents Terminal view
+    agents_terminal: AgentsTerminalState,
+
     pending_upgrade_notice: Option<(u64, String)>,
 
     // Cached visible rows for the diff overlay body to clamp scrolling (kept within diffs)
@@ -620,6 +623,109 @@ struct AgentRuntime {
     completed_at: Option<Instant>,
 }
 
+#[derive(Debug, Clone)]
+struct AgentTerminalEntry {
+    name: String,
+    model: Option<String>,
+    status: AgentStatus,
+    last_progress: Option<String>,
+    result: Option<String>,
+    error: Option<String>,
+    logs: Vec<AgentLogEntry>,
+}
+
+impl AgentTerminalEntry {
+    fn new(name: String, model: Option<String>, status: AgentStatus) -> Self {
+        Self {
+            name,
+            model,
+            status,
+            last_progress: None,
+            result: None,
+            error: None,
+            logs: Vec::new(),
+        }
+    }
+
+    fn push_log(&mut self, kind: AgentLogKind, message: impl Into<String>) {
+        let msg = message.into();
+        if self
+            .logs
+            .last()
+            .map(|entry| entry.kind == kind && entry.message == msg)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        self.logs.push(AgentLogEntry {
+            timestamp: Local::now(),
+            kind,
+            message: msg,
+        });
+        const MAX_HISTORY: usize = 500;
+        if self.logs.len() > MAX_HISTORY {
+            let excess = self.logs.len() - MAX_HISTORY;
+            self.logs.drain(0..excess);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AgentLogEntry {
+    timestamp: DateTime<Local>,
+    kind: AgentLogKind,
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentLogKind {
+    Status,
+    Progress,
+    Result,
+    Error,
+}
+
+struct AgentsTerminalState {
+    active: bool,
+    selected_index: usize,
+    order: Vec<String>,
+    entries: HashMap<String, AgentTerminalEntry>,
+    scroll_offsets: HashMap<String, u16>,
+    saved_scroll_offset: u16,
+    shared_context: Option<String>,
+    shared_task: Option<String>,
+}
+
+impl AgentsTerminalState {
+    fn new() -> Self {
+        Self {
+            active: false,
+            selected_index: 0,
+            order: Vec::new(),
+            entries: HashMap::new(),
+            scroll_offsets: HashMap::new(),
+            saved_scroll_offset: 0,
+            shared_context: None,
+            shared_task: None,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.selected_index = 0;
+        self.order.clear();
+        self.entries.clear();
+        self.scroll_offsets.clear();
+        self.shared_context = None;
+        self.shared_task = None;
+    }
+
+    fn current_agent_id(&self) -> Option<&str> {
+        self.order
+            .get(self.selected_index)
+            .map(String::as_str)
+    }
+}
+
 // ---------- Stable ordering & routing helpers ----------
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OrderKey {
@@ -686,6 +792,52 @@ enum AgentStatus {
     Running,
     Completed,
     Failed,
+}
+
+fn agent_status_from_str(status: &str) -> AgentStatus {
+    match status {
+        "pending" => AgentStatus::Pending,
+        "running" => AgentStatus::Running,
+        "completed" => AgentStatus::Completed,
+        "failed" => AgentStatus::Failed,
+        _ => AgentStatus::Pending,
+    }
+}
+
+fn agent_status_label(status: AgentStatus) -> &'static str {
+    match status {
+        AgentStatus::Pending => "Pending",
+        AgentStatus::Running => "Running",
+        AgentStatus::Completed => "Completed",
+        AgentStatus::Failed => "Failed",
+    }
+}
+
+fn agent_status_color(status: AgentStatus) -> ratatui::style::Color {
+    match status {
+        AgentStatus::Pending => crate::colors::warning(),
+        AgentStatus::Running => crate::colors::info(),
+        AgentStatus::Completed => crate::colors::success(),
+        AgentStatus::Failed => crate::colors::error(),
+    }
+}
+
+fn agent_log_label(kind: AgentLogKind) -> &'static str {
+    match kind {
+        AgentLogKind::Status => "status",
+        AgentLogKind::Progress => "progress",
+        AgentLogKind::Result => "result",
+        AgentLogKind::Error => "error",
+    }
+}
+
+fn agent_log_color(kind: AgentLogKind) -> ratatui::style::Color {
+    match kind {
+        AgentLogKind::Status => crate::colors::info(),
+        AgentLogKind::Progress => crate::colors::primary(),
+        AgentLogKind::Result => crate::colors::success(),
+        AgentLogKind::Error => crate::colors::error(),
+    }
 }
 
 use self::message::create_initial_user_message;
@@ -1259,6 +1411,7 @@ impl ChatWidget<'_> {
         let any_tasks_active = !self.active_task_ids.is_empty();
         if !(any_tools_running || any_streaming || any_agents_active || any_tasks_active) {
             self.bottom_pane.set_task_running(false);
+            self.bottom_pane.update_status_text(String::new());
         }
     }
 
@@ -2434,6 +2587,7 @@ impl ChatWidget<'_> {
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
+            agents_terminal: AgentsTerminalState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
@@ -2662,6 +2816,7 @@ impl ChatWidget<'_> {
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
+            agents_terminal: AgentsTerminalState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             height_manager: RefCell::new(HeightManager::new(
@@ -2865,7 +3020,7 @@ impl ChatWidget<'_> {
 
         // Global HUD toggles (avoid conflicting with common editor keys):
         // - Ctrl+B: toggle Browser panel (expand/collapse)
-        // - Ctrl+G: toggle Agents panel (expand/collapse)
+        // - Ctrl+A: toggle Agents terminal mode
         if let KeyEvent {
             code: crossterm::event::KeyCode::Char('b'),
             modifiers: crossterm::event::KeyModifiers::CONTROL,
@@ -2886,6 +3041,71 @@ impl ChatWidget<'_> {
             self.toggle_agents_hud();
             return;
         }
+
+        if self.agents_terminal.active {
+            match key_event {
+                KeyEvent {
+                    code: crossterm::event::KeyCode::Esc,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    self.exit_agents_terminal_mode();
+                    return;
+                }
+                KeyEvent {
+                    code: crossterm::event::KeyCode::Up,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    self.navigate_agents_terminal_selection(-1);
+                    return;
+                }
+                KeyEvent {
+                    code: crossterm::event::KeyCode::Down,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    self.navigate_agents_terminal_selection(1);
+                    return;
+                }
+                KeyEvent {
+                    code: crossterm::event::KeyCode::Tab,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    self.navigate_agents_terminal_selection(1);
+                    return;
+                }
+                KeyEvent {
+                    code: crossterm::event::KeyCode::BackTab,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    self.navigate_agents_terminal_selection(-1);
+                    return;
+                }
+                KeyEvent {
+                    code: crossterm::event::KeyCode::PageUp,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    layout_scroll::page_up(self);
+                    self.record_current_agent_scroll();
+                    return;
+                }
+                KeyEvent {
+                    code: crossterm::event::KeyCode::PageDown,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                } => {
+                    layout_scroll::page_down(self);
+                    self.record_current_agent_scroll();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         if let KeyEvent {
             code: crossterm::event::KeyCode::Char('p'),
             modifiers,
@@ -3050,7 +3270,11 @@ impl ChatWidget<'_> {
     }
 
     fn toggle_agents_hud(&mut self) {
-        layout_scroll::toggle_agents_hud(self);
+        if self.agents_terminal.active {
+            self.exit_agents_terminal_mode();
+        } else {
+            self.enter_agents_terminal_mode();
+        }
     }
 
     fn toggle_pro_hud(&mut self) {
@@ -6017,20 +6241,21 @@ impl ChatWidget<'_> {
                 // Update the active agents list from the event and track timing
                 self.active_agents.clear();
                 let now = Instant::now();
-                for agent in agents {
+                for agent in agents.iter() {
+                    let parsed_status = agent_status_from_str(agent.status.as_str());
                     // Update runtime map
                     let entry = self
                         .agent_runtime
                         .entry(agent.id.clone())
                         .or_insert_with(AgentRuntime::default);
                     entry.last_update = Some(now);
-                    match agent.status.as_str() {
-                        "running" => {
+                    match parsed_status {
+                        AgentStatus::Running => {
                             if entry.started_at.is_none() {
                                 entry.started_at = Some(now);
                             }
                         }
-                        "completed" | "failed" => {
+                        AgentStatus::Completed | AgentStatus::Failed => {
                             if entry.completed_at.is_none() {
                                 entry.completed_at = entry.completed_at.or(Some(now));
                             }
@@ -6042,19 +6267,15 @@ impl ChatWidget<'_> {
                     self.active_agents.push(AgentInfo {
                         id: agent.id.clone(),
                         name: agent.name.clone(),
-                        status: match agent.status.as_str() {
-                            "pending" => AgentStatus::Pending,
-                            "running" => AgentStatus::Running,
-                            "completed" => AgentStatus::Completed,
-                            "failed" => AgentStatus::Failed,
-                            _ => AgentStatus::Pending,
-                        },
-                        model: agent.model,
-                        result: agent.result,
-                        error: agent.error,
-                        last_progress: agent.last_progress,
+                        status: parsed_status.clone(),
+                        model: agent.model.clone(),
+                        result: agent.result.clone(),
+                        error: agent.error.clone(),
+                        last_progress: agent.last_progress.clone(),
                     });
                 }
+
+                self.update_agents_terminal_state(&agents, context.clone(), task.clone());
 
                 // Store shared context and task
                 self.agent_context = context;
@@ -7157,6 +7378,181 @@ fn update_rate_limit_resets(
     pub(crate) fn set_agents_overview_selection(&mut self, index: usize) {
         self.agents_overview_selected_index = index;
     }
+
+    fn update_agents_terminal_state(
+        &mut self,
+        agents: &[codex_core::protocol::AgentInfo],
+        context: Option<String>,
+        task: Option<String>,
+    ) {
+        self.agents_terminal.shared_context = context;
+        self.agents_terminal.shared_task = task;
+
+        let mut saw_new_agent = false;
+        for info in agents {
+            let status = agent_status_from_str(info.status.as_str());
+            let is_new = !self.agents_terminal.entries.contains_key(&info.id);
+            if is_new
+                && !self
+                    .agents_terminal
+                    .order
+                    .iter()
+                    .any(|id| id == &info.id)
+            {
+                self.agents_terminal.order.push(info.id.clone());
+                saw_new_agent = true;
+            }
+
+            let entry = self.agents_terminal.entries.entry(info.id.clone());
+            let entry = entry.or_insert_with(|| {
+                saw_new_agent = true;
+                let mut new_entry = AgentTerminalEntry::new(
+                    info.name.clone(),
+                    info.model.clone(),
+                    status.clone(),
+                );
+                new_entry.push_log(
+                    AgentLogKind::Status,
+                    format!("Status → {}", agent_status_label(status.clone())),
+                );
+                new_entry
+            });
+
+            entry.name = info.name.clone();
+            entry.model = info.model.clone();
+
+            if entry.status != status {
+                entry.status = status.clone();
+                entry.push_log(
+                    AgentLogKind::Status,
+                    format!("Status → {}", agent_status_label(status.clone())),
+                );
+            }
+
+            if let Some(progress) = info.last_progress.as_ref() {
+                if entry.last_progress.as_ref() != Some(progress) {
+                    entry.last_progress = Some(progress.clone());
+                    entry.push_log(AgentLogKind::Progress, progress.clone());
+                }
+            }
+
+            if let Some(result) = info.result.as_ref() {
+                if entry.result.as_ref() != Some(result) {
+                    entry.result = Some(result.clone());
+                    entry.push_log(AgentLogKind::Result, result.clone());
+                }
+            }
+
+            if let Some(error) = info.error.as_ref() {
+                if entry.error.as_ref() != Some(error) {
+                    entry.error = Some(error.clone());
+                    entry.push_log(AgentLogKind::Error, error.clone());
+                }
+            }
+        }
+
+        if self.agents_terminal.selected_index >= self.agents_terminal.order.len()
+            && !self.agents_terminal.order.is_empty()
+        {
+            self.agents_terminal.selected_index = self.agents_terminal.order.len() - 1;
+        }
+
+        if saw_new_agent && self.agents_terminal.active {
+            self.layout.scroll_offset = 0;
+        }
+    }
+
+    fn enter_agents_terminal_mode(&mut self) {
+        if self.agents_terminal.active {
+            return;
+        }
+        self.agents_terminal.active = true;
+        self.agents_terminal.saved_scroll_offset = self.layout.scroll_offset;
+        self.layout.agents_hud_expanded = false;
+        if self.agents_terminal.order.is_empty() {
+            for agent in &self.active_agents {
+                if !self
+                    .agents_terminal
+                    .entries
+                    .contains_key(&agent.id)
+                {
+                    self.agents_terminal.order.push(agent.id.clone());
+                    let mut entry = AgentTerminalEntry::new(
+                        agent.name.clone(),
+                        agent.model.clone(),
+                        agent.status.clone(),
+                    );
+                    if let Some(progress) = agent.last_progress.as_ref() {
+                        entry.last_progress = Some(progress.clone());
+                        entry.push_log(AgentLogKind::Progress, progress.clone());
+                    }
+                    if let Some(result) = agent.result.as_ref() {
+                        entry.result = Some(result.clone());
+                        entry.push_log(AgentLogKind::Result, result.clone());
+                    }
+                    if let Some(error) = agent.error.as_ref() {
+                        entry.error = Some(error.clone());
+                        entry.push_log(AgentLogKind::Error, error.clone());
+                    }
+                    self.agents_terminal
+                        .entries
+                        .insert(agent.id.clone(), entry);
+                }
+            }
+        }
+        self.restore_selected_agent_scroll();
+        self.request_redraw();
+    }
+
+    fn exit_agents_terminal_mode(&mut self) {
+        if !self.agents_terminal.active {
+            return;
+        }
+        self.record_current_agent_scroll();
+        self.agents_terminal.active = false;
+        self.layout.scroll_offset = self.agents_terminal.saved_scroll_offset;
+        self.request_redraw();
+    }
+
+    fn record_current_agent_scroll(&mut self) {
+        if let Some(id) = self.agents_terminal.current_agent_id() {
+            let capped = self
+                .layout
+                .scroll_offset
+                .min(self.layout.last_max_scroll.get());
+            self.agents_terminal
+                .scroll_offsets
+                .insert(id.to_string(), capped);
+        }
+    }
+
+    fn restore_selected_agent_scroll(&mut self) {
+        let offset = self
+            .agents_terminal
+            .current_agent_id()
+            .and_then(|id| self.agents_terminal.scroll_offsets.get(id).copied())
+            .unwrap_or(0);
+        self.layout.scroll_offset = offset;
+    }
+
+    fn navigate_agents_terminal_selection(&mut self, delta: isize) {
+        if self.agents_terminal.order.is_empty() {
+            return;
+        }
+        let len = self.agents_terminal.order.len() as isize;
+        self.record_current_agent_scroll();
+        let mut new_index = self.agents_terminal.selected_index as isize + delta;
+        if new_index >= len {
+            new_index %= len;
+        }
+        while new_index < 0 {
+            new_index += len;
+        }
+        self.agents_terminal.selected_index = new_index as usize;
+        self.restore_selected_agent_scroll();
+        self.request_redraw();
+    }
+
 
     fn resolve_agent_install_command(&self, agent_name: &str) -> Option<(Vec<String>, String)> {
         let cmd = self
@@ -8464,7 +8860,7 @@ fn update_rate_limit_resets(
             t_fg.add_modifier(Modifier::BOLD),
         )]));
         lines.push(kv("Ctrl+B", "Toggle Browser panel"));
-        lines.push(kv("Ctrl+A", "Toggle Agents panel"));
+        lines.push(kv("Ctrl+A", "Open Agents terminal"));
 
         // Slash command reference
         lines.push(RtLine::from(""));
@@ -8783,6 +9179,11 @@ fn update_rate_limit_resets(
     pub(crate) fn prepare_agents(&mut self) {
         // Set the flag to show agents are ready to start
         self.agents_ready_to_start = true;
+        self.agents_terminal.reset();
+        if self.agents_terminal.active {
+            // Reset scroll offset when a new batch starts to avoid stale positions
+            self.layout.scroll_offset = 0;
+        }
 
         // Initialize sparkline with some data so it shows immediately
         {
@@ -15385,15 +15786,10 @@ impl ChatWidget<'_> {
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
 
-        // Right side: toggle hint based on state (Ctrl+A)
-        let action = if self.layout.agents_hud_expanded {
-            " collapse"
-        } else {
-            " expand"
-        };
+        // Right side: hint for opening terminal (Ctrl+A)
         let right_spans: Vec<Span> = vec![
             Span::from("Ctrl+A").style(key_hint_style),
-            Span::styled(action, label_style),
+            Span::styled(" open terminal", label_style),
         ];
 
         let measure =
@@ -15420,6 +15816,279 @@ impl ChatWidget<'_> {
             "Chrome"
         } else {
             "Browser"
+        }
+    }
+
+    fn render_agents_terminal_overlay(
+        &self,
+        frame_area: Rect,
+        history_area: Rect,
+        bottom_pane_area: Rect,
+        buf: &mut Buffer,
+    ) {
+        use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect as RtRect};
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+
+        let scrim_style = Style::default()
+            .bg(crate::colors::overlay_scrim())
+            .fg(crate::colors::text_dim());
+        fill_rect(buf, frame_area, None, scrim_style);
+
+        let padding = 1u16;
+        let footer_reserved = bottom_pane_area.height.min(1);
+        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
+        let overlay_height = overlay_bottom
+            .saturating_sub(history_area.y)
+            .max(1)
+            .min(frame_area.height);
+
+        let window_area = Rect {
+            x: history_area.x + padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(padding * 2),
+            height: overlay_height,
+        };
+        Clear.render(window_area, buf);
+
+        let title_spans = vec![
+            Span::styled(" Agents ", Style::default().fg(crate::colors::text())),
+            Span::styled("— Ctrl+A to close", Style::default().fg(crate::colors::text_dim())),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(title_spans))
+            .style(Style::default().bg(crate::colors::background()))
+            .border_style(
+                Style::default()
+                    .fg(crate::colors::border())
+                    .bg(crate::colors::background()),
+            );
+        let inner = block.inner(window_area);
+        block.render(window_area, buf);
+
+        let inner_bg = Style::default().bg(crate::colors::background());
+        for y in inner.y..inner.y + inner.height {
+            for x in inner.x..inner.x + inner.width {
+                buf[(x, y)].set_style(inner_bg);
+            }
+        }
+
+        let content = inner.inner(Margin::new(1, 1));
+        if content.width == 0 || content.height == 0 {
+            return;
+        }
+
+        let hint_height = if content.height >= 2 { 1 } else { 0 };
+        let body_height = content.height.saturating_sub(hint_height);
+        let body_area = RtRect {
+            x: content.x,
+            y: content.y,
+            width: content.width,
+            height: body_height,
+        };
+        let hint_area = RtRect {
+            x: content.x,
+            y: content.y.saturating_add(body_height),
+            width: content.width,
+            height: hint_height,
+        };
+
+        let sidebar_target = 28u16;
+        let sidebar_width = if body_area.width <= sidebar_target + 12 {
+            (body_area.width.saturating_mul(35) / 100).clamp(16, body_area.width)
+        } else {
+            sidebar_target.min(body_area.width.saturating_sub(12)).max(16)
+        };
+
+        let constraints = if body_area.width <= sidebar_width {
+            [Constraint::Length(body_area.width), Constraint::Length(0)]
+        } else {
+            [Constraint::Length(sidebar_width), Constraint::Min(12)]
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(constraints)
+            .split(body_area);
+
+        // Sidebar list of agents
+        let mut items: Vec<ListItem> = Vec::new();
+        for id in &self.agents_terminal.order {
+            if let Some(entry) = self.agents_terminal.entries.get(id) {
+                let status_color = agent_status_color(entry.status.clone());
+                let status_label = agent_status_label(entry.status.clone());
+                let mut spans = vec![
+                    Span::styled("• ", Style::default().fg(status_color)),
+                    Span::styled(entry.name.clone(), Style::default().fg(crate::colors::text())),
+                ];
+                if let Some(progress) = entry.last_progress.as_ref() {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(progress.clone(), Style::default().fg(crate::colors::text_dim())));
+                } else {
+                    spans.push(Span::raw("  "));
+                    spans.push(
+                        Span::styled(
+                            status_label,
+                            Style::default()
+                                .fg(status_color)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                    );
+                }
+                items.push(ListItem::new(Line::from(spans)));
+            }
+        }
+
+        if items.is_empty() {
+            items.push(ListItem::new(Line::from(vec![Span::styled(
+                "No agents yet",
+                Style::default().fg(crate::colors::text_dim()),
+            )])));
+        }
+
+        let mut list_state = ListState::default();
+        if !self.agents_terminal.order.is_empty() {
+            let idx = self
+                .agents_terminal
+                .selected_index
+                .min(self.agents_terminal.order.len().saturating_sub(1));
+            list_state.select(Some(idx));
+        }
+
+        let sidebar_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Agents ")
+            .border_style(Style::default().fg(crate::colors::border()));
+        let sidebar = List::new(items)
+            .block(sidebar_block)
+            .highlight_style(
+                Style::default()
+                    .fg(crate::colors::primary())
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("➤ ");
+        ratatui::widgets::StatefulWidget::render(sidebar, chunks[0], buf, &mut list_state);
+
+        let right_area = if chunks.len() > 1 { chunks[1] } else { chunks[0] };
+        let mut lines: Vec<Line> = Vec::new();
+
+        if let Some(agent_id) = self.agents_terminal.current_agent_id() {
+            if let Some(entry) = self.agents_terminal.entries.get(agent_id) {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        entry.name.clone(),
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        agent_status_label(entry.status.clone()),
+                        Style::default().fg(agent_status_color(entry.status.clone())),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("#{}", agent_id.chars().take(7).collect::<String>()),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                ]));
+
+                if let Some(model) = entry.model.as_ref() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("Model: {model}"),
+                        Style::default().fg(crate::colors::text_dim()),
+                    )]));
+                }
+                if let Some(context) = self.agents_terminal.shared_context.as_ref() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("Context: {context}"),
+                        Style::default().fg(crate::colors::text_dim()),
+                    )]));
+                }
+                if let Some(task) = self.agents_terminal.shared_task.as_ref() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("Task: {task}"),
+                        Style::default().fg(crate::colors::text_dim()),
+                    )]));
+                }
+
+                lines.push(Line::from(""));
+
+                if entry.logs.is_empty() {
+                    lines.push(Line::from(vec![Span::styled(
+                        "No updates yet",
+                        Style::default().fg(crate::colors::text_dim()),
+                    )]));
+                } else {
+                    for log in &entry.logs {
+                        let timestamp = log.timestamp.format("%H:%M:%S");
+                        let label = agent_log_label(log.kind);
+                        let color = agent_log_color(log.kind);
+                        let label_style = Style::default()
+                            .fg(color)
+                            .add_modifier(Modifier::BOLD);
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("[{timestamp}] "),
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            Span::styled(label, label_style),
+                            Span::raw(": "),
+                            Span::styled(
+                                log.message.clone(),
+                                Style::default().fg(crate::colors::text()),
+                            ),
+                        ]));
+                    }
+                }
+            } else {
+                lines.push(Line::from(vec![Span::styled(
+                    "No data for selected agent",
+                    Style::default().fg(crate::colors::text_dim()),
+                )]));
+            }
+        } else {
+            lines.push(Line::from(vec![Span::styled(
+                "No agents available",
+                Style::default().fg(crate::colors::text_dim()),
+            )]));
+        }
+
+        let viewport_height = right_area.height.max(1);
+        let total_lines = lines.len() as u16;
+        let max_scroll = total_lines.saturating_sub(viewport_height);
+        self.layout.last_history_viewport_height.set(viewport_height);
+        self.layout.last_max_scroll.set(max_scroll);
+
+        let history_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Agent History ")
+            .border_style(Style::default().fg(crate::colors::border()));
+
+        Paragraph::new(lines)
+            .block(history_block)
+            .wrap(Wrap { trim: false })
+            .scroll((self.layout.scroll_offset.min(max_scroll), 0))
+            .render(right_area, buf);
+
+        if hint_height == 1 {
+            let hint_line = Line::from(vec![
+                Span::styled("↑/↓", Style::default().fg(crate::colors::function())),
+                Span::styled(" Select  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Tab", Style::default().fg(crate::colors::function())),
+                Span::styled(" Next  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("PgUp/PgDn", Style::default().fg(crate::colors::function())),
+                Span::styled(" Scroll  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Esc", Style::default().fg(crate::colors::error())),
+                Span::styled(" Exit", Style::default().fg(crate::colors::text_dim())),
+            ]);
+            Paragraph::new(hint_line)
+                .style(Style::default().bg(crate::colors::background()))
+                .alignment(ratatui::layout::Alignment::Center)
+                .render(hint_area, buf);
         }
     }
 
@@ -15498,7 +16167,7 @@ impl ChatWidget<'_> {
         left_spans.push(Span::raw(summary));
         let right_spans: Vec<Span> = vec![
             Span::from("Ctrl+A").style(key_hint_style),
-            Span::styled(" collapse", label_style),
+            Span::styled(" open terminal", label_style),
         ];
         let measure =
             |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
@@ -16890,6 +17559,9 @@ impl WidgetRef for &ChatWidget<'_> {
         if self.terminal.overlay().is_some() {
             let bg_style = Style::default().bg(crate::colors::background());
             fill_rect(buf, bottom_pane_area, Some(' '), bg_style);
+        } else if self.agents_terminal.active {
+            let bg_style = Style::default().bg(crate::colors::background());
+            fill_rect(buf, bottom_pane_area, Some(' '), bg_style);
         } else {
             // Render the bottom pane directly without a border for now
             // The composer has its own layout with hints at the bottom
@@ -17217,15 +17889,19 @@ impl WidgetRef for &ChatWidget<'_> {
                     .alignment(ratatui::layout::Alignment::Left)
                     .render(instructions_area, buf);
             }
-
-            // Terminal overlay takes precedence over other overlays
         }
+
+        if self.terminal.overlay().is_none() && self.agents_terminal.active {
+            self.render_agents_terminal_overlay(area, history_area, bottom_pane_area, buf);
+        }
+
+        // Terminal overlay takes precedence over other overlays
 
         // Welcome animation is kept as a normal cell in history; no overlay.
 
         // The welcome animation is no longer rendered as an overlay.
 
-        if self.terminal.overlay().is_none() {
+        if self.terminal.overlay().is_none() && !self.agents_terminal.active {
             if self.pro.overlay_visible {
                 self.render_pro_overlay(area, history_area, buf);
             } else if let Some(overlay) = &self.diffs.overlay {
