@@ -75,7 +75,7 @@ struct TerminalRunState {
     cancel_tx: Option<oneshot::Sender<()>>,
     running: bool,
     controller: Option<TerminalRunController>,
-    writer_tx: Option<StdSender<Vec<u8>>>,
+    writer_tx: Option<Arc<Mutex<Option<StdSender<Vec<u8>>>>>>,
     pty: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
 }
 
@@ -487,7 +487,8 @@ impl App<'_> {
 
         let stored_command = command.clone();
         let (cancel_tx, cancel_rx) = oneshot::channel();
-        let (writer_tx, writer_rx) = channel::<Vec<u8>>();
+        let (writer_tx_raw, writer_rx) = channel::<Vec<u8>>();
+        let writer_tx_shared = Arc::new(Mutex::new(Some(writer_tx_raw)));
         let controller_clone = controller.clone();
         let cwd = self.config.cwd.clone();
         let controller_tx = controller.map(|c| c.tx);
@@ -699,7 +700,7 @@ impl App<'_> {
                 cancel_tx: Some(cancel_tx),
                 running: true,
                 controller: controller_clone,
-                writer_tx: Some(writer_tx.clone()),
+                writer_tx: Some(writer_tx_shared.clone()),
                 pty: Some(master_for_state),
             },
         );
@@ -707,6 +708,7 @@ impl App<'_> {
         let tx = self.app_event_tx.clone();
         let controller_tx_task = controller_tx.clone();
         let master_for_task = Arc::clone(&master);
+        let writer_tx_for_task = writer_tx_shared.clone();
         tokio::spawn(async move {
             let start_time = Instant::now();
             let controller_tx = controller_tx_task;
@@ -780,6 +782,11 @@ impl App<'_> {
                     }
                 }
             };
+
+            {
+                let mut guard = writer_tx_for_task.lock().unwrap();
+                guard.take();
+            }
 
             let _ = reader_handle.await;
             let _ = writer_handle.await;
@@ -1303,7 +1310,10 @@ impl App<'_> {
                     let controller_present = if let Some(run) = self.terminal_runs.get_mut(&id) {
                         run.running = false;
                         run.cancel_tx = None;
-                        run.writer_tx = None;
+                        if let Some(writer_shared) = run.writer_tx.take() {
+                            let mut guard = writer_shared.lock().unwrap();
+                            guard.take();
+                        }
                         run.pty = None;
                         run.controller.is_some()
                     } else {
@@ -1327,7 +1337,10 @@ impl App<'_> {
                         }
                         run.running = false;
                         run.controller = None;
-                        run.writer_tx = None;
+                        if let Some(writer_shared) = run.writer_tx.take() {
+                            let mut guard = writer_shared.lock().unwrap();
+                            guard.take();
+                        }
                         run.pty = None;
                         remove_entry = had_controller;
                     }
@@ -1369,9 +1382,12 @@ impl App<'_> {
                 }
                 AppEvent::TerminalSendInput { id, data } => {
                     if let Some(run) = self.terminal_runs.get_mut(&id) {
-                        if let Some(tx) = run.writer_tx.as_ref() {
-                            if tx.send(data).is_err() {
-                                run.writer_tx = None;
+                        if let Some(writer_shared) = run.writer_tx.as_ref() {
+                            let mut guard = writer_shared.lock().unwrap();
+                            if let Some(tx) = guard.as_ref() {
+                                if tx.send(data).is_err() {
+                                    guard.take();
+                                }
                             }
                         }
                     }
