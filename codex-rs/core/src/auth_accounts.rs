@@ -121,25 +121,20 @@ fn match_chatgpt_account(existing: &StoredAccount, tokens: &TokenData) -> bool {
         None => return false,
     };
 
-    if let (Some(a), Some(b)) = (
-        existing_tokens.account_id.as_deref(),
-        tokens.account_id.as_deref(),
-    ) {
-        if a == b {
-            return true;
-        }
-    }
+    let account_id_matches = match (&existing_tokens.account_id, &tokens.account_id) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
 
-    if let (Some(a), Some(b)) = (
-        existing_tokens.id_token.email.as_deref(),
-        tokens.id_token.email.as_deref(),
+    let email_matches = match (
+        existing_tokens.id_token.email.as_ref(),
+        tokens.id_token.email.as_ref(),
     ) {
-        if normalize_email(a) == normalize_email(b) {
-            return true;
-        }
-    }
+        (Some(a), Some(b)) => normalize_email(a) == normalize_email(b),
+        _ => false,
+    };
 
-    false
+    account_id_matches && email_matches
 }
 
 fn match_api_key_account(existing: &StoredAccount, api_key: &str) -> bool {
@@ -409,6 +404,38 @@ mod tests {
         let accounts = list_accounts(home.path()).expect("list accounts");
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].id, stored.id);
+    }
+
+    #[test]
+    fn chatgpt_accounts_with_same_email_but_different_ids_are_distinct() {
+        let home = tempdir().expect("tempdir");
+
+        let personal = make_chatgpt_tokens(Some("acct-personal"), Some("user@example.com"));
+        let personal_id = upsert_chatgpt_account(
+            home.path(),
+            personal,
+            Utc::now(),
+            None,
+            true,
+        )
+        .expect("insert personal account")
+        .id;
+
+        let team = make_chatgpt_tokens(Some("acct-team"), Some("user@example.com"));
+        let team_id = upsert_chatgpt_account(
+            home.path(),
+            team,
+            Utc::now(),
+            None,
+            false,
+        )
+        .expect("insert team account")
+        .id;
+
+        assert_ne!(personal_id, team_id, "accounts with different IDs should not be merged");
+
+        let accounts = list_accounts(home.path()).expect("list accounts");
+        assert_eq!(accounts.len(), 2, "both accounts should remain listed");
     }
 
     #[test]
