@@ -330,6 +330,10 @@ impl ChatComposer {
 
     // Map technical status messages to user-friendly ones
     fn map_status_message(technical_message: &str) -> String {
+        if technical_message.trim().is_empty() {
+            return String::new();
+        }
+
         let lower = technical_message.to_lowercase();
 
         // Thinking/reasoning patterns
