@@ -2105,79 +2105,90 @@ impl ChatWidget<'_> {
     }
 
     fn interrupt_running_task(&mut self) {
-        if self.bottom_pane.is_task_running() {
-            let mut has_wait_running = false;
-            for entry in self.tools_state.running_custom_tools.values() {
-                if let Some(idx) = self.resolve_running_tool_index(entry) {
-                    if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
+        let bottom_running = self.bottom_pane.is_task_running();
+        let exec_related_running = !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty();
+
+        if !(bottom_running || exec_related_running) {
+            return;
+        }
+
+        let mut has_wait_running = false;
+        for entry in self.tools_state.running_custom_tools.values() {
+            if let Some(idx) = self.resolve_running_tool_index(entry) {
+                if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
                     .as_any()
                     .downcast_ref::<history_cell::RunningToolCallCell>())
-                    {
-                        if cell.has_title("Waiting") {
-                            has_wait_running = true;
-                            break;
-                        }
+                {
+                    if cell.has_title("Waiting") {
+                        has_wait_running = true;
+                        break;
                     }
                 }
             }
-            self.active_exec_cell = None;
-            // Finalize any visible running indicators as interrupted (Exec/Web/Custom)
-            self.finalize_all_running_as_interrupted();
-            self.bottom_pane.clear_ctrl_c_quit_hint();
-            // Stop any active UI streams immediately so output ceases at once.
-            self.finalize_active_stream();
-            self.stream_state.drop_streaming = true;
-            // Surface an explicit notice in history so users see confirmation.
-            // We add a lightweight background event (not an error) to match prior UX.
-            if !has_wait_running {
-                self.push_background_tail("Cancelled by user.".to_string());
-            }
-            self.submit_op(Op::Interrupt);
-            // Immediately drop the running status so the next message can be typed/run,
-            // even if backend cleanup (and Error event) arrives slightly later.
-            self.bottom_pane.set_task_running(false);
-            self.bottom_pane.clear_live_ring();
-            // Reset with max width to disable wrapping
-            self.live_builder = RowBuilder::new(usize::MAX);
-            // Stream state is now managed by StreamController
-            self.content_buffer.clear();
-            // Defensive: clear transient flags so UI can quiesce
-            self.agents_ready_to_start = false;
-            self.active_task_ids.clear();
-            // Restore any queued messages back into the composer so the user can
-            // immediately press Enter to resume the conversation where they left off.
-            if !self.queued_user_messages.is_empty() {
-                let existing_input = self.bottom_pane.composer_text();
-                let mut segments: Vec<String> = Vec::new();
-
-                let mut queued_block = String::new();
-                for (i, qm) in self.queued_user_messages.iter().enumerate() {
-                    if i > 0 {
-                        queued_block.push_str("\n\n");
-                    }
-                    queued_block.push_str(qm.display_text.trim_end());
-                }
-                if !queued_block.trim().is_empty() {
-                    segments.push(queued_block);
-                }
-
-                if !existing_input.trim().is_empty() {
-                    segments.push(existing_input);
-                }
-
-                let combined = segments.join("\n\n");
-                self.clear_composer();
-                if !combined.is_empty() {
-                    self.insert_str(&combined);
-                }
-                self.queued_user_messages.clear();
-                self.bottom_pane.update_status_text(String::new());
-                self.pending_dispatched_user_messages.clear();
-                self.refresh_queued_user_messages();
-            }
-            self.maybe_hide_spinner();
-            self.request_redraw();
         }
+
+        self.active_exec_cell = None;
+        // Finalize any visible running indicators as interrupted (Exec/Web/Custom)
+        self.finalize_all_running_as_interrupted();
+        if bottom_running {
+            self.bottom_pane.clear_ctrl_c_quit_hint();
+        }
+        // Stop any active UI streams immediately so output ceases at once.
+        self.finalize_active_stream();
+        self.stream_state.drop_streaming = true;
+        // Surface an explicit notice in history so users see confirmation.
+        if !has_wait_running {
+            self.push_background_tail("Cancelled by user.".to_string());
+        }
+        self.submit_op(Op::Interrupt);
+        // Immediately drop the running status so the next message can be typed/run,
+        // even if backend cleanup (and Error event) arrives slightly later.
+        self.bottom_pane.set_task_running(false);
+        self.bottom_pane.clear_live_ring();
+        // Reset with max width to disable wrapping
+        self.live_builder = RowBuilder::new(usize::MAX);
+        // Stream state is now managed by StreamController
+        self.content_buffer.clear();
+        // Defensive: clear transient flags so UI can quiesce
+        self.agents_ready_to_start = false;
+        self.active_task_ids.clear();
+        // Restore any queued messages back into the composer so the user can
+        // immediately press Enter to resume the conversation where they left off.
+        if !self.queued_user_messages.is_empty() {
+            let existing_input = self.bottom_pane.composer_text();
+            let mut segments: Vec<String> = Vec::new();
+
+            let mut queued_block = String::new();
+            for (i, qm) in self.queued_user_messages.iter().enumerate() {
+                if i > 0 {
+                    queued_block.push_str("\n\n");
+                }
+                queued_block.push_str(qm.display_text.trim_end());
+            }
+            if !queued_block.trim().is_empty() {
+                segments.push(queued_block);
+            }
+
+            if !existing_input.trim().is_empty() {
+                segments.push(existing_input);
+            }
+
+            let combined = segments.join("\n\n");
+            self.clear_composer();
+            if !combined.is_empty() {
+                self.insert_str(&combined);
+            }
+            self.queued_user_messages.clear();
+            self.bottom_pane.update_status_text(String::new());
+            self.pending_dispatched_user_messages.clear();
+            self.refresh_queued_user_messages();
+        }
+        self.maybe_hide_spinner();
+        self.request_redraw();
     }
     fn layout_areas(&self, area: Rect) -> Vec<Rect> {
         layout_scroll::layout_areas(self, area)
@@ -2332,6 +2343,7 @@ impl ChatWidget<'_> {
                 running_custom_tools: HashMap::new(),
                 running_web_search: HashMap::new(),
                 running_wait_tools: HashMap::new(),
+                running_kill_tools: HashMap::new(),
             },
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
@@ -2560,6 +2572,7 @@ impl ChatWidget<'_> {
                 running_custom_tools: HashMap::new(),
                 running_web_search: HashMap::new(),
                 running_wait_tools: HashMap::new(),
+                running_kill_tools: HashMap::new(),
             },
             live_builder: RowBuilder::new(usize::MAX),
             pending_images: HashMap::new(),
@@ -5366,6 +5379,20 @@ impl ChatWidget<'_> {
                         return;
                     }
                 }
+                if tool_name == "kill" {
+                    if let Some(exec_call_id) =
+                        wait_exec_call_id_from_params(params_string.as_ref())
+                    {
+                        self.tools_state
+                            .running_kill_tools
+                            .insert(ToolCallId(call_id.clone()), exec_call_id);
+                        self.bottom_pane
+                            .update_status_text("cancelling command".to_string());
+                        self.invalidate_height_cache();
+                        self.request_redraw();
+                        return;
+                    }
+                }
                 // Animated running cell with live timer and formatted args
                 let cell = if tool_name.starts_with("browser_") {
                     history_cell::new_running_browser_tool_call(
@@ -5619,6 +5646,28 @@ impl ChatWidget<'_> {
                     self.bottom_pane
                         .update_status_text("responding".to_string());
                     self.maybe_hide_spinner();
+                    return;
+                }
+                if tool_name == "kill" {
+                    let _ = self
+                        .tools_state
+                        .running_kill_tools
+                        .remove(&ToolCallId(call_id.clone()));
+                    if success {
+                        self.remove_background_completion_message(&call_id);
+                        self.bottom_pane
+                            .update_status_text("responding".to_string());
+                    } else {
+                        let trimmed = content.trim();
+                        if !trimmed.is_empty() {
+                            self.push_background_tail(trimmed.to_string());
+                        }
+                        self.bottom_pane
+                            .update_status_text("kill failed".to_string());
+                    }
+                    self.maybe_hide_spinner();
+                    self.invalidate_height_cache();
+                    self.request_redraw();
                     return;
                 }
                 // Special-case web_fetch to render returned markdown nicely.
@@ -8780,7 +8829,12 @@ fn update_rate_limit_resets(
             CancellationEvent::Handled => return CancellationEvent::Handled,
             CancellationEvent::Ignored => {}
         }
-        if self.bottom_pane.is_task_running() {
+        let exec_related_running = !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty();
+        if self.bottom_pane.is_task_running() || exec_related_running {
             self.interrupt_running_task();
             CancellationEvent::Ignored
         } else if self.bottom_pane.ctrl_c_quit_hint_visible() {
@@ -8883,6 +8937,12 @@ fn update_rate_limit_resets(
 
     pub(crate) fn is_task_running(&self) -> bool {
         self.bottom_pane.is_task_running()
+            || self.terminal_is_running()
+            || !self.exec.running_commands.is_empty()
+            || !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty()
     }
 
     // begin_jump_back no longer used: backend fork handles it.
@@ -17202,6 +17262,7 @@ struct ToolState {
     running_custom_tools: HashMap<ToolCallId, RunningToolEntry>,
     running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
     running_wait_tools: HashMap<ToolCallId, ExecCallId>,
+    running_kill_tools: HashMap<ToolCallId, ExecCallId>,
 }
 #[derive(Default)]
 struct StreamState {
