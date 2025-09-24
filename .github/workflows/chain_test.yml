@@ -1,0 +1,220 @@
+name: Chain Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/rs/hanzod/**'
+      - '.github/workflows/ai_blockchain_test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/rs/hanzod/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run unit tests
+        run: |
+          cd src/rs
+          cargo test --package hanzod --lib -- --nocapture
+
+      - name: Run doc tests
+        run: |
+          cd src/rs
+          cargo test --package hanzod --doc
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: hanzod_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build hanzod
+        run: |
+          cd src/rs
+          cargo build --package hanzod --release
+
+      - name: Start hanzod daemon
+        run: |
+          cd src/rs
+          ./target/release/hanzod --config ../../hanzo_config.toml --port 3690 &
+          sleep 5
+
+      - name: Run integration tests
+        run: |
+          cd src/rs
+          cargo test --package hanzod --test '*' -- --ignored --test-threads=1
+
+      - name: Stop hanzod
+        if: always()
+        run: pkill -f hanzod || true
+
+  test-chain:
+    name: Chain Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install KuzuDB
+        run: |
+          # Download pre-built KuzuDB library for Linux
+          wget https://github.com/kuzudb/kuzu/releases/download/v0.11.2/kuzu_c-linux-x86_64.tar.gz
+          tar -xzf kuzu_c-linux-x86_64.tar.gz
+          sudo cp -r kuzu_c-linux-x86_64/include/* /usr/local/include/
+          sudo cp -r kuzu_c-linux-x86_64/lib/* /usr/local/lib/
+          sudo ldconfig
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-ai-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build with features
+        run: |
+          cd src/rs
+          export KUZU_LIBRARY_DIR="/usr/local/lib"
+          export KUZU_INCLUDE_DIR="/usr/local/include"
+          export KUZU_SHARED=1
+          cargo build --package hanzod --release --features "kuzu"
+
+      - name: Run AI blockchain unit tests
+        run: |
+          cd src/rs/hanzod
+          cargo test database_unit_tests -- --nocapture
+          cargo test ai_blockchain -- --nocapture
+          cargo test kuzu_ledger -- --nocapture
+          cargo test api_gateway -- --nocapture
+
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release mode
+        run: |
+          cd src/rs
+          cargo build --package hanzod --release
+
+      - name: Start hanzod for benchmarks
+        run: |
+          cd src/rs
+          ./target/release/hanzod --config ../../hanzo_config.toml --port 3690 &
+          sleep 10
+
+      - name: Run benchmarks
+        run: |
+          cd src/rs
+          cargo test --package hanzod --release --test ai_blockchain_integration benchmarks -- --ignored --nocapture
+
+      - name: Stop hanzod
+        if: always()
+        run: pkill -f hanzod || true
+
+  lint:
+    name: Linting and Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: |
+          cd src/rs
+          cargo fmt --package hanzod -- --check
+
+      - name: Run clippy
+        run: |
+          cd src/rs
+          cargo clippy --package hanzod -- -D warnings
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        run: |
+          cd src/rs
+          cargo audit

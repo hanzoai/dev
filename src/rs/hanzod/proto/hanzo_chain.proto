@@ -1,0 +1,303 @@
+syntax = "proto3";
+
+package hanzo.chain;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// Main Chain Service for Hanzo node operators
+service ChainService {
+  // Node operator management
+  rpc RegisterOperator(RegisterOperatorRequest) returns (RegisterOperatorResponse);
+  rpc OperatorHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ListOperators(ListOperatorsRequest) returns (ListOperatorsResponse);
+
+  // Inference operations
+  rpc Inference(InferenceRequest) returns (InferenceResponse);
+  rpc InferenceStream(stream InferenceRequest) returns (stream InferenceResponse);
+
+  // Vector operations
+  rpc GenerateEmbedding(EmbeddingRequest) returns (EmbeddingResponse);
+  rpc VectorSearch(VectorSearchRequest) returns (VectorSearchResponse);
+
+  // Blockchain operations
+  rpc SubmitTransaction(TransactionRequest) returns (TransactionResponse);
+  rpc GetBlock(GetBlockRequest) returns (Block);
+  rpc GetChainStatus(ChainStatusRequest) returns (ChainStatus);
+
+  // Graph queries (KuzuDB)
+  rpc GraphQuery(GraphQueryRequest) returns (GraphQueryResponse);
+
+  // Subscriptions
+  rpc SubscribeBlocks(SubscribeRequest) returns (stream Block);
+  rpc SubscribeTransactions(SubscribeRequest) returns (stream Transaction);
+}
+
+// Node operator registration
+message RegisterOperatorRequest {
+  string public_key = 1;
+  bytes signature = 2;
+  double stake_amount = 3;
+  NodeCapabilities capabilities = 4;
+  string lux_address = 5;  // Lux consensus address
+}
+
+message RegisterOperatorResponse {
+  bool success = 1;
+  string operator_address = 2;
+  string error = 3;
+}
+
+message NodeCapabilities {
+  bool qwen3_next = 1;
+  bool qwen3_reranker = 2;
+  uint32 gpu_memory_gb = 3;
+  uint32 cpu_cores = 4;
+  uint32 bandwidth_mbps = 5;
+  repeated string supported_models = 6;
+}
+
+// Heartbeat for liveness
+message HeartbeatRequest {
+  string operator_address = 1;
+  bytes signature = 2;
+  ResourceMetrics metrics = 3;
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+  google.protobuf.Timestamp next_heartbeat = 2;
+}
+
+message ResourceMetrics {
+  float gpu_utilization = 1;
+  float cpu_utilization = 2;
+  uint64 memory_used_bytes = 3;
+  uint64 disk_used_bytes = 4;
+  uint32 active_inferences = 5;
+}
+
+// List operators
+message ListOperatorsRequest {
+  bool only_active = 1;
+  string model_filter = 2;  // Filter by model support
+}
+
+message ListOperatorsResponse {
+  repeated NodeOperator operators = 1;
+}
+
+message NodeOperator {
+  string address = 1;
+  string public_key = 2;
+  NodeCapabilities capabilities = 3;
+  double stake_amount = 4;
+  double reputation_score = 5;
+  bool active = 6;
+  google.protobuf.Timestamp last_heartbeat = 7;
+  uint64 total_inferences = 8;
+  double earnings_usd = 9;
+}
+
+// Inference requests
+message InferenceRequest {
+  string model = 1;  // qwen3-next, qwen3-reranker, etc.
+  google.protobuf.Any input = 2;  // Flexible input
+  string operator_preference = 3;  // Optional specific operator
+  InferenceParams params = 4;
+
+  // For Qwen3-Reranker
+  string query = 5;
+  repeated Document documents = 6;
+}
+
+message InferenceParams {
+  uint32 max_tokens = 1;
+  float temperature = 2;
+  float top_p = 3;
+  uint32 top_k = 4;
+  repeated string stop_sequences = 5;
+}
+
+message Document {
+  string id = 1;
+  string content = 2;
+  map<string, string> metadata = 3;
+  double score = 4;  // For reranking results
+}
+
+message InferenceResponse {
+  string model = 1;
+  google.protobuf.Any output = 2;
+  string node_operator = 3;
+  uint32 tokens_used = 4;
+  uint64 latency_ms = 5;
+  string tx_hash = 6;  // Blockchain transaction
+
+  // For Qwen3-Reranker
+  repeated Document reranked_documents = 7;
+}
+
+// Embeddings
+message EmbeddingRequest {
+  repeated string texts = 1;
+  string model = 2;  // default: snowflake-arctic-embed-l
+}
+
+message EmbeddingResponse {
+  repeated Embedding embeddings = 1;
+  string model = 2;
+  uint32 dimensions = 3;
+}
+
+message Embedding {
+  repeated float values = 1;
+  string text_hash = 2;
+}
+
+// Vector search
+message VectorSearchRequest {
+  oneof query {
+    string text = 1;
+    Embedding embedding = 2;
+  }
+  uint32 k = 3;
+  float threshold = 4;
+  map<string, string> filters = 5;
+}
+
+message VectorSearchResponse {
+  repeated SearchResult results = 1;
+  uint64 search_time_ms = 2;
+}
+
+message SearchResult {
+  string id = 1;
+  float similarity = 2;
+  google.protobuf.Any metadata = 3;
+  string content = 4;
+}
+
+// Blockchain transactions
+message TransactionRequest {
+  TransactionType type = 1;
+  bytes data = 2;
+  string from_address = 3;
+  string to_address = 4;
+  bytes signature = 5;
+}
+
+enum TransactionType {
+  UNKNOWN = 0;
+  INFERENCE = 1;
+  EMBEDDING = 2;
+  VECTOR_SEARCH = 3;
+  OPERATOR_REGISTRATION = 4;
+  STAKE_UPDATE = 5;
+  RESOURCE_CONSUMPTION = 6;
+  PAYMENT_SETTLEMENT = 7;
+}
+
+message TransactionResponse {
+  string tx_hash = 1;
+  TransactionStatus status = 2;
+  uint64 block_height = 3;
+  string error = 4;
+}
+
+enum TransactionStatus {
+  PENDING = 0;
+  CONFIRMED = 1;
+  FAILED = 2;
+  FINALIZED = 3;  // Quantum finality
+}
+
+message Transaction {
+  string hash = 1;
+  TransactionType type = 2;
+  string from = 3;
+  string to = 4;
+  bytes data = 5;
+  bytes signature = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  uint64 block_height = 8;
+  uint64 gas_used = 9;
+  TransactionStatus status = 10;
+}
+
+// Blocks
+message GetBlockRequest {
+  oneof identifier {
+    uint64 height = 1;
+    string hash = 2;
+  }
+}
+
+message Block {
+  uint64 height = 1;
+  string hash = 2;
+  string parent_hash = 3;
+  string merkle_root = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  string validator = 6;
+  repeated Transaction transactions = 7;
+  string state_root = 8;
+
+  // Lux consensus fields
+  uint64 quantum_round = 9;
+  bytes quantum_signature = 10;
+}
+
+// Chain status
+message ChainStatusRequest {}
+
+message ChainStatus {
+  uint64 block_height = 1;
+  string network = 2;
+  string chain_id = 3;
+  uint32 active_operators = 4;
+  double total_staked = 5;
+  string consensus_status = 6;
+
+  // Model availability
+  map<string, uint32> models_available = 7;  // model -> operator count
+
+  // Performance metrics
+  double avg_inference_latency_ms = 8;
+  uint64 total_inferences_24h = 9;
+}
+
+// Graph queries
+message GraphQueryRequest {
+  string cypher_query = 1;
+  map<string, string> parameters = 2;
+}
+
+message GraphQueryResponse {
+  repeated GraphNode nodes = 1;
+  repeated GraphEdge edges = 2;
+  google.protobuf.Any result = 3;
+  uint64 query_time_ms = 4;
+}
+
+message GraphNode {
+  string id = 1;
+  repeated string labels = 2;
+  map<string, google.protobuf.Any> properties = 3;
+}
+
+message GraphEdge {
+  string id = 1;
+  string from_id = 2;
+  string to_id = 3;
+  string type = 4;
+  map<string, google.protobuf.Any> properties = 5;
+}
+
+// Subscriptions
+message SubscribeRequest {
+  oneof filter {
+    string address_filter = 1;
+    TransactionType type_filter = 2;
+  }
+}

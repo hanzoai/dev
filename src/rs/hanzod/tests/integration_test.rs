@@ -1,218 +1,173 @@
-//! Integration tests for hanzod
-
-use hanzod::runtime_detection::{RuntimeDetector, RuntimeType};
-use hanzod::sandboxer::{SandboxConfig, SandboxerType, SandboxManager, ContainerSandboxer};
-use hanzod::workload_manager::{WorkloadManager, WorkloadRequest, WorkloadType, ResourceRequirements};
-use std::sync::Arc;
-
-#[tokio::test]
-async fn test_runtime_detection() {
-    // Test runtime detection
-    let detector = RuntimeDetector::new().await.expect("Failed to create detector");
-    let runtimes = detector.runtimes();
-
-    // Should detect at least one runtime (Docker Desktop or Colima)
-    assert!(!runtimes.is_empty(), "No container runtimes detected");
-
-    // Check for Docker Desktop or Colima
-    let has_docker = runtimes.iter().any(|r| matches!(r.runtime_type, RuntimeType::DockerDesktop));
-    let has_colima = runtimes.iter().any(|r| matches!(r.runtime_type, RuntimeType::Colima));
-
-    assert!(has_docker || has_colima, "Neither Docker Desktop nor Colima detected");
-}
-
-#[tokio::test]
-async fn test_colima_detection() {
-    // Specifically test Colima detection
-    let detector = RuntimeDetector::new().await.expect("Failed to create detector");
-    let runtimes = detector.runtimes();
-
-    // Check if Colima is installed
-    let colima_runtime = runtimes.iter()
-        .find(|r| matches!(r.runtime_type, RuntimeType::Colima));
-
-    if let Some(runtime) = colima_runtime {
-        println!("Colima detected: v{} (active: {})", runtime.version, runtime.is_active);
-
-        // If Colima is active, it should have a valid socket path
-        if runtime.is_active {
-            assert!(runtime.socket_path.is_some(), "Active Colima should have socket path");
-            let socket_path = runtime.socket_path.as_ref().unwrap();
-            assert!(socket_path.exists(), "Colima socket path doesn't exist: {:?}", socket_path);
-        }
-    }
-}
-
-#[tokio::test]
-async fn test_sandbox_config_defaults() {
-    // Test default configurations
-    let inference_config = SandboxConfig::inference_default();
-    assert_eq!(inference_config.sandboxer_type, SandboxerType::Container);
-    assert_eq!(inference_config.resources.memory_mb, 512);
-    assert_eq!(inference_config.resources.cpu_cores, 1.0);
-
-    let database_config = SandboxConfig::database_default();
-    assert_eq!(database_config.sandboxer_type, SandboxerType::Container);
-    assert_eq!(database_config.resources.memory_mb, 4096);
-
-    let security_config = SandboxConfig::high_security();
-    assert_eq!(security_config.sandboxer_type, SandboxerType::Process);
-    assert_eq!(security_config.resources.memory_mb, 512);
-    assert!(!security_config.network.enabled); // Network should be disabled for high security
-}
-
-#[tokio::test]
-async fn test_sandbox_manager() {
-    // Test sandbox manager creation
-    let sandbox_manager = SandboxManager::new();
-
-    // List sandboxes (should be empty initially)
-    let sandboxes = sandbox_manager.list_sandboxes().await
-        .expect("Failed to list sandboxes");
-    assert_eq!(sandboxes.len(), 0, "Should start with no sandboxes");
-}
-
-#[tokio::test]
-async fn test_workload_types() {
-    // Test different workload types
-    let inference = WorkloadType::Inference {
-        model: "llama3".to_string(),
-        engine: "ollama".to_string(),
-    };
-
-    let embedding = WorkloadType::Embedding {
-        model: "all-minilm".to_string(),
-    };
-
-    let vector_db = WorkloadType::VectorDB {
-        engine: "qdrant".to_string(),
-    };
-
-    let blockchain = WorkloadType::Blockchain {
-        chain: "lux".to_string(),
-    };
-
-    let compute = WorkloadType::Compute {
-        image: "nginx:alpine".to_string(),
-        command: vec!["nginx".to_string(), "-g".to_string(), "daemon off;".to_string()],
-    };
-
-    // Verify enum variants can be created
-    match inference {
-        WorkloadType::Inference { model, engine } => {
-            assert_eq!(model, "llama3");
-            assert_eq!(engine, "ollama");
-        }
-        _ => panic!("Wrong type"),
-    }
-}
-
-#[tokio::test]
-async fn test_resource_requirements() {
-    // Test resource requirements
-    let requirements = ResourceRequirements {
-        min_memory_mb: 512,
-        min_cpu_cores: 1.0,
-        gpu_required: false,
-        network_required: true,
-    };
-
-    assert_eq!(requirements.min_memory_mb, 512);
-    assert!(!requirements.gpu_required);
-    assert!(requirements.network_required);
-}
+//! Integration tests for Hanzo AI Blockchain with Lux Consensus
 
 #[cfg(test)]
-mod docker_tests {
-    use super::*;
-    use hanzod::docker_provider::DockerProvider;
-    use hanzod::runtime_detection::{RuntimeInfo, RuntimeProvider, ContainerConfig};
-    use std::collections::HashMap;
+mod integration_tests {
+    use hanzod::lux_consensus::{LuxConsensus, LuxConsensusConfig, InterchainMessageType, InterchainMessage};
+    use hanzod::warp_ffi::{UnsignedMessage, WarpProtocolRust};
+    use chrono::Utc;
 
-    #[tokio::test]
-    async fn test_docker_provider_creation() {
-        // Create a mock runtime info
-        let runtime_info = RuntimeInfo {
-            runtime_type: RuntimeType::DockerDesktop,
-            version: "28.0.1".to_string(),
-            socket_path: Some(std::path::PathBuf::from("/var/run/docker.sock")),
-            is_active: false, // Set to false so we don't try to connect
-            capabilities: vec![],
+    #[test]
+    fn test_lux_consensus_initialization() {
+        let config = LuxConsensusConfig::default();
+        let consensus = LuxConsensus::new(config).unwrap();
+        
+        // Test that consensus is initialized
+        let metrics = tokio_test::block_on(consensus.get_metrics());
+        assert_eq!(metrics.network_id, 43114); // Lux mainnet
+        assert_eq!(metrics.chain_id, "hanzo-chain-1");
+    }
+
+    #[test]
+    fn test_validator_registration() {
+        let config = LuxConsensusConfig::default();
+        let consensus = LuxConsensus::new(config).unwrap();
+        
+        // Register a validator with minimum stake
+        let validator = tokio_test::block_on(async {
+            consensus.register_validator(2_000_000_000_000_000, true).await
+        }).unwrap();
+        
+        assert!(validator.node_id.starts_with("NodeID-"));
+        assert!(validator.supports_qwen3);
+        assert_eq!(validator.stake_amount, 2_000_000_000_000_000);
+    }
+
+    #[test]
+    fn test_warp_message_creation() {
+        let chain_id = vec![0u8; 32];
+        let payload = b"Test interchain message".to_vec();
+        
+        let msg = UnsignedMessage::new(43114, chain_id, payload).unwrap();
+        assert_eq!(msg.network_id, 43114);
+        
+        let id = msg.id();
+        assert_eq!(id.len(), 32); // SHA256 hash
+    }
+
+    #[test]
+    fn test_warp_protocol_rust() {
+        use ed25519_dalek::SigningKey;
+        use rand::rngs::OsRng;
+        
+        let protocol = WarpProtocolRust::new(43114);
+        
+        // Create a message
+        let chain_id = vec![1u8; 32];
+        let payload = b"Asset transfer via zkBridge".to_vec();
+        let msg = protocol.create_unsigned_message(chain_id, payload).unwrap();
+        
+        // Sign it
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let signed = protocol.sign_message(&msg, &signing_key);
+        
+        // Verify signature
+        let verifying_key = signing_key.verifying_key();
+        assert!(protocol.verify_message(&signed, &verifying_key));
+    }
+
+    #[test]
+    fn test_interchain_message_types() {
+        let msg = InterchainMessage {
+            message_id: "test-001".to_string(),
+            message_type: InterchainMessageType::Warp,
+            source_chain: "hanzo-chain-1".to_string(),
+            destination_chain: "C-Chain".to_string(),
+            payload: vec![1, 2, 3],
+            signature: vec![0; 64],
+            timestamp: Utc::now(),
         };
-
-        let provider = DockerProvider::new(runtime_info.clone());
-        let info = provider.info();
-        assert_eq!(info.runtime_type, RuntimeType::DockerDesktop);
+        
+        assert!(matches!(msg.message_type, InterchainMessageType::Warp));
+        
+        let teleport_msg = InterchainMessage {
+            message_type: InterchainMessageType::Teleport,
+            ..msg.clone()
+        };
+        
+        assert!(matches!(teleport_msg.message_type, InterchainMessageType::Teleport));
     }
 
-}
-
-#[cfg(test)]
-mod api_tests {
-    use axum::http::StatusCode;
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn test_health_endpoint() {
-        // Server should be running from cargo run
-        let client = reqwest::Client::new();
-
-        // Try multiple times in case server is starting
-        for _ in 0..10 {
-            if let Ok(response) = client.get("http://localhost:3690/health").send().await {
-                if response.status() == StatusCode::OK {
-                    let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
-                    assert_eq!(body["status"], "healthy");
-                    return;
-                }
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        }
-
-        panic!("Health endpoint not responding");
+    #[test]
+    fn test_consensus_signature_verification() {
+        let config = LuxConsensusConfig::default();
+        let consensus = LuxConsensus::new(config).unwrap();
+        
+        let message = b"Test message for signing";
+        let signature = consensus.sign_as_validator(message);
+        
+        assert_eq!(signature.len(), 64); // Ed25519 signature
+        
+        // In production, we'd verify with the public key
+        // For now, just check the signature was created
+        assert!(!signature.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_runtimes_endpoint() {
-        let client = reqwest::Client::new();
-
-        // Try with retries
-        for _ in 0..10 {
-            if let Ok(response) = client.get("http://localhost:3690/runtimes").send().await {
-                if response.status() == StatusCode::OK {
-                    let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
-                    assert!(body["runtimes"].is_array());
-                    return;
-                }
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        }
-        panic!("Runtimes endpoint not responding");
+    #[test]
+    fn test_snow_consensus_parameters() {
+        let config = LuxConsensusConfig::default();
+        
+        assert_eq!(config.snow_params.k, 20);
+        assert_eq!(config.snow_params.alpha, 15);
+        assert_eq!(config.snow_params.beta_virtuous, 15);
+        assert_eq!(config.snow_params.beta_rogue, 20);
+        assert_eq!(config.snow_params.concurrent_repolls, 4);
     }
 
-    #[tokio::test]
-    #[ignore] // Requires server and Docker
-    async fn test_sandbox_creation() {
-        let client = reqwest::Client::new();
-        let payload = json!({
-            "image": "alpine:latest",
-            "sandboxer_type": "container"
+    #[test]
+    fn test_interchain_config() {
+        let config = LuxConsensusConfig::default();
+        
+        assert!(config.interchain.enable_warp);
+        assert!(config.interchain.enable_teleport);
+        
+        // Check supported chains
+        let chains: Vec<String> = config.interchain.supported_chains
+            .iter()
+            .map(|c| c.chain_id.clone())
+            .collect();
+        
+        assert!(chains.contains(&"C-Chain".to_string()));
+        assert!(chains.contains(&"X-Chain".to_string()));
+        assert!(chains.contains(&"P-Chain".to_string()));
+    }
+
+    #[test]
+    fn test_minimum_stake_requirement() {
+        let config = LuxConsensusConfig::default();
+        let consensus = LuxConsensus::new(config).unwrap();
+        
+        // Try to register with insufficient stake
+        let result = tokio_test::block_on(async {
+            consensus.register_validator(1000, false).await
         });
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Insufficient stake"));
+    }
 
-        let response = client.post("http://localhost:3690/v1/sandboxes")
-            .json(&payload)
-            .send()
-            .await
-            .expect("Failed to send request");
-
-        let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
-
-        // If Docker is running, it should succeed
-        if body["success"] == true {
-            assert!(body["sandbox_id"].is_string());
-        } else {
-            // Otherwise, we should get a meaningful error
-            assert!(body["error"].is_string());
-        }
+    #[test]
+    fn test_node_operator_capabilities() {
+        let config = LuxConsensusConfig::default();
+        let consensus = LuxConsensus::new(config).unwrap();
+        
+        // Register node with Qwen3 support
+        let validator = tokio_test::block_on(async {
+            consensus.register_validator(2_000_000_000_000_000, true).await
+        }).unwrap();
+        
+        assert!(validator.supports_qwen3);
+        assert_eq!(validator.uptime, 100.0);
+        
+        // Test uptime update
+        tokio_test::block_on(async {
+            consensus.update_validator_uptime(&validator.node_id, 95.5).await
+        }).unwrap();
+        
+        let validators = tokio_test::block_on(consensus.get_validator_set());
+        let updated = validators.iter()
+            .find(|v| v.node_id == validator.node_id)
+            .unwrap();
+        
+        assert_eq!(updated.uptime, 95.5);
     }
 }

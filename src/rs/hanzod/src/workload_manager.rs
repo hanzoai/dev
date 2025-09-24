@@ -263,7 +263,7 @@ impl WorkloadManager {
     pub async fn get_workload_status(&self, id: &str) -> Result<Option<WorkloadStatus>> {
         let key = format!("workload_{}", id);
         if let Ok(Some(value)) = self.sled_db.get(key.as_bytes()) {
-            let status: WorkloadStatus = serde_json::from_slice(&value)?;
+            let status: WorkloadStatus = serde_json::from_slice(value.as_ref())?;
             return Ok(Some(status));
         }
 

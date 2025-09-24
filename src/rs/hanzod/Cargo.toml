@@ -10,18 +10,35 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = { version = "0.7", features = ["http2", "macros"] }
+tower = "0.5"
 tower-http = { version = "0.5", features = ["cors"] }
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-sled = "0.34"
+sled = { version = "0.34", optional = true }
 reqwest = { version = "0.11", features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 hex = "0.4"
 num_cpus = "1.16"
 sys-info = "0.9"
-bollard = { version = "0.15", optional = true }
+bollard = { version = "0.16", optional = true }
+
+# Hanzo Node packages from the main node workspace
+# TODO: Re-enable after fixing dependency issues
+# hanzo_db = { path = "/Users/z/work/hanzo/node/crates/hanzo-db" }
+# hanzo_pqc = { path = "/Users/z/work/hanzo/node/crates/hanzo-pqc" }
+# hanzo_crypto_identities = { path = "/Users/z/work/hanzo/node/crates/hanzo-crypto-identities" }
+# hanzo_embedding = { path = "/Users/z/work/hanzo/node/crates/hanzo-embedding" }
+# hanzo_sqlite = { path = "/Users/z/work/hanzo/node/crates/hanzo-sqlite" }
+# hanzo_config = { path = "/Users/z/work/hanzo/node/crates/hanzo-config" }
+# hanzo-runtime = { path = "/Users/z/work/hanzo/node/crates/hanzo-runtime" }
+
+# KuzuDB for unified database backend
+kuzu = { version = "0.11.2", optional = true }
 
 # Cryptography dependencies
 ed25519-dalek = "2.1"
@@ -32,23 +49,36 @@ argon2 = "0.5"
 aes-gcm = "0.10"
 
 # Hanzo Engine - embedded natively for high-performance inference
-mistralrs-server-core = { path = "/Users/z/work/hanzo/engine/mistralrs-server-core", optional = true }
-mistralrs-core = { path = "/Users/z/work/hanzo/engine/mistralrs-core", features = ["metal"], optional = true }
+# TODO: Fix version conflicts with hanzo_db bytemuck_derive dependency
+# mistralrs-server-core = { path = "/Users/z/work/hanzo/engine/mistralrs-server-core", optional = true }
+# mistralrs-core = { path = "/Users/z/work/hanzo/engine/mistralrs-core", features = ["metal"], optional = true }
+
+[build-dependencies]
+tonic-build = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
 mockito = "1"
 proptest = "1"
+futures = "0.3"
+tokio-test = "0.4"
 
 [features]
-default = ["blockchain", "marketplace", "quantum-staking", "engine"]
-blockchain = []
-marketplace = []
-quantum-staking = []
+default = ["chain", "market", "staking", "engine", "kuzu"]  # kuzu is the native database backend
+chain = []
+market = []
+staking = []
+kuzu = ["dep:kuzu"]  # Default database backend - graph + vector + KV in one
+sled = ["dep:sled"]  # Optional: Fast embedded KV store
+rocksdb = []  # Optional: Production KV store
+postgres = []  # Optional: PostgreSQL with pgvector
 docker = ["bollard"]
-engine = ["mistralrs-server-core", "mistralrs-core"]
-metal = ["engine", "mistralrs-core/metal"]
-full = ["blockchain", "marketplace", "quantum-staking", "docker", "engine"]
+# TODO: Re-enable when mistralrs dependencies are fixed
+# engine = ["mistralrs-server-core", "mistralrs-core"]
+# metal = ["engine", "mistralrs-core/metal"]
+engine = []
+metal = []
+full = ["chain", "market", "staking", "docker", "engine", "kuzu"]
 
 [[bin]]
 name = "hanzo"
