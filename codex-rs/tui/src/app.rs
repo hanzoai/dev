@@ -1001,7 +1001,7 @@ impl App<'_> {
                     // releases can be dropped, and synthesize a press when a release arrives
                     // without a prior press.
                     if !self.enhanced_keys_supported {
-                        let key_code = key_event.code;
+                        let key_code = key_event.code.clone();
                         match key_event.kind {
                             KeyEventKind::Press | KeyEventKind::Repeat => {
                                 self.non_enhanced_pressed_keys.insert(key_code);
@@ -1034,7 +1034,10 @@ impl App<'_> {
                                     continue;
                                 }
 
-                                key_event = KeyEvent::new(key_event.code, key_event.modifiers);
+                                key_event = KeyEvent::new(
+                                    Self::normalize_non_enhanced_release_code(key_event.code),
+                                    key_event.modifiers,
+                                );
                             }
                         }
                     }
@@ -2559,6 +2562,15 @@ impl App<'_> {
         match &mut self.app_state {
             AppState::Chat { widget } => widget.handle_codex_event(event),
             AppState::Onboarding { .. } => {}
+        }
+    }
+
+    fn normalize_non_enhanced_release_code(code: KeyCode) -> KeyCode {
+        match code {
+            KeyCode::Char('\r') | KeyCode::Char('\n') => KeyCode::Enter,
+            KeyCode::Char('\t') => KeyCode::Tab,
+            KeyCode::Char('\u{1b}') => KeyCode::Esc,
+            other => other,
         }
     }
 
