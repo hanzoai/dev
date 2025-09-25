@@ -54,6 +54,26 @@ function getCachedBinaryPath(version, targetTriple, isWindows) {
   return join(cacheDir, `code-${targetTriple}${ext}`);
 }
 
+const CODE_SHIM_SIGNATURES = [
+  '@just-every/code',
+  'bin/coder.js',
+  '$(dirname "$0")/coder',
+  '%~dp0coder'
+];
+
+function shimContentsLookOurs(contents) {
+  return CODE_SHIM_SIGNATURES.some(sig => contents.includes(sig));
+}
+
+function looksLikeOurCodeShim(path) {
+  try {
+    const contents = readFileSync(path, 'utf8');
+    return shimContentsLookOurs(contents);
+  } catch {
+    return false;
+  }
+}
+
 function isWSL() {
   if (platform() !== 'linux') return false;
   try {
@@ -290,7 +310,7 @@ async function main() {
         } catch {
           contents = '';
         }
-        const looksLikeOurs = contents.includes('@just-every/code') || contents.includes('bin/coder.js');
+        const looksLikeOurs = shimContentsLookOurs(contents);
         if (!looksLikeOurs) {
           console.warn('[notice] Found an existing `code` on PATH at:');
           console.warn(`         ${resolved}`);
@@ -652,20 +672,12 @@ async function main() {
       const ourShim = globalBin ? join(globalBin, isWindows ? 'code.cmd' : 'code') : '';
       const candidates = resolveAllOnPath();
       const others = candidates.filter(p => p && (!ourShim || p !== ourShim));
-      const shimExists = ourShim && existsSync(ourShim);
-      let shimLooksLikeOurs = false;
-      if (shimExists) {
-        try {
-          const content = readFileSync(ourShim, 'utf8');
-          shimLooksLikeOurs = looksLikeOurCodeShim(content);
-        } catch {
-          shimLooksLikeOurs = false;
-        }
-      }
-      const conflictPaths = others.slice();
-      if (shimExists && !shimLooksLikeOurs) {
-        conflictPaths.push(ourShim);
-      }
+      const ourShimExists = ourShim && existsSync(ourShim);
+      const shimLooksOurs = ourShimExists && looksLikeOurCodeShim(ourShim);
+      const conflictPaths = [
+        ...others,
+        ...(ourShimExists && !shimLooksOurs ? [ourShim] : []),
+      ];
       const collision = conflictPaths.length > 0;
 
       const ensureWrapper = (name, args) => {
@@ -696,16 +708,18 @@ async function main() {
         for (const p of conflictPaths) console.error(`   - ${p}`);
         if (globalBin) {
           try {
-            if (shimExists && shimLooksLikeOurs) {
-              unlinkSync(ourShim);
-              const reason = conflictPaths[0] || 'another command on PATH';
-              console.error(`✓ Skipped global 'code' shim (removed ${ourShim})`);
-              skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
-            } else if (shimExists && !shimLooksLikeOurs) {
-              const reason = conflictPaths[0] || ourShim;
-              console.error(`✓ Skipped global 'code' shim (kept existing at ${ourShim})`);
-              skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
-            } else if (!shimExists) {
+            if (ourShimExists) {
+              if (shimLooksOurs && others.length > 0) {
+                unlinkSync(ourShim);
+                console.error(`✓ Removed global 'code' shim (ours) at ${ourShim}`);
+                const reason = others[0] || ourShim;
+                skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
+              } else if (!shimLooksOurs) {
+                console.error(`✓ Skipped global 'code' shim (different CLI at ${ourShim})`);
+                const reason = conflictPaths[0] || ourShim;
+                skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
+              }
+            } else {
               const reason = conflictPaths[0] || 'another command on PATH';
               skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
             }
