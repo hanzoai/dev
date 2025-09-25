@@ -212,7 +212,15 @@ impl ModelClient {
         let store = false;
 
         let full_instructions = prompt.get_full_instructions(&self.config.model_family);
-        let tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
+        let mut tools_json = create_tools_json_for_responses_api(&prompt.tools)?;
+        if matches!(self.effort, ReasoningEffortConfig::Minimal) {
+            tools_json.retain(|tool| {
+                tool.get("type")
+                    .and_then(|value| value.as_str())
+                    .map(|tool_type| tool_type != "web_search")
+                    .unwrap_or(true)
+            });
+        }
 
         let reasoning = create_reasoning_param_for_request(
             &self.config.model_family,
