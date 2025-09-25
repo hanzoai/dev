@@ -7197,9 +7197,10 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn on_auto_upgrade_completed(&mut self, version: String) {
+        let notice = format!("Auto-upgraded to version {version}");
         self.latest_upgrade_version = None;
-        self.bottom_pane
-            .flash_footer_notice(format!("Upgraded to version {version}"));
+        self.push_background_tail(notice.clone());
+        self.bottom_pane.flash_footer_notice(notice);
         self.request_redraw();
     }
 
