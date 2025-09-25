@@ -1600,7 +1600,7 @@ impl ChatComposer {
         self.dismissed_file_popup_token = None;
     }
 
-    fn set_has_focus(&mut self, has_focus: bool) {
+    pub(crate) fn set_has_focus(&mut self, has_focus: bool) {
         self.has_focus = has_focus;
     }
 

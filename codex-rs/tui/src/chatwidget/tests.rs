@@ -538,6 +538,41 @@ fn agents_terminal_focus_and_scroll_controls() {
     assert!(!chat.agents_terminal.active, "Second Esc should close overlay");
 }
 
+#[test]
+fn agents_terminal_esc_closes_from_sidebar() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            batch_id: None,
+            model: Some("gemini-pro".into()),
+            last_progress: None,
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "overlay should open");
+    assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Esc should close from sidebar focus");
+}
+
 fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
     while let Ok(event) = rx.try_recv() {
         match event {
