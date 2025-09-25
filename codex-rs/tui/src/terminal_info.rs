@@ -1,24 +1,51 @@
+use std::env;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
 use std::time::Duration;
 use std::time::Instant;
 
+const ANSI_16_TO_RGB: [(u8, u8, u8); 16] = [
+    (0, 0, 0),
+    (205, 0, 0),
+    (0, 205, 0),
+    (205, 205, 0),
+    (0, 0, 205),
+    (205, 0, 205),
+    (0, 205, 205),
+    (229, 229, 229),
+    (127, 127, 127),
+    (255, 0, 0),
+    (0, 255, 0),
+    (255, 255, 0),
+    (92, 92, 255),
+    (255, 0, 255),
+    (0, 255, 255),
+    (255, 255, 255),
+];
+
+fn set_nonblocking(tty: &std::fs::File) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = tty.as_raw_fd();
+        if fd != -1 {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+            if flags != -1 {
+                unsafe {
+                    libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+                }
+            }
+        }
+    }
+}
+
 fn read_reply(tty: &mut std::fs::File, timeout: Duration) -> Option<String> {
     let start = Instant::now();
     let mut buf = [0u8; 256];
     let mut s = String::new();
 
-    // Set non-blocking mode
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
-        let fd = tty.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
-        if flags != -1 {
-            unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-        }
-    }
+    set_nonblocking(tty);
 
     while start.elapsed() < timeout {
         match tty.read(&mut buf) {
@@ -110,5 +137,162 @@ pub fn get_cell_size_pixels() -> Option<(u16, u16)> {
             return Some((cell_w, cell_h));
         }
     }
+    None
+}
+
+fn read_osc_reply(tty: &mut std::fs::File, timeout: Duration) -> Option<Vec<u8>> {
+    let start = Instant::now();
+    let mut buf = [0u8; 256];
+    let mut data = Vec::new();
+
+    set_nonblocking(tty);
+
+    while start.elapsed() < timeout {
+        match tty.read(&mut buf) {
+            Ok(n) if n > 0 => {
+                data.extend_from_slice(&buf[..n]);
+                let has_bel = data.contains(&b'\x07');
+                let has_st = data.windows(2).any(|w| w == b"\x1b\\");
+                if has_bel || has_st {
+                    break;
+                }
+            }
+            _ => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+
+    if data.is_empty() { None } else { Some(data) }
+}
+
+fn parse_component(component: &str) -> Option<u8> {
+    let trimmed = component.trim();
+    match trimmed.len() {
+        2 => u8::from_str_radix(trimmed, 16).ok(),
+        4 => u16::from_str_radix(trimmed, 16)
+            .ok()
+            .map(|value| ((value as u32 * 255 + 32_767) / 65_535) as u8),
+        _ => None,
+    }
+}
+
+fn parse_osc_rgb(reply: &str) -> Option<(u8, u8, u8)> {
+    let start = reply.find("]11;")?;
+    let payload = &reply[start + 4..];
+    let payload = payload.trim_start_matches('?');
+    let end = payload
+        .find('\u{7}')
+        .or_else(|| payload.find("\x1b\\"))
+        .unwrap_or(payload.len());
+    let payload = &payload[..end];
+
+    if let Some(rest) = payload.strip_prefix("rgb:") {
+        let mut parts = rest.split('/');
+        let r = parse_component(parts.next()?)?;
+        let g = parse_component(parts.next()?)?;
+        let b = parse_component(parts.next()?)?;
+        return Some((r, g, b));
+    }
+
+    if let Some(rest) = payload.strip_prefix("rgba:") {
+        let mut parts = rest.split('/');
+        let r = parse_component(parts.next()?)?;
+        let g = parse_component(parts.next()?)?;
+        let b = parse_component(parts.next()?)?;
+        return Some((r, g, b));
+    }
+
+    if let Some(hex) = payload.strip_prefix('#') {
+        if hex.len() >= 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some((r, g, b));
+        }
+    }
+
+    None
+}
+
+fn query_osc_background_color() -> Option<(u8, u8, u8)> {
+    let mut tty_w = OpenOptions::new().write(true).open("/dev/tty").ok()?;
+    let mut tty_r = OpenOptions::new().read(true).open("/dev/tty").ok()?;
+
+    tty_w.write_all(b"\x1b]11;?\x07").ok()?;
+    tty_w.flush().ok()?;
+
+    let reply = read_osc_reply(&mut tty_r, Duration::from_millis(150))?;
+    let reply_str = String::from_utf8_lossy(&reply);
+    parse_osc_rgb(&reply_str)
+}
+
+fn xterm_color_to_rgb(idx: u32) -> Option<(u8, u8, u8)> {
+    if idx <= 15 {
+        return Some(ANSI_16_TO_RGB[idx as usize]);
+    }
+    if (16..=231).contains(&idx) {
+        let idx = idx - 16;
+        let r = idx / 36;
+        let g = (idx % 36) / 6;
+        let b = idx % 6;
+        let to_component = |v: u32| if v == 0 { 0 } else { 55 + v * 40 };
+        return Some((
+            to_component(r) as u8,
+            to_component(g) as u8,
+            to_component(b) as u8,
+        ));
+    }
+    if (232..=255).contains(&idx) {
+        let level = (idx - 232) * 10 + 8;
+        let level = level as u8;
+        return Some((level, level, level));
+    }
+    None
+}
+
+fn parse_colorfgbg_env() -> Option<(u8, u8, u8)> {
+    let raw = env::var("COLORFGBG").ok()?;
+    let bg_part = raw
+        .split(';')
+        .filter(|segment| !segment.is_empty())
+        .last()?;
+    if bg_part.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    let idx = bg_part.parse::<u32>().ok()?;
+    xterm_color_to_rgb(idx)
+}
+
+fn relative_luminance((r, g, b): (u8, u8, u8)) -> f64 {
+    let to_linear = |component: u8| {
+        let c = component as f64 / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+
+    0.2126 * to_linear(r) + 0.7152 * to_linear(g) + 0.0722 * to_linear(b)
+}
+
+fn detect_dark_from_rgb(rgb: (u8, u8, u8)) -> bool {
+    relative_luminance(rgb) < 0.45
+}
+
+pub fn detect_dark_terminal_background() -> Option<bool> {
+    if let Ok(value) = env::var("CODE_DISABLE_THEME_AUTODETECT") {
+        if matches!(value.as_str(), "1" | "true" | "TRUE" | "True") {
+            return None;
+        }
+    }
+
+    if let Some(rgb) = query_osc_background_color() {
+        return Some(detect_dark_from_rgb(rgb));
+    }
+
+    if let Some(rgb) = parse_colorfgbg_env() {
+        return Some(detect_dark_from_rgb(rgb));
+    }
+
     None
 }
