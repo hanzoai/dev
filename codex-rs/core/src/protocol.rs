@@ -596,12 +596,12 @@ fn rate_limit_snapshot_to_protocol(
     let primary = codex_protocol::protocol::RateLimitWindow {
         used_percent: snapshot.primary_used_percent,
         window_minutes: Some(snapshot.primary_window_minutes),
-        resets_in_seconds: None,
+        resets_in_seconds: snapshot.primary_reset_after_seconds,
     };
     let secondary = codex_protocol::protocol::RateLimitWindow {
         used_percent: snapshot.secondary_used_percent,
         window_minutes: Some(snapshot.secondary_window_minutes),
-        resets_in_seconds: None,
+        resets_in_seconds: snapshot.secondary_reset_after_seconds,
     };
     codex_protocol::protocol::RateLimitSnapshot {
         primary: Some(primary),
@@ -629,11 +629,19 @@ fn rate_limit_snapshot_from_protocol(
         .as_ref()
         .and_then(|window| window.window_minutes)
         .unwrap_or(0);
+    let primary_reset_after_seconds = snapshot
+        .primary
+        .as_ref()
+        .and_then(|window| window.resets_in_seconds);
     let secondary_window_minutes = snapshot
         .secondary
         .as_ref()
         .and_then(|window| window.window_minutes)
         .unwrap_or(0);
+    let secondary_reset_after_seconds = snapshot
+        .secondary
+        .as_ref()
+        .and_then(|window| window.resets_in_seconds);
 
     let ratio_percent = match (primary_window_minutes, secondary_window_minutes) {
         (0, _) | (_, 0) => f64::NAN,
@@ -649,6 +657,8 @@ fn rate_limit_snapshot_from_protocol(
         primary_to_secondary_ratio_percent: ratio_percent,
         primary_window_minutes,
         secondary_window_minutes,
+        primary_reset_after_seconds,
+        secondary_reset_after_seconds,
     }
 }
 
@@ -983,6 +993,12 @@ pub struct RateLimitSnapshotEvent {
     pub primary_window_minutes: u64,
     /// Rolling window duration for the secondary limit, in minutes.
     pub secondary_window_minutes: u64,
+    /// Seconds until the primary window resets, if reported by the API.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_reset_after_seconds: Option<u64>,
+    /// Seconds until the secondary window resets, if reported by the API.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary_reset_after_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
