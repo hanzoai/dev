@@ -7970,10 +7970,10 @@ pub(crate) fn new_status_output(
 
 pub(crate) fn new_warning_event(message: String) -> PlainHistoryCell {
     let warn_style = Style::default().fg(crate::colors::warning());
-    PlainHistoryCell::new(
-        vec![Line::from(vec![Span::styled(format!("⚠ {message}"), warn_style)])],
-        HistoryCellType::Notice,
-    )
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(2);
+    lines.push(Line::from("notice"));
+    lines.push(Line::from(vec![Span::styled(format!("⚠ {message}"), warn_style)]));
+    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {
