@@ -21,6 +21,7 @@ use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
 use codex_core::protocol::FileChange;
+use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::ProAction;
@@ -29,6 +30,7 @@ use codex_core::protocol::TaskCompleteEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use chrono::{Duration as ChronoDuration, Local, Utc};
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use std::fs::File;
@@ -151,6 +153,91 @@ fn background_event_before_next_output_precedes_later_cells() {
         "guard".to_string(),
         "tail".to_string(),
     ]);
+}
+
+#[test]
+fn limits_overlay_loading_when_snapshot_missing() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.rate_limit_snapshot = None;
+    chat.rate_limit_fetch_inflight = true;
+    chat.rate_limit_last_fetch_at = Some(Utc::now());
+
+    chat.add_limits_output();
+
+    let overlay = chat.limits.overlay.as_ref().expect("overlay present");
+    let lines = overlay.lines_for_width(60);
+    let text: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
+
+    assert!(
+        text.iter()
+            .any(|line| line.contains("Loading...")),
+        "expected loading message in overlay: {text:?}"
+    );
+    assert!(text.iter().all(|line| !line.contains("/limits")));
+    assert!(chat.rate_limit_fetch_inflight);
+}
+
+#[test]
+fn limits_overlay_renders_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.rate_limit_snapshot = Some(RateLimitSnapshotEvent {
+        primary_used_percent: 30.0,
+        secondary_used_percent: 60.0,
+        primary_to_secondary_ratio_percent: 0.0,
+        primary_window_minutes: 300,
+        secondary_window_minutes: 10_080,
+    });
+    chat.rate_limit_last_fetch_at = Some(Utc::now());
+
+    chat.add_limits_output();
+
+    let overlay = chat.limits.overlay.as_ref().expect("overlay present");
+    let lines = overlay.lines_for_width(80);
+    let strings: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
+
+    let joined = strings.join("\n");
+    assert!(joined.contains("Hourly Limit"), "overlay text: {joined}");
+    assert!(joined.contains("Weekly Limit"), "overlay text: {joined}");
+    assert!(joined.contains(" Type: "));
+    assert!(joined.contains(" Plan: "));
+    assert!(joined.contains(" Total: "));
+    assert!(joined.contains("Chart"));
+    assert!(joined.contains("7 Day History"));
+    assert!(!joined.contains("/limits"));
+    assert!(!joined.contains("Within current limits"));
+
+    let header_idx = strings
+        .iter()
+        .position(|line| line.contains("7 Day History"))
+        .expect("expected usage header");
+    let latest_label = Local::now().format("%b %d").to_string();
+    let yesterday_label = (Local::now().date_naive() - ChronoDuration::days(1))
+        .format("%b %d")
+        .to_string();
+    let latest_line = strings
+        .get(header_idx + 1)
+        .expect("expected latest usage line");
+    let second_line = strings
+        .get(header_idx + 2)
+        .expect("expected second usage line");
+    assert!(latest_line.contains(&latest_label));
+    assert!(second_line.contains(&yesterday_label));
 }
 
 #[tokio::test(flavor = "current_thread")]
