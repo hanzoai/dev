@@ -64,14 +64,6 @@ pub(crate) struct LimitsView {
 }
 
 impl LimitsView {
-    pub(crate) fn grid_state(&self) -> Option<GridState> {
-        self.grid_state
-    }
-
-    pub(crate) fn grid_config(&self) -> GridConfig {
-        self.grid
-    }
-
     pub(crate) fn lines_for_width(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines = self.summary_lines.clone();
         lines.extend(self.gauge_lines(width));
