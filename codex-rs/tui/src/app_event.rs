@@ -43,6 +43,7 @@ pub(crate) struct TerminalLaunch {
     pub command_display: String,
     pub controller: Option<TerminalRunController>,
     pub auto_close_on_success: bool,
+    pub start_running: bool,
 }
 
 #[derive(Debug, Clone)]

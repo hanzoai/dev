@@ -7982,6 +7982,7 @@ impl ChatWidget<'_> {
             command_display: "Preparing install assistant…".to_string(),
             controller: Some(controller),
             auto_close_on_success: false,
+            start_running: true,
         })
     }
 
@@ -8017,6 +8018,7 @@ impl ChatWidget<'_> {
             command_display: display,
             controller: None,
             auto_close_on_success: false,
+            start_running: true,
         };
 
         self.push_background_before_next_output(format!(
@@ -8042,16 +8044,27 @@ impl ChatWidget<'_> {
         if let Some(rest) = trimmed.strip_prefix('$') {
             let command = rest.trim();
             if command.is_empty() {
-                self.history_push(history_cell::new_error_event(
-                    "No command provided after '$'.".to_string(),
-                ));
-                self.app_event_tx.send(AppEvent::RequestRedraw);
+                self.launch_manual_terminal();
             } else {
                 self.run_terminal_command(command);
             }
             return true;
         }
         false
+    }
+
+    fn launch_manual_terminal(&mut self) {
+        let id = self.terminal.alloc_id();
+        let launch = TerminalLaunch {
+            id,
+            title: "Shell".to_string(),
+            command: Vec::new(),
+            command_display: String::new(),
+            controller: None,
+            auto_close_on_success: false,
+            start_running: false,
+        };
+        self.app_event_tx.send(AppEvent::OpenTerminal(launch));
     }
 
     fn run_terminal_command(&mut self, command: &str) {
@@ -8075,6 +8088,7 @@ impl ChatWidget<'_> {
             command_display: display,
             controller: Some(controller.clone()),
             auto_close_on_success: false,
+            start_running: true,
         };
         self.push_background_before_next_output(format!(
             "Terminal command: {command}"
@@ -8107,6 +8121,7 @@ impl ChatWidget<'_> {
             command_display: display.clone(),
             controller: Some(controller.clone()),
             auto_close_on_success: false,
+            start_running: true,
         };
 
         self.push_background_before_next_output(format!(
@@ -8179,6 +8194,7 @@ impl ChatWidget<'_> {
             command_display: display,
             controller: None,
             auto_close_on_success: false,
+            start_running: true,
         })
     }
 
@@ -8189,6 +8205,9 @@ impl ChatWidget<'_> {
             launch.command_display.clone(),
             launch.auto_close_on_success,
         );
+        if !launch.start_running {
+            overlay.running = false;
+        }
         let visible = self.terminal.last_visible_rows.get();
         overlay.visible_rows = visible;
         overlay.clamp_scroll();
@@ -9187,6 +9206,15 @@ impl ChatWidget<'_> {
             "Home/End",
             "Jump to line start/end (jump to history start/end when input is empty)",
         ));
+        lines.push(RtLine::from(""));
+
+        lines.push(RtLine::from(vec![RtSpan::styled(
+            "Terminal",
+            t_fg.add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(kv("$", "Open shell terminal without a preset command"));
+        lines.push(kv("$ <command>", "Run shell command immediately"));
+        lines.push(kv("$$ <prompt>", "Request guided shell command help"));
         lines.push(RtLine::from(""));
 
         // Panels
