@@ -24,7 +24,6 @@ use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
-use crossterm::event::KeyModifiers;
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 use crossterm::SynchronizedUpdate; // trait for stdout().sync_update
@@ -35,7 +34,7 @@ use ratatui::prelude::Rect;
 use ratatui::text::Line;
 use ratatui::CompletedFrame;
 use shlex::try_join;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -122,11 +121,10 @@ pub(crate) struct App<'a> {
     _transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
-    /// Last key reported as a physical `Press`/`Repeat` while keyboard
-    /// enhancements were unavailable. Used to drop the matching `Release` echo
-    /// that some Windows terminals emit, without impacting release-only
-    /// terminals whose characters arrive on key-up.
-    last_physical_press_without_enhancements: Option<(KeyCode, KeyModifiers)>,
+    /// Tracks keys seen as pressed when keyboard enhancements are unavailable
+    /// so duplicate release events can be filtered and release-only terminals
+    /// still synthesize a press.
+    non_enhanced_pressed_keys: HashSet<KeyCode>,
 
     /// Debug flag for logging LLM requests/responses
     _debug: bool,
@@ -369,7 +367,7 @@ impl App<'_> {
             _deferred_history_lines: Vec::new(),
             _transcript_saved_viewport: None,
             enhanced_keys_supported,
-            last_physical_press_without_enhancements: None,
+            non_enhanced_pressed_keys: HashSet::new(),
             _debug: debug,
             show_order_overlay,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
@@ -997,33 +995,49 @@ impl App<'_> {
                 }
                 AppEvent::KeyEvent(mut key_event) => {
                     if self.timing_enabled { self.timing.on_key(); }
-                    // On terminals that do not support keyboard enhancement flags
-                    // (notably some Windows Git Bash/mintty setups), crossterm may
-                    // report only Release events. Normalize such events to Press so
-                    // keys register consistently.
+                    // On terminals without keyboard enhancement flags (notably some Windows
+                    // Git Bash/mintty setups), crossterm may emit duplicate key-up events or
+                    // only report releases. Track which keys were seen as pressed so matching
+                    // releases can be dropped, and synthesize a press when a release arrives
+                    // without a prior press.
                     if !self.enhanced_keys_supported {
+                        let key_code = key_event.code.clone();
                         match key_event.kind {
                             KeyEventKind::Press | KeyEventKind::Repeat => {
-                                self.last_physical_press_without_enhancements = Some((
-                                    key_event.code.clone(),
-                                    key_event.modifiers,
-                                ));
+                                self.non_enhanced_pressed_keys.insert(key_code);
                             }
                             KeyEventKind::Release => {
-                                if let Some((code, modifiers)) =
-                                    &self.last_physical_press_without_enhancements
-                                {
-                                    if *code == key_event.code && *modifiers == key_event.modifiers
-                                    {
-                                        self.last_physical_press_without_enhancements = None;
-                                        continue;
+                                if self.non_enhanced_pressed_keys.remove(&key_code) {
+                                    continue;
+                                }
+
+                                let mut release_handled = false;
+                                if let KeyCode::Char(ch) = key_code {
+                                    let alts: Vec<char> = ch
+                                        .to_lowercase()
+                                        .chain(ch.to_uppercase())
+                                        .filter(|&c| c != ch)
+                                        .collect();
+
+                                    for alt in alts {
+                                        if self
+                                            .non_enhanced_pressed_keys
+                                            .remove(&KeyCode::Char(alt))
+                                        {
+                                            release_handled = true;
+                                            break;
+                                        }
                                     }
                                 }
-                                // Some terminals (notably Windows Git Bash/mintty without
-                                // enhanced key support) synthesize characters only on key-up
-                                // (e.g., Alt+NumPad) or never emit a physical press. Treat those
-                                // as Press so they register once.
-                                key_event.kind = KeyEventKind::Press;
+
+                                if release_handled {
+                                    continue;
+                                }
+
+                                key_event = KeyEvent::new(
+                                    Self::normalize_non_enhanced_release_code(key_event.code),
+                                    key_event.modifiers,
+                                );
                             }
                         }
                     }
@@ -2548,6 +2562,15 @@ impl App<'_> {
         match &mut self.app_state {
             AppState::Chat { widget } => widget.handle_codex_event(event),
             AppState::Onboarding { .. } => {}
+        }
+    }
+
+    fn normalize_non_enhanced_release_code(code: KeyCode) -> KeyCode {
+        match code {
+            KeyCode::Char('\r') | KeyCode::Char('\n') => KeyCode::Enter,
+            KeyCode::Char('\t') => KeyCode::Tab,
+            KeyCode::Char('\u{1b}') => KeyCode::Esc,
+            other => other,
         }
     }
 
