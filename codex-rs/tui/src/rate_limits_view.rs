@@ -87,8 +87,8 @@ pub(crate) struct GridConfig {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RateLimitResetInfo {
-    pub(crate) primary_last_reset: Option<DateTime<Utc>>,
-    pub(crate) weekly_last_reset: Option<DateTime<Utc>>,
+    pub(crate) primary_next_reset: Option<DateTime<Utc>>,
+    pub(crate) secondary_next_reset: Option<DateTime<Utc>>,
     pub(crate) session_tokens_used: Option<u64>,
     pub(crate) auto_compact_limit: Option<u64>,
     pub(crate) overflow_auto_compact: bool,
@@ -178,11 +178,11 @@ fn build_summary_lines(
     ));
     lines.push(build_hourly_window_line(
         metrics,
-        reset_info.primary_last_reset,
+        reset_info.primary_next_reset,
     ));
     lines.push(build_hourly_reset_line(
         snapshot.primary_window_minutes,
-        reset_info.primary_last_reset,
+        reset_info.primary_next_reset,
     ));
 
     lines.push("".into());
@@ -196,11 +196,11 @@ fn build_summary_lines(
     ));
     lines.push(build_weekly_window_line(
         metrics.weekly_window_minutes,
-        reset_info.weekly_last_reset,
+        reset_info.secondary_next_reset,
     ));
     lines.push(build_weekly_reset_line(
         snapshot.secondary_window_minutes,
-        reset_info.weekly_last_reset,
+        reset_info.secondary_next_reset,
     ));
 
     lines.push("".into());
@@ -240,7 +240,7 @@ fn build_bar_line(label: &str, percent: f64, suffix: &str, style: Style) -> Line
 
 fn build_hourly_window_line(
     metrics: &RateLimitMetrics,
-    last_reset: Option<DateTime<Utc>>,
+    next_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     let prefix = field_prefix("Window");
     if metrics.primary_window_minutes == 0 {
@@ -253,8 +253,8 @@ fn build_hourly_window_line(
         ]);
     }
 
-    if let Some(last) = last_reset {
-        if let Some(timing) = compute_window_timing(metrics.primary_window_minutes, last) {
+    if let Some(next) = next_reset {
+        if let Some(timing) = compute_window_timing(metrics.primary_window_minutes, next) {
             let window_secs = timing.window.as_secs_f64();
             if window_secs > 0.0 {
                 let elapsed = timing.elapsed();
@@ -278,25 +278,25 @@ fn build_hourly_window_line(
         }
     }
 
-    Line::from(vec![
-        Span::raw(prefix),
-        Span::styled(
-            format!(
-                "(unknown / {})",
-                format_minutes_round_units(metrics.primary_window_minutes)
-            ),
-            Style::default().fg(colors::dim()),
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw(prefix));
+    spans.push(Span::styled(
+        format!(
+            "(unknown / {})",
+            format_minutes_round_units(metrics.primary_window_minutes)
         ),
-    ])
+        Style::default().fg(colors::dim()),
+    ));
+    Line::from(spans)
 }
 
 fn build_hourly_reset_line(
     window_minutes: u64,
-    last_reset: Option<DateTime<Utc>>,
+    next_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
-    if let (Some(last), true) = (last_reset, window_minutes > 0) {
+    if let (Some(next), true) = (next_reset, window_minutes > 0) {
         let prefix = field_prefix("Resets");
-        if let Some(timing) = compute_window_timing(window_minutes, last) {
+        if let Some(timing) = compute_window_timing(window_minutes, next) {
             let remaining = format_duration(timing.remaining);
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::raw(prefix.clone()));
@@ -320,7 +320,7 @@ fn build_hourly_reset_line(
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::raw(field_prefix("Resets")));
     spans.push(Span::styled(
-        "shown once next window detected".to_string(),
+        "awaiting reset timing…".to_string(),
         Style::default().fg(colors::dim()),
     ));
     Line::from(spans)
@@ -328,7 +328,7 @@ fn build_hourly_reset_line(
 
 fn build_weekly_window_line(
     weekly_minutes: u64,
-    last_reset: Option<DateTime<Utc>>,
+    next_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
     let prefix = field_prefix("Window");
     if weekly_minutes == 0 {
@@ -341,8 +341,8 @@ fn build_weekly_window_line(
         ]);
     }
 
-    if let Some(last) = last_reset {
-        if let Some(timing) = compute_window_timing(weekly_minutes, last) {
+    if let Some(next) = next_reset {
+        if let Some(timing) = compute_window_timing(weekly_minutes, next) {
             let window_secs = timing.window.as_secs_f64();
             if window_secs > 0.0 {
                 let elapsed = timing.elapsed();
@@ -379,11 +379,11 @@ fn build_weekly_window_line(
 
 fn build_weekly_reset_line(
     window_minutes: u64,
-    last_reset: Option<DateTime<Utc>>,
+    next_reset: Option<DateTime<Utc>>,
 ) -> Line<'static> {
-    if let (Some(last), true) = (last_reset, window_minutes > 0) {
+    if let (Some(next), true) = (next_reset, window_minutes > 0) {
         let prefix = field_prefix("Resets");
-        if let Some(timing) = compute_window_timing(window_minutes, last) {
+        if let Some(timing) = compute_window_timing(window_minutes, next) {
             let remaining = format_duration(timing.remaining);
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::raw(prefix.clone()));
@@ -406,7 +406,7 @@ fn build_weekly_reset_line(
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::raw(field_prefix("Resets")));
     spans.push(Span::styled(
-        "shown once next window detected".to_string(),
+        "awaiting reset timing…".to_string(),
         Style::default().fg(colors::dim()),
     ));
     Line::from(spans)
@@ -609,7 +609,7 @@ impl WindowTiming {
 
 fn compute_window_timing(
     window_minutes: u64,
-    last_reset: DateTime<Utc>,
+    next_reset: DateTime<Utc>,
 ) -> Option<WindowTiming> {
     let window_seconds = (window_minutes as i64).checked_mul(60)?;
     if window_seconds <= 0 {
@@ -617,17 +617,16 @@ fn compute_window_timing(
     }
 
     let now = Utc::now();
-    let elapsed_secs = now.signed_duration_since(last_reset).num_seconds();
-    let elapsed_within_window = if elapsed_secs <= 0 {
-        0
-    } else {
-        elapsed_secs.rem_euclid(window_seconds)
-    };
-    let remaining_secs = (window_seconds - elapsed_within_window).max(0);
+    let mut remaining_secs = next_reset.signed_duration_since(now).num_seconds();
+    if remaining_secs < 0 {
+        remaining_secs = 0;
+    }
+    if remaining_secs > window_seconds {
+        remaining_secs = window_seconds;
+    }
 
     let window = Duration::from_secs(window_seconds as u64);
     let remaining = Duration::from_secs(remaining_secs as u64);
-    let next_reset = now + chrono::Duration::seconds(remaining_secs);
     Some(WindowTiming {
         remaining,
         window,
@@ -1020,6 +1019,8 @@ mod tests {
             primary_to_secondary_ratio_percent: 40.0,
             primary_window_minutes: 300,
             secondary_window_minutes: 10_080,
+            primary_reset_after_seconds: None,
+            secondary_reset_after_seconds: None,
         }
     }
 

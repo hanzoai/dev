@@ -160,6 +160,7 @@ impl ModelClient {
                     &self.client,
                     &self.provider,
                     &self.debug_logger,
+                    self.auth_manager.clone(),
                 )
                 .await?;
 
@@ -296,6 +297,22 @@ impl ModelClient {
         }
         if azure_workaround {
             attach_item_ids(&mut payload_json, &input_with_instructions);
+        }
+        if let Some(openrouter_cfg) = self.provider.openrouter_config() {
+            if let Some(obj) = payload_json.as_object_mut() {
+                if let Some(provider) = &openrouter_cfg.provider {
+                    obj.insert(
+                        "provider".to_string(),
+                        serde_json::to_value(provider)?
+                    );
+                }
+                if let Some(route) = &openrouter_cfg.route {
+                    obj.insert("route".to_string(), route.clone());
+                }
+                for (key, value) in &openrouter_cfg.extra {
+                    obj.entry(key.clone()).or_insert(value.clone());
+                }
+            }
         }
         let payload_body = serde_json::to_string(&payload_json)?;
 
@@ -687,6 +704,10 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEve
         parse_header_f64(headers, "x-codex-primary-over-secondary-limit-percent")?;
     let primary_window_minutes = parse_header_u64(headers, "x-codex-primary-window-minutes")?;
     let secondary_window_minutes = parse_header_u64(headers, "x-codex-secondary-window-minutes")?;
+    let primary_reset_after_seconds =
+        parse_header_u64(headers, "x-codex-primary-reset-after-seconds");
+    let secondary_reset_after_seconds =
+        parse_header_u64(headers, "x-codex-secondary-reset-after-seconds");
 
     Some(RateLimitSnapshotEvent {
         primary_used_percent,
@@ -694,6 +715,8 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEve
         primary_to_secondary_ratio_percent,
         primary_window_minutes,
         secondary_window_minutes,
+        primary_reset_after_seconds,
+        secondary_reset_after_seconds,
     })
 }
 
@@ -1249,6 +1272,7 @@ mod tests {
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
             requires_openai_auth: false,
+            openrouter: None,
         };
 
         let events = collect_events(
@@ -1309,6 +1333,7 @@ mod tests {
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
             requires_openai_auth: false,
+            openrouter: None,
         };
 
         let events = collect_events(&[sse1.as_bytes()], provider).await;
@@ -1343,6 +1368,7 @@ mod tests {
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(1000),
             requires_openai_auth: false,
+            openrouter: None,
         };
 
         let events = collect_events(&[sse1.as_bytes()], provider).await;
@@ -1448,6 +1474,7 @@ mod tests {
                 stream_max_retries: Some(0),
                 stream_idle_timeout_ms: Some(1000),
                 requires_openai_auth: false,
+                openrouter: None,
             };
 
             let out = run_sse(evs, provider).await;

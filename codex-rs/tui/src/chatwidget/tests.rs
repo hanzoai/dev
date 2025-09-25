@@ -196,7 +196,10 @@ fn limits_overlay_renders_snapshot() {
         primary_to_secondary_ratio_percent: 0.0,
         primary_window_minutes: 300,
         secondary_window_minutes: 10_080,
+        primary_reset_after_seconds: Some(600),
+        secondary_reset_after_seconds: Some(3_600),
     });
+    chat.update_rate_limit_resets(chat.rate_limit_snapshot.as_ref().unwrap());
     chat.rate_limit_last_fetch_at = Some(Utc::now());
 
     chat.add_limits_output();
@@ -218,6 +221,11 @@ fn limits_overlay_renders_snapshot() {
     assert!(joined.contains("Weekly Limit"), "overlay text: {joined}");
     assert!(joined.contains(" Type: "));
     assert!(joined.contains(" Plan: "));
+    assert!(joined.contains("Resets"), "overlay text: {joined}");
+    assert!(
+        !joined.contains("awaiting reset timing"),
+        "expected reset timings to render: {joined}"
+    );
     assert!(joined.contains(" Total: "));
     assert!(joined.contains("Chart"));
     assert!(joined.contains("7 Day History"));
@@ -536,6 +544,41 @@ fn agents_terminal_focus_and_scroll_controls() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     pump_app_events(&mut chat, &rx);
     assert!(!chat.agents_terminal.active, "Second Esc should close overlay");
+}
+
+#[test]
+fn agents_terminal_esc_closes_from_sidebar() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            batch_id: None,
+            model: Some("gemini-pro".into()),
+            last_progress: None,
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "overlay should open");
+    assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Esc should close from sidebar focus");
 }
 
 fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {

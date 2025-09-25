@@ -55,6 +55,18 @@ pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_too
 
 const APPLY_PATCH_COMMANDS: [&str; 2] = ["apply_patch", "applypatch"];
 
+fn looks_like_bash(cmd: &str) -> bool {
+    let trimmed = cmd.trim_matches('"').trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
+        return true;
+    }
+    Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {
     #[error(transparent)]
@@ -128,7 +140,7 @@ pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
             Err(e) => MaybeApplyPatch::PatchParseError(e),
         },
         // Bash heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
-        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
+        [bash, flag, script] if looks_like_bash(bash) && flag == "-lc" => {
             match extract_apply_patch_from_bash(script) {
                 Ok((body, workdir)) => match parse_patch(&body) {
                     Ok(mut source) => {
@@ -248,7 +260,7 @@ pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApp
                 );
             }
         }
-        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
+        [bash, flag, script] if looks_like_bash(bash) && flag == "-lc" => {
             if parse_patch(script).is_ok() {
                 return MaybeApplyPatchVerified::CorrectnessError(
                     ApplyPatchError::ImplicitInvocation,
@@ -886,6 +898,10 @@ mod tests {
         strs_to_strings(&["bash", "-lc", script])
     }
 
+    fn args_abs_bash(script: &str) -> Vec<String> {
+        strs_to_strings(&["/bin/bash", "-lc", script])
+    }
+
     fn heredoc_script(prefix: &str) -> String {
         format!(
             "{prefix}apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch\nPATCH"
@@ -905,8 +921,7 @@ mod tests {
         }]
     }
 
-    fn assert_match(script: &str, expected_workdir: Option<&str>) {
-        let args = args_bash(script);
+    fn assert_match_args(args: Vec<String>, expected_workdir: Option<&str>) {
         match maybe_parse_apply_patch(&args) {
             MaybeApplyPatch::Body(ApplyPatchArgs { hunks, workdir, .. }) => {
                 assert_eq!(workdir.as_deref(), expected_workdir);
@@ -916,12 +931,21 @@ mod tests {
         }
     }
 
-    fn assert_not_match(script: &str) {
-        let args = args_bash(script);
+    fn assert_match(script: &str, expected_workdir: Option<&str>) {
+        assert_match_args(args_bash(script), expected_workdir);
+        assert_match_args(args_abs_bash(script), expected_workdir);
+    }
+
+    fn assert_not_match_args(args: Vec<String>) {
         assert!(matches!(
             maybe_parse_apply_patch(&args),
             MaybeApplyPatch::NotApplyPatch
         ));
+    }
+
+    fn assert_not_match(script: &str) {
+        assert_not_match_args(args_bash(script));
+        assert_not_match_args(args_abs_bash(script));
     }
 
     #[test]
@@ -938,12 +962,13 @@ mod tests {
     #[test]
     fn test_implicit_patch_bash_script_is_error() {
         let script = "*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch";
-        let args = args_bash(script);
         let dir = tempdir().unwrap();
-        assert!(matches!(
-            maybe_parse_apply_patch_verified(&args, dir.path()),
-            MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
-        ));
+        for args in [args_bash(script), args_abs_bash(script)] {
+            assert!(matches!(
+                maybe_parse_apply_patch_verified(&args, dir.path()),
+                MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
+            ));
+        }
     }
 
     #[test]
@@ -1003,29 +1028,41 @@ mod tests {
 
     #[test]
     fn test_heredoc_applypatch() {
-        let args = strs_to_strings(&[
-            "bash",
-            "-lc",
-            r#"applypatch <<'PATCH'
+        for args in [
+            strs_to_strings(&[
+                "bash",
+                "-lc",
+                r#"applypatch <<'PATCH'
 *** Begin Patch
 *** Add File: foo
 +hi
 *** End Patch
 PATCH"#,
-        ]);
-
-        match maybe_parse_apply_patch(&args) {
-            MaybeApplyPatch::Body(ApplyPatchArgs { hunks, workdir, .. }) => {
-                assert_eq!(workdir, None);
-                assert_eq!(
-                    hunks,
-                    vec![Hunk::AddFile {
-                        path: PathBuf::from("foo"),
-                        contents: "hi\n".to_string()
-                    }]
-                );
+            ]),
+            strs_to_strings(&[
+                "/bin/bash",
+                "-lc",
+                r#"applypatch <<'PATCH'
+*** Begin Patch
+*** Add File: foo
++hi
+*** End Patch
+PATCH"#,
+            ]),
+        ] {
+            match maybe_parse_apply_patch(&args) {
+                MaybeApplyPatch::Body(ApplyPatchArgs { hunks, workdir, .. }) => {
+                    assert_eq!(workdir, None);
+                    assert_eq!(
+                        hunks,
+                        vec![Hunk::AddFile {
+                            path: PathBuf::from("foo"),
+                            contents: "hi\n".to_string()
+                        }]
+                    );
+                }
+                result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
             }
-            result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
         }
     }
 
