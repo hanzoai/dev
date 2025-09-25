@@ -691,13 +691,6 @@ fn wait_exec_call_id_from_params(params: Option<&String>) -> Option<ExecCallId> 
         .and_then(|json| json.get("call_id").and_then(|v| v.as_str()).map(|s| ExecCallId(s.to_string())))
 }
 
-fn line_text(line: &Line<'static>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.clone().into_owned())
-        .collect::<Vec<_>>()
-        .join("")
-}
 impl std::fmt::Display for ExecCallId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -1229,10 +1222,11 @@ impl ChatWidget<'_> {
                     .as_any()
                     .downcast_ref::<PlainHistoryCell>()
                     .map(|plain| {
-                        plain
-                            .lines
-                            .iter()
-                            .any(|line| line_text(line).contains(call_id))
+                        plain.state().lines.iter().any(|line| {
+                            line.spans
+                                .iter()
+                                .any(|span| span.text.contains(call_id))
+                        })
                     })
                     .unwrap_or(false)
         }) {
@@ -1895,17 +1889,37 @@ impl ChatWidget<'_> {
                     .as_any_mut()
                     .downcast_mut::<history_cell::PlainHistoryCell>()
                 {
-                    if let Some(first_line) = plain.lines.first_mut() {
-                        if let Some(first_span) = first_line.spans.get_mut(0) {
-                            first_span.content = "Updated".into();
-                            first_span.style = Style::default()
-                                .fg(crate::colors::success())
-                                .add_modifier(Modifier::BOLD);
+                    let state = plain.state_mut();
+                    if let Some(header) = state.header.as_mut() {
+                        header.label = "Updated".to_string();
+                    }
+                    if let Some(first_line) = state.lines.first_mut() {
+                        if first_line.spans.is_empty() {
+                            first_line.kind = crate::history::MessageLineKind::Paragraph;
+                            first_line.spans.push(crate::history::InlineSpan {
+                                text: "Updated".to_string(),
+                                tone: crate::history::TextTone::Success,
+                                emphasis: crate::history::TextEmphasis {
+                                    bold: true,
+                                    italic: false,
+                                    dim: false,
+                                    strike: false,
+                                    underline: false,
+                                },
+                                entity: None,
+                            });
+                        } else {
+                            for span in &mut first_line.spans {
+                                span.tone = crate::history::TextTone::Success;
+                                span.emphasis.bold = true;
+                                span.emphasis.dim = false;
+                            }
+                            first_line.spans[0].text = "Updated".to_string();
                         }
                     }
-                    plain.kind = history_cell::HistoryCellType::Patch {
+                    plain.set_kind(history_cell::HistoryCellType::Patch {
                         kind: history_cell::PatchKind::ApplySuccess,
-                    };
+                    });
                     plain.invalidate_layout_cache();
                     self.request_redraw();
                     return;
@@ -8746,7 +8760,6 @@ fn update_rate_limit_resets(
                 .as_any_mut()
                 .downcast_mut::<history_cell::PlainHistoryCell>()
             {
-                history_cell::retint_lines_in_place(&mut plain.lines, &old, &new);
                 plain.invalidate_layout_cache();
             } else if let Some(tool) = cell
                 .as_any_mut()
@@ -8757,7 +8770,7 @@ fn update_rate_limit_resets(
                 .as_any_mut()
                 .downcast_mut::<history_cell::CollapsibleReasoningCell>()
             {
-                history_cell::retint_lines_in_place(&mut reason.lines, &old, &new);
+                reason.retint(&old, &new);
             } else if let Some(stream) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::StreamingContentCell>()
@@ -9098,8 +9111,7 @@ fn update_rate_limit_resets(
                         if let Some(found_idx) = self.history_cells.iter().rposition(|c| {
                             c.as_any()
                                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                                .and_then(|rc| rc.id.as_ref())
-                                .map(|sid| sid == rid)
+                                .map(|rc| rc.matches_id(rid))
                                 .unwrap_or(false)
                         }) {
                             if let Some(reasoning_cell) = self.history_cells[found_idx]
