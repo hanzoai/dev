@@ -14,7 +14,6 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::env::VarError;
 use std::time::Duration;
-
 use crate::error::EnvVarError;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;

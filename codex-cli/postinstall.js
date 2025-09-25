@@ -169,6 +169,11 @@ function resolveGlobalBinDir() {
   return '';
 }
 
+function looksLikeOurCodeShim(contents) {
+  if (!contents) return false;
+  return contents.includes('@just-every/code') || contents.includes('$(dirname "$0")/coder') || contents.includes('%~dp0coder');
+}
+
 async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -711,8 +716,12 @@ async function main() {
                 skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
               } else if (!shimLooksOurs) {
                 console.error(`✓ Skipped global 'code' shim (different CLI at ${ourShim})`);
-                skippedCmds.push({ name: 'code', reason: `existing: ${ourShim}` });
+                const reason = conflictPaths[0] || ourShim;
+                skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
               }
+            } else {
+              const reason = conflictPaths[0] || 'another command on PATH';
+              skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
             }
           } catch (e) {
             console.error(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
