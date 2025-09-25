@@ -3102,7 +3102,7 @@ impl ChatWidget<'_> {
 
         if self.agents_terminal.active {
             use crossterm::event::KeyCode;
-            if key_event.kind == KeyEventKind::Release {
+            if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 return;
             }
             match key_event.code {
@@ -7823,6 +7823,7 @@ fn update_rate_limit_resets(
         }
         self.agents_terminal.active = true;
         self.agents_terminal.focus_sidebar();
+        self.bottom_pane.set_input_focus(false);
         self.agents_terminal.saved_scroll_offset = self.layout.scroll_offset;
         self.layout.agents_hud_expanded = false;
         if self.agents_terminal.order.is_empty() {
@@ -7869,6 +7870,7 @@ fn update_rate_limit_resets(
         self.agents_terminal.active = false;
         self.agents_terminal.focus_sidebar();
         self.layout.scroll_offset = self.agents_terminal.saved_scroll_offset;
+        self.bottom_pane.set_input_focus(true);
         self.request_redraw();
     }
 
