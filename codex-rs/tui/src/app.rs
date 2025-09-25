@@ -48,10 +48,10 @@ use tokio::sync::oneshot;
 
 /// Time window for debouncing redraw requests.
 ///
-/// Raising this slightly helps coalesce bursts of updates during typing and
-/// reduces render thrash, improving perceived input latency while staying
-/// comfortably under a 60 FPS refresh budget.
-const REDRAW_DEBOUNCE: Duration = Duration::from_millis(16);
+/// Temporarily widened to ~30 FPS (33 ms) to coalesce bursts of updates while
+/// we smooth out per-frame hotspots; keeps redraws responsive without pegging
+/// the main thread.
+const REDRAW_DEBOUNCE: Duration = Duration::from_millis(33);
 const DEFAULT_PTY_ROWS: u16 = 24;
 const DEFAULT_PTY_COLS: u16 = 80;
 
@@ -121,6 +121,9 @@ pub(crate) struct App<'a> {
     _transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
+    /// Tracks keys seen as pressed when keyboard enhancements are unavailable
+    /// so duplicate release events can be filtered and release-only terminals
+    /// still synthesize a press.
     non_enhanced_pressed_keys: HashSet<KeyCode>,
 
     /// Debug flag for logging LLM requests/responses
@@ -992,11 +995,11 @@ impl App<'_> {
                 }
                 AppEvent::KeyEvent(mut key_event) => {
                     if self.timing_enabled { self.timing.on_key(); }
-                    // On consoles without keyboard enhancement support we may receive both
-                    // Press and Release notifications for a single keypress. Track which
-                    // keys were seen as pressed so matching Release events can be dropped.
-                    // If a Release arrives without a prior Press (common on some mintty setups),
-                    // synthesize a Press so typing still works.
+                    // On terminals without keyboard enhancement flags (notably some Windows
+                    // Git Bash/mintty setups), crossterm may emit duplicate key-up events or
+                    // only report releases. Track which keys were seen as pressed so matching
+                    // releases can be dropped, and synthesize a press when a release arrives
+                    // without a prior press.
                     if !self.enhanced_keys_supported {
                         let key_code = key_event.code;
                         match key_event.kind {
@@ -1017,7 +1020,10 @@ impl App<'_> {
                                         .collect();
 
                                     for alt in alts {
-                                        if self.non_enhanced_pressed_keys.remove(&KeyCode::Char(alt)) {
+                                        if self
+                                            .non_enhanced_pressed_keys
+                                            .remove(&KeyCode::Char(alt))
+                                        {
                                             release_handled = true;
                                             break;
                                         }

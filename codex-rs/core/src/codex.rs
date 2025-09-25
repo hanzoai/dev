@@ -1152,23 +1152,24 @@ impl Session {
     }
 
     pub(crate) async fn submit_follow_up_user_message(&self, text: String) {
-        let items = vec![ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: text.clone(),
-            }],
-        }];
-        self.record_conversation_items(&items).await;
+        let mut response_input = response_input_from_core_items(vec![InputItem::Text { text: text.clone() }]);
+        self.enforce_user_message_limits(PRO_SUBMISSION_ID, &mut response_input);
+        let response_item: ResponseItem = response_input.clone().into();
+        self.record_conversation_items(std::slice::from_ref(&response_item)).await;
 
-        let input = vec![InputItem::Text { text: text.clone() }];
-        if let Err(items) = self.inject_input(input) {
-            if let Some(sess_arc) = self.upgrade_self() {
-                let turn_context = sess_arc.make_turn_context();
-                let submission_id = Uuid::new_v4().to_string();
-                let agent = AgentTask::spawn(Arc::clone(&sess_arc), turn_context, submission_id, items);
-                sess_arc.set_task(agent);
-            }
+        let started = {
+            let mut state = self.state.lock().unwrap();
+            let should_start = state.current_task.is_none();
+            state.pending_input.insert(0, response_input);
+            should_start
+        };
+        if started {
+            self.cleanup_old_status_items().await;
+            let turn_context = self.make_turn_context();
+            let sub_id = self.next_internal_sub_id();
+            let sentinel_input = vec![InputItem::Text { text: PENDING_ONLY_SENTINEL.to_string() }];
+            let agent = AgentTask::spawn(self.upgrade_self().expect("session"), turn_context, sub_id, sentinel_input);
+            self.set_task(agent);
         }
 
         if let Some(sess_arc) = self.upgrade_self() {
@@ -1252,12 +1253,14 @@ impl Session {
         state.request_ordinal = state.request_ordinal.saturating_add(1);
     }
 
-    fn scratchpad_push(&self, item: &ResponseItem, response: &Option<ResponseInputItem>) {
+    fn scratchpad_push(&self, item: &ResponseItem, response: &Option<ResponseInputItem>, sub_id: &str) {
         let mut state = self.state.lock().unwrap();
         if let Some(sp) = &mut state.turn_scratchpad {
             sp.items.push(item.clone());
             if let Some(r) = response {
-                sp.responses.push(r.clone());
+                let mut truncated = r.clone();
+                self.enforce_user_message_limits(sub_id, &mut truncated);
+                sp.responses.push(truncated);
             }
         }
     }
@@ -1334,6 +1337,111 @@ impl Session {
     pub fn queue_user_input(&self, queued: QueuedUserInput) {
         let mut state = self.state.lock().unwrap();
         state.pending_user_input.push(queued);
+    }
+
+    fn enforce_user_message_limits(
+        &self,
+        sub_id: &str,
+        response_item: &mut ResponseInputItem,
+    ) {
+        let ResponseInputItem::Message { role, content } = response_item else {
+            return;
+        };
+        if role != "user" {
+            return;
+        }
+
+        let mut aggregated = String::new();
+        let mut text_segments: Vec<(usize, usize)> = Vec::new();
+        for item in content.iter() {
+            if let ContentItem::InputText { text } = item {
+                let start = aggregated.len();
+                aggregated.push_str(text);
+                let end = aggregated.len();
+                text_segments.push((start, end));
+            }
+        }
+
+        if text_segments.is_empty() {
+            return;
+        }
+
+        let (_, was_truncated, prefix_end, suffix_start) =
+            truncate_middle_bytes(&aggregated, MAX_TOOL_OUTPUT_BYTES_FOR_MODEL);
+        if !was_truncated {
+            return;
+        }
+
+        let cwd = self.get_cwd().to_path_buf();
+        let filename = format!("user-message-{}-{}.txt", sub_id, Uuid::new_v4());
+        let file_note = match ensure_user_dir(&cwd)
+            .and_then(|dir| write_agent_file(&dir, &filename, &aggregated))
+        {
+            Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
+            Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
+        };
+
+        let original = std::mem::take(content);
+        let mut new_content = Vec::with_capacity(original.len());
+        let mut segment_iter = text_segments.into_iter();
+        let mut marker_inserted = false;
+        let mut last_text_idx: Option<usize> = None;
+
+        for item in original.into_iter() {
+            match item {
+                ContentItem::InputText { text } => {
+                    if let Some((seg_start, seg_end)) = segment_iter.next() {
+                        let mut new_text = String::new();
+
+                        if seg_start < prefix_end {
+                            let slice_end = seg_end.min(prefix_end) - seg_start;
+                            if let Some(prefix_slice) = text.get(..slice_end) {
+                                new_text.push_str(prefix_slice);
+                            }
+                        }
+
+                        if !marker_inserted && seg_end > prefix_end && seg_start < suffix_start {
+                            new_text.push_str(TRUNCATION_MARKER);
+                            marker_inserted = true;
+                        }
+
+                        if seg_end > suffix_start {
+                            let slice_start = seg_start.max(suffix_start) - seg_start;
+                            if let Some(suffix_slice) = text.get(slice_start..) {
+                                new_text.push_str(suffix_slice);
+                            }
+                        }
+
+                        new_content.push(ContentItem::InputText { text: new_text });
+                        last_text_idx = Some(new_content.len() - 1);
+                    }
+                }
+                other => new_content.push(other),
+            }
+        }
+
+        if !marker_inserted {
+            if let Some(idx) = last_text_idx {
+                if let ContentItem::InputText { text } = &mut new_content[idx] {
+                    text.push_str(TRUNCATION_MARKER);
+                }
+            } else {
+                new_content.push(ContentItem::InputText {
+                    text: TRUNCATION_MARKER.to_string(),
+                });
+                last_text_idx = Some(new_content.len() - 1);
+            }
+        }
+
+        if let Some(idx) = last_text_idx {
+            if let ContentItem::InputText { text } = &mut new_content[idx] {
+                text.push_str(&file_note);
+            }
+        } else {
+            new_content.push(ContentItem::InputText { text: file_note });
+        }
+
+        *content = new_content;
     }
 
     pub fn pop_next_queued_user_input(&self) -> Option<QueuedUserInput> {
@@ -2426,10 +2534,10 @@ impl Session {
     /// Returns the input if there was no agent running to inject into
     pub fn inject_input(&self, input: Vec<InputItem>) -> Result<(), Vec<InputItem>> {
         let mut state = self.state.lock().unwrap();
-        if state.current_task.is_some() {
-            state
-                .pending_input
-                .push(response_input_from_core_items(input));
+        if let Some(task) = state.current_task.as_ref() {
+            let mut response = response_input_from_core_items(input);
+            self.enforce_user_message_limits(&task.sub_id, &mut response);
+            state.pending_input.push(response);
             Ok(())
         } else {
             Err(input)
@@ -2474,8 +2582,11 @@ impl Session {
         }
     }
 
-    pub fn add_pending_input(&self, input: ResponseInputItem) {
+    pub fn add_pending_input(&self, mut input: ResponseInputItem) {
         let mut state = self.state.lock().unwrap();
+        if let Some(task) = state.current_task.as_ref() {
+            self.enforce_user_message_limits(&task.sub_id, &mut input);
+        }
         state.pending_input.push(input);
     }
 
@@ -3302,7 +3413,8 @@ async fn submission_loop(
                 };
 
                 if sess.has_running_task() {
-                    let response_item = response_input_from_core_items(items.clone());
+                    let mut response_item = response_input_from_core_items(items.clone());
+                    sess.enforce_user_message_limits(&sub.id, &mut response_item);
                     let queued = QueuedUserInput {
                         submission_id: sub.id.clone(),
                         response_item,
@@ -3865,7 +3977,9 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
 
     if !pending_only_turn {
         // Convert input to ResponseInputItem
-        let response_item: ResponseItem = response_input_from_core_items(input.clone()).into();
+        let mut response_input = response_input_from_core_items(input.clone());
+        sess.enforce_user_message_limits(&sub_id, &mut response_input);
+        let response_item: ResponseItem = response_input.into();
 
         if is_review_mode {
             review_history.push(response_item.clone());
@@ -4615,7 +4729,7 @@ async fn try_run_turn(
                     handle_response_item(sess, turn_diff_tracker, sub_id, item.clone(), sequence_number, output_index, attempt_req).await?;
 
                 // Save into scratchpad so we can seed a retry if the stream drops later.
-                sess.scratchpad_push(&item, &response);
+                sess.scratchpad_push(&item, &response, &sub_id);
 
                 // If this was a finalized assistant message, clear partial text buffer
                 if let ResponseItem::Message { .. } = &item {
@@ -4754,13 +4868,7 @@ async fn try_run_turn(
             }
             ResponseEvent::RateLimits(snapshot) => {
                 let mut state = sess.state.lock().unwrap();
-                state.latest_rate_limits = Some(RateLimitSnapshotEvent {
-                    primary_used_percent: snapshot.primary_used_percent,
-                    secondary_used_percent: snapshot.secondary_used_percent,
-                    primary_to_secondary_ratio_percent: snapshot.primary_to_secondary_ratio_percent,
-                    primary_window_minutes: snapshot.primary_window_minutes,
-                    secondary_window_minutes: snapshot.secondary_window_minutes,
-                });
+                state.latest_rate_limits = Some(snapshot.clone());
                 if let Some(ctx) = account_usage_context(sess) {
                     let usage_home = ctx.codex_home.clone();
                     let usage_account = ctx.account_id.clone();
@@ -4948,6 +5056,13 @@ fn ensure_agent_dir(cwd: &Path, agent_id: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+fn ensure_user_dir(cwd: &Path) -> Result<PathBuf, String> {
+    let dir = cwd.join(".code").join("users");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create user dir {}: {}", dir.display(), e))?;
+    Ok(dir)
+}
+
 fn write_agent_file(dir: &Path, filename: &str, content: &str) -> Result<PathBuf, String> {
     let path = dir.join(filename);
     std::fs::write(&path, content)
@@ -4955,17 +5070,57 @@ fn write_agent_file(dir: &Path, filename: &str, content: &str) -> Result<PathBuf
     Ok(path)
 }
 
+const AGENT_PREVIEW_MAX_BYTES: usize = 32 * 1024; // 32 KiB
+
 fn preview_first_n_lines(s: &str, n: usize) -> (String, usize) {
-    let mut lines = s.lines();
-    let mut collected: Vec<&str> = Vec::new();
-    for _ in 0..n {
-        if let Some(l) = lines.next() {
-            collected.push(l);
-        } else {
-            break;
-        }
+    let total_lines = s.lines().count();
+    let mut preview = s.lines().take(n).collect::<Vec<_>>().join("\n");
+
+    let (maybe_truncated, was_truncated, _, _) =
+        truncate_middle_bytes(&preview, AGENT_PREVIEW_MAX_BYTES);
+    if was_truncated {
+        preview = maybe_truncated;
+        preview.push_str(&format!(
+            "\n…preview truncated to roughly {AGENT_PREVIEW_MAX_BYTES} bytes…"
+        ));
+    } else {
+        preview = maybe_truncated;
     }
-    (collected.join("\n"), s.lines().count())
+
+    if total_lines > n {
+        if !preview.ends_with('\n') {
+            preview.push('\n');
+        }
+        preview.push_str("…additional lines omitted…");
+    }
+
+    (preview, total_lines)
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn truncates_excessively_long_single_line() {
+        let input = "x".repeat(AGENT_PREVIEW_MAX_BYTES + 1024);
+        let (preview, total_lines) = preview_first_n_lines(&input, 500);
+        assert_eq!(total_lines, 1);
+        assert!(preview.contains("…truncated…"));
+        assert!(preview.contains("preview truncated to roughly"));
+    }
+
+    #[test]
+    fn notes_when_additional_lines_omitted() {
+        let input = (0..600)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (preview, total_lines) = preview_first_n_lines(&input, 500);
+        assert_eq!(total_lines, 600);
+        assert!(preview.contains("…additional lines omitted…"));
+        assert!(!preview.contains("preview truncated to roughly"));
+    }
 }
 
 async fn handle_function_call(
@@ -8084,7 +8239,8 @@ async fn handle_container_exec_with_params(
                         display_label_task.clone()
                     };
                     let header = format!("Background shell completed ({header_label}), exit_code={}, duration={:?}.", out.exit_code, out.duration);
-                    let body = out.aggregated_output.text.clone();
+                    let full_body = format_exec_output_str(&out);
+                    let body = truncate_exec_output_for_storage(&sandbox_cwd, &sub_id_for_events, &call_id_for_events, &full_body);
                     let dev_text = format!("{}\n\n{}", header, body);
                     let _ = tx
                         .send(Submission { id: uuid::Uuid::new_v4().to_string(), op: Op::AddPendingInputDeveloper { text: dev_text } })
@@ -8298,13 +8454,14 @@ async fn handle_sandbox_error(
 // context overflows. Keep this conservative because multiple tool outputs
 // can appear in a single turn. The limit is in bytes (on the UTF‑8 string).
 const MAX_TOOL_OUTPUT_BYTES_FOR_MODEL: usize = 32 * 1024; // 32 KiB
+const TRUNCATION_MARKER: &str = "…truncated…\n";
 
-fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool) {
+fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool, usize, usize) {
     if s.len() <= max_bytes {
-        return (s.to_string(), false);
+        return (s.to_string(), false, s.len(), s.len());
     }
     if max_bytes == 0 {
-        return ("…truncated…".to_string(), true);
+        return (TRUNCATION_MARKER.trim_end().to_string(), true, 0, s.len());
     }
 
     // Try to keep some head/tail, favoring newline boundaries when possible.
@@ -8334,9 +8491,9 @@ fn truncate_middle_bytes(s: &str, max_bytes: usize) -> (String, bool) {
 
     let mut out = String::with_capacity(max_bytes);
     out.push_str(&s[..prefix_end]);
-    out.push_str("…truncated…\n");
+    out.push_str(TRUNCATION_MARKER);
     out.push_str(&s[suffix_start..]);
-    (out, true)
+    (out, true, prefix_end, suffix_start)
 }
 
 fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
@@ -8355,6 +8512,28 @@ fn format_exec_output_str(exec_output: &ExecToolCallOutput) -> String {
     }
 
     formatted_output
+}
+
+fn truncate_exec_output_for_storage(
+    cwd: &Path,
+    sub_id: &str,
+    call_id: &str,
+    full: &str,
+) -> String {
+    let (maybe_truncated, was_truncated, _, _) = truncate_middle_bytes(full, MAX_TOOL_OUTPUT_BYTES_FOR_MODEL);
+    if !was_truncated {
+        return maybe_truncated;
+    }
+
+    let file_note = match ensure_agent_dir(cwd, sub_id)
+        .and_then(|dir| write_agent_file(&dir, &format!("exec-{call_id}.txt"), full))
+    {
+        Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
+        Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
+    };
+    let mut truncated = maybe_truncated;
+    truncated.push_str(&file_note);
+    truncated
 }
 
 /// Exec output serialized for the model. If the payload is too large,
@@ -8383,26 +8562,9 @@ fn format_exec_output_with_limit(
     // round to 1 decimal place
     let duration_seconds = ((duration.as_secs_f32()) * 10.0).round() / 10.0;
 
+    let cwd = sess.get_cwd().to_path_buf();
     let full = format_exec_output_str(exec_output);
-    let (maybe_truncated, was_truncated) =
-        truncate_middle_bytes(&full, MAX_TOOL_OUTPUT_BYTES_FOR_MODEL);
-
-    // If truncated, persist the full output under .code/agents/<agent>/exec-<call_id>.txt
-    // so users can inspect it and the model can refer to a short, stable path.
-    let final_output = if was_truncated {
-        let cwd = sess.get_cwd().to_path_buf();
-        let file_note = match ensure_agent_dir(&cwd, sub_id)
-            .and_then(|dir| write_agent_file(&dir, &format!("exec-{call_id}.txt"), &full))
-        {
-            Ok(path) => format!("\n\n[Full output saved to: {}]", path.display()),
-            Err(e) => format!("\n\n[Full output was too large and truncation applied; failed to save file: {e}]")
-        };
-        let mut s = maybe_truncated;
-        s.push_str(&file_note);
-        s
-    } else {
-        maybe_truncated
-    };
+    let final_output = truncate_exec_output_for_storage(&cwd, sub_id, call_id, &full);
 
     let payload = ExecOutput {
         output: &final_output,
