@@ -24,6 +24,7 @@ use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 use crossterm::SynchronizedUpdate; // trait for stdout().sync_update
@@ -121,6 +122,11 @@ pub(crate) struct App<'a> {
     _transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
+    /// Last key reported as a physical `Press`/`Repeat` while keyboard
+    /// enhancements were unavailable. Used to drop the matching `Release` echo
+    /// that some Windows terminals emit, without impacting release-only
+    /// terminals whose characters arrive on key-up.
+    last_physical_press_without_enhancements: Option<(KeyCode, KeyModifiers)>,
 
     /// Debug flag for logging LLM requests/responses
     _debug: bool,
@@ -363,6 +369,7 @@ impl App<'_> {
             _deferred_history_lines: Vec::new(),
             _transcript_saved_viewport: None,
             enhanced_keys_supported,
+            last_physical_press_without_enhancements: None,
             _debug: debug,
             show_order_overlay,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
@@ -995,7 +1002,30 @@ impl App<'_> {
                     // report only Release events. Normalize such events to Press so
                     // keys register consistently.
                     if !self.enhanced_keys_supported {
-                        key_event = KeyEvent::new(key_event.code, key_event.modifiers);
+                        match key_event.kind {
+                            KeyEventKind::Press | KeyEventKind::Repeat => {
+                                self.last_physical_press_without_enhancements = Some((
+                                    key_event.code.clone(),
+                                    key_event.modifiers,
+                                ));
+                            }
+                            KeyEventKind::Release => {
+                                if let Some((code, modifiers)) =
+                                    &self.last_physical_press_without_enhancements
+                                {
+                                    if *code == key_event.code && *modifiers == key_event.modifiers
+                                    {
+                                        self.last_physical_press_without_enhancements = None;
+                                        continue;
+                                    }
+                                }
+                                // Some terminals (notably Windows Git Bash/mintty without
+                                // enhanced key support) synthesize characters only on key-up
+                                // (e.g., Alt+NumPad) or never emit a physical press. Treat those
+                                // as Press so they register once.
+                                key_event.kind = KeyEventKind::Press;
+                            }
+                        }
                     }
                     // Reset double‑Esc timer on any non‑Esc key
                     if !matches!(key_event.code, KeyCode::Esc) {

@@ -149,6 +149,11 @@ function resolveGlobalBinDir() {
   return '';
 }
 
+function looksLikeOurCodeShim(contents) {
+  if (!contents) return false;
+  return contents.includes('@just-every/code') || contents.includes('$(dirname "$0")/coder') || contents.includes('%~dp0coder');
+}
+
 async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -647,7 +652,21 @@ async function main() {
       const ourShim = globalBin ? join(globalBin, isWindows ? 'code.cmd' : 'code') : '';
       const candidates = resolveAllOnPath();
       const others = candidates.filter(p => p && (!ourShim || p !== ourShim));
-      const collision = others.length > 0;
+      const shimExists = ourShim && existsSync(ourShim);
+      let shimLooksLikeOurs = false;
+      if (shimExists) {
+        try {
+          const content = readFileSync(ourShim, 'utf8');
+          shimLooksLikeOurs = looksLikeOurCodeShim(content);
+        } catch {
+          shimLooksLikeOurs = false;
+        }
+      }
+      const conflictPaths = others.slice();
+      if (shimExists && !shimLooksLikeOurs) {
+        conflictPaths.push(ourShim);
+      }
+      const collision = conflictPaths.length > 0;
 
       const ensureWrapper = (name, args) => {
         if (!globalBin) return;
@@ -674,13 +693,21 @@ async function main() {
 
       if (collision) {
         console.error('⚠ Detected existing `code` on PATH:');
-        for (const p of others) console.error(`   - ${p}`);
+        for (const p of conflictPaths) console.error(`   - ${p}`);
         if (globalBin) {
           try {
-            if (existsSync(ourShim)) {
+            if (shimExists && shimLooksLikeOurs) {
               unlinkSync(ourShim);
+              const reason = conflictPaths[0] || 'another command on PATH';
               console.error(`✓ Skipped global 'code' shim (removed ${ourShim})`);
-              skippedCmds.push({ name: 'code', reason: `existing: ${others[0]}` });
+              skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
+            } else if (shimExists && !shimLooksLikeOurs) {
+              const reason = conflictPaths[0] || ourShim;
+              console.error(`✓ Skipped global 'code' shim (kept existing at ${ourShim})`);
+              skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
+            } else if (!shimExists) {
+              const reason = conflictPaths[0] || 'another command on PATH';
+              skippedCmds.push({ name: 'code', reason: `existing: ${reason}` });
             }
           } catch (e) {
             console.error(`⚠ Could not remove npm shim '${ourShim}': ${e.message}`);
