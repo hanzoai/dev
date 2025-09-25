@@ -6,6 +6,8 @@ use codex_core::LocalShellExecAction;
 use codex_core::LocalShellStatus;
 use codex_core::ModelClient;
 use codex_core::ModelProviderInfo;
+use codex_core::OpenRouterConfig;
+use codex_core::OpenRouterProviderConfig;
 use codex_core::NewConversation;
 use codex_core::Prompt;
 use codex_core::ReasoningItemContent;
@@ -27,6 +29,8 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
 use serde_json::json;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::sync::Arc;
@@ -751,6 +755,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
         requires_openai_auth: false,
+        openrouter: None,
     };
 
     let codex_home = TempDir::new().unwrap();
@@ -1125,6 +1130,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         requires_openai_auth: false,
+        openrouter: None,
     };
 
     // Init session
@@ -1201,6 +1207,7 @@ async fn env_var_overrides_loaded_auth() {
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         requires_openai_auth: false,
+        openrouter: None,
     };
 
     // Init session
@@ -1367,4 +1374,98 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
         r3_tail_expected,
         "request 3 tail mismatch",
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openrouter_metadata_is_forwarded_in_responses_payload() {
+    non_sandbox_test!();
+
+    let server = MockServer::start().await;
+    let template = ResponseTemplate::new(200)
+        .insert_header("content-type", "text/event-stream")
+        .set_body_raw(
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp1\"}}\n\n",
+            "text/event-stream",
+        );
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(template)
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut extra = BTreeMap::new();
+    extra.insert("dry_run".to_string(), Value::Bool(true));
+
+    let mut provider = ModelProviderInfo {
+        name: "openrouter".into(),
+        base_url: Some(format!("{}/v1", server.uri())),
+        env_key: None,
+        env_key_instructions: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: Some(0),
+        stream_max_retries: Some(0),
+        stream_idle_timeout_ms: Some(5_000),
+        requires_openai_auth: false,
+        openrouter: Some(OpenRouterConfig {
+            provider: Some(OpenRouterProviderConfig {
+                order: Some(vec!["openai/gpt-4o-mini".to_string()]),
+                allow_fallbacks: Some(true),
+                ..OpenRouterProviderConfig::default()
+            }),
+            route: Some(json!({ "strategy": "balanced" })),
+            extra,
+        }),
+    };
+
+    let codex_home = TempDir::new().unwrap();
+    let mut config = load_default_config_for_test(&codex_home);
+    config.model_provider_id = provider.name.clone();
+    config.model_provider = provider.clone();
+    let effort = config.model_reasoning_effort;
+    let summary = config.model_reasoning_summary;
+    let config = Arc::new(config);
+
+    let client = ModelClient::new(
+        Arc::clone(&config),
+        None,
+        provider,
+        effort,
+        summary,
+        ConversationId::new(),
+    );
+
+    let mut prompt = Prompt::default();
+    prompt.input.push(ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText {
+            text: "hello".to_string(),
+        }],
+    });
+
+    let mut stream = client.stream(&prompt).await.expect("stream responses");
+    while let Some(event) = stream.next().await {
+        event.expect("stream event");
+    }
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("request captured");
+    let request_body = requests[0]
+        .body_json::<serde_json::Value>()
+        .expect("request body json");
+
+    assert_eq!(
+        request_body["provider"]["order"],
+        json!(["openai/gpt-4o-mini"])
+    );
+    assert_eq!(request_body["provider"]["allow_fallbacks"], Value::Bool(true));
+    assert_eq!(request_body["route"], json!({ "strategy": "balanced" }));
+    assert_eq!(request_body["dry_run"], Value::Bool(true));
 }
