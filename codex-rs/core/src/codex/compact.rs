@@ -216,7 +216,7 @@ pub(super) async fn perform_compaction(
     Ok(())
 }
 
-/// Run compaction and return the rebuilt compact history without mutating session history.
+/// Run compaction inline, update the session history in-place, and return the rebuilt compact history.
 async fn run_compact_task_inner_inline(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -292,6 +292,17 @@ async fn run_compact_task_inner_inline(
     let user_messages = collect_user_messages(&history_snapshot);
     let initial_context = sess.build_initial_context(turn_context.as_ref());
     let new_history = build_compacted_history(initial_context, &user_messages, &summary_text);
+
+    {
+        let mut state = sess.state.lock().unwrap();
+        state.history = crate::conversation_history::ConversationHistory::new();
+        state.history.record_items(new_history.iter());
+    }
+
+    let rollout_item = RolloutItem::Compacted(CompactedItem {
+        message: summary_text.clone(),
+    });
+    sess.persist_rollout_items(&[rollout_item]).await;
 
     let display_message = if summary_text.trim().is_empty() {
         "Compact task completed.".to_string()

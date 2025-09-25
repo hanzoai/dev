@@ -62,6 +62,42 @@ const FINAL_REPLY: &str = "FINAL_REPLY";
 const DUMMY_FUNCTION_NAME: &str = "unsupported_tool";
 const DUMMY_CALL_ID: &str = "call-multi-auto";
 
+#[derive(Clone)]
+struct SeqResponder {
+    bodies: Arc<Vec<String>>,
+    calls: Arc<AtomicUsize>,
+    requests: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+impl SeqResponder {
+    fn new(bodies: Vec<String>) -> Self {
+        Self {
+            bodies: Arc::new(bodies),
+            calls: Arc::new(AtomicUsize::new(0)),
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn recorded_requests(&self) -> Vec<Vec<u8>> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl Respond for SeqResponder {
+    fn respond(&self, req: &Request) -> ResponseTemplate {
+        let idx = self.calls.fetch_add(1, Ordering::SeqCst);
+        self.requests.lock().unwrap().push(req.body.clone());
+        let body = self
+            .bodies
+            .get(idx)
+            .unwrap_or_else(|| panic!("unexpected request index {idx}"))
+            .clone();
+        ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_raw(body, "text/event-stream")
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn summarize_context_three_requests_and_instructions() {
     non_sandbox_test!();
@@ -644,6 +680,124 @@ async fn auto_compact_persists_rollout_entries() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_compact_clears_history_before_next_turn() {
+    non_sandbox_test!();
+
+    let server = start_mock_server().await;
+
+    let sse1 = sse(vec![
+        ev_assistant_message("m1", FIRST_REPLY),
+        ev_completed_with_tokens("r1", 70_000),
+    ]);
+    let sse2 = sse(vec![
+        ev_assistant_message("m2", "SECOND_REPLY"),
+        ev_completed_with_tokens("r2", 330_000),
+    ]);
+    let sse3 = sse(vec![
+        ev_assistant_message("m3", AUTO_SUMMARY_TEXT),
+        ev_completed_with_tokens("r3", 200),
+    ]);
+    let sse4 = sse(vec![
+        ev_assistant_message("m4", "SECOND_REPLY_COMPACTED"),
+        ev_completed_with_tokens("r4", 80_000),
+    ]);
+    let sse5 = sse(vec![
+        ev_assistant_message("m5", "THIRD_REPLY"),
+        ev_completed_with_tokens("r5", 60_000),
+    ]);
+
+    let responder = SeqResponder::new(vec![sse1, sse2, sse3, sse4, sse5]);
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(responder.clone())
+        .expect(5)
+        .mount(&server)
+        .await;
+
+    let model_provider = ModelProviderInfo {
+        base_url: Some(format!("{}/v1", server.uri())),
+        ..built_in_model_providers()["openai"].clone()
+    };
+    let home = TempDir::new().unwrap();
+    let mut config = load_default_config_for_test(&home);
+    config.model_provider = model_provider;
+    config.model_auto_compact_token_limit = Some(200_000);
+    let conversation_manager = ConversationManager::with_auth(CodexAuth::from_api_key("dummy"));
+    let NewConversation { conversation: codex, .. } =
+        conversation_manager.new_conversation(config).await.unwrap();
+
+    codex
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: FIRST_AUTO_MSG.into(),
+            }],
+        })
+        .await
+        .unwrap();
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
+
+    codex
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: SECOND_AUTO_MSG.into(),
+            }],
+        })
+        .await
+        .unwrap();
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
+
+    codex
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: THIRD_USER_MSG.into(),
+            }],
+        })
+        .await
+        .unwrap();
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TaskComplete(_))).await;
+
+    let recorded = responder.recorded_requests();
+    assert_eq!(recorded.len(), 5, "expected five model requests including auto-compact retry");
+
+    let prompt_appearances = recorded
+        .iter()
+        .filter(|body| std::str::from_utf8(body).unwrap_or("").contains(SUMMARIZATION_PROMPT))
+        .count();
+    assert_eq!(prompt_appearances, 1, "summarization prompt should appear exactly once");
+
+    let third_turn_body = &recorded[4];
+    let third_body_text = std::str::from_utf8(third_turn_body).unwrap_or("");
+    assert!(
+        !third_body_text.contains(SUMMARIZATION_PROMPT),
+        "compacted history should drop summarization prompt before next turn"
+    );
+    assert!(
+        third_body_text.contains(THIRD_USER_MSG),
+        "third turn request should include the new user message"
+    );
+
+    let third_body_json: serde_json::Value = serde_json::from_slice(third_turn_body).unwrap();
+    let input_items = third_body_json
+        .get("input")
+        .and_then(|v| v.as_array())
+        .expect("third request should include input array");
+    let has_bridge = input_items.iter().any(|item| {
+        if item.get("type").and_then(|v| v.as_str()) != Some("message") {
+            return false;
+        }
+        let text = item
+            .get("content")
+            .and_then(|v| v.as_array())
+            .and_then(|content| content.first())
+            .and_then(|item| item.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        text.contains(AUTO_SUMMARY_TEXT)
+    });
+    assert!(has_bridge, "third turn request should include the compacted summary bridge");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auto_compact_stops_after_failed_attempt() {
     non_sandbox_test!();
 
@@ -794,42 +948,6 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
         ev_assistant_message("m6", FINAL_REPLY),
         ev_completed_with_tokens("r6", 120),
     ]);
-
-    #[derive(Clone)]
-    struct SeqResponder {
-        bodies: Arc<Vec<String>>,
-        calls: Arc<AtomicUsize>,
-        requests: Arc<Mutex<Vec<Vec<u8>>>>,
-    }
-
-    impl SeqResponder {
-        fn new(bodies: Vec<String>) -> Self {
-            Self {
-                bodies: Arc::new(bodies),
-                calls: Arc::new(AtomicUsize::new(0)),
-                requests: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn recorded_requests(&self) -> Vec<Vec<u8>> {
-            self.requests.lock().unwrap().clone()
-        }
-    }
-
-    impl Respond for SeqResponder {
-        fn respond(&self, req: &Request) -> ResponseTemplate {
-            let idx = self.calls.fetch_add(1, Ordering::SeqCst);
-            self.requests.lock().unwrap().push(req.body.clone());
-            let body = self
-                .bodies
-                .get(idx)
-                .unwrap_or_else(|| panic!("unexpected request index {idx}"))
-                .clone();
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_raw(body, "text/event-stream")
-        }
-    }
 
     let responder = SeqResponder::new(vec![sse1, sse2, sse3, sse4, sse5, sse6]);
     Mock::given(method("POST"))
