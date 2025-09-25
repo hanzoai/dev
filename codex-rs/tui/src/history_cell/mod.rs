@@ -4473,13 +4473,6 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Agents.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/pro", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Pro.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/model", Style::default().fg(crate::colors::primary())),
@@ -4504,12 +4497,6 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/solve", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Solve.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
         Span::styled("/code", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
@@ -4520,13 +4507,27 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Branch.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/limits", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Limits.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
         Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/resume", Style::default().fg(crate::colors::primary())),
+        Span::styled("/undo", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
-        Span::from(SlashCommand::Resume.description())
+        Span::from(SlashCommand::Undo.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/review", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Review.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
 
     lines
