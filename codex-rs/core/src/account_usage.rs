@@ -72,8 +72,10 @@ struct RateLimitInfo {
     snapshot: Option<RateLimitSnapshotEvent>,
     #[serde(default)]
     observed_at: Option<DateTime<Utc>>,
+    #[serde(default, alias = "next_reset_at")]
+    primary_next_reset_at: Option<DateTime<Utc>>,
     #[serde(default)]
-    next_reset_at: Option<DateTime<Utc>>,
+    secondary_next_reset_at: Option<DateTime<Utc>>,
     #[serde(default)]
     last_usage_limit_hit_at: Option<DateTime<Utc>>,
 }
@@ -141,7 +143,8 @@ pub struct StoredRateLimitSnapshot {
     pub plan: Option<String>,
     pub snapshot: Option<RateLimitSnapshotEvent>,
     pub observed_at: Option<DateTime<Utc>>,
-    pub next_reset_at: Option<DateTime<Utc>>,
+    pub primary_next_reset_at: Option<DateTime<Utc>>,
+    pub secondary_next_reset_at: Option<DateTime<Utc>>,
     pub last_usage_limit_hit_at: Option<DateTime<Utc>>,
 }
 
@@ -252,6 +255,12 @@ pub fn record_rate_limit_snapshot(
         let mut info = data.rate_limit.take().unwrap_or_default();
         info.snapshot = Some(snapshot.clone());
         info.observed_at = Some(observed_at);
+        info.primary_next_reset_at = snapshot
+            .primary_reset_after_seconds
+            .map(|seconds| observed_at + Duration::seconds(seconds as i64));
+        info.secondary_next_reset_at = snapshot
+            .secondary_reset_after_seconds
+            .map(|seconds| observed_at + Duration::seconds(seconds as i64));
         data.rate_limit = Some(info);
     })
 }
@@ -294,12 +303,17 @@ pub fn list_rate_limit_snapshots(
                 Err(_) => continue,
                 };
             let rate = data.rate_limit.unwrap_or_default();
+            let primary_next_reset_at = rate.primary_next_reset_at;
+            let secondary_next_reset_at = rate
+                .secondary_next_reset_at
+                .or(rate.primary_next_reset_at);
             results.push(StoredRateLimitSnapshot {
                 account_id: data.account_id,
                 plan: data.plan,
                 snapshot: rate.snapshot,
                 observed_at: rate.observed_at,
-                next_reset_at: rate.next_reset_at,
+                primary_next_reset_at,
+                secondary_next_reset_at,
                 last_usage_limit_hit_at: rate.last_usage_limit_hit_at,
             });
         }
@@ -330,7 +344,8 @@ pub fn record_usage_limit_hint(
         info.last_usage_limit_hit_at = Some(observed_at);
         if let Some(seconds) = resets_in_seconds {
             let reset_at = observed_at + Duration::seconds(seconds as i64);
-            info.next_reset_at = Some(reset_at);
+            info.primary_next_reset_at = Some(reset_at);
+            info.secondary_next_reset_at = Some(reset_at);
         }
         data.rate_limit = Some(info);
     })

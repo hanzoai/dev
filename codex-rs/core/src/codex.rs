@@ -4754,13 +4754,7 @@ async fn try_run_turn(
             }
             ResponseEvent::RateLimits(snapshot) => {
                 let mut state = sess.state.lock().unwrap();
-                state.latest_rate_limits = Some(RateLimitSnapshotEvent {
-                    primary_used_percent: snapshot.primary_used_percent,
-                    secondary_used_percent: snapshot.secondary_used_percent,
-                    primary_to_secondary_ratio_percent: snapshot.primary_to_secondary_ratio_percent,
-                    primary_window_minutes: snapshot.primary_window_minutes,
-                    secondary_window_minutes: snapshot.secondary_window_minutes,
-                });
+                state.latest_rate_limits = Some(snapshot.clone());
                 if let Some(ctx) = account_usage_context(sess) {
                     let usage_home = ctx.codex_home.clone();
                     let usage_account = ctx.account_id.clone();

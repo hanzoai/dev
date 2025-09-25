@@ -703,6 +703,10 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEve
         parse_header_f64(headers, "x-codex-primary-over-secondary-limit-percent")?;
     let primary_window_minutes = parse_header_u64(headers, "x-codex-primary-window-minutes")?;
     let secondary_window_minutes = parse_header_u64(headers, "x-codex-secondary-window-minutes")?;
+    let primary_reset_after_seconds =
+        parse_header_u64(headers, "x-codex-primary-reset-after-seconds");
+    let secondary_reset_after_seconds =
+        parse_header_u64(headers, "x-codex-secondary-reset-after-seconds");
 
     Some(RateLimitSnapshotEvent {
         primary_used_percent,
@@ -710,6 +714,8 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshotEve
         primary_to_secondary_ratio_percent,
         primary_window_minutes,
         secondary_window_minutes,
+        primary_reset_after_seconds,
+        secondary_reset_after_seconds,
     })
 }
 
