@@ -196,7 +196,10 @@ fn limits_overlay_renders_snapshot() {
         primary_to_secondary_ratio_percent: 0.0,
         primary_window_minutes: 300,
         secondary_window_minutes: 10_080,
+        primary_reset_after_seconds: Some(600),
+        secondary_reset_after_seconds: Some(3_600),
     });
+    chat.update_rate_limit_resets(chat.rate_limit_snapshot.as_ref().unwrap());
     chat.rate_limit_last_fetch_at = Some(Utc::now());
 
     chat.add_limits_output();
@@ -218,6 +221,11 @@ fn limits_overlay_renders_snapshot() {
     assert!(joined.contains("Weekly Limit"), "overlay text: {joined}");
     assert!(joined.contains(" Type: "));
     assert!(joined.contains(" Plan: "));
+    assert!(joined.contains("Resets"), "overlay text: {joined}");
+    assert!(
+        !joined.contains("awaiting reset timing"),
+        "expected reset timings to render: {joined}"
+    );
     assert!(joined.contains(" Total: "));
     assert!(joined.contains("Chart"));
     assert!(joined.contains("7 Day History"));
