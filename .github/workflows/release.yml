@@ -152,8 +152,9 @@ jobs:
         shell: bash
         run: |
           rustup set profile minimal
-          rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
+          rustup toolchain install 1.89.0 --profile minimal
           rustup default 1.89.0
+          rustup target add ${{ matrix.target }}
 
       # Keep target/ across runs so Cargo can no-op when code hasn't changed
       - id: rust_cache
