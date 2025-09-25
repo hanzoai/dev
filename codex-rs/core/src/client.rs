@@ -160,6 +160,7 @@ impl ModelClient {
                     &self.client,
                     &self.provider,
                     &self.debug_logger,
+                    self.auth_manager.clone(),
                 )
                 .await?;
 

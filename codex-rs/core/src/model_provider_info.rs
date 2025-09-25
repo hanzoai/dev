@@ -13,6 +13,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::env::VarError;
 use std::time::Duration;
+use tracing::warn;
 
 use crate::error::EnvVarError;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
@@ -22,6 +23,31 @@ const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
 const MAX_STREAM_MAX_RETRIES: u64 = 100;
 /// Hard cap for user-configured `request_max_retries`.
 const MAX_REQUEST_MAX_RETRIES: u64 = 100;
+
+fn openai_wire_api_override() -> Option<WireApi> {
+    let raw = std::env::var("OPENAI_WIRE_API").ok()?;
+    parse_openai_wire_api(&raw)
+}
+
+fn parse_openai_wire_api(raw: &str) -> Option<WireApi> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = trimmed.to_ascii_lowercase();
+    match normalized.as_str() {
+        "chat" => Some(WireApi::Chat),
+        "responses" => Some(WireApi::Responses),
+        _ => {
+            warn!(
+                override_value = trimmed,
+                "Ignoring invalid OPENAI_WIRE_API; expected 'chat' or 'responses'"
+            );
+            None
+        }
+    }
+}
 
 /// Wire protocol that the provider speaks. Most third-party services only
 /// implement the classic OpenAI Chat Completions JSON schema, whereas OpenAI
@@ -278,46 +304,54 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     [
         (
             "openai",
-            P {
-                name: "OpenAI".into(),
-                // Allow users to override the default OpenAI endpoint by
-                // exporting `OPENAI_BASE_URL`. This is useful when pointing
-                // Codex at a proxy, mock server, or Azure-style deployment
-                // without requiring a full TOML override for the built-in
-                // OpenAI provider.
-                base_url: std::env::var("OPENAI_BASE_URL")
-                    .ok()
-                    .filter(|v| !v.trim().is_empty()),
-                env_key: None,
-                env_key_instructions: None,
-                wire_api: WireApi::Responses,
-                query_params: None,
-                http_headers: Some(
-                    [
-                        (
-                            "version".to_string(),
-                            codex_version::version().to_string(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                ),
-                env_http_headers: Some(
-                    [
-                        (
-                            "OpenAI-Organization".to_string(),
-                            "OPENAI_ORGANIZATION".to_string(),
-                        ),
-                        ("OpenAI-Project".to_string(), "OPENAI_PROJECT".to_string()),
-                    ]
-                    .into_iter()
-                    .collect(),
-                ),
-                // Use global defaults for retry/timeout unless overridden in config.toml.
-                request_max_retries: None,
-                stream_max_retries: None,
-                stream_idle_timeout_ms: None,
-                requires_openai_auth: true,
+            {
+                let mut provider = P {
+                    name: "OpenAI".into(),
+                    // Allow users to override the default OpenAI endpoint by
+                    // exporting `OPENAI_BASE_URL`. This is useful when pointing
+                    // Codex at a proxy, mock server, or Azure-style deployment
+                    // without requiring a full TOML override for the built-in
+                    // OpenAI provider.
+                    base_url: std::env::var("OPENAI_BASE_URL")
+                        .ok()
+                        .filter(|v| !v.trim().is_empty()),
+                    env_key: None,
+                    env_key_instructions: None,
+                    wire_api: WireApi::Responses,
+                    query_params: None,
+                    http_headers: Some(
+                        [
+                            (
+                                "version".to_string(),
+                                codex_version::version().to_string(),
+                            ),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    env_http_headers: Some(
+                        [
+                            (
+                                "OpenAI-Organization".to_string(),
+                                "OPENAI_ORGANIZATION".to_string(),
+                            ),
+                            ("OpenAI-Project".to_string(), "OPENAI_PROJECT".to_string()),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                    // Use global defaults for retry/timeout unless overridden in config.toml.
+                    request_max_retries: None,
+                    stream_max_retries: None,
+                    stream_idle_timeout_ms: None,
+                    requires_openai_auth: true,
+                };
+
+                if let Some(wire_api) = openai_wire_api_override() {
+                    provider.wire_api = wire_api;
+                }
+
+                provider
             },
         ),
         (BUILT_IN_OSS_MODEL_PROVIDER_ID, create_oss_provider()),
@@ -466,6 +500,18 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
         assert_eq!(expected_provider, provider);
+    }
+
+    #[test]
+    fn openai_wire_api_override_parser_handles_values() {
+        assert_eq!(super::parse_openai_wire_api("chat"), Some(WireApi::Chat));
+        assert_eq!(
+            super::parse_openai_wire_api(" responses "),
+            Some(WireApi::Responses)
+        );
+        assert_eq!(super::parse_openai_wire_api(""), None);
+        assert_eq!(super::parse_openai_wire_api("  \t"), None);
+        assert_eq!(super::parse_openai_wire_api("invalid"), None);
     }
 
     #[test]
