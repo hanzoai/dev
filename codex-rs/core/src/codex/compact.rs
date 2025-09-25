@@ -194,10 +194,15 @@ pub(super) async fn perform_compaction(
     });
     sess.persist_rollout_items(&[rollout_item]).await;
 
+    let display_message = if summary_text.trim().is_empty() {
+        "Compact task completed.".to_string()
+    } else {
+        summary_text.clone()
+    };
     let event = sess.make_event(
         &sub_id,
         EventMsg::AgentMessage(AgentMessageEvent {
-            message: "Compact task completed".to_string(),
+            message: display_message,
         }),
     );
     sess.send_event(event).await;
@@ -277,7 +282,22 @@ async fn run_compact_task_inner_inline(
     let summary_text = get_last_assistant_message_from_turn(&history_snapshot).unwrap_or_default();
     let user_messages = collect_user_messages(&history_snapshot);
     let initial_context = sess.build_initial_context(turn_context.as_ref());
-    build_compacted_history(initial_context, &user_messages, &summary_text)
+    let new_history = build_compacted_history(initial_context, &user_messages, &summary_text);
+
+    let display_message = if summary_text.trim().is_empty() {
+        "Compact task completed.".to_string()
+    } else {
+        summary_text.clone()
+    };
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::AgentMessage(AgentMessageEvent {
+            message: display_message,
+        }),
+    );
+    sess.send_event(event).await;
+
+    new_history
 }
 
 pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
