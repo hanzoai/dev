@@ -221,8 +221,43 @@ fn query_osc_background_color() -> Option<(u8, u8, u8)> {
     tty_w.flush().ok()?;
 
     let reply = read_osc_reply(&mut tty_r, Duration::from_millis(150))?;
+    let _ = tty_w.write_all(b"\r\x1b[K");
+    let _ = tty_w.flush();
     let reply_str = String::from_utf8_lossy(&reply);
     parse_osc_rgb(&reply_str)
+}
+
+fn osc_background_query_supported() -> bool {
+    if env::var("TMUX").is_ok() || env::var("STY").is_ok() {
+        return false;
+    }
+
+    let term = env::var("TERM").unwrap_or_default();
+    if term.is_empty() {
+        return false;
+    }
+    let term_lower = term.to_ascii_lowercase();
+
+    const UNSUPPORTED_PREFIXES: [&str; 2] = ["screen", "tmux"];
+    if UNSUPPORTED_PREFIXES
+        .iter()
+        .any(|prefix| term_lower.starts_with(prefix))
+    {
+        return false;
+    }
+
+    const UNSUPPORTED_TERMS: [&str; 5] = [
+        "dumb",
+        "linux",
+        "vt100",
+        "xterm-color",
+        "ansi",
+    ];
+    if UNSUPPORTED_TERMS.contains(&term_lower.as_str()) {
+        return false;
+    }
+
+    true
 }
 
 fn xterm_color_to_rgb(idx: u32) -> Option<(u8, u8, u8)> {
@@ -286,8 +321,10 @@ pub fn detect_dark_terminal_background() -> Option<bool> {
         }
     }
 
-    if let Some(rgb) = query_osc_background_color() {
-        return Some(detect_dark_from_rgb(rgb));
+    if osc_background_query_supported() {
+        if let Some(rgb) = query_osc_background_color() {
+            return Some(detect_dark_from_rgb(rgb));
+        }
     }
 
     if let Some(rgb) = parse_colorfgbg_env() {
