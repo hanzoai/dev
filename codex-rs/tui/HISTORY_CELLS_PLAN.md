@@ -49,15 +49,15 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
       result_preview: Option<ToolResultPreview>,
   }
   ```
-- **Status:** ✅ arguments/results now captured as semantic lines; TODO: evolve into explicit `ToolArgument`/`ToolResultPreview` structs.
+- **Status:** ✅ constructors now populate `ToolArgument`/`ToolResultPreview`; follow-up: polish preview truncation + metadata serialization.
 - **External settings:** theme, width.
 
 - **Desired state:** same struct but `arguments: Vec<ToolArgument>` instead of rendered lines.
-- **Status:** ✅ running tool arguments emitted as semantic lines; TODO: convert to structured argument types.
+- **Status:** ✅ running tool state stores `Vec<ToolArgument>` with wait caps/call ids tracked separately.
 - **External settings:** theme, width, current time (for elapsed label).
 
 - **Desired state:** `PlanUpdateState { icon: PlanIcon, items: Vec<PlanLine>, completion: PlanCompletion }`
-- **Status:** ✅ semantic lines in place; TODO: expand to structured plan items.
+- **Status:** ✅ stores `PlanUpdateState` with `PlanProgress`/`PlanStep`; follow-up: richer icons + metadata serialization.
 - **External settings:** theme, width.
 
 - **Desired state:** snapshot rate-limit metrics and legend entries as structured data (percentages, reset times, etc.).
@@ -65,7 +65,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **External settings:** theme, width.
 
 - **Desired state:** `UpgradeNoticeState { current_version: String, latest_version: String, message: UpgradeMessage }`
-- **Status:** ✅ semantic lines in place; TODO: replace with version/message struct.
+- **Status:** ✅ upgrade notices now keep `{ current_version, latest_version, message }`; follow-up: wire optional CTA metadata.
 - **External settings:** theme, width.
 
 - **Status:** ✅ already semantic (metadata only).
@@ -76,7 +76,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **Runtime state:** start time, fade progress, cached height.
 
 - **Desired state:** `ReasoningState { id, sections: Vec<ReasoningSection>, in_progress, hide_when_collapsed }` with sections broken into semantic blocks.
-- **Status:** ✅ semantic lines in place; ⏳ still need structured sections.
+- **Status:** ✅ state maintains `ReasoningSection` blocks; follow-up: richer block typing + metadata.
 - **External settings:** `Ctrl+R` (collapsed vs expanded), theme, width.
 - **Widget state:** collapse flag held outside the serialized state (driven by the global toggle).
 
@@ -116,11 +116,11 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 
 ## Step 1 – Finish Semantic State Refactors *(In Progress)*
 1.1 **Plain messages** – ✅ replaced `SemanticLine` caches with `PlainMessageState` (`plain.rs` now stores `MessageHeader + MessageLine` via shared conversion helpers). Follow-up: enrich headers with structured badges and surface metadata once available.
-1.2 **Tool calls (running & completed)** – Introduce `ToolArgument`, `ArgumentValue`, and `ToolResultPreview`; ensure constructors populate structured args/results instead of emitting prefixed strings. Track wait caps and timestamps explicitly.
-1.3 **Plan updates** – Model progress via `PlanProgress { completed, total }` and `Vec<PlanStep>`; remove reliance on unicode progress bars inside strings (rendered in UI only). Persist chosen `PlanIcon` variant instead of string literal.
-1.4 **Upgrade notice** – Store `{ current_version, latest_version, message }` plus optional CTA metadata; renderers assemble styled lines at draw time.
-1.5 **Reasoning** – Build `ReasoningSection/ReasoningBlock` hierarchy (headings, paragraphs, bullets, code). Collapse behavior becomes a pure view concern driven by global `Ctrl+R` toggle.
-1.6 **Wait status & background notices** – ✅ wait tool output now records `WaitStatusState { header, details }`; background notices still pending.
+1.2 **Tool calls (running & completed)** – ✅ constructors now emit `ToolArgument`/`ToolResultPreview`; remaining work: tighten JSON summaries + result truncation heuristics.
+1.3 **Plan updates** – ✅ `PlanUpdateCell` now renders from `PlanProgress`/`PlanStep` + `PlanIcon`; follow-up: improved summary metadata.
+1.4 **Upgrade notice** – ✅ cell consumes `UpgradeNoticeState` (versions + message), custom render derived at draw time.
+1.5 **Reasoning** – ⏳ sections/blocks stored; next: enrich block types (code/bullets) and attach metadata for collapse summaries.
+1.6 **Wait status & background notices** – ✅ wait tools use `WaitStatusState`; background notices render via `BackgroundEventRecord`.
 1.7 **Documentation** – Update module docs/tests to reflect new structs; ensure all constructors return strongly typed states.
 
 ## Step 2 – Exec / Streaming / Diff Family *(Pending)*
