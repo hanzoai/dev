@@ -594,7 +594,7 @@ pub struct TaskStartedEvent {
     pub model_context_window: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
@@ -603,7 +603,7 @@ pub struct TokenUsage {
     pub total_tokens: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
     pub last_token_usage: TokenUsage,
@@ -640,13 +640,13 @@ impl TokenUsageInfo {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshotEvent>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 pub struct RateLimitSnapshotEvent {
     /// Percentage (0-100) of the primary window that has been consumed.
     pub primary_used_percent: f64,
@@ -1303,7 +1303,7 @@ pub enum ReviewDecision {
     Abort,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum FileChange {
     Add {

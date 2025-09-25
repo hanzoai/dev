@@ -709,7 +709,7 @@ pub struct TaskCompleteEvent {
     pub last_agent_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
@@ -846,7 +846,7 @@ impl TokenUsage {
 /// Includes prompts, tools and space to call compact.
 const BASELINE_TOKENS: u64 = 12_000;
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
     pub last_token_usage: TokenUsage,
@@ -889,7 +889,7 @@ impl TokenUsageInfo {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RateLimitSnapshotEvent {
     /// Percentage (0-100) of the primary window that has been consumed.
     pub primary_used_percent: f64,
@@ -903,7 +903,7 @@ pub struct RateLimitSnapshotEvent {
     pub secondary_window_minutes: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshotEvent>,
@@ -1250,7 +1250,7 @@ pub enum ReviewDecision {
     Abort,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FileChange {
     Add {
