@@ -5212,6 +5212,12 @@ impl ChatWidget<'_> {
         match event {
             ProEvent::Toggled { enabled } => {
                 self.pro.set_enabled(enabled);
+                if !enabled {
+                    self.layout.pro_hud_expanded = false;
+                    if self.pro.overlay_visible {
+                        self.pro.overlay_visible = false;
+                    }
+                }
                 let title = if enabled {
                     "Pro mode enabled"
                 } else {
@@ -16168,11 +16174,10 @@ impl ChatWidget<'_> {
     }
 
     fn pro_surface_present(&self) -> bool {
-        self.pro.enabled
-            || self.pro.auto_enabled
-            || self.pro.status.is_some()
-            || !self.pro.log.is_empty()
-            || self.pro.overlay_visible
+        if !(self.pro.enabled || self.pro.auto_enabled) {
+            return false;
+        }
+        self.pro.status.is_some() || !self.pro.log.is_empty() || self.pro.overlay_visible
     }
 
     fn format_recent_timestamp(&self, timestamp: DateTime<Local>) -> String {
