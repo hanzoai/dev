@@ -297,6 +297,23 @@ pub(crate) async fn stream_chat_completions(
         "tools": tools_json,
     });
 
+    if let Some(openrouter_cfg) = provider.openrouter_config() {
+        if let Some(obj) = payload.as_object_mut() {
+            if let Some(provider_cfg) = &openrouter_cfg.provider {
+                obj.insert(
+                    "provider".to_string(),
+                    serde_json::to_value(provider_cfg)?
+                );
+            }
+            if let Some(route) = &openrouter_cfg.route {
+                obj.insert("route".to_string(), route.clone());
+            }
+            for (key, value) in &openrouter_cfg.extra {
+                obj.entry(key.clone()).or_insert(value.clone());
+            }
+        }
+    }
+
     // If an Ollama context override is present, propagate it. Some Ollama
     // builds honor `num_ctx` directly in OpenAI-compatible Chat Completions,
     // and others accept it under an `options` object – include both.
