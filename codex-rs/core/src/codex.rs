@@ -6573,6 +6573,35 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
         || async move {
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
         Ok(params) => {
+            let trimmed_task = params.task.trim();
+            let word_count = trimmed_task
+                .split_whitespace()
+                .filter(|segment| !segment.is_empty())
+                .count();
+
+            if trimmed_task.is_empty() || word_count < 4 {
+                let guidance = format!(
+                    "⚠️ Agent prompt too short: give the manager more context (at least a full sentence) before running agents. Current prompt: \"{}\".",
+                    trimmed_task
+                );
+                sess
+                    .notify_background_event(&ctx.sub_id, guidance.clone())
+                    .await;
+
+                let response = serde_json::json!({
+                    "status": "blocked",
+                    "reason": "prompt_too_short",
+                    "message": guidance,
+                });
+                return ResponseInputItem::FunctionCallOutput {
+                    call_id: call_id_clone,
+                    output: FunctionCallOutputPayload {
+                        content: response.to_string(),
+                        success: Some(false),
+                    },
+                };
+            }
+
             let mut manager = AGENT_MANAGER.write().await;
 
             // Collect requested models from the `models` field.
@@ -6650,6 +6679,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
             };
 
             let mut agent_ids = Vec::new();
+            let mut agent_labels: Vec<(String, String)> = Vec::new();
             let mut skipped: Vec<String> = Vec::new();
             for model in models {
                 let model_key = model.to_lowercase();
@@ -6675,7 +6705,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
 
                     let agent_id = manager
                         .create_agent_with_config(
-                            model,
+                            model.clone(),
                             params.task.clone(),
                             params.context.clone(),
                             params.output.clone(),
@@ -6686,6 +6716,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         )
                         .await;
                     agent_ids.push(agent_id);
+                    agent_labels.push((agent_ids.last().cloned().unwrap(), model));
                 } else {
                     // Use default configuration for unknown agents
                     let (cmd_to_check, is_builtin) = resolve_command_for_check(&model, None);
@@ -6696,7 +6727,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     let read_only = resolve_agent_read_only(params.read_only, None);
                     let agent_id = manager
                         .create_agent(
-                            model,
+                            model.clone(),
                             params.task.clone(),
                             params.context.clone(),
                             params.output.clone(),
@@ -6706,6 +6737,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         )
                         .await;
                     agent_ids.push(agent_id);
+                    agent_labels.push((agent_ids.last().cloned().unwrap(), model));
                 }
             }
 
@@ -6724,6 +6756,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     )
                     .await;
                 agent_ids.push(agent_id);
+                agent_labels.push((agent_ids.last().cloned().unwrap(), "code".to_string()));
             }
 
             // Send agent status update event
@@ -6732,12 +6765,44 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                 send_agent_status_update(sess).await;
             }
 
+            let launch_hint = if let Some(batch) = &batch_id {
+                let short_batch = short_id(batch);
+                let agent_phrase = agent_labels
+                    .iter()
+                    .map(|(id, model)| format!("{} [{}]", short_id(id), model))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let first_agent = agent_labels
+                    .first()
+                    .map(|(id, _)| id.as_str())
+                    .unwrap_or(batch.as_str());
+                format!(
+                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent_wait {{\"batch_id\":\"{batch}\",\"return_all\":true}}` to wait for all agents, then `agent_result {{\"agent_id\":\"{first_agent}\"}}` for a detailed report."
+                )
+            } else {
+                let (single_id, single_model) = agent_labels
+                    .first()
+                    .map(|(id, model)| (id.as_str(), model.as_str()))
+                    .unwrap();
+                format!(
+                    "🤖 Agent {} [{}] started. Use `agent_wait {{\"agent_id\":\"{}\",\"return_all\":true}}` to follow progress, or `agent_result {{\"agent_id\":\"{}\"}}` when it finishes.",
+                    short_id(single_id),
+                    single_model,
+                    single_id,
+                    single_id
+                )
+            };
+
+            sess.notify_background_event(&ctx.sub_id, launch_hint.clone())
+                .await;
+
             let response = if let Some(batch_id) = batch_id {
                 serde_json::json!({
                     "batch_id": batch_id,
                     "agent_ids": agent_ids,
                     "status": "started",
-                    "message": format!("Started {} agents", agent_ids.len()),
+                    "message": format!("Started {} agents", agent_labels.len()),
+                    "next_steps": launch_hint,
                     "skipped": if skipped.is_empty() { None } else { Some(skipped) }
                 })
             } else {
@@ -6745,6 +6810,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     "agent_id": agent_ids[0],
                     "status": "started",
                     "message": "Agent started successfully",
+                    "next_steps": launch_hint,
                     "skipped": if skipped.is_empty() { None } else { Some(skipped) }
                 })
             };
@@ -6767,6 +6833,10 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
     }
         },
     ).await
+}
+
+fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
