@@ -7,6 +7,16 @@ use crate::slash_command::SlashCommand;
 use crate::util::buffer::{fill_rect, write_line};
 use crate::insert_history::word_wrap_lines;
 use crate::text_formatting::format_json_compact;
+use crate::history::state::{
+    BackgroundEventRecord,
+    HistoryId,
+    PlanIcon,
+    PlanProgress,
+    PlanStep,
+    PlanUpdateState,
+    UpgradeNoticeState,
+};
+use crate::history::state::{ArgumentValue, ToolArgument, ToolResultPreview};
 use base64::Engine;
 use codex_ansi_escape::ansi_escape_line;
 use codex_common::create_config_summary_entries;
@@ -51,6 +61,7 @@ use std::time::UNIX_EPOCH;
 use tracing::error;
 
 mod animated;
+mod background;
 mod explore;
 mod image;
 mod loading;
@@ -64,6 +75,7 @@ mod semantic;
 mod text;
 
 pub(crate) use animated::AnimatedWelcomeCell;
+pub(crate) use background::BackgroundEventCell;
 pub(crate) use explore::{ExploreAggregationCell, ExploreEntryStatus};
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
@@ -72,6 +84,7 @@ pub(crate) use tool::{
     RunningToolCallCell,
     RunningToolCallState,
     ToolCallCell,
+    ToolCallCellState,
     ToolCallStatus,
 };
 pub(crate) use wait_status::WaitStatusCell;
@@ -4417,13 +4430,24 @@ fn pretty_provider_name(id: &str) -> String {
 
 // ==================== Factory Functions ====================
 
-pub(crate) fn new_background_event(message: String) -> PlainHistoryCell {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from("event".dim()));
-    let msg_norm = normalize_overwrite_sequences(&message);
-    lines.extend(msg_norm.lines().map(|line| ansi_escape_line(line).dim()));
-    // No empty line at end - trimming and spacing handled by renderer
-    PlainHistoryCell::new(lines, HistoryCellType::BackgroundEvent)
+pub(crate) fn new_background_event(message: String) -> BackgroundEventCell {
+    let normalized = normalize_overwrite_sequences(&message);
+    let mut collected: Vec<String> = Vec::new();
+    for line in normalized.lines() {
+        let sanitized_line = ansi_escape_line(line)
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        collected.push(sanitized_line);
+    }
+    let description = collected.join("\n");
+    let record = BackgroundEventRecord {
+        id: HistoryId::ZERO,
+        title: String::new(),
+        description,
+    };
+    BackgroundEventCell::new(record)
 }
 
 pub(crate) fn new_session_info(
@@ -4552,10 +4576,14 @@ pub(crate) fn new_upgrade_prelude(
         return None;
     }
 
-    Some(UpgradeNoticeCell::new(
-        current.to_string(),
-        latest.to_string(),
-    ))
+    let state = UpgradeNoticeState {
+        id: HistoryId::ZERO,
+        current_version: current.trim().to_string(),
+        latest_version: latest.trim().to_string(),
+        message: "Use /upgrade to upgrade now or enable auto-update.".to_string(),
+    };
+
+    Some(UpgradeNoticeCell::new(state))
 }
 
 pub(crate) fn new_popular_commands_notice(
@@ -4574,16 +4602,13 @@ pub(crate) fn new_popular_commands_notice(
 /// are being connected. Uses the standard background-event gutter (»)
 /// and inserts a blank line above the message for visual separation from
 /// the Popular commands block.
-pub(crate) fn new_connecting_mcp_status() -> PlainHistoryCell {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from("event".dim()));
-    // Explicit blank line above the status message
-    lines.push(Line::from(String::new()));
-    lines.push(Line::from(Span::styled(
-        "Connecting MCP servers…",
-        Style::default().fg(crate::colors::text_dim()),
-    )));
-    PlainHistoryCell::new(lines, HistoryCellType::BackgroundEvent)
+pub(crate) fn new_connecting_mcp_status() -> BackgroundEventCell {
+    let record = BackgroundEventRecord {
+        id: HistoryId::ZERO,
+        title: String::new(),
+        description: "\nConnecting MCP servers…".to_string(),
+    };
+    BackgroundEventCell::new(record)
 }
 
 pub(crate) fn new_user_prompt(message: String) -> PlainHistoryCell {
@@ -6530,35 +6555,41 @@ fn new_exec_command_generic(
 
 #[allow(dead_code)]
 pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCell {
-    let title_line = Line::styled("Working", Style::default().fg(crate::colors::info()));
-    let lines: Vec<Line> = vec![
-        title_line,
-        format_mcp_invocation(invocation),
-        Line::from(""),
-    ];
-    ToolCallCell::new(lines, ToolCallStatus::Running)
+    let invocation_line = format_mcp_invocation(invocation);
+    let invocation_text = line_to_plain_text(&invocation_line);
+    let state = ToolCallCellState::new(
+        "Working".to_string(),
+        ToolCallStatus::Running,
+        None,
+        vec![ToolArgument {
+            name: "invocation".to_string(),
+            value: ArgumentValue::Text(invocation_text),
+        }],
+        None,
+        None,
+    );
+    ToolCallCell::new(state)
 }
 
 #[allow(dead_code)]
 pub(crate) fn new_active_custom_tool_call(tool_name: String, args: Option<String>) -> ToolCallCell {
-    let title_line = Line::styled("Working", Style::default().fg(crate::colors::info()));
     let invocation_str = if let Some(args) = args {
         format!("{}({})", tool_name, args)
     } else {
         format!("{}()", tool_name)
     };
-
-    let lines: Vec<Line> = vec![
-        title_line,
-        Line::styled(
-            invocation_str,
-            Style::default()
-                .fg(crate::colors::text_dim())
-                .add_modifier(Modifier::ITALIC),
-        ),
-        Line::from(""),
-    ];
-    ToolCallCell::new(lines, ToolCallStatus::Running)
+    let state = ToolCallCellState::new(
+        "Working".to_string(),
+        ToolCallStatus::Running,
+        None,
+        vec![ToolArgument {
+            name: "invocation".to_string(),
+            value: ArgumentValue::Text(invocation_str),
+        }],
+        None,
+        None,
+    );
+    ToolCallCell::new(state)
 }
 
 // Friendly present-participle titles for running browser tools
@@ -6580,26 +6611,71 @@ fn browser_running_title(tool_name: &str) -> &'static str {
     }
 }
 
+fn argument_value_from_json(value: &serde_json::Value) -> ArgumentValue {
+    match value {
+        serde_json::Value::String(s) => ArgumentValue::Text(s.clone()),
+        serde_json::Value::Number(n) => ArgumentValue::Text(n.to_string()),
+        serde_json::Value::Bool(b) => ArgumentValue::Text(b.to_string()),
+        serde_json::Value::Null => ArgumentValue::Text("null".to_string()),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            ArgumentValue::Json(value.clone())
+        }
+    }
+}
+
+fn arguments_from_json(value: &serde_json::Value) -> Vec<ToolArgument> {
+    arguments_from_json_excluding(value, &[])
+}
+
+fn arguments_from_json_excluding(
+    value: &serde_json::Value,
+    exclude: &[&str],
+) -> Vec<ToolArgument> {
+    match value {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .filter(|(key, _)| !exclude.contains(&key.as_str()))
+            .map(|(key, val)| ToolArgument {
+                name: key.clone(),
+                value: argument_value_from_json(val),
+            })
+            .collect(),
+        serde_json::Value::Array(items) => vec![ToolArgument {
+            name: "items".to_string(),
+            value: ArgumentValue::Json(serde_json::Value::Array(items.clone())),
+        }],
+        other => vec![ToolArgument {
+            name: "args".to_string(),
+            value: argument_value_from_json(other),
+        }],
+    }
+}
+
 pub(crate) fn new_running_browser_tool_call(
     tool_name: String,
     args: Option<String>,
 ) -> RunningToolCallCell {
     // Parse args JSON and use compact humanized form when possible
-    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    let mut arguments: Vec<ToolArgument> = Vec::new();
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
             if let Some(lines) = format_browser_args_humanized(&tool_name, &json) {
-                arg_lines.extend(lines);
-            } else {
-                arg_lines.extend(format_browser_args_line(&json));
+                let summary = lines_to_plain_text(&lines);
+                if !summary.is_empty() {
+                    arguments.push(ToolArgument {
+                        name: "summary".to_string(),
+                        value: ArgumentValue::Text(summary),
+                    });
+                }
             }
+            let mut kv_args = arguments_from_json(&json);
+            arguments.append(&mut kv_args);
         }
     }
-    let arg_lines = semantic::lines_from_ratatui(arg_lines);
     RunningToolCallCell::new(RunningToolCallState::new(
         browser_running_title(&tool_name).to_string(),
         SystemTime::now(),
-        arg_lines,
+        arguments,
         false,
         false,
         None,
@@ -6637,54 +6713,56 @@ pub(crate) fn new_running_custom_tool_call(
     tool_name: String,
     args: Option<String>,
 ) -> RunningToolCallCell {
-    // Parse args JSON and format as key/value lines
-    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    // Parse args JSON and format as structured key/value arguments
+    let mut arguments: Vec<ToolArgument> = Vec::new();
     let mut wait_has_target = false;
     let mut wait_has_call_id = false;
     let mut wait_cap_ms = None;
     if let Some(args_str) = args {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
-            if tool_name == "wait" {
-                wait_cap_ms = json.get("timeout_ms").and_then(|v| v.as_u64());
-                if let Some(for_what) = json.get("for").and_then(|v| v.as_str()) {
-                    let cleaned = clean_wait_command(for_what);
-                    let mut spans = vec![
-                        Span::styled("└ for ", Style::default().fg(crate::colors::text_dim())),
-                    ];
-                    spans.push(Span::styled(
-                        cleaned,
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
-                    arg_lines.push(Line::from(spans));
-                    wait_has_target = true;
-                }
-                if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
-                    if !wait_has_target {
-                        arg_lines.push(Line::from(vec![
-                            Span::styled(
-                                "└ call_id: ",
-                                Style::default().fg(crate::colors::text_dim()),
-                            ),
-                            Span::styled(cid.to_string(), Style::default().fg(crate::colors::text())),
-                        ]));
+        match serde_json::from_str::<serde_json::Value>(&args_str) {
+            Ok(json) => {
+                if tool_name == "wait" {
+                    wait_cap_ms = json.get("timeout_ms").and_then(|v| v.as_u64());
+                    if let Some(for_what) = json.get("for").and_then(|v| v.as_str()) {
+                        let cleaned = clean_wait_command(for_what);
+                        arguments.push(ToolArgument {
+                            name: "for".to_string(),
+                            value: ArgumentValue::Text(cleaned),
+                        });
+                        wait_has_target = true;
                     }
-                    wait_has_call_id = true;
+                    if let Some(cid) = json.get("call_id").and_then(|v| v.as_str()) {
+                        arguments.push(ToolArgument {
+                            name: "call_id".to_string(),
+                            value: ArgumentValue::Text(cid.to_string()),
+                        });
+                        wait_has_call_id = true;
+                    }
+                    let mut remaining = json.clone();
+                    if let serde_json::Value::Object(ref mut map) = remaining {
+                        map.remove("for");
+                        map.remove("call_id");
+                        map.remove("timeout_ms");
+                    }
+                    let mut others = arguments_from_json(&remaining);
+                    arguments.append(&mut others);
+                } else {
+                    let mut kv_args = arguments_from_json(&json);
+                    arguments.append(&mut kv_args);
                 }
-            } else {
-                arg_lines.extend(format_browser_args_line(&json));
             }
-        } else {
-            arg_lines.push(Line::from(vec![
-                Span::styled("└ args: ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled(args_str, Style::default().fg(crate::colors::text())),
-            ]));
+            Err(_) => {
+                arguments.push(ToolArgument {
+                    name: "args".to_string(),
+                    value: ArgumentValue::Text(args_str.clone()),
+                });
+            }
         }
     }
-    let arg_lines = semantic::lines_from_ratatui(arg_lines);
     RunningToolCallCell::new(RunningToolCallState::new(
         custom_tool_running_title(&tool_name),
         SystemTime::now(),
-        arg_lines,
+        arguments,
         wait_has_target,
         wait_has_call_id,
         wait_cap_ms,
@@ -6693,18 +6771,17 @@ pub(crate) fn new_running_custom_tool_call(
 
 /// Running web search call (native Responses web_search)
 pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCell {
-    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    let mut arguments: Vec<ToolArgument> = Vec::new();
     if let Some(q) = query {
-        arg_lines.push(Line::from(vec![
-            Span::styled("└ query: ", Style::default().fg(crate::colors::text_dim())),
-            Span::styled(q, Style::default().fg(crate::colors::text())),
-        ]));
+        arguments.push(ToolArgument {
+            name: "query".to_string(),
+            value: ArgumentValue::Text(q),
+        });
     }
-    let arg_lines = semantic::lines_from_ratatui(arg_lines);
     RunningToolCallCell::new(RunningToolCallState::new(
         "Web Search...".to_string(),
         SystemTime::now(),
-        arg_lines,
+        arguments,
         false,
         false,
         None,
@@ -6714,10 +6791,14 @@ pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCe
 pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToolCallCell {
     // Represent as provider.tool(...) on one dim line beneath a generic running header with timer
     let line = format_mcp_invocation(invocation);
+    let invocation_text = line_to_plain_text(&line);
     RunningToolCallCell::new(RunningToolCallState::new(
         "Working...".to_string(),
         SystemTime::now(),
-        semantic::lines_from_ratatui(vec![line]),
+        vec![ToolArgument {
+            name: "invocation".to_string(),
+            value: ArgumentValue::Text(invocation_text),
+        }],
         false,
         false,
         None,
@@ -6739,54 +6820,63 @@ pub(crate) fn new_completed_custom_tool_call(
     if tool_name.starts_with("agent_") {
         return new_completed_agent_tool_call(tool_name, args, duration, success, result);
     }
-    let duration = format_duration(duration);
-    let status_str = if success { "Complete" } else { "Error" };
-    let title_line = if success {
-        Line::from(vec![
-            Span::styled(status_str, Style::default().fg(crate::colors::success())),
-            format!(", duration: {duration}").dim(),
-        ])
+    let status = if success {
+        ToolCallStatus::Success
     } else {
-        Line::from(vec![
-            Span::styled(status_str, Style::default().fg(crate::colors::error())),
-            format!(", duration: {duration}").dim(),
-        ])
+        ToolCallStatus::Failed
     };
-
-    let invocation_str = if let Some(args) = args {
+    let status_title = if success { "Complete" } else { "Error" };
+    let invocation_str = if let Some(args) = args.clone() {
         format!("{}({})", tool_name, args)
     } else {
         format!("{}()", tool_name)
     };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(title_line);
-    lines.push(Line::styled(
-        invocation_str,
-        Style::default()
-            .fg(crate::colors::text_dim())
-            .add_modifier(Modifier::ITALIC),
-    ));
+    let mut arguments = vec![ToolArgument {
+        name: "invocation".to_string(),
+        value: ArgumentValue::Text(invocation_str),
+    }];
 
-    if !result.is_empty() {
-        lines.push(Line::from(""));
-        let mut preview = build_preview_lines(&result, true);
-        preview = preview
-            .into_iter()
-            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
-            .collect();
-        lines.extend(preview);
+    if let Some(args_str) = args {
+        match serde_json::from_str::<serde_json::Value>(&args_str) {
+            Ok(json) => {
+                let mut parsed = arguments_from_json(&json);
+                arguments.append(&mut parsed);
+            }
+            Err(_) => {
+                if !args_str.is_empty() {
+                    arguments.push(ToolArgument {
+                        name: "args".to_string(),
+                        value: ArgumentValue::Text(args_str),
+                    });
+                }
+            }
+        }
     }
 
-    lines.push(Line::from(""));
-    ToolCallCell::new(
-        lines,
-        if success {
-            ToolCallStatus::Success
-        } else {
-            ToolCallStatus::Failed
-        },
-    )
+    let result_preview = if result.is_empty() {
+        None
+    } else {
+        let preview_lines = build_preview_lines(&result, true);
+        let preview_strings = preview_lines
+            .iter()
+            .map(line_to_plain_text)
+            .collect::<Vec<_>>();
+        Some(ToolResultPreview {
+            lines: preview_strings,
+            truncated: false,
+        })
+    };
+
+    let state = ToolCallCellState::new(
+        status_title.to_string(),
+        status,
+        Some(duration),
+        arguments,
+        result_preview,
+        None,
+    );
+    ToolCallCell::new(state)
 }
 
 /// Completed web_fetch tool call with markdown rendering of the `markdown` field.
@@ -7268,57 +7358,20 @@ fn browser_tool_title(tool_name: &str) -> &'static str {
     }
 }
 
-fn format_browser_args_line(args: &serde_json::Value) -> Vec<Line<'static>> {
-    use serde_json::Value;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    let dim = |s: &str| {
-        Span::styled(
-            s.to_string(),
-            Style::default().fg(crate::colors::text_dim()),
-        )
-    };
-    let text = |s: String| Span::styled(s, Style::default().fg(crate::colors::text()));
-
-    // Helper to one-line, truncated representation for values
-    fn short(v: &serde_json::Value, key: &str) -> String {
-        match v {
-            serde_json::Value::String(s) => {
-                let one = s.replace('\n', " ");
-                let max = if key == "code" { 80 } else { 80 };
-                if one.chars().count() > max {
-                    let truncated: String = one.chars().take(max).collect();
-                    format!("{}…", truncated)
-                } else {
-                    one
-                }
-            }
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::Bool(b) => b.to_string(),
-            serde_json::Value::Array(a) => format!("[{} items]", a.len()),
-            serde_json::Value::Object(o) => format!("{{{} keys}}", o.len()),
-            serde_json::Value::Null => "null".to_string(),
-        }
-    }
-
-    match args {
-        Value::Object(map) => {
-            // Preserve insertion order (serde_json in this crate preserves order via feature)
-            for (k, v) in map {
-                let val = short(v, k);
-                lines.push(Line::from(vec![
-                    dim("└ "),
-                    dim(&format!("{}: ", k)),
-                    text(val),
-                ]));
-            }
-        }
-        Value::Null => {}
-        other => {
-            lines.push(Line::from(vec![dim("└ args: "), text(other.to_string())]));
-        }
-    }
+fn lines_to_plain_text(lines: &[Line<'_>]) -> String {
     lines
+        .iter()
+        .map(line_to_plain_text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn line_to_plain_text(line: &Line<'_>) -> String {
+    line
+        .spans
+        .iter()
+        .map(|sp| sp.content.as_ref())
+        .collect::<String>()
 }
 
 // Attempt a compact, humanized one-line summary for browser tools.
@@ -7384,71 +7437,56 @@ fn new_completed_browser_tool_call(
     success: bool,
     result: String,
 ) -> ToolCallCell {
-    let title = browser_tool_title(&tool_name);
-    let duration = format_duration(duration);
-
-    // Title styled by status with duration dimmed
-    let title_line = if success {
-        Line::from(vec![
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(crate::colors::success())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            format!(", duration: {duration}").dim(),
-        ])
+    let status = if success {
+        ToolCallStatus::Success
     } else {
-        Line::from(vec![
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(crate::colors::error())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            format!(", duration: {duration}").dim(),
-        ])
+        ToolCallStatus::Failed
     };
-
-    // Parse args JSON (if provided)
-    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    let mut arguments: Vec<ToolArgument> = Vec::new();
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
             if let Some(lines) = format_browser_args_humanized(&tool_name, &json) {
-                arg_lines.extend(lines);
-            } else {
-                arg_lines.extend(format_browser_args_line(&json));
+                let summary = lines_to_plain_text(&lines);
+                if !summary.is_empty() {
+                    arguments.push(ToolArgument {
+                        name: "summary".to_string(),
+                        value: ArgumentValue::Text(summary),
+                    });
+                }
             }
+            let mut kv = arguments_from_json(&json);
+            arguments.append(&mut kv);
+        } else if !args_str.is_empty() {
+            arguments.push(ToolArgument {
+                name: "args".to_string(),
+                value: ArgumentValue::Text(args_str),
+            });
         }
     }
 
-    // Result lines (preview format)
-    let mut result_lines: Vec<Line<'static>> = Vec::new();
-    if !result.is_empty() {
-        let preview = build_preview_lines(&result, true)
-            .into_iter()
-            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+    let result_preview = if result.is_empty() {
+        None
+    } else {
+        let preview_lines = build_preview_lines(&result, true);
+        let preview_strings = preview_lines
+            .iter()
+            .map(line_to_plain_text)
             .collect::<Vec<_>>();
-        result_lines.extend(preview);
-    }
+        Some(ToolResultPreview {
+            lines: preview_strings,
+            truncated: false,
+        })
+    };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(title_line);
-    lines.extend(arg_lines);
-    if !result_lines.is_empty() {
-        lines.push(Line::from(""));
-        lines.extend(result_lines);
-    }
-    lines.push(Line::from(""));
-
-    ToolCallCell::new(
-        lines,
-        if success {
-            ToolCallStatus::Success
-        } else {
-            ToolCallStatus::Failed
-        },
-    )
+    let state = ToolCallCellState::new(
+        browser_tool_title(&tool_name).to_string(),
+        status,
+        Some(duration),
+        arguments,
+        result_preview,
+        None,
+    );
+    ToolCallCell::new(state)
 }
 
 // Map `agent_*` tool names to friendly titles
@@ -7490,67 +7528,47 @@ fn new_completed_agent_tool_call(
     success: bool,
     result: String,
 ) -> ToolCallCell {
-    let title = agent_tool_title(&tool_name);
-    let duration = format_duration(duration);
-
-    // Title styled by status with duration dimmed
-    let title_line = if success {
-        Line::from(vec![
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(crate::colors::success())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            format!(", duration: {duration}").dim(),
-        ])
+    let status = if success {
+        ToolCallStatus::Success
     } else {
-        Line::from(vec![
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(crate::colors::error())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            format!(", duration: {duration}").dim(),
-        ])
+        ToolCallStatus::Failed
     };
-
-    // Parse args JSON (if provided)
-    let mut arg_lines: Vec<Line<'static>> = Vec::new();
+    let mut arguments: Vec<ToolArgument> = Vec::new();
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
-            arg_lines.extend(format_browser_args_line(&json));
+            let mut kv = arguments_from_json(&json);
+            arguments.append(&mut kv);
+        } else if !args_str.is_empty() {
+            arguments.push(ToolArgument {
+                name: "args".to_string(),
+                value: ArgumentValue::Text(args_str),
+            });
         }
     }
 
-    // Result lines (preview format)
-    let mut result_lines: Vec<Line<'static>> = Vec::new();
-    if !result.is_empty() {
-        let preview = build_preview_lines(&result, true)
-            .into_iter()
-            .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
+    let result_preview = if result.is_empty() {
+        None
+    } else {
+        let preview_lines = build_preview_lines(&result, true);
+        let preview_strings = preview_lines
+            .iter()
+            .map(line_to_plain_text)
             .collect::<Vec<_>>();
-        result_lines.extend(preview);
-    }
+        Some(ToolResultPreview {
+            lines: preview_strings,
+            truncated: false,
+        })
+    };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(title_line);
-    lines.extend(arg_lines);
-    if !result_lines.is_empty() {
-        lines.push(Line::from(""));
-        lines.extend(result_lines);
-    }
-    lines.push(Line::from(""));
-
-    ToolCallCell::new(
-        lines,
-        if success {
-            ToolCallStatus::Success
-        } else {
-            ToolCallStatus::Failed
-        },
-    )
+    let state = ToolCallCellState::new(
+        agent_tool_title(&tool_name),
+        status,
+        Some(duration),
+        arguments,
+        result_preview,
+        None,
+    );
+    ToolCallCell::new(state)
 }
 
 // Try to create an image cell if the MCP result contains an image
@@ -7603,83 +7621,79 @@ pub(crate) fn new_completed_mcp_tool_call(
         return Box::new(cell);
     }
 
-    let duration = format_duration(duration);
-    let status_str = if success { "Complete" } else { "Error" };
-    let title_line = if success {
-        Line::from(vec![
-            Span::styled(status_str, Style::default().fg(crate::colors::success())),
-            format!(", duration: {duration}").dim(),
-        ])
+    let status = if success {
+        ToolCallStatus::Success
     } else {
-        Line::from(vec![
-            Span::styled(status_str, Style::default().fg(crate::colors::error())),
-            format!(", duration: {duration}").dim(),
-        ])
+        ToolCallStatus::Failed
     };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(title_line);
-    lines.push(format_mcp_invocation(invocation));
+    let invocation_line = format_mcp_invocation(invocation);
+    let invocation_text = line_to_plain_text(&invocation_line);
+    let arguments = vec![ToolArgument {
+        name: "invocation".to_string(),
+        value: ArgumentValue::Text(invocation_text),
+    }];
+
+    let mut preview_lines: Vec<String> = Vec::new();
+    let mut error_message: Option<String> = None;
 
     match result {
         Ok(mcp_types::CallToolResult { content, .. }) => {
-            if !content.is_empty() {
-                lines.push(Line::from(""));
-
-                for tool_call_result in content {
-                    match tool_call_result {
-                        mcp_types::ContentBlock::TextContent(text) => {
-                            let mut preview = build_preview_lines(&text.text, true);
-                            preview = preview
-                                .into_iter()
-                                .map(|l| l.style(Style::default().fg(crate::colors::text_dim())))
-                                .collect();
-                            lines.extend(preview);
+            for tool_call_result in content {
+                match tool_call_result {
+                    mcp_types::ContentBlock::TextContent(text) => {
+                        let preview = build_preview_lines(&text.text, true);
+                        for line in preview {
+                            preview_lines.push(line_to_plain_text(&line));
                         }
-                        mcp_types::ContentBlock::ImageContent(_) => {
-                            lines.push(Line::from("<image content>".to_string()))
-                        }
-                        mcp_types::ContentBlock::AudioContent(_) => {
-                            lines.push(Line::from("<audio content>".to_string()))
-                        }
-                        mcp_types::ContentBlock::EmbeddedResource(resource) => {
-                            let uri = match resource.resource {
-                                EmbeddedResourceResource::TextResourceContents(text) => text.uri,
-                                EmbeddedResourceResource::BlobResourceContents(blob) => blob.uri,
-                            };
-                            lines.push(Line::from(format!("embedded resource: {uri}")));
-                        }
-                        mcp_types::ContentBlock::ResourceLink(ResourceLink { uri, .. }) => {
-                            lines.push(Line::from(format!("link: {uri}")));
-                        }
+                        preview_lines.push(String::new());
+                    }
+                    mcp_types::ContentBlock::ImageContent(_) => {
+                        preview_lines.push("<image content>".to_string());
+                    }
+                    mcp_types::ContentBlock::AudioContent(_) => {
+                        preview_lines.push("<audio content>".to_string());
+                    }
+                    mcp_types::ContentBlock::EmbeddedResource(resource) => {
+                        let uri = match resource.resource {
+                            EmbeddedResourceResource::TextResourceContents(text) => text.uri,
+                            EmbeddedResourceResource::BlobResourceContents(blob) => blob.uri,
+                        };
+                        preview_lines.push(format!("embedded resource: {uri}"));
+                    }
+                    mcp_types::ContentBlock::ResourceLink(ResourceLink { uri, .. }) => {
+                        preview_lines.push(format!("link: {uri}"));
                     }
                 }
             }
-
-            lines.push(Line::from(""));
+            if preview_lines.last().map(|s| !s.is_empty()).unwrap_or(false) {
+                preview_lines.push(String::new());
+            }
         }
         Err(e) => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "Error: ",
-                    Style::default()
-                        .fg(crate::colors::error())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(e, Style::default().fg(crate::colors::error())),
-            ]));
-            lines.push(Line::from(""));
+            error_message = Some(format!("Error: {e}"));
         }
     }
 
-    Box::new(ToolCallCell::new(
-        lines,
-        if success {
-            ToolCallStatus::Success
-        } else {
-            ToolCallStatus::Failed
-        },
-    ))
+    let result_preview = if preview_lines.is_empty() {
+        None
+    } else {
+        Some(ToolResultPreview {
+            lines: preview_lines,
+            truncated: false,
+        })
+    };
+
+    let state = ToolCallCellState::new(
+        if success { "Complete" } else { "Error" }.to_string(),
+        status,
+        Some(duration),
+        arguments,
+        result_preview,
+        error_message,
+    );
+
+    Box::new(ToolCallCell::new(state))
 }
 
 pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
@@ -7992,112 +8006,55 @@ pub(crate) fn new_prompts_output() -> PlainHistoryCell {
     PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
-fn plan_progress_icon(total: usize, completed: usize) -> &'static str {
+fn plan_progress_icon(total: usize, completed: usize) -> PlanIcon {
     if total == 0 || completed == 0 {
-        "○"
+        PlanIcon::Custom("progress-empty".to_string())
     } else if completed >= total {
-        "●"
+        PlanIcon::Custom("progress-complete".to_string())
     } else if completed.saturating_mul(3) <= total {
-        "◔"
+        PlanIcon::Custom("progress-start".to_string())
     } else if completed.saturating_mul(3) < total.saturating_mul(2) {
-        "◑"
+        PlanIcon::Custom("progress-mid".to_string())
     } else {
-        "◕"
+        PlanIcon::Custom("progress-late".to_string())
     }
 }
 
 pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
     let UpdatePlanArgs { name, plan } = update;
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
     let total = plan.len();
     let completed = plan
         .iter()
         .filter(|p| matches!(p.status, StepStatus::Completed))
         .count();
     let icon = plan_progress_icon(total, completed);
-    let is_complete = total > 0 && completed >= total;
-    let header_color = if is_complete {
-        crate::colors::success()
-    } else {
-        crate::colors::info()
-    };
+    let progress = PlanProgress { completed, total };
 
-    let width: usize = 10;
-    let filled = if total > 0 {
-        (completed * width + total / 2) / total
-    } else {
-        0
-    };
-    let empty = width.saturating_sub(filled);
-
-    // Build header without leading icon; icon will render in the gutter
-    let mut header: Vec<Span> = Vec::new();
-    let title = name
+    let name = name
         .as_ref()
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .unwrap_or("Plan");
-    header.push(Span::styled(
-        title.to_string(),
-        Style::default()
-            .fg(header_color)
-            .add_modifier(Modifier::BOLD),
-    ));
-    header.push(Span::raw(" ["));
-    if filled > 0 {
-        header.push(Span::styled(
-            "█".repeat(filled),
-            Style::default().fg(crate::colors::success()),
-        ));
-    }
-    if empty > 0 {
-        header.push(Span::styled(
-            "░".repeat(empty),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
-    header.push(Span::raw("] "));
-    header.push(Span::raw(format!("{completed}/{total}")));
-    lines.push(Line::from(header));
+        .unwrap_or("Plan")
+        .to_string();
 
-    // Steps styled as checkbox items
-    if plan.is_empty() {
-        lines.push(Line::from("(no steps provided)".dim().italic()));
-    } else {
-        for (idx, PlanItemArg { step, status }) in plan.into_iter().enumerate() {
-            let (box_span, text_span) = match status {
-                StepStatus::Completed => (
-                    Span::styled("✔", Style::default().fg(crate::colors::success())),
-                    Span::styled(
-                        step,
-                        Style::default().add_modifier(Modifier::CROSSED_OUT | Modifier::DIM),
-                    ),
-                ),
-                StepStatus::InProgress => (
-                    Span::raw("□"),
-                    Span::styled(step, Style::default().fg(crate::colors::info())),
-                ),
-                StepStatus::Pending => (
-                    Span::raw("□"),
-                    Span::styled(step, Style::default().add_modifier(Modifier::DIM)),
-                ),
-            };
-            let prefix = if idx == 0 {
-                Span::raw("└ ")
-            } else {
-                Span::raw("  ")
-            };
-            lines.push(Line::from(vec![
-                prefix,
-                box_span,
-                Span::raw(" "),
-                text_span,
-            ]));
-        }
-    }
+    let steps: Vec<PlanStep> = plan
+        .into_iter()
+        .map(|PlanItemArg { step, status }| PlanStep {
+            description: step,
+            status,
+        })
+        .collect();
 
-    PlanUpdateCell::new(lines, icon, is_complete)
+    let state = PlanUpdateState {
+        id: HistoryId::ZERO,
+        name,
+        icon,
+        progress,
+        steps,
+    };
+
+    PlanUpdateCell::new(state)
 }
 
 pub(crate) fn new_patch_event(
