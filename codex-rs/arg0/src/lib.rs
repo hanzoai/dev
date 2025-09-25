@@ -61,17 +61,7 @@ where
             Some(patch_arg) => {
                 let mut stdout = std::io::stdout();
                 let mut stderr = std::io::stderr();
-                let fs = codex_apply_patch::StdFileSystem;
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("failed to build apply_patch runtime");
-                match rt.block_on(codex_apply_patch::apply_patch(
-                    &patch_arg,
-                    &mut stdout,
-                    &mut stderr,
-                    &fs,
-                )) {
+                match codex_apply_patch::apply_patch(&patch_arg, &mut stdout, &mut stderr) {
                     Ok(()) => 0,
                     Err(_) => 1,
                 }

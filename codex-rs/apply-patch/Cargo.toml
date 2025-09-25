@@ -20,8 +20,6 @@ similar = { workspace = true }
 thiserror = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-bash = { workspace = true }
-once_cell = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
