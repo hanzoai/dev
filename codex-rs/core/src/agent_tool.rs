@@ -99,6 +99,7 @@ impl AgentManager {
                         id: agent.id.clone(),
                         name,
                         status: format!("{:?}", agent.status).to_lowercase(),
+                        batch_id: agent.batch_id.clone(),
                         model: Some(agent.model.clone()),
                         last_progress: agent.progress.last().cloned(),
                         result: agent.result.clone(),
