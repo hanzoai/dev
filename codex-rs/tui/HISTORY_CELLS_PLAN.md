@@ -117,17 +117,18 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 1.7 **Documentation** – Update module docs/tests to reflect new structs; ensure all constructors return strongly typed states.
 
 ## Step 2 – Exec / Streaming / Diff Family *(Pending)*
-2.1 **Exec state extraction** – Create `ExecRecord { command, parsed, action, stdout_chunks, stderr_chunks, exit_code, wait_notes }`. Remove layout caches and expose helpers for appending stream chunks by offset.
-2.2 **Streaming assistant content** – Capture raw markdown deltas + metadata in `AssistantStreamState`; support merge/upsert by stream id. Renderer handles ellipsis and wrapping.
-2.3 **Finalized assistant markdown** – Use `AssistantMessageState` storing markdown + citations + token metadata. Rendering converts markdown on demand via theme-aware renderer.
-2.4 **Diff cells** – Persist diff hunks (`DiffHunk`, `DiffLine`) and patch metadata; renderer applies styling based on line kind.
-2.5 **Merged exec views** – Rebuild aggregated exec cells from `Vec<ExecRecord>` snapshots rather than cached text blocks.
+2.1 **Exec state extraction & module split** – Create `ExecRecord { command, parsed, action, stdout_chunks, stderr_chunks, exit_code, wait_notes }`, move exec rendering/state into `history_cell/exec.rs`, and drop layout caches from the shared module.
+2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. Renderer handles ellipsis and wrapping.
+2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. Move finalized assistant rendering into the streaming module or a dedicated `assistant.rs` while ensuring layout rebuild happens on demand.
+2.4 **Diff module breakout** – Persist diff hunks (`DiffHunk`, `DiffLine`) and patch metadata, move diff rendering into `history_cell/diff.rs`, and have the renderer apply styling based on line kind.
+2.5 **Merged exec views** – Rebuild aggregated exec cells from `Vec<ExecRecord>` snapshots rather than cached text blocks once the exec module exists.
 
 ## Step 3 – HistoryState Manager *(Pending)*
 3.1 **HistoryRecord enum** – ✅ complete: `history/state.rs` defines `HistoryRecord`, per-cell state structs, and `HistoryState` scaffolding with ID management helpers.
-3.2 **Apply-event pipeline** – Implement `HistoryState::apply_event(&mut self, event: &EventMsg)` covering all core/TUI event types (exec lifecycle, tool updates, background notices, resume snapshots, undo).
-3.3 **Undo/resume hooks** – Expose `snapshot`, `restore`, and `truncate_after(id)` to support /undo and resume flows.
-3.4 **ChatWidget integration** – Replace `history_cells: Vec<Box<dyn HistoryCell>>` with `history: HistoryState` plus `HistoryRenderState`. Update helper methods (`history_push`, `history_replace`, etc.) to delegate to state APIs.
+3.2 **ChatWidget incremental adoption** – Introduce `HistoryState`/`HistoryRenderState` alongside the legacy `history_cells` vector, migrate low-risk cell types (plain, loading, wait status) to the new state, then remove the legacy vector once the path is stable.
+3.3 **Apply-event pipeline** – Implement `HistoryState::apply_event(&mut self, event: &EventMsg)` covering all core/TUI event types (exec lifecycle, tool updates, background notices, resume snapshots, undo) and route migrated cells through it.
+3.4 **Undo/resume hooks** – Expose `snapshot`, `restore`, and `truncate_after(id)` to support /undo and resume flows.
+3.5 **ChatWidget full integration** – Delete `history_cells: Vec<Box<dyn HistoryCell>>`, wire all helper methods (`history_push`, `history_replace`, etc.) into `HistoryState`, and treat Step 4 as the follow-up for centralized rendering.
 
 ## Step 4 – Event Mapping & Rendering *(Pending)*
 4.1 **Centralize handlers** – Route every mutation in `handle_*` (exec events, tool deltas, diff updates, background notices) through `HistoryState` so ordering/id management lives in one place.
