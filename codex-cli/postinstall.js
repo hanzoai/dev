@@ -169,11 +169,6 @@ function resolveGlobalBinDir() {
   return '';
 }
 
-function looksLikeOurCodeShim(contents) {
-  if (!contents) return false;
-  return contents.includes('@just-every/code') || contents.includes('$(dirname "$0")/coder') || contents.includes('%~dp0coder');
-}
-
 async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
