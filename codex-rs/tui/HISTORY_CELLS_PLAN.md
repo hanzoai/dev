@@ -2,8 +2,8 @@
 
 ## Primary Goals (Plan & Status)
 - [x] **Extract per-cell modules** – core message/tool/plan/upgrade/reasoning/image/loading/animated files live under `history_cell/`; exec/diff/streaming still inline and pending extraction.
-- [ ] **Finish semantic state refactor** – replace remaining ad-hoc `SemanticLine` usage with rich typed structs (`MessageSegment`, `ToolArgument`, etc.) so renderers never infer structure from strings.
-- [ ] **Introduce single `HistoryState` vector** – replace `Vec<Box<dyn HistoryCell>>` with a typed `Vec<HistoryRecord>` plus helper APIs for updates, undo, and resume.
+- [ ] **Finish semantic state refactor** – continue replacing ad-hoc `SemanticLine` usage with rich typed structs (`MessageSegment`, `ToolArgument`, etc.) so renderers never infer structure from strings.
+- [~] **Introduce single `HistoryState` vector** – foundational types (`HistoryRecord`, `HistoryState`, `HistoryId`) now live in `history/state.rs`; still need to adopt them in `chatwidget.rs` and event handling.
 - [ ] **Centralize event → state mapping** – funnel all `handle_*` mutations through `HistoryState::apply_event` and a dedicated render adapter.
 - [ ] **Unlock serialization & perf goals** – once the state vector exists, wire serialization, resume snapshots, undo rewind, and cached layout per `(record_id, width)`.
 
@@ -24,7 +24,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
       metadata: Option<MessageMetadata>,
   }
   ```
-- **Current status:** ✅ state now stored as `Vec<SemanticLine>` (tones + emphasis); still need richer `MessageSegment` structure for final serialization.
+- **Current status:** ✅ state now stored as `PlainMessageState` (header + `Vec<MessageLine>`); follow-up: richer `MessageSegment` types for code/bullets plus metadata serialization.
 
 - **Desired state:** `WaitStatusState { header: WaitHeader, bullet_points: Vec<WaitDetail> }`
 - **Status:** ✅ migrated to `WaitStatusState` with explicit header/detail tones; renderer rebuilds lines from structured data.
@@ -124,7 +124,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 2.5 **Merged exec views** – Rebuild aggregated exec cells from `Vec<ExecRecord>` snapshots rather than cached text blocks.
 
 ## Step 3 – HistoryState Manager *(Pending)*
-3.1 **HistoryRecord enum** – Enumerate every cell variant in `history/state.rs` (plain, tool, exec, diff, image, explore, rate limits, patches, etc.) with serde derives.
+3.1 **HistoryRecord enum** – ✅ complete: `history/state.rs` defines `HistoryRecord`, per-cell state structs, and `HistoryState` scaffolding with ID management helpers.
 3.2 **Apply-event pipeline** – Implement `HistoryState::apply_event(&mut self, event: &EventMsg)` covering all core/TUI event types (exec lifecycle, tool updates, background notices, resume snapshots, undo).
 3.3 **Undo/resume hooks** – Expose `snapshot`, `restore`, and `truncate_after(id)` to support /undo and resume flows.
 3.4 **ChatWidget integration** – Replace `history_cells: Vec<Box<dyn HistoryCell>>` with `history: HistoryState` plus `HistoryRenderState`. Update helper methods (`history_push`, `history_replace`, etc.) to delegate to state APIs.
