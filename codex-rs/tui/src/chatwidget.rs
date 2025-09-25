@@ -3107,7 +3107,12 @@ impl ChatWidget<'_> {
                     kind: KeyEventKind::Press | KeyEventKind::Repeat,
                     ..
                 } => {
-                    self.exit_agents_terminal_mode();
+                    if self.agents_terminal.focus() == AgentsTerminalFocus::Detail {
+                        self.agents_terminal.focus_sidebar();
+                        self.request_redraw();
+                    } else {
+                        self.exit_agents_terminal_mode();
+                    }
                     return;
                 }
                 KeyEvent {
@@ -3201,7 +3206,9 @@ impl ChatWidget<'_> {
                     self.record_current_agent_scroll();
                     return;
                 }
-                _ => {}
+                _ => {
+                    return;
+                }
             }
         }
 
@@ -13404,6 +13411,7 @@ fn update_rate_limit_resets(
         if self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
             || self.terminal.overlay().is_some()
+            || self.agents_terminal.active
         {
             return None;
         }
@@ -16531,18 +16539,22 @@ impl ChatWidget<'_> {
                     }
                     None => format!("Ad-hoc · {count_label}"),
                 };
-                items.push(ListItem::new(Line::from(vec![Span::styled(
-                    header_label,
-                    Style::default()
-                        .fg(crate::colors::text_dim())
-                        .add_modifier(Modifier::BOLD),
-                )])));
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        header_label,
+                        Style::default()
+                            .fg(crate::colors::text_dim())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ])));
                 display_ids.push(None);
 
                 for id in ids {
                     if let Some(entry) = self.agents_terminal.entries.get(&id) {
                         let status_color = agent_status_color(entry.status.clone());
                         let spans = vec![
+                            Span::raw(" "),
                             Span::styled("• ", Style::default().fg(status_color)),
                             Span::styled(entry.name.clone(), Style::default().fg(crate::colors::text())),
                         ];
@@ -16554,10 +16566,13 @@ impl ChatWidget<'_> {
         }
 
         if items.is_empty() {
-            items.push(ListItem::new(Line::from(vec![Span::styled(
-                "No agents yet",
-                Style::default().fg(crate::colors::text_dim()),
-            )])));
+            items.push(ListItem::new(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "No agents yet",
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+            ])));
         }
 
         let mut list_state = ListState::default();
@@ -16576,10 +16591,16 @@ impl ChatWidget<'_> {
             }
         }
 
+        let sidebar_has_focus = self.agents_terminal.focus() == AgentsTerminalFocus::Sidebar;
+        let sidebar_border_color = if sidebar_has_focus {
+            crate::colors::border_focused()
+        } else {
+            crate::colors::border()
+        };
         let sidebar_block = Block::default()
             .borders(Borders::ALL)
             .title(" Agents ")
-            .border_style(Style::default().fg(crate::colors::border()));
+            .border_style(Style::default().fg(sidebar_border_color));
         let sidebar = List::new(items)
             .block(sidebar_block)
             .highlight_style(
@@ -16596,6 +16617,7 @@ impl ChatWidget<'_> {
         if let Some(agent_id) = self.agents_terminal.current_agent_id() {
             if let Some(entry) = self.agents_terminal.entries.get(agent_id) {
                 lines.push(Line::from(vec![
+                    Span::raw(" "),
                     Span::styled(
                         entry.name.clone(),
                         Style::default()
@@ -16615,31 +16637,43 @@ impl ChatWidget<'_> {
                 ]));
 
                 if let Some(model) = entry.model.as_ref() {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("Model: {model}"),
-                        Style::default().fg(crate::colors::text_dim()),
-                    )]));
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("Model: {model}"),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
                 }
                 if let Some(context) = self.agents_terminal.shared_context.as_ref() {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("Context: {context}"),
-                        Style::default().fg(crate::colors::text_dim()),
-                    )]));
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("Context: {context}"),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
                 }
                 if let Some(task) = self.agents_terminal.shared_task.as_ref() {
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("Task: {task}"),
-                        Style::default().fg(crate::colors::text_dim()),
-                    )]));
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("Task: {task}"),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
                 }
 
                 lines.push(Line::from(""));
 
                 if entry.logs.is_empty() {
-                    lines.push(Line::from(vec![Span::styled(
-                        "No updates yet",
-                        Style::default().fg(crate::colors::text_dim()),
-                    )]));
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "No updates yet",
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
                 } else {
                     for (idx, log) in entry.logs.iter().enumerate() {
                         let timestamp = log.timestamp.format("%H:%M:%S");
@@ -16652,6 +16686,7 @@ impl ChatWidget<'_> {
                         match log.kind {
                             AgentLogKind::Result => {
                                 lines.push(Line::from(vec![
+                                    Span::raw(" "),
                                     Span::styled(
                                         format!("[{timestamp}] "),
                                         Style::default().fg(crate::colors::text_dim()),
@@ -16668,12 +16703,19 @@ impl ChatWidget<'_> {
                                 );
 
                                 if markdown_lines.is_empty() {
-                                    lines.push(Line::from(vec![Span::styled(
-                                        "(no result)",
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    )]));
+                                    lines.push(Line::from(vec![
+                                        Span::raw(" "),
+                                        Span::styled(
+                                            "(no result)",
+                                            Style::default().fg(crate::colors::text_dim()),
+                                        ),
+                                    ]));
                                 } else {
-                                    lines.extend(markdown_lines.into_iter());
+                                    for line in markdown_lines.into_iter() {
+                                        let mut spans = line.spans;
+                                        spans.insert(0, Span::raw(" "));
+                                        lines.push(Line::from(spans));
+                                    }
                                 }
 
                                 if idx + 1 < entry.logs.len() {
@@ -16682,6 +16724,7 @@ impl ChatWidget<'_> {
                             }
                             _ => {
                                 lines.push(Line::from(vec![
+                                    Span::raw(" "),
                                     Span::styled(
                                         format!("[{timestamp}] "),
                                         Style::default().fg(crate::colors::text_dim()),
@@ -16698,16 +16741,22 @@ impl ChatWidget<'_> {
                     }
                 }
             } else {
-                lines.push(Line::from(vec![Span::styled(
-                    "No data for selected agent",
-                    Style::default().fg(crate::colors::text_dim()),
-                )]));
+                lines.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        "No data for selected agent",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ),
+                ]));
             }
         } else {
-            lines.push(Line::from(vec![Span::styled(
-                "No agents available",
-                Style::default().fg(crate::colors::text_dim()),
-            )]));
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "No agents available",
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+            ]));
         }
 
         let viewport_height = right_area.height.max(1);
@@ -16716,10 +16765,16 @@ impl ChatWidget<'_> {
         self.layout.last_history_viewport_height.set(viewport_height);
         self.layout.last_max_scroll.set(max_scroll);
 
+        let detail_has_focus = self.agents_terminal.focus() == AgentsTerminalFocus::Detail;
+        let detail_border_color = if detail_has_focus {
+            crate::colors::border_focused()
+        } else {
+            crate::colors::border()
+        };
         let history_block = Block::default()
             .borders(Borders::ALL)
             .title(" Agent History ")
-            .border_style(Style::default().fg(crate::colors::border()));
+            .border_style(Style::default().fg(detail_border_color));
 
         Paragraph::new(lines)
             .block(history_block)
