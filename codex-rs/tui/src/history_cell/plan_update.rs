@@ -1,37 +1,88 @@
-use super::semantic::{lines_from_ratatui, lines_to_ratatui, SemanticLine};
+//! Rendering for structured plan update history cells built from `PlanUpdateState`.
+
 use super::*;
-use crate::theme::current_theme;
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PlanUpdateState {
-    pub lines: Vec<SemanticLine>,
-    pub icon: &'static str,
-    pub is_complete: bool,
-}
-
-impl PlanUpdateState {
-    pub(crate) fn new(lines: Vec<Line<'static>>, icon: &'static str, is_complete: bool) -> Self {
-        Self {
-            lines: lines_from_ratatui(lines),
-            icon,
-            is_complete,
-        }
-    }
-}
+use crate::history::state::{PlanIcon, PlanProgress, PlanStep, PlanUpdateState};
+use codex_core::plan_tool::StepStatus;
 
 pub(crate) struct PlanUpdateCell {
     state: PlanUpdateState,
 }
 
 impl PlanUpdateCell {
-    pub(crate) fn new(lines: Vec<Line<'static>>, icon: &'static str, is_complete: bool) -> Self {
-        Self {
-            state: PlanUpdateState::new(lines, icon, is_complete),
-        }
+    pub(crate) fn new(state: PlanUpdateState) -> Self {
+        Self { state }
     }
 
     pub(crate) fn is_complete(&self) -> bool {
-        self.state.is_complete
+        let progress = &self.state.progress;
+        progress.total > 0 && progress.completed >= progress.total
+    }
+
+    fn header_line(&self) -> Line<'static> {
+        let progress = &self.state.progress;
+        let is_complete = self.is_complete();
+        let header_color = if is_complete {
+            crate::colors::success()
+        } else {
+            crate::colors::info()
+        };
+
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::styled(
+            self.state.name.clone(),
+            Style::default()
+                .fg(header_color)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        let bar = progress_meter(progress, 10);
+        spans.push(Span::raw(" ["));
+        spans.push(Span::styled(bar.filled, Style::default().fg(crate::colors::success())));
+        spans.push(Span::styled(bar.empty, Style::default().add_modifier(Modifier::DIM)));
+        spans.push(Span::raw("] "));
+        spans.push(Span::raw(format!("{}/{}", progress.completed, progress.total)));
+        Line::from(spans)
+    }
+
+    fn step_line(&self, step: &PlanStep, is_first: bool) -> Line<'static> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(if is_first {
+            Span::raw("└ ")
+        } else {
+            Span::raw("  ")
+        });
+
+        match step.status {
+            StepStatus::Completed => {
+                spans.push(Span::styled(
+                    "✔",
+                    Style::default().fg(crate::colors::success()),
+                ));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    step.description.clone(),
+                    Style::default().add_modifier(Modifier::CROSSED_OUT | Modifier::DIM),
+                ));
+            }
+            StepStatus::InProgress => {
+                spans.push(Span::raw("□"));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    step.description.clone(),
+                    Style::default().fg(crate::colors::info()),
+                ));
+            }
+            StepStatus::Pending => {
+                spans.push(Span::raw("□"));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    step.description.clone(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
+        }
+
+        Line::from(spans)
     }
 }
 
@@ -49,11 +100,57 @@ impl HistoryCell for PlanUpdateCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
-        let theme = current_theme();
-        lines_to_ratatui(&self.state.lines, &theme)
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(self.header_line());
+
+        if self.state.steps.is_empty() {
+            lines.push(Line::from("(no steps provided)".dim().italic()));
+        } else {
+            for (index, step) in self.state.steps.iter().enumerate() {
+                lines.push(self.step_line(step, index == 0));
+            }
+        }
+
+        lines
     }
 
     fn gutter_symbol(&self) -> Option<&'static str> {
-        Some(self.state.icon)
+        Some(icon_symbol(&self.state.icon))
+    }
+}
+
+struct ProgressMeter {
+    filled: String,
+    empty: String,
+}
+
+fn progress_meter(progress: &PlanProgress, width: usize) -> ProgressMeter {
+    if progress.total == 0 {
+        return ProgressMeter {
+            filled: String::new(),
+            empty: "░".repeat(width),
+        };
+    }
+    let filled_units = (progress.completed * width + progress.total / 2) / progress.total;
+    let empty_units = width.saturating_sub(filled_units);
+    ProgressMeter {
+        filled: "█".repeat(filled_units),
+        empty: "░".repeat(empty_units),
+    }
+}
+
+fn icon_symbol(icon: &PlanIcon) -> &'static str {
+    match icon {
+        PlanIcon::LightBulb => "💡",
+        PlanIcon::Rocket => "🚀",
+        PlanIcon::Clipboard => "📋",
+        PlanIcon::Custom(kind) => match kind.as_str() {
+            "progress-empty" => "○",
+            "progress-start" => "◔",
+            "progress-mid" => "◑",
+            "progress-late" => "◕",
+            "progress-complete" => "●",
+            _ => "•",
+        },
     }
 }
