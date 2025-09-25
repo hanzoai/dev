@@ -28,9 +28,12 @@ use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
 use codex_core::model_family::derive_default_model_family;
 use codex_core::model_family::find_family_for_model;
+use codex_core::account_usage::{self, StoredRateLimitSnapshot, StoredUsageSummary};
+use codex_core::auth_accounts::{self, StoredAccount};
 use codex_login::AuthManager;
 use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
+use codex_protocol::num_format::format_with_separators;
 
 
 mod diff_handlers;
@@ -40,6 +43,8 @@ mod exec_tools;
 mod gh_actions;
 mod history_render;
 mod help_handlers;
+mod limits_handlers;
+mod limits_overlay;
 mod interrupts;
 mod layout_scroll;
 mod message;
@@ -55,6 +60,7 @@ use self::agent_install::{
     start_prompt_terminal_session,
     wrap_command,
 };
+use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{CachedLayout, HistoryRenderState, LayoutRef};
 use codex_core::parse_command::ParsedCommand;
@@ -199,9 +205,9 @@ use codex_protocol::models::ResponseItem;
 use codex_core::config_types::{validation_tool_category, ValidationCategory};
 use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::ValidationGroup;
-use crate::rate_limits_view::RateLimitResetInfo;
+use crate::rate_limits_view::{build_limits_view, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use codex_core::review_format::format_review_findings_block;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -372,7 +378,6 @@ pub(crate) struct ChatWidget<'a> {
     rate_limit_snapshot: Option<RateLimitSnapshotEvent>,
     rate_limit_warnings: RateLimitWarningState,
     rate_limit_fetch_inflight: bool,
-    rate_limit_fetch_placeholder: Option<usize>,
     rate_limit_last_fetch_at: Option<DateTime<Utc>>,
     rate_limit_last_primary_reset_at: Option<chrono::DateTime<chrono::Utc>>,
     rate_limit_last_weekly_reset_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -440,6 +445,9 @@ pub(crate) struct ChatWidget<'a> {
 
     // Help overlay state
     help: HelpState,
+
+    // Limits overlay state
+    limits: LimitsState,
 
     // Terminal overlay state
     terminal: TerminalState,
@@ -2519,7 +2527,6 @@ impl ChatWidget<'_> {
             rate_limit_snapshot: None,
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_fetch_inflight: false,
-            rate_limit_fetch_placeholder: None,
             rate_limit_last_fetch_at: None,
             rate_limit_last_primary_reset_at: primary_last_reset,
             rate_limit_last_weekly_reset_at: weekly_last_reset,
@@ -2584,6 +2591,7 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            limits: LimitsState::default(),
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
@@ -2750,7 +2758,6 @@ impl ChatWidget<'_> {
             rate_limit_snapshot: None,
             rate_limit_warnings: RateLimitWarningState::default(),
             rate_limit_fetch_inflight: false,
-            rate_limit_fetch_placeholder: None,
             rate_limit_last_fetch_at: None,
             rate_limit_last_primary_reset_at: primary_last_reset,
             rate_limit_last_weekly_reset_at: weekly_last_reset,
@@ -2813,6 +2820,7 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            limits: LimitsState::default(),
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
@@ -2991,6 +2999,12 @@ impl ChatWidget<'_> {
         }
         if self.terminal.overlay.is_some() {
             // Block background input while the terminal overlay is visible.
+            return;
+        }
+        if limits_handlers::handle_limits_key(self, key_event) {
+            return;
+        }
+        if self.limits.overlay.is_some() {
             return;
         }
         // Intercept keys for overlays when active (help first, then diff)
@@ -3289,6 +3303,313 @@ impl ChatWidget<'_> {
             overlay.set_scroll(0);
         }
         self.request_redraw();
+    }
+
+    fn set_limits_overlay_content(&mut self, content: LimitsOverlayContent) {
+        if let Some(existing) = self.limits.overlay.as_mut() {
+            existing.set_content(content);
+        } else {
+            self.limits.overlay = Some(LimitsOverlay::new(content));
+        }
+    }
+
+    fn set_limits_overlay_tabs(&mut self, tabs: Vec<LimitsTab>) {
+        if tabs.is_empty() {
+            self.set_limits_overlay_content(LimitsOverlayContent::Placeholder);
+        } else {
+            self.set_limits_overlay_content(LimitsOverlayContent::Tabs(tabs));
+        }
+    }
+
+    fn rebuild_limits_overlay(&mut self) {
+        if self.rate_limit_fetch_inflight {
+            self.set_limits_overlay_content(LimitsOverlayContent::Loading);
+            return;
+        }
+
+        let snapshot = self.rate_limit_snapshot.clone();
+        let reset_info = self.rate_limit_reset_info();
+        let tabs = self.build_limits_tabs(snapshot, reset_info);
+        self.set_limits_overlay_tabs(tabs);
+    }
+
+    fn build_limits_tabs(
+        &self,
+        current_snapshot: Option<RateLimitSnapshotEvent>,
+        current_reset: RateLimitResetInfo,
+    ) -> Vec<LimitsTab> {
+        use std::collections::HashSet;
+
+        let codex_home = self.config.codex_home.clone();
+        let accounts = auth_accounts::list_accounts(&codex_home).unwrap_or_default();
+        let mut account_map: HashMap<String, StoredAccount> = accounts
+            .into_iter()
+            .map(|account| (account.id.clone(), account))
+            .collect();
+
+        let active_id = auth_accounts::get_active_account_id(&codex_home)
+            .ok()
+            .flatten();
+
+        let usage_records = account_usage::list_rate_limit_snapshots(&codex_home).unwrap_or_default();
+        let mut snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
+            .into_iter()
+            .map(|record| (record.account_id.clone(), record))
+            .collect();
+
+        let mut summary_ids: HashSet<String> = account_map.keys().cloned().collect();
+        summary_ids.extend(snapshot_map.keys().cloned());
+        if let Some(id) = active_id.as_ref() {
+            summary_ids.insert(id.clone());
+        }
+
+        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
+        for id in summary_ids {
+            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, &id) {
+                usage_summary_map.insert(id, summary);
+            }
+        }
+
+        let mut tabs: Vec<LimitsTab> = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
+
+        if let Some(snapshot) = current_snapshot {
+            let account_ref = active_id
+                .as_ref()
+                .and_then(|id| account_map.get(id));
+            let snapshot_ref = active_id
+                .as_ref()
+                .and_then(|id| snapshot_map.get(id));
+            let summary_ref = active_id
+                .as_ref()
+                .and_then(|id| usage_summary_map.get(id));
+
+            let title = account_ref
+                .map(Self::account_label)
+                .or_else(|| active_id.clone())
+                .unwrap_or_else(|| "Current session".to_string());
+            let header = Self::account_header_lines(account_ref, snapshot_ref, summary_ref);
+            let extra = Self::daily_usage_lines(summary_ref);
+            let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG);
+            tabs.push(LimitsTab::view(title, header, view, extra));
+            if let Some(id) = active_id.as_ref() {
+                seen_ids.insert(id.clone());
+                account_map.remove(id);
+                snapshot_map.remove(id);
+                usage_summary_map.remove(id);
+            }
+        }
+
+        let mut remaining_ids: Vec<String> = Vec::new();
+        for id in account_map.keys() {
+            if seen_ids.insert(id.clone()) {
+                remaining_ids.push(id.clone());
+            }
+        }
+        for id in snapshot_map.keys() {
+            if seen_ids.insert(id.clone()) {
+                remaining_ids.push(id.clone());
+            }
+        }
+        remaining_ids.sort_by(|a, b| {
+            let a_label = account_map
+                .get(a)
+                .map(Self::account_label)
+                .unwrap_or_else(|| a.clone());
+            let b_label = account_map
+                .get(b)
+                .map(Self::account_label)
+                .unwrap_or_else(|| b.clone());
+            a_label
+                .to_ascii_lowercase()
+                .cmp(&b_label.to_ascii_lowercase())
+        });
+
+        for id in remaining_ids {
+            let account = account_map.get(&id);
+            let record = snapshot_map.remove(&id);
+            let usage_summary = usage_summary_map.remove(&id);
+            let title = account
+                .map(Self::account_label)
+                .unwrap_or_else(|| id.clone());
+            match record {
+                Some(record) => {
+                    if let Some(snapshot) = record.snapshot.clone() {
+                        let view_snapshot = RateLimitSnapshotEvent {
+                            primary_used_percent: snapshot.primary_used_percent,
+                            secondary_used_percent: snapshot.secondary_used_percent,
+                            primary_to_secondary_ratio_percent:
+                                snapshot.primary_to_secondary_ratio_percent,
+                            primary_window_minutes: snapshot.primary_window_minutes,
+                            secondary_window_minutes: snapshot.secondary_window_minutes,
+                        };
+                        let view = build_limits_view(
+                            &view_snapshot,
+                            RateLimitResetInfo::default(),
+                            DEFAULT_GRID_CONFIG,
+                        );
+                        let header = Self::account_header_lines(
+                            account,
+                            Some(&record),
+                            usage_summary.as_ref(),
+                        );
+                        let extra = Self::daily_usage_lines(usage_summary.as_ref());
+                        tabs.push(LimitsTab::view(title, header, view, extra));
+                    } else {
+                        let mut lines = Self::daily_usage_lines(usage_summary.as_ref());
+                        lines.push(Self::dim_line(
+                            " Rate limit snapshot not yet available.",
+                        ));
+                        let header = Self::account_header_lines(
+                            account,
+                            Some(&record),
+                            usage_summary.as_ref(),
+                        );
+                        tabs.push(LimitsTab::message(title, header, lines));
+                    }
+                }
+                None => {
+                    let mut lines = Self::daily_usage_lines(usage_summary.as_ref());
+                    lines.push(Self::dim_line(
+                        " Rate limit snapshot not yet available.",
+                    ));
+                    let header = Self::account_header_lines(
+                        account,
+                        None,
+                        usage_summary.as_ref(),
+                    );
+                    tabs.push(LimitsTab::message(title, header, lines));
+                }
+            }
+        }
+
+        if tabs.is_empty() {
+            let mut lines = Self::daily_usage_lines(None);
+            lines.push(Self::dim_line(
+                " Rate limit snapshot not yet available.",
+            ));
+            tabs.push(LimitsTab::message("Usage", Vec::new(), lines));
+        }
+
+        tabs
+    }
+
+    fn account_label(account: &StoredAccount) -> String {
+        account
+            .label
+            .clone()
+            .filter(|label| !label.trim().is_empty())
+            .unwrap_or_else(|| account.id.clone())
+    }
+
+    fn account_header_lines(
+        account: Option<&StoredAccount>,
+        record: Option<&StoredRateLimitSnapshot>,
+        usage: Option<&StoredUsageSummary>,
+    ) -> Vec<RtLine<'static>> {
+        let mut lines: Vec<RtLine<'static>> = Vec::new();
+
+        let account_type = account
+            .map(|acc| match acc.mode {
+                McpAuthMode::ChatGPT => "ChatGPT account",
+                McpAuthMode::ApiKey => "API key",
+            })
+            .unwrap_or("Unknown account");
+
+        let plan = record
+            .and_then(|r| r.plan.as_deref())
+            .or_else(|| usage.and_then(|u| u.plan.as_deref()))
+            .unwrap_or("Unknown");
+
+        let total_tokens = usage
+            .map(|u| u.totals.total_tokens)
+            .unwrap_or(0);
+
+        let value_style = Style::default().fg(crate::colors::text_dim());
+
+        lines.push(RtLine::from(String::new()));
+
+        lines.push(RtLine::from(vec![
+            RtSpan::raw(" Type:  "),
+            RtSpan::styled(account_type.to_string(), value_style),
+        ]));
+        lines.push(RtLine::from(vec![
+            RtSpan::raw(" Plan:  "),
+            RtSpan::styled(plan.to_string(), value_style),
+        ]));
+        let total_value = format!("{} tokens", format_with_separators(total_tokens));
+        lines.push(RtLine::from(vec![
+            RtSpan::raw(" Total: "),
+            RtSpan::styled(total_value, value_style),
+        ]));
+        lines
+    }
+
+    fn daily_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
+        const WIDTH: usize = 14;
+        let today = Local::now().date_naive();
+        let mut daily: Vec<(chrono::NaiveDate, u64)> = (0..7)
+            .map(|offset| (today - ChronoDuration::days(offset as i64), 0u64))
+            .collect();
+
+        if let Some(summary) = summary {
+            for entry in &summary.hourly_entries {
+                let entry_date = entry.timestamp.with_timezone(&Local).date_naive();
+                let diff = today.signed_duration_since(entry_date).num_days();
+                if (0..=6).contains(&diff) {
+                    let idx = diff as usize;
+                    let (_, total) = &mut daily[idx];
+                    *total = total.saturating_add(entry.tokens.total_tokens);
+                }
+            }
+        }
+
+        let max_total = daily.iter().map(|(_, total)| *total).max().unwrap_or(0);
+        let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(RtLine::from(vec![RtSpan::styled(
+            "7 Day History",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+
+        for (day, total) in daily.iter() {
+            let label = day.format("%b %d").to_string();
+            let bar = Self::bar_segment(*total, max_total, WIDTH);
+            let tokens = format_with_separators(*total);
+            lines.push(RtLine::from(vec![
+                RtSpan::styled(
+                    format!(" {label} "),
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+                RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
+                RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
+                RtSpan::raw(format!(" {tokens} tokens")),
+            ]));
+        }
+        lines
+    }
+
+    fn bar_segment(value: u64, max: u64, width: usize) -> String {
+        const FILL: &str = "▇";
+        if max == 0 {
+            return format!("{}{}", FILL.repeat(1), " ".repeat(width.saturating_sub(1)));
+        }
+        if value == 0 {
+            return format!("{}{}", FILL.repeat(1), " ".repeat(width.saturating_sub(1)));
+        }
+        let ratio = value as f64 / max as f64;
+        let filled = (ratio * width as f64).ceil().clamp(1.0, width as f64) as usize;
+        format!(
+            "{}{}",
+            FILL.repeat(filled),
+            " ".repeat(width.saturating_sub(filled))
+        )
+    }
+
+    fn dim_line(text: impl Into<String>) -> RtLine<'static> {
+        RtLine::from(vec![RtSpan::styled(
+            text.into(),
+            Style::default().fg(crate::colors::text_dim()),
+        )])
     }
 
     fn close_pro_overlay(&mut self) {
@@ -5490,40 +5811,19 @@ impl ChatWidget<'_> {
                     let warnings = self
                         .rate_limit_warnings
                         .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
-                    self.rate_limit_snapshot = Some(snapshot);
                     if !warnings.is_empty() {
                         for warning in warnings {
                             self.history_push(history_cell::new_warning_event(warning));
                         }
                         self.request_redraw();
                     }
-                    if let Some(snapshot_ref) = self.rate_limit_snapshot.as_ref() {
-                        if self.rate_limit_fetch_placeholder.is_some() || self.rate_limit_fetch_inflight {
-                            let reset_info = self.rate_limit_reset_info();
-                            if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
-                                if idx < self.history_cells.len() {
-                                    self.history_replace_at(
-                                        idx,
-                                        Box::new(history_cell::new_limits_output(
-                                            snapshot_ref,
-                                            reset_info.clone(),
-                                        )),
-                                    );
-                                } else {
-                                    self.history_push(history_cell::new_limits_output(
-                                        snapshot_ref,
-                                        reset_info.clone(),
-                                    ));
-                                }
-                            } else {
-                                self.history_push(history_cell::new_limits_output(
-                                    snapshot_ref,
-                                    reset_info,
-                                ));
-                            }
-                            self.rate_limit_last_fetch_at = Some(Utc::now());
-                            self.rate_limit_fetch_inflight = false;
-                        }
+
+                    self.rate_limit_snapshot = Some(snapshot);
+                    self.rate_limit_last_fetch_at = Some(Utc::now());
+                    self.rate_limit_fetch_inflight = false;
+                    if self.limits.overlay.is_some() {
+                        self.rebuild_limits_overlay();
+                        self.request_redraw();
                     }
                 }
                 self.bottom_pane.set_token_usage(
@@ -6763,38 +7063,32 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn add_limits_output(&mut self) {
-        if let Some(snapshot) = self.rate_limit_snapshot.clone() {
-            let reset_info = self.rate_limit_reset_info();
-            let key = self.next_internal_key();
-            let idx = self.history_insert_with_key_global_tagged(
-                Box::new(history_cell::new_limits_output(&snapshot, reset_info)),
-                key,
-                "limits",
-            );
+        let snapshot = self.rate_limit_snapshot.clone();
+        let needs_refresh = self.should_refresh_limits();
 
-            if self.should_refresh_limits() {
-                self.request_latest_rate_limits(Some(idx));
-            }
+        if self.rate_limit_fetch_inflight || needs_refresh {
+            self.set_limits_overlay_content(LimitsOverlayContent::Loading);
         } else {
-            self.request_latest_rate_limits(None);
+            let reset_info = self.rate_limit_reset_info();
+            let tabs = self.build_limits_tabs(snapshot.clone(), reset_info);
+            self.set_limits_overlay_tabs(tabs);
+        }
+
+        self.request_redraw();
+
+        if needs_refresh {
+            self.request_latest_rate_limits(snapshot.is_none());
         }
     }
 
-    fn request_latest_rate_limits(&mut self, target_idx: Option<usize>) {
+    fn request_latest_rate_limits(&mut self, show_loading: bool) {
         if self.rate_limit_fetch_inflight {
             return;
         }
 
-        if let Some(idx) = target_idx {
-            self.rate_limit_fetch_placeholder = Some(idx);
-        } else if self.rate_limit_fetch_placeholder.is_none() {
-            let key = self.next_internal_key();
-            let idx = self.history_insert_with_key_global_tagged(
-                Box::new(history_cell::new_limits_fetching()),
-                key,
-                "limits",
-            );
-            self.rate_limit_fetch_placeholder = Some(idx);
+        if show_loading && self.limits.overlay.is_none() {
+            self.set_limits_overlay_content(LimitsOverlayContent::Loading);
+            self.request_redraw();
         }
 
         self.rate_limit_fetch_inflight = true;
@@ -6824,20 +7118,17 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn on_rate_limit_refresh_failed(&mut self, message: String) {
-        if let Some(idx) = self.rate_limit_fetch_placeholder.take() {
-            if self.rate_limit_snapshot.is_none() {
-                if idx < self.history_cells.len() {
-                    self.history_replace_at(
-                        idx,
-                        Box::new(history_cell::new_error_event(message.clone())),
-                    );
-                } else {
-                    self.history_push(history_cell::new_error_event(message.clone()));
-                }
-            }
-        }
-
         self.rate_limit_fetch_inflight = false;
+
+        if self.limits.overlay.is_some() {
+            let content = if self.rate_limit_snapshot.is_some() {
+                LimitsOverlayContent::Error(message.clone())
+            } else {
+                LimitsOverlayContent::Placeholder
+            };
+            self.set_limits_overlay_content(content);
+            self.request_redraw();
+        }
 
         if self.rate_limit_snapshot.is_some() {
             self.history_push(history_cell::new_warning_event(message));
@@ -9919,6 +10210,7 @@ fn update_rate_limit_resets(
         self.bottom_pane.has_active_modal_view()
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
+            || self.limits.overlay.is_some()
             || self.terminal.overlay.is_some()
     }
 
@@ -15550,6 +15842,194 @@ impl ChatWidget<'_> {
         paragraph.render(body, buf);
     }
 
+    fn render_limits_overlay(&self, frame_area: Rect, history_area: Rect, buf: &mut Buffer) {
+        use ratatui::layout::Margin;
+        use ratatui::text::Line as RLine;
+        use ratatui::text::Span;
+        use ratatui::widgets::Block;
+        use ratatui::widgets::Borders;
+        use ratatui::widgets::Clear;
+        use ratatui::widgets::Paragraph;
+        use ratatui::widgets::Wrap;
+
+        let Some(overlay) = self.limits.overlay.as_ref() else {
+            return;
+        };
+
+        let tab_count = overlay.tab_count();
+
+        let scrim_style = Style::default()
+            .bg(crate::colors::overlay_scrim())
+            .fg(crate::colors::text_dim());
+        fill_rect(buf, frame_area, None, scrim_style);
+
+        let padding = 1u16;
+        let overlay_area = Rect {
+            x: history_area.x + padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(padding * 2),
+            height: history_area.height,
+        };
+
+        Clear.render(overlay_area, buf);
+
+        let dim_style = Style::default().fg(crate::colors::text_dim());
+        let mut title_spans: Vec<Span<'static>> = vec![
+            Span::styled(" Rate limits ", Style::default().fg(crate::colors::text())),
+        ];
+        if tab_count > 1 {
+            title_spans.extend_from_slice(&[
+                Span::styled("——— ", dim_style),
+                Span::styled("◂ ▸", Style::default().fg(crate::colors::function())),
+                Span::styled(" change account ", dim_style),
+            ]);
+        }
+        title_spans.extend_from_slice(&[
+            Span::styled("——— ", dim_style),
+            Span::styled("Esc", Style::default().fg(crate::colors::text())),
+            Span::styled(" close ", dim_style),
+            Span::styled("——— ", dim_style),
+            Span::styled("↑↓", Style::default().fg(crate::colors::function())),
+            Span::styled(" scroll", dim_style),
+        ]);
+        let title = RLine::from(title_spans);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .style(Style::default().bg(crate::colors::background()))
+            .border_style(
+                Style::default()
+                    .fg(crate::colors::border())
+                    .bg(crate::colors::background()),
+            );
+        let inner = block.inner(overlay_area);
+        block.render(overlay_area, buf);
+
+        let body = inner.inner(Margin::new(1, 1));
+        if body.width == 0 || body.height == 0 {
+            overlay.set_visible_rows(0);
+            overlay.set_max_scroll(0);
+            return;
+        }
+
+        let (tabs_area, content_area) = if tab_count > 1 {
+            let [tabs_area, content_area] =
+                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(body);
+            (Some(tabs_area), content_area)
+        } else {
+            (None, body)
+        };
+
+        if let Some(area) = tabs_area {
+            if let Some(tabs) = overlay.tabs() {
+                let labels: Vec<String> = tabs
+                    .iter()
+                    .map(|tab| format!("  {}  ", tab.title))
+                    .collect();
+
+                let mut constraints: Vec<Constraint> = Vec::new();
+                let mut consumed: u16 = 0;
+                for label in &labels {
+                    let width = label.chars().count() as u16;
+                    let remaining = area.width.saturating_sub(consumed);
+                    let w = width.min(remaining);
+                    constraints.push(Constraint::Length(w));
+                    consumed = consumed.saturating_add(w);
+                    if consumed >= area.width.saturating_sub(4) {
+                        break;
+                    }
+                }
+                constraints.push(Constraint::Fill(1));
+
+                let chunks = Layout::horizontal(constraints).split(area);
+
+                let tabs_bottom_rule = Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(Style::default().fg(crate::colors::border()));
+                tabs_bottom_rule.render(area, buf);
+
+                let selected_idx = overlay.selected_tab();
+
+                for (idx, label) in labels.iter().enumerate() {
+                    if idx >= chunks.len().saturating_sub(1) {
+                        break;
+                    }
+                    let rect = chunks[idx];
+                    if rect.width == 0 {
+                        continue;
+                    }
+
+                    let selected = idx == selected_idx;
+                    let bg_style = Style::default().bg(crate::colors::background());
+                    fill_rect(buf, rect, None, bg_style);
+
+                    let label_rect = Rect {
+                        x: rect.x + 1,
+                        y: rect.y,
+                        width: rect.width.saturating_sub(2),
+                        height: 1,
+                    };
+                    let label_style = if selected {
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        dim_style
+                    };
+                    let line = RLine::from(Span::styled(label.clone(), label_style));
+                    Paragraph::new(RtText::from(vec![line]))
+                        .wrap(Wrap { trim: true })
+                        .render(label_rect, buf);
+
+                    if selected {
+                        let accent_width = label.chars().count() as u16;
+                        let accent_rect = Rect {
+                            x: label_rect.x,
+                            y: rect.y + rect.height.saturating_sub(1),
+                            width: accent_width.min(label_rect.width).max(1),
+                            height: 1,
+                        };
+                        let underline = Block::default()
+                            .borders(Borders::BOTTOM)
+                            .border_style(Style::default().fg(crate::colors::text_bright()));
+                        underline.render(accent_rect, buf);
+                    }
+                }
+            }
+        }
+
+        let text_area = content_area;
+
+        let lines = overlay.lines_for_width(text_area.width);
+        let total_lines = lines.len();
+        let visible_rows = text_area.height as usize;
+        overlay.set_visible_rows(text_area.height);
+        let max_scroll = total_lines
+            .saturating_sub(visible_rows.max(1))
+            .min(u16::MAX as usize) as u16;
+        overlay.set_max_scroll(max_scroll);
+
+        let scroll = overlay.scroll().min(max_scroll) as usize;
+        let end = (scroll + visible_rows).min(total_lines);
+        let slice = if scroll < total_lines {
+            lines[scroll..end].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        fill_rect(
+            buf,
+            text_area,
+            Some(' '),
+            Style::default().bg(crate::colors::background()),
+        );
+
+        Paragraph::new(RtText::from(slice))
+            .wrap(Wrap { trim: false })
+            .render(text_area, buf);
+    }
+
     fn pro_summary_line(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
         parts.push(if self.pro.enabled { "on" } else { "off" }.to_string());
@@ -17902,7 +18382,9 @@ impl WidgetRef for &ChatWidget<'_> {
         // The welcome animation is no longer rendered as an overlay.
 
         if self.terminal.overlay().is_none() && !self.agents_terminal.active {
-            if self.pro.overlay_visible {
+            if self.limits.overlay.is_some() {
+                self.render_limits_overlay(area, history_area, buf);
+            } else if self.pro.overlay_visible {
                 self.render_pro_overlay(area, history_area, buf);
             } else if let Some(overlay) = &self.diffs.overlay {
                 // Global scrim: dim the whole background to draw focus to the viewer
@@ -18637,6 +19119,11 @@ struct DiffsState {
 struct HelpState {
     overlay: Option<HelpOverlay>,
     body_visible_rows: std::cell::Cell<u16>,
+}
+
+#[derive(Default)]
+struct LimitsState {
+    overlay: Option<LimitsOverlay>,
 }
 
 struct HelpOverlay {
