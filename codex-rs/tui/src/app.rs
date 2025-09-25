@@ -49,10 +49,10 @@ use tokio::sync::oneshot;
 
 /// Time window for debouncing redraw requests.
 ///
-/// Raising this slightly helps coalesce bursts of updates during typing and
-/// reduces render thrash, improving perceived input latency while staying
-/// comfortably under a 60 FPS refresh budget.
-const REDRAW_DEBOUNCE: Duration = Duration::from_millis(16);
+/// Temporarily widened to ~30 FPS (33 ms) to coalesce bursts of updates while
+/// we smooth out per-frame hotspots; keeps redraws responsive without pegging
+/// the main thread.
+const REDRAW_DEBOUNCE: Duration = Duration::from_millis(33);
 const DEFAULT_PTY_ROWS: u16 = 24;
 const DEFAULT_PTY_COLS: u16 = 80;
 
