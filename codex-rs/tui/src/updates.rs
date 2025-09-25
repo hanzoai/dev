@@ -298,6 +298,8 @@ async fn run_upgrade_command(command: Vec<String>) -> anyhow::Result<()> {
         cmd.args(&command[1..]);
     }
     cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
 
     let status = cmd.status().await?;
     if !status.success() {
