@@ -13,6 +13,22 @@ use crate::protocol::TokenUsage;
 const USAGE_VERSION: u32 = 1;
 const USAGE_SUBDIR: &str = "usage";
 const HOURLY_HISTORY_DAYS: i64 = 7;
+const UNKNOWN_RESET_RELOG_INTERVAL: Duration = Duration::hours(24);
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RateLimitWarningScope {
+    Primary,
+    Secondary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RateLimitWarningRecord {
+    threshold: f64,
+    #[serde(default)]
+    reset_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    logged_at: Option<DateTime<Utc>>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokenTotals {
@@ -78,6 +94,10 @@ struct RateLimitInfo {
     secondary_next_reset_at: Option<DateTime<Utc>>,
     #[serde(default)]
     last_usage_limit_hit_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    primary_threshold_logs: Vec<RateLimitWarningRecord>,
+    #[serde(default)]
+    secondary_threshold_logs: Vec<RateLimitWarningRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +185,10 @@ pub struct StoredUsageSummary {
 
 fn usage_dir(codex_home: &Path) -> PathBuf {
     codex_home.join(USAGE_SUBDIR)
+}
+
+fn warning_log_path(codex_home: &Path) -> PathBuf {
+    usage_dir(codex_home).join("rate_limit_warnings.log")
 }
 
 fn usage_file_path(codex_home: &Path, account_id: &str) -> PathBuf {
@@ -349,6 +373,136 @@ pub fn record_usage_limit_hint(
         }
         data.rate_limit = Some(info);
     })
+}
+
+fn reset_changed(prev: Option<DateTime<Utc>>, next: Option<DateTime<Utc>>) -> bool {
+    match (prev, next) {
+        (Some(a), Some(b)) => a
+            .signed_duration_since(b)
+            .num_seconds()
+            .abs()
+            > 5,
+        (None, None) => false,
+        _ => true,
+    }
+}
+
+fn record_threshold_log(
+    logs: &mut Vec<RateLimitWarningRecord>,
+    threshold: f64,
+    reset_at: Option<DateTime<Utc>>,
+    observed_at: DateTime<Utc>,
+) -> bool {
+    if let Some(existing) = logs.iter_mut().find(|entry| {
+        (entry.threshold - threshold).abs() < f64::EPSILON
+    }) {
+        if reset_changed(existing.reset_at, reset_at) {
+            existing.logged_at = None;
+        } else if reset_at.is_none()
+            && existing
+                .logged_at
+                .is_some_and(|logged| observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL)
+        {
+            existing.logged_at = None;
+        }
+        existing.reset_at = reset_at;
+        if existing.logged_at.is_none() {
+            existing.logged_at = Some(observed_at);
+            return true;
+        }
+        return false;
+    }
+
+    logs.push(RateLimitWarningRecord {
+        threshold,
+        reset_at,
+        logged_at: Some(observed_at),
+    });
+    true
+}
+
+fn append_rate_limit_warning_log(
+    codex_home: &Path,
+    account_id: &str,
+    plan: Option<&str>,
+    scope: RateLimitWarningScope,
+    threshold: f64,
+    reset_at: Option<DateTime<Utc>>,
+    observed_at: DateTime<Utc>,
+    message: &str,
+) -> std::io::Result<()> {
+    let dir = usage_dir(codex_home);
+    fs::create_dir_all(&dir)?;
+    let path = warning_log_path(codex_home);
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(&path)?;
+    file.lock_exclusive()?;
+    let scope_field = match scope {
+        RateLimitWarningScope::Primary => "primary",
+        RateLimitWarningScope::Secondary => "secondary",
+    };
+    let plan_field = plan.unwrap_or("-");
+    let reset_field = reset_at
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| "-".to_string());
+    let line = format!(
+        "{}\t{}\t{}\t{:.0}\t{}\t{}\t{}\n",
+        observed_at.to_rfc3339(),
+        account_id,
+        plan_field,
+        threshold,
+        scope_field,
+        reset_field,
+        message,
+    );
+    let write_res = file.write_all(line.as_bytes());
+    let unlock_res = file.unlock();
+    write_res?;
+    unlock_res?;
+    Ok(())
+}
+
+pub fn record_rate_limit_warning(
+    codex_home: &Path,
+    account_id: &str,
+    plan: Option<&str>,
+    scope: RateLimitWarningScope,
+    threshold: f64,
+    reset_at: Option<DateTime<Utc>>,
+    observed_at: DateTime<Utc>,
+    message: &str,
+) -> std::io::Result<bool> {
+    let mut should_log = false;
+    with_usage_file(codex_home, account_id, plan, |data| {
+        data.last_updated = observed_at;
+        let mut info = data.rate_limit.take().unwrap_or_default();
+        let logs = match scope {
+            RateLimitWarningScope::Primary => &mut info.primary_threshold_logs,
+            RateLimitWarningScope::Secondary => &mut info.secondary_threshold_logs,
+        };
+        if record_threshold_log(logs, threshold, reset_at, observed_at) {
+            should_log = true;
+        }
+        data.rate_limit = Some(info);
+    })?;
+
+    if should_log {
+        append_rate_limit_warning_log(
+            codex_home,
+            account_id,
+            plan,
+            scope,
+            threshold,
+            reset_at,
+            observed_at,
+            message,
+        )?;
+    }
+
+    Ok(should_log)
 }
 
 pub fn load_account_usage(

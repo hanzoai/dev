@@ -28,7 +28,12 @@ use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
 use codex_core::model_family::derive_default_model_family;
 use codex_core::model_family::find_family_for_model;
-use codex_core::account_usage::{self, StoredRateLimitSnapshot, StoredUsageSummary};
+use codex_core::account_usage::{
+    self,
+    RateLimitWarningScope,
+    StoredRateLimitSnapshot,
+    StoredUsageSummary,
+};
 use codex_core::auth_accounts::{self, StoredAccount};
 use codex_login::AuthManager;
 use codex_login::AuthMode;
@@ -273,6 +278,13 @@ const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(
 
 const MAX_TRACKED_GHOST_COMMITS: usize = 20;
 
+#[derive(Clone)]
+struct RateLimitWarning {
+    scope: RateLimitWarningScope,
+    threshold: f64,
+    message: String,
+}
+
 #[derive(Default)]
 struct RateLimitWarningState {
     weekly_index: usize,
@@ -280,26 +292,38 @@ struct RateLimitWarningState {
 }
 
 impl RateLimitWarningState {
-    fn take_warnings(&mut self, weekly_used_percent: f64, hourly_used_percent: f64) -> Vec<String> {
+    fn take_warnings(
+        &mut self,
+        secondary_used_percent: f64,
+        primary_used_percent: f64,
+    ) -> Vec<RateLimitWarning> {
         let mut warnings = Vec::new();
 
         while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && weekly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
         {
             let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
-            warnings.push(format!(
-                "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
-            ));
+            warnings.push(RateLimitWarning {
+                scope: RateLimitWarningScope::Secondary,
+                threshold,
+                message: format!(
+                    "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+                ),
+            });
             self.weekly_index += 1;
         }
 
         while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && hourly_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
         {
             let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
-            warnings.push(format!(
-                "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
-            ));
+            warnings.push(RateLimitWarning {
+                scope: RateLimitWarningScope::Primary,
+                threshold,
+                message: format!(
+                    "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
+                ),
+            });
             self.hourly_index += 1;
         }
 
@@ -5873,10 +5897,16 @@ impl ChatWidget<'_> {
                     let warnings = self
                         .rate_limit_warnings
                         .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
-                    if !warnings.is_empty() {
-                        for warning in warnings {
-                            self.history_push(history_cell::new_warning_event(warning));
+                    let mut displayed_warning = false;
+                    for warning in warnings {
+                        if self.log_and_should_display_warning(&warning) {
+                            self.history_push(history_cell::new_warning_event(
+                                warning.message.clone(),
+                            ));
+                            displayed_warning = true;
                         }
+                    }
+                    if displayed_warning {
                         self.request_redraw();
                     }
 
@@ -13301,6 +13331,50 @@ impl ChatWidget<'_> {
             self.last_token_usage.clone(),
             self.config.model_context_window,
         );
+    }
+
+    fn log_and_should_display_warning(&self, warning: &RateLimitWarning) -> bool {
+        let reset_at = match warning.scope {
+            RateLimitWarningScope::Primary => self.rate_limit_primary_next_reset_at,
+            RateLimitWarningScope::Secondary => self.rate_limit_secondary_next_reset_at,
+        };
+
+        let account_id = auth_accounts::get_active_account_id(&self.config.codex_home)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "_default".to_string());
+
+        let plan = if account_id == "_default" {
+            None
+        } else {
+            match account_usage::list_rate_limit_snapshots(&self.config.codex_home) {
+                Ok(records) => records
+                    .into_iter()
+                    .find(|record| record.account_id == account_id)
+                    .and_then(|record| record.plan.clone()),
+                Err(err) => {
+                    tracing::warn!(?err, "failed to load rate limit snapshots while logging warning");
+                    None
+                }
+            }
+        };
+
+        match account_usage::record_rate_limit_warning(
+            &self.config.codex_home,
+            &account_id,
+            plan.as_deref(),
+            warning.scope,
+            warning.threshold,
+            reset_at,
+            Utc::now(),
+            &warning.message,
+        ) {
+            Ok(result) => result,
+            Err(err) => {
+                tracing::warn!(?err, "failed to persist rate limit warning log");
+                true
+            }
+        }
     }
 
     /// Export transcript for buffer-mode mirroring: omit internal sentinels
