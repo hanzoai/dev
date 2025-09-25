@@ -14,6 +14,7 @@ use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::config_types::ThemeColors;
 use codex_core::config_types::ThemeName;
+use regex_lite::Regex;
 use codex_login::AuthMode;
 use codex_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
@@ -91,6 +92,21 @@ mod updates;
 
 pub use cli::Cli;
 
+fn theme_configured_in_config_file(codex_home: &std::path::Path) -> bool {
+    let config_path = codex_home.join("config.toml");
+    let Ok(contents) = std::fs::read_to_string(&config_path) else {
+        return false;
+    };
+
+    let table_pattern = Regex::new(r"(?m)^\s*\[tui\.theme\]").expect("valid regex");
+    if table_pattern.is_match(&contents) {
+        return true;
+    }
+
+    let inline_pattern = Regex::new(r"(?m)^\s*tui\.theme\s*=").expect("valid regex");
+    inline_pattern.is_match(&contents)
+}
+
 // (tests access modules directly within the crate)
 
 pub async fn run_main(
@@ -166,6 +182,9 @@ pub async fn run_main(
             std::process::exit(1);
         }
     };
+    let theme_override_in_cli = cli_kv_overrides
+        .iter()
+        .any(|(path, _)| path.starts_with("tui.theme"));
 
     let mut config = {
         // Load configuration and support CLI overrides.
@@ -184,7 +203,7 @@ pub async fn run_main(
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
-    let config_toml = {
+    let (config_toml, theme_set_in_config_file) = {
         let codex_home = match find_codex_home() {
             Ok(codex_home) => codex_home,
             Err(err) => {
@@ -193,14 +212,18 @@ pub async fn run_main(
             }
         };
 
+        let theme_set_in_config_file = theme_configured_in_config_file(&codex_home);
+
         match load_config_as_toml_with_cli_overrides(&codex_home, cli_kv_overrides) {
-            Ok(config_toml) => config_toml,
+            Ok(config_toml) => (config_toml, theme_set_in_config_file),
             Err(err) => {
                 eprintln!("Error loading config.toml: {err}");
                 std::process::exit(1);
             }
         }
     };
+
+    let theme_configured_explicitly = theme_set_in_config_file || theme_override_in_cli;
 
     let should_show_trust_screen = determine_repo_trust_state(
         &mut config,
@@ -269,6 +292,7 @@ pub async fn run_main(
         should_show_trust_screen,
         startup_footer_notice,
         latest_upgrade_version,
+        theme_configured_explicitly,
     )
         .map_err(|err| std::io::Error::other(err.to_string()))
 }
@@ -279,6 +303,7 @@ fn run_ratatui_app(
     should_show_trust_screen: bool,
     startup_footer_notice: Option<String>,
     latest_upgrade_version: Option<String>,
+    theme_configured_explicitly: bool,
 ) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
     color_eyre::install()?;
 
@@ -291,7 +316,7 @@ fn run_ratatui_app(
         tracing::error!("panic: {info}");
         prev_hook(info);
     }));
-    maybe_apply_terminal_theme_detection(&mut config);
+    maybe_apply_terminal_theme_detection(&mut config, theme_configured_explicitly);
 
     let (mut terminal, terminal_info) = tui::init(&config)?;
     if config.tui.alternate_screen {
@@ -406,7 +431,14 @@ fn cleanup_session_worktrees_and_print() {
     let _ = std::fs::remove_file(&file);
 }
 
-fn maybe_apply_terminal_theme_detection(config: &mut Config) {
+fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_explicitly: bool) {
+    if theme_configured_explicitly {
+        tracing::info!(
+            "Terminal theme autodetect skipped due to explicit theme configuration"
+        );
+        return;
+    }
+
     let theme = &mut config.tui.theme;
 
     let autodetect_disabled = std::env::var("CODE_DISABLE_THEME_AUTODETECT")
