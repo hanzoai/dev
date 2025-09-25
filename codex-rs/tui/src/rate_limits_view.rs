@@ -1,5 +1,5 @@
 use crate::colors;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Datelike, Local, Utc};
 use codex_common::elapsed::format_duration;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_protocol::num_format::format_with_separators;
@@ -54,7 +54,7 @@ fn label_text(text: &str) -> String {
 /// Aggregated output used by the `/limits` command.
 /// It contains the rendered summary lines, optional legend,
 /// and the precomputed gauge state when one can be shown.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct LimitsView {
     pub(crate) summary_lines: Vec<Line<'static>>,
     pub(crate) legend_lines: Vec<Line<'static>>,
@@ -70,6 +70,14 @@ impl LimitsView {
             Some(state) => render_limit_grid(state, self.grid, width),
             None => Vec::new(),
         }
+    }
+
+    pub(crate) fn lines_for_width(&self, width: u16) -> Vec<Line<'static>> {
+        let mut lines = self.summary_lines.clone();
+        lines.extend(self.gauge_lines(width));
+        lines.extend(self.legend_lines.clone());
+        lines.extend(self.footer_lines.clone());
+        lines
     }
 }
 
@@ -181,7 +189,7 @@ fn build_summary_lines(
 
     lines.push("".into());
 
-    lines.push(section_header("Secondary Limit"));
+    lines.push(section_header("Weekly Limit"));
     lines.push(build_bar_line(
         "Usage",
         metrics.weekly_used,
@@ -294,8 +302,9 @@ fn build_hourly_reset_line(
             let remaining = format_duration(timing.remaining);
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::raw(prefix.clone()));
+            let time_display = format_reset_timestamp(timing.next_reset_local, false);
             spans.push(Span::raw("at "));
-            spans.push(Span::raw(timing.next_reset_local));
+            spans.push(Span::raw(time_display));
             spans.push(Span::styled(
                 format!(" (in {remaining})"),
                 Style::default().fg(colors::dim()),
@@ -380,8 +389,8 @@ fn build_weekly_reset_line(
             let remaining = format_duration(timing.remaining);
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::raw(prefix.clone()));
-            spans.push(Span::raw("at "));
-            spans.push(Span::raw(timing.next_reset_local));
+            let detailed_display = format_reset_timestamp(timing.next_reset_local, true);
+            spans.push(Span::raw(detailed_display));
             spans.push(Span::styled(
                 format!(" (in {remaining})"),
                 Style::default().fg(colors::dim()),
@@ -589,7 +598,7 @@ fn build_context_status_line(
 struct WindowTiming {
     remaining: Duration,
     window: Duration,
-    next_reset_local: String,
+    next_reset_local: chrono::DateTime<Local>,
 }
 
 impl WindowTiming {
@@ -624,11 +633,51 @@ fn compute_window_timing(
     Some(WindowTiming {
         remaining,
         window,
-        next_reset_local: next_reset
-            .with_timezone(&Local)
-            .format("%I:%M%P")
-            .to_string(),
+        next_reset_local: next_reset.with_timezone(&Local),
     })
+}
+
+fn format_reset_timestamp(ts: chrono::DateTime<Local>, include_calendar: bool) -> String {
+    let time_part = ts.format("%I:%M%P").to_string();
+    if !include_calendar {
+        return time_part;
+    }
+
+    let dow = ts.format("%a").to_string();
+    let day = format_day_ordinal(ts.day());
+    let month = month_abbrev(ts.month());
+    format!("{dow} {day} {month} at {time_part}")
+}
+
+fn format_day_ordinal(day: u32) -> String {
+    let suffix = match day % 100 {
+        11 | 12 | 13 => "th",
+        _ => match day % 10 {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        },
+    };
+    format!("{day}{suffix}")
+}
+
+fn month_abbrev(month: u32) -> &'static str {
+    match month {
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sept",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
+        _ => "",
+    }
 }
 
 fn build_status_line(metrics: &RateLimitMetrics) -> Line<'static> {
@@ -801,11 +850,18 @@ fn format_minutes_round_units(minutes: u64) -> String {
 
 fn extract_capacity_fraction(snapshot: &RateLimitSnapshotEvent) -> Option<f64> {
     let ratio = snapshot.primary_to_secondary_ratio_percent;
-    if ratio.is_finite() {
-        Some((ratio / 100.0).clamp(0.0, 1.0))
-    } else {
-        None
+    if ratio.is_finite() && ratio > 0.0 {
+        return Some((ratio / 100.0).clamp(0.0, 1.0));
     }
+
+    // Fallback: derive capacity share from the reported window lengths.
+    let primary = snapshot.primary_window_minutes as f64;
+    let secondary = snapshot.secondary_window_minutes as f64;
+    if primary.is_finite() && secondary.is_finite() && primary > 0.0 && secondary > 0.0 {
+        return Some((primary / secondary).clamp(0.0, 1.0));
+    }
+
+    None
 }
 
 fn compute_grid_state(metrics: &RateLimitMetrics, capacity_fraction: f64) -> Option<GridState> {
