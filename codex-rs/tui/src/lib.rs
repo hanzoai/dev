@@ -5,6 +5,7 @@
 #![deny(clippy::disallowed_methods)]
 use app::App;
 use codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID;
+use codex_core::config::set_cached_terminal_background;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
@@ -12,8 +13,11 @@ use codex_core::config::find_codex_home;
 use codex_core::config::load_config_as_toml_with_cli_overrides;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
+use codex_core::config_types::CachedTerminalBackground;
 use codex_core::config_types::ThemeColors;
+use codex_core::config_types::ThemeConfig;
 use codex_core::config_types::ThemeName;
+use regex_lite::Regex;
 use codex_login::AuthMode;
 use codex_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
@@ -91,6 +95,21 @@ mod updates;
 
 pub use cli::Cli;
 
+fn theme_configured_in_config_file(codex_home: &std::path::Path) -> bool {
+    let config_path = codex_home.join("config.toml");
+    let Ok(contents) = std::fs::read_to_string(&config_path) else {
+        return false;
+    };
+
+    let table_pattern = Regex::new(r"(?m)^\s*\[tui\.theme\]").expect("valid regex");
+    if table_pattern.is_match(&contents) {
+        return true;
+    }
+
+    let inline_pattern = Regex::new(r"(?m)^\s*tui\.theme\s*=").expect("valid regex");
+    inline_pattern.is_match(&contents)
+}
+
 // (tests access modules directly within the crate)
 
 pub async fn run_main(
@@ -166,6 +185,9 @@ pub async fn run_main(
             std::process::exit(1);
         }
     };
+    let theme_override_in_cli = cli_kv_overrides
+        .iter()
+        .any(|(path, _)| path.starts_with("tui.theme"));
 
     let mut config = {
         // Load configuration and support CLI overrides.
@@ -184,7 +206,7 @@ pub async fn run_main(
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
-    let config_toml = {
+    let (config_toml, theme_set_in_config_file) = {
         let codex_home = match find_codex_home() {
             Ok(codex_home) => codex_home,
             Err(err) => {
@@ -193,14 +215,18 @@ pub async fn run_main(
             }
         };
 
+        let theme_set_in_config_file = theme_configured_in_config_file(&codex_home);
+
         match load_config_as_toml_with_cli_overrides(&codex_home, cli_kv_overrides) {
-            Ok(config_toml) => config_toml,
+            Ok(config_toml) => (config_toml, theme_set_in_config_file),
             Err(err) => {
                 eprintln!("Error loading config.toml: {err}");
                 std::process::exit(1);
             }
         }
     };
+
+    let theme_configured_explicitly = theme_set_in_config_file || theme_override_in_cli;
 
     let should_show_trust_screen = determine_repo_trust_state(
         &mut config,
@@ -269,6 +295,7 @@ pub async fn run_main(
         should_show_trust_screen,
         startup_footer_notice,
         latest_upgrade_version,
+        theme_configured_explicitly,
     )
         .map_err(|err| std::io::Error::other(err.to_string()))
 }
@@ -279,6 +306,7 @@ fn run_ratatui_app(
     should_show_trust_screen: bool,
     startup_footer_notice: Option<String>,
     latest_upgrade_version: Option<String>,
+    theme_configured_explicitly: bool,
 ) -> color_eyre::Result<codex_core::protocol::TokenUsage> {
     color_eyre::install()?;
 
@@ -291,7 +319,7 @@ fn run_ratatui_app(
         tracing::error!("panic: {info}");
         prev_hook(info);
     }));
-    maybe_apply_terminal_theme_detection(&mut config);
+    maybe_apply_terminal_theme_detection(&mut config, theme_configured_explicitly);
 
     let (mut terminal, terminal_info) = tui::init(&config)?;
     if config.tui.alternate_screen {
@@ -406,7 +434,14 @@ fn cleanup_session_worktrees_and_print() {
     let _ = std::fs::remove_file(&file);
 }
 
-fn maybe_apply_terminal_theme_detection(config: &mut Config) {
+fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_explicitly: bool) {
+    if theme_configured_explicitly {
+        tracing::info!(
+            "Terminal theme autodetect skipped due to explicit theme configuration"
+        );
+        return;
+    }
+
     let theme = &mut config.tui.theme;
 
     let autodetect_disabled = std::env::var("CODE_DISABLE_THEME_AUTODETECT")
@@ -429,17 +464,54 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config) {
         return;
     }
 
-    match crate::terminal_info::detect_dark_terminal_background() {
-        Some(true) => {
-            theme.name = ThemeName::DarkCarbonNight;
-            tracing::info!(
-                "Detected dark terminal background; switching default theme to Dark - Carbon Night"
+    let term = std::env::var("TERM").ok().filter(|value| !value.is_empty());
+    let term_program = std::env::var("TERM_PROGRAM").ok().filter(|value| !value.is_empty());
+    let term_program_version =
+        std::env::var("TERM_PROGRAM_VERSION").ok().filter(|value| !value.is_empty());
+    let colorfgbg = std::env::var("COLORFGBG").ok().filter(|value| !value.is_empty());
+
+    if let Some(cached) = config.tui.cached_terminal_background.as_ref() {
+        if cached_background_matches_env(
+            cached,
+            &term,
+            &term_program,
+            &term_program_version,
+            &colorfgbg,
+        ) {
+            tracing::debug!(
+                source = cached.source.as_deref().unwrap_or("cached"),
+                "Using cached terminal background detection result",
             );
+            apply_detected_theme(theme, cached.is_dark);
+            return;
         }
-        Some(false) => {
-            tracing::info!(
-                "Detected light terminal background; keeping default Light - Photon theme"
-            );
+    }
+
+    match crate::terminal_info::detect_dark_terminal_background() {
+        Some(detection) => {
+            apply_detected_theme(theme, detection.is_dark);
+
+            let source = match detection.source {
+                crate::terminal_info::TerminalBackgroundSource::Osc11 => "osc-11",
+                crate::terminal_info::TerminalBackgroundSource::ColorFgBg => "colorfgbg",
+            };
+
+            let cache = CachedTerminalBackground {
+                is_dark: detection.is_dark,
+                term,
+                term_program,
+                term_program_version,
+                colorfgbg,
+                source: Some(source.to_string()),
+                rgb: detection
+                    .rgb
+                    .map(|(r, g, b)| format!("{:02x}{:02x}{:02x}", r, g, b)),
+            };
+
+            config.tui.cached_terminal_background = Some(cache.clone());
+            if let Err(err) = set_cached_terminal_background(&config.codex_home, &cache) {
+                tracing::warn!("Failed to persist terminal background autodetect result: {err}");
+            }
         }
         None => {
             tracing::debug!(
@@ -447,6 +519,39 @@ fn maybe_apply_terminal_theme_detection(config: &mut Config) {
             );
         }
     }
+}
+
+fn apply_detected_theme(theme: &mut ThemeConfig, is_dark: bool) {
+    if is_dark {
+        theme.name = ThemeName::DarkCarbonNight;
+        tracing::info!(
+            "Detected dark terminal background; switching default theme to Dark - Carbon Night"
+        );
+    } else {
+        tracing::info!(
+            "Detected light terminal background; keeping default Light - Photon theme"
+        );
+    }
+}
+
+fn cached_background_matches_env(
+    cached: &CachedTerminalBackground,
+    term: &Option<String>,
+    term_program: &Option<String>,
+    term_program_version: &Option<String>,
+    colorfgbg: &Option<String>,
+) -> bool {
+    fn matches(expected: &Option<String>, actual: &Option<String>) -> bool {
+        match expected {
+            Some(expected) => actual.as_ref().map(|value| value == expected).unwrap_or(false),
+            None => true,
+        }
+    }
+
+    matches(&cached.term, term)
+        && matches(&cached.term_program, term_program)
+        && matches(&cached.term_program_version, term_program_version)
+        && matches(&cached.colorfgbg, colorfgbg)
 }
 
 /// Minimal login status indicator for onboarding flow.
