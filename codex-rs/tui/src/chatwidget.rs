@@ -3101,12 +3101,12 @@ impl ChatWidget<'_> {
         }
 
         if self.agents_terminal.active {
-            match key_event {
-                KeyEvent {
-                    code: crossterm::event::KeyCode::Esc,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+            use crossterm::event::KeyCode;
+            if key_event.kind == KeyEventKind::Release {
+                return;
+            }
+            match key_event.code {
+                KeyCode::Esc => {
                     if self.agents_terminal.focus() == AgentsTerminalFocus::Detail {
                         self.agents_terminal.focus_sidebar();
                         self.request_redraw();
@@ -3115,16 +3115,7 @@ impl ChatWidget<'_> {
                     }
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::Right,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                }
-                | KeyEvent {
-                    code: crossterm::event::KeyCode::Enter,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::Right | KeyCode::Enter => {
                     if self.agents_terminal.focus() == AgentsTerminalFocus::Sidebar
                         && self.agents_terminal.current_agent_id().is_some()
                     {
@@ -3133,22 +3124,14 @@ impl ChatWidget<'_> {
                     }
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::Left,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::Left => {
                     if self.agents_terminal.focus() == AgentsTerminalFocus::Detail {
                         self.agents_terminal.focus_sidebar();
                         self.request_redraw();
                     }
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::Up,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::Up => {
                     if self.agents_terminal.focus() == AgentsTerminalFocus::Detail {
                         layout_scroll::line_up(self);
                         self.record_current_agent_scroll();
@@ -3157,11 +3140,7 @@ impl ChatWidget<'_> {
                     }
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::Down,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::Down => {
                     if self.agents_terminal.focus() == AgentsTerminalFocus::Detail {
                         layout_scroll::line_down(self);
                         self.record_current_agent_scroll();
@@ -3170,38 +3149,22 @@ impl ChatWidget<'_> {
                     }
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::Tab,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::Tab => {
                     self.agents_terminal.focus_sidebar();
                     self.navigate_agents_terminal_selection(1);
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::BackTab,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::BackTab => {
                     self.agents_terminal.focus_sidebar();
                     self.navigate_agents_terminal_selection(-1);
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::PageUp,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::PageUp => {
                     layout_scroll::page_up(self);
                     self.record_current_agent_scroll();
                     return;
                 }
-                KeyEvent {
-                    code: crossterm::event::KeyCode::PageDown,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                } => {
+                KeyCode::PageDown => {
                     layout_scroll::page_down(self);
                     self.record_current_agent_scroll();
                     return;
