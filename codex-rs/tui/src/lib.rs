@@ -12,6 +12,8 @@ use codex_core::config::find_codex_home;
 use codex_core::config::load_config_as_toml_with_cli_overrides;
 use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
+use codex_core::config_types::ThemeColors;
+use codex_core::config_types::ThemeName;
 use codex_login::AuthMode;
 use codex_login::CodexAuth;
 use codex_ollama::DEFAULT_OSS_MODEL;
@@ -273,7 +275,7 @@ pub async fn run_main(
 
 fn run_ratatui_app(
     cli: Cli,
-    config: Config,
+    mut config: Config,
     should_show_trust_screen: bool,
     startup_footer_notice: Option<String>,
     latest_upgrade_version: Option<String>,
@@ -289,6 +291,8 @@ fn run_ratatui_app(
         tracing::error!("panic: {info}");
         prev_hook(info);
     }));
+    maybe_apply_terminal_theme_detection(&mut config);
+
     let (mut terminal, terminal_info) = tui::init(&config)?;
     if config.tui.alternate_screen {
         terminal.clear()?;
@@ -400,6 +404,49 @@ fn cleanup_session_worktrees_and_print() {
         let _ = std::fs::remove_dir_all(&worktree);
     }
     let _ = std::fs::remove_file(&file);
+}
+
+fn maybe_apply_terminal_theme_detection(config: &mut Config) {
+    let theme = &mut config.tui.theme;
+
+    let autodetect_disabled = std::env::var("CODE_DISABLE_THEME_AUTODETECT")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "True"))
+        .unwrap_or(false);
+    if autodetect_disabled {
+        tracing::info!("Terminal theme autodetect disabled via CODE_DISABLE_THEME_AUTODETECT");
+        return;
+    }
+
+    if theme.name != ThemeName::LightPhoton {
+        return;
+    }
+
+    if theme.label.is_some() || theme.is_dark.is_some() {
+        return;
+    }
+
+    if theme.colors != ThemeColors::default() {
+        return;
+    }
+
+    match crate::terminal_info::detect_dark_terminal_background() {
+        Some(true) => {
+            theme.name = ThemeName::DarkCarbonNight;
+            tracing::info!(
+                "Detected dark terminal background; switching default theme to Dark - Carbon Night"
+            );
+        }
+        Some(false) => {
+            tracing::info!(
+                "Detected light terminal background; keeping default Light - Photon theme"
+            );
+        }
+        None => {
+            tracing::debug!(
+                "Terminal theme autodetect unavailable; using configured default theme"
+            );
+        }
+    }
 }
 
 /// Minimal login status indicator for onboarding flow.
