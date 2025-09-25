@@ -707,6 +707,13 @@ impl BottomPane<'_> {
         self.composer.is_in_paste_burst()
     }
 
+    pub(crate) fn set_input_focus(&mut self, has_focus: bool) {
+        self.has_input_focus = has_focus;
+        self.composer.set_has_focus(has_focus);
+        self.composer
+            .set_ctrl_c_quit_hint(self.ctrl_c_quit_hint, self.has_input_focus);
+    }
+
     pub(crate) fn on_history_entry_response(
         &mut self,
         log_id: u64,
@@ -737,15 +744,12 @@ impl BottomPane<'_> {
     pub(crate) fn ensure_input_focus(&mut self) {
         // Only ensure focus if there's no active modal view
         if self.active_view.is_none() {
-            self.has_input_focus = true;
-            // Reset any transient state that might affect focus
-            // Clear any temporary status overlays that might interfere
-            if !self.is_task_running {
-                // Status now shown in composer title
+            if !self.has_input_focus {
+                self.set_input_focus(true);
+            } else {
+                self.composer
+                    .set_ctrl_c_quit_hint(self.ctrl_c_quit_hint, self.has_input_focus);
             }
-            // Ensure composer knows it has focus
-            self.composer
-                .set_ctrl_c_quit_hint(self.ctrl_c_quit_hint, self.has_input_focus);
         }
     }
 

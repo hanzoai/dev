@@ -51,8 +51,15 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  BIN_SUBPATH="${BIN_SUBDIR}/code"
+  BIN_CARGO_FILENAME="code"
+  BIN_FILENAME="code"
+  if [ "$PROFILE" = "perf" ]; then
+    BIN_FILENAME="code-perf"
+  fi
+  BIN_SUBPATH="${BIN_SUBDIR}/${BIN_FILENAME}"
+  BIN_CARGO_SUBPATH="${BIN_SUBDIR}/${BIN_CARGO_FILENAME}"
   BIN_PATH="${TARGET_DIR_ABS}/${BIN_SUBPATH}"
+  BIN_CARGO_PATH="${TARGET_DIR_ABS}/${BIN_CARGO_SUBPATH}"
   BIN_LINK_PATH="./target/${BIN_SUBPATH}"
 
   if [ -n "${REPO_TARGET_ABS:-}" ] && [ "${TARGET_DIR_ABS}" = "${REPO_TARGET_ABS}" ]; then
@@ -382,15 +389,31 @@ ${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tu
 if [ $? -eq 0 ]; then
     resolve_bin_path
 
+    if [ "$PROFILE" = "perf" ]; then
+      PERF_SOURCE="${BIN_CARGO_PATH}"
+      PERF_TARGET="${BIN_PATH}"
+      if [ -e "${PERF_SOURCE}" ]; then
+        PERF_DIR="$(dirname "${PERF_TARGET}")"
+        mkdir -p "${PERF_DIR}"
+        if [ -e "${PERF_TARGET}" ] || [ -L "${PERF_TARGET}" ]; then
+          rm -f "${PERF_TARGET}"
+        fi
+        (
+          cd "${PERF_DIR}" >/dev/null 2>&1
+          ln -sf "$(basename "${PERF_SOURCE}")" "$(basename "${PERF_TARGET}")"
+        )
+      fi
+    fi
+
     echo "✅ Build successful!"
     echo "Binary location: ${BIN_DISPLAY_PATH}"
     echo ""
 
     # Keep old symlink locations working for compatibility
     # Create symlink in target/release for npm wrapper expectations
-    release_link_target="../${BIN_SUBDIR}/code"
-    cli_link_target="../../codex-rs/target/${BIN_SUBDIR}/code"
-    dev_fast_link_target="../${BIN_SUBDIR}/code"
+    release_link_target="../${BIN_SUBDIR}/${BIN_FILENAME}"
+    cli_link_target="../../codex-rs/target/${BIN_SUBDIR}/${BIN_FILENAME}"
+    dev_fast_link_target="../${BIN_SUBDIR}/${BIN_FILENAME}"
 
     if [ "${TARGET_DIR_ABS}" != "${REPO_TARGET_ABS}" ]; then
       release_link_target="${BIN_PATH}"
