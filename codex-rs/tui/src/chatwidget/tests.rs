@@ -528,9 +528,14 @@ fn agents_terminal_focus_and_scroll_controls() {
     pump_app_events(&mut chat, &rx);
     assert_eq!(chat.layout.scroll_offset, 1, "Up should scroll output when focused");
 
-    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "Overlay should remain open after first Esc");
     assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Second Esc should close overlay");
 }
 
 fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
