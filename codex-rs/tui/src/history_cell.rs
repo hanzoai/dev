@@ -3,7 +3,6 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::sanitize::Mode as SanitizeMode;
 use crate::sanitize::Options as SanitizeOptions;
 use crate::sanitize::sanitize_for_tui;
-use crate::rate_limits_view::{build_limits_view, LimitsView, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use crate::slash_command::SlashCommand;
 use crate::util::buffer::{fill_rect, write_line};
 use crate::insert_history::word_wrap_lines;
@@ -20,7 +19,6 @@ use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
 use codex_core::protocol::FileChange;
 use codex_core::protocol::McpInvocation;
-use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::SessionConfiguredEvent;
 use codex_core::protocol::TokenUsage;
 use codex_protocol::num_format::format_with_separators;
@@ -1086,59 +1084,6 @@ pub(crate) struct PlainHistoryCell {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) kind: HistoryCellType,
     cached_layout: std::cell::RefCell<Option<PlainLayoutCache>>,
-}
-
-pub(crate) struct LimitsHistoryCell {
-    view: LimitsView,
-}
-
-impl LimitsHistoryCell {
-    const TRANSCRIPT_WIDTH: u16 = 80;
-
-    fn lines_for_width(&self, width: u16) -> Vec<Line<'static>> {
-        let mut lines = self.view.summary_lines.clone();
-        lines.extend(self.view.gauge_lines(width));
-        lines.extend(self.view.legend_lines.clone());
-        lines.extend(self.view.footer_lines.clone());
-        lines
-    }
-}
-
-impl HistoryCell for LimitsHistoryCell {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Notice
-    }
-
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        self.lines_for_width(Self::TRANSCRIPT_WIDTH)
-    }
-
-    fn has_custom_render(&self) -> bool {
-        true
-    }
-
-    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        let width = if area.width == 0 { 1 } else { area.width };
-        let lines = self.lines_for_width(width);
-        let text = Text::from(lines);
-
-        let cell_bg = crate::colors::background();
-
-        Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .scroll((skip_rows, 0))
-            .block(Block::default().style(Style::default().bg(cell_bg)))
-            .style(Style::default().bg(cell_bg))
-            .render(area, buf);
-    }
 }
 
 pub(crate) struct UpgradeNoticeCell {
@@ -9884,30 +9829,12 @@ pub(crate) fn new_status_output(
     PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
-pub(crate) fn new_limits_output(
-    snapshot: &RateLimitSnapshotEvent,
-    reset_info: RateLimitResetInfo,
-) -> LimitsHistoryCell {
-    LimitsHistoryCell {
-        view: build_limits_view(snapshot, reset_info, DEFAULT_GRID_CONFIG),
-    }
-}
-
 pub(crate) fn new_warning_event(message: String) -> PlainHistoryCell {
     let warn_style = Style::default().fg(crate::colors::warning());
     PlainHistoryCell::new(
         vec![Line::from(vec![Span::styled(format!("⚠ {message}"), warn_style)])],
         HistoryCellType::Notice,
     )
-}
-
-pub(crate) fn new_limits_fetching() -> PlainHistoryCell {
-    let lines: Vec<Line<'static>> = vec![
-        Line::from("/limits").fg(crate::colors::keyword()),
-        Line::from(""),
-        Line::from("Requesting latest rate limit data…".dim()),
-    ];
-    PlainHistoryCell::new(lines, HistoryCellType::Notice)
 }
 
 pub(crate) fn new_prompts_output() -> PlainHistoryCell {

@@ -1,29 +1,31 @@
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use codex_protocol::protocol::RateLimitSnapshotEvent;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use serde_json;
 
 use crate::protocol::TokenUsage;
 
 const USAGE_VERSION: u32 = 1;
 const USAGE_SUBDIR: &str = "usage";
+const HOURLY_HISTORY_DAYS: i64 = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct TokenTotals {
+pub struct TokenTotals {
     #[serde(default)]
-    input_tokens: u64,
+    pub input_tokens: u64,
     #[serde(default)]
-    cached_input_tokens: u64,
+    pub cached_input_tokens: u64,
     #[serde(default)]
-    output_tokens: u64,
+    pub output_tokens: u64,
     #[serde(default)]
-    reasoning_output_tokens: u64,
+    pub reasoning_output_tokens: u64,
     #[serde(default)]
-    total_tokens: u64,
+    pub total_tokens: u64,
 }
 
 impl TokenTotals {
@@ -117,16 +119,45 @@ impl AccountUsageData {
     }
 
     fn update_last_hour(&mut self, now: DateTime<Utc>) {
-        let cutoff = now - Duration::hours(1);
+        let hourly_cutoff = now - Duration::hours(1);
+        let history_cutoff = now - Duration::days(HOURLY_HISTORY_DAYS);
         self.hourly_entries
-            .retain(|entry| entry.timestamp >= cutoff);
+            .retain(|entry| entry.timestamp >= history_cutoff);
 
         let mut totals = TokenTotals::default();
         for entry in &self.hourly_entries {
+            if entry.timestamp < hourly_cutoff {
+                continue;
+            }
             totals.add_totals(&entry.tokens);
         }
         self.tokens_last_hour = totals;
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredRateLimitSnapshot {
+    pub account_id: String,
+    pub plan: Option<String>,
+    pub snapshot: Option<RateLimitSnapshotEvent>,
+    pub observed_at: Option<DateTime<Utc>>,
+    pub next_reset_at: Option<DateTime<Utc>>,
+    pub last_usage_limit_hit_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredUsageEntry {
+    pub timestamp: DateTime<Utc>,
+    pub tokens: TokenTotals,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredUsageSummary {
+    pub account_id: String,
+    pub plan: Option<String>,
+    pub totals: TokenTotals,
+    pub last_updated: DateTime<Utc>,
+    pub hourly_entries: Vec<StoredUsageEntry>,
 }
 
 fn usage_dir(codex_home: &Path) -> PathBuf {
@@ -225,6 +256,58 @@ pub fn record_rate_limit_snapshot(
     })
 }
 
+pub fn list_rate_limit_snapshots(
+    codex_home: &Path,
+) -> std::io::Result<Vec<StoredRateLimitSnapshot>> {
+    let usage_dir = usage_dir(codex_home);
+    let mut results = Vec::new();
+
+    let entries = match fs::read_dir(&usage_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(results),
+        Err(err) => return Err(err),
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if entry
+            .file_type()
+            .ok()
+            .map(|ft| ft.is_file())
+            .unwrap_or(false)
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("json"))
+                .unwrap_or(false)
+        {
+            let contents = match fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(_) => continue,
+            };
+            let data: AccountUsageData = match serde_json::from_str(&contents) {
+                Ok(data) => data,
+                Err(_) => continue,
+                };
+            let rate = data.rate_limit.unwrap_or_default();
+            results.push(StoredRateLimitSnapshot {
+                account_id: data.account_id,
+                plan: data.plan,
+                snapshot: rate.snapshot,
+                observed_at: rate.observed_at,
+                next_reset_at: rate.next_reset_at,
+                last_usage_limit_hit_at: rate.last_usage_limit_hit_at,
+            });
+        }
+    }
+
+    Ok(results)
+}
+
 pub fn record_usage_limit_hint(
     codex_home: &Path,
     account_id: &str,
@@ -251,6 +334,36 @@ pub fn record_usage_limit_hint(
         }
         data.rate_limit = Some(info);
     })
+}
+
+pub fn load_account_usage(
+    codex_home: &Path,
+    account_id: &str,
+) -> std::io::Result<Option<StoredUsageSummary>> {
+    let path = usage_file_path(codex_home, account_id);
+    let contents = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+
+    let data: AccountUsageData = serde_json::from_str(&contents)?;
+    let hourly_entries = data
+        .hourly_entries
+        .into_iter()
+        .map(|entry| StoredUsageEntry {
+            timestamp: entry.timestamp,
+            tokens: entry.tokens,
+        })
+        .collect();
+
+    Ok(Some(StoredUsageSummary {
+        account_id: data.account_id,
+        plan: data.plan,
+        totals: data.totals,
+        last_updated: data.last_updated,
+        hourly_entries,
+    }))
 }
 
 #[cfg(test)]
