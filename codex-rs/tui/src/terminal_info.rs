@@ -24,6 +24,19 @@ const ANSI_16_TO_RGB: [(u8, u8, u8); 16] = [
     (255, 255, 255),
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalBackgroundSource {
+    Osc11,
+    ColorFgBg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalBackgroundDetection {
+    pub is_dark: bool,
+    pub source: TerminalBackgroundSource,
+    pub rgb: Option<(u8, u8, u8)>,
+}
+
 fn set_nonblocking(tty: &std::fs::File) {
     #[cfg(unix)]
     {
@@ -314,7 +327,7 @@ fn detect_dark_from_rgb(rgb: (u8, u8, u8)) -> bool {
     relative_luminance(rgb) < 0.45
 }
 
-pub fn detect_dark_terminal_background() -> Option<bool> {
+pub fn detect_dark_terminal_background() -> Option<TerminalBackgroundDetection> {
     if let Ok(value) = env::var("CODE_DISABLE_THEME_AUTODETECT") {
         if matches!(value.as_str(), "1" | "true" | "TRUE" | "True") {
             return None;
@@ -323,12 +336,20 @@ pub fn detect_dark_terminal_background() -> Option<bool> {
 
     if osc_background_query_supported() {
         if let Some(rgb) = query_osc_background_color() {
-            return Some(detect_dark_from_rgb(rgb));
+            return Some(TerminalBackgroundDetection {
+                is_dark: detect_dark_from_rgb(rgb),
+                source: TerminalBackgroundSource::Osc11,
+                rgb: Some(rgb),
+            });
         }
     }
 
     if let Some(rgb) = parse_colorfgbg_env() {
-        return Some(detect_dark_from_rgb(rgb));
+        return Some(TerminalBackgroundDetection {
+            is_dark: detect_dark_from_rgb(rgb),
+            source: TerminalBackgroundSource::ColorFgBg,
+            rgb: Some(rgb),
+        });
     }
 
     None
