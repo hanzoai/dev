@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.165] - 2025-09-25
+
+- TUI/Theme: cache terminal background detection and skip OSC probe when theme is explicit. (eeefdf5, 166fa57)
+- Agents: clear idle spinner and avoid empty task preview text in chat. (499f14b)
+- Workflows: escape issue titles in PR fallback for issue-code automation. (67a9882)
+- MCP Server: use codex_mcp_server imports for bundled tooling compatibility. (f846c9d)
+
 ## [0.2.164] - 2025-09-25
 
 - TUI/Limits: track API reset timers across core and TUI so rate windows stay accurate. (417c1867)
