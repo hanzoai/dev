@@ -412,6 +412,7 @@ pub(crate) struct ChatWidget<'a> {
     last_agent_prompt: Option<String>,
     agent_context: Option<String>,
     agent_task: Option<String>,
+    recent_agent_hint: Option<String>,
     active_review_hint: Option<String>,
     active_review_prompt: Option<String>,
     overall_task_status: String,
@@ -2596,6 +2597,7 @@ impl ChatWidget<'_> {
             last_agent_prompt: None,
             agent_context: None,
             agent_task: None,
+            recent_agent_hint: None,
             active_review_hint: None,
             active_review_prompt: None,
             overall_task_status: "preparing".to_string(),
@@ -2827,6 +2829,7 @@ impl ChatWidget<'_> {
             last_agent_prompt: None,
             agent_context: None,
             agent_task: None,
+            recent_agent_hint: None,
             active_review_hint: None,
             active_review_prompt: None,
             overall_task_status: "preparing".to_string(),
@@ -6583,8 +6586,9 @@ impl ChatWidget<'_> {
                     SystemPlacement::EndOfCurrent
                 };
                 let id_for_replace = Some(id.clone());
+                let message_clone = message.clone();
                 self.push_system_cell(
-                    history_cell::new_background_event(message.clone()),
+                    history_cell::new_background_event(message_clone),
                     placement,
                     id_for_replace,
                     event.order.as_ref(),
@@ -6597,6 +6601,13 @@ impl ChatWidget<'_> {
                 if message.starts_with("✅ Connected to Chrome via CDP") {
                     self.bottom_pane
                         .update_status_text("using browser (CDP)".to_string());
+                }
+
+                if message.starts_with("🤖 Agent")
+                    || message.starts_with("⚠️ Agent reuse")
+                    || message.starts_with("⚠️ Agent prompt")
+                {
+                    self.recent_agent_hint = Some(message);
                 }
             }
             EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { agents, context, task }) => {
@@ -16789,6 +16800,9 @@ impl ChatWidget<'_> {
             self.update_sparkline_data();
         }
 
+        let short_id = |id: &str| -> String { id.chars().take(8).collect() };
+        let mut rendered_batches = std::collections::HashSet::new();
+
         // Agent status block
         let agent_block = Block::default()
             .borders(Borders::ALL)
@@ -17034,6 +17048,10 @@ impl ChatWidget<'_> {
                             .add_modifier(Modifier::BOLD),
                     ),
                 );
+                line_spans.push(Span::styled(
+                    format!(" [{}]", short_id(&agent.id)),
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
                 if let Some(ref model) = agent.model {
                     if !model.is_empty() {
                         line_spans.push(Span::styled(
@@ -17089,6 +17107,23 @@ impl ChatWidget<'_> {
                     }
                     _ => {}
                 }
+
+                if let Some(ref batch) = agent.batch_id {
+                    if rendered_batches.insert(batch.clone()) {
+                        let batch_line = format!(
+                            "Batch {} — use agent_wait {{\"batch_id\":\"{}\"}}",
+                            short_id(batch),
+                            batch
+                        );
+                        text_content.push(RLine::from(vec![
+                            Span::from("   "),
+                            Span::styled(
+                                batch_line,
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    }
+                }
             }
         }
 
@@ -17133,6 +17168,28 @@ impl ChatWidget<'_> {
                     Span::from(" "),
                     Span::styled(task, Style::default().fg(crate::colors::text_dim())),
                 ]));
+            }
+
+            if let Some(ref hint) = self.recent_agent_hint {
+                wrapped_content.push(RLine::from(" "));
+                wrapped_content.push(RLine::from(vec![
+                    Span::from(" "),
+                    Span::styled(
+                        "Next steps:",
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                for line in hint.lines() {
+                    wrapped_content.push(RLine::from(vec![
+                        Span::from("   "),
+                        Span::styled(
+                            line.trim_end(),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
+                }
             }
 
             if !wrapped_content.is_empty() {
