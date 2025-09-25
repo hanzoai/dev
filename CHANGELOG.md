@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.166] - 2025-09-25
+
+- TUI/History: refresh the popular commands lineup so quick actions match current workflows. (03af55d1)
+- TUI/Auto-upgrade: silence installer chatter and log completion once updates finish. (f23e920c)
+- Core/Client: skip the web_search tool when reasoning is minimal to reduce latency. (75314d7e)
+- TUI/Input: normalize legacy key press/release cases so hotkeys stay consistent on older terminals. (0415dd9f, 06eeac5a, 64922dfb)
+- Nix: make codex-rs the default package and drop the broken codex-cli derivation. (fa945b5f, 9ec8f3eb)
+
 ## [0.2.165] - 2025-09-25
 
 - TUI/Theme: cache terminal background detection and skip OSC probe when theme is explicit. (eeefdf5, 166fa57)
