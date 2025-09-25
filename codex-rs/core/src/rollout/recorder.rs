@@ -290,9 +290,11 @@ impl RolloutRecorder {
                     RolloutItem::Event(ev) => {
                         items.push(RolloutItem::Event(ev));
                     }
+                    RolloutItem::Compacted(compacted) => {
+                        items.push(RolloutItem::Compacted(compacted));
+                    }
                     // Ignore variants not used by this fork when resuming.
-                    RolloutItem::Compacted(_)
-                    | RolloutItem::TurnContext(_) => {
+                    RolloutItem::TurnContext(_) => {
                         // Skip
                     }
                 },
