@@ -62,6 +62,7 @@ use tracing::error;
 
 mod animated;
 mod background;
+mod diff;
 mod explore;
 mod image;
 mod loading;
@@ -76,6 +77,7 @@ mod text;
 
 pub(crate) use animated::AnimatedWelcomeCell;
 pub(crate) use background::BackgroundEventCell;
+pub(crate) use diff::{new_diff_cell_from_string, DiffCell};
 pub(crate) use explore::{ExploreAggregationCell, ExploreEntryStatus};
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
@@ -1622,144 +1624,6 @@ impl ExecCell {
             }
         }
         Some(running_status_line(message))
-    }
-}
-
-// ==================== DiffCell ====================
-
-pub(crate) struct DiffCell {
-    pub(crate) lines: Vec<Line<'static>>,
-}
-
-impl HistoryCell for DiffCell {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Diff
-    }
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        self.lines.clone()
-    }
-    fn has_custom_render(&self) -> bool {
-        true
-    }
-    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
-        // Render a two-column diff with a 1-col marker gutter and 1-col padding
-        // so wrapped lines hang under their first content column.
-        // Hard clear the entire area: write spaces + background so any
-        // previously longer content does not bleed into shorter frames.
-        let bg = Style::default().bg(crate::colors::background());
-        fill_rect(buf, area, Some(' '), bg);
-
-        // Center the sign in the two-column gutter by leaving one leading
-        // space and drawing the sign in the second column.
-        let marker_col_x = area.x.saturating_add(2); // two spaces then '+'/'-'
-        let content_x = area.x.saturating_add(4); // two spaces before sign + one after sign
-        let content_w = area.width.saturating_sub(4);
-        let mut cur_y = area.y;
-
-        // Helper to classify a line and extract marker and content
-        let classify = |l: &Line<'_>| -> (Option<char>, Line<'static>, Style) {
-            let text: String = l
-                .spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>();
-            let default_style = Style::default().fg(crate::colors::text());
-            if text.starts_with("+") && !text.starts_with("+++") {
-                let content = text.chars().skip(1).collect::<String>();
-                (
-                    Some('+'),
-                    Line::from(content).style(Style::default().fg(crate::colors::success())),
-                    default_style,
-                )
-            } else if text.starts_with("-") && !text.starts_with("---") {
-                let content = text.chars().skip(1).collect::<String>();
-                (
-                    Some('-'),
-                    Line::from(content).style(Style::default().fg(crate::colors::error())),
-                    default_style,
-                )
-            } else if text.starts_with("@@") {
-                (
-                    None,
-                    Line::from(text).style(Style::default().fg(crate::colors::primary())),
-                    default_style,
-                )
-            } else {
-                (None, Line::from(text), default_style)
-            }
-        };
-
-        'outer: for line in &self.lines {
-            // Measure this line at wrapped width
-            let (_marker, content_line, _sty) = classify(line);
-            let content_text = Text::from(vec![content_line.clone()]);
-            let rows: u16 = Paragraph::new(content_text.clone())
-                .wrap(Wrap { trim: false })
-                .line_count(content_w)
-                .try_into()
-                .unwrap_or(0);
-
-            let mut local_skip = 0u16;
-            if skip_rows > 0 {
-                if skip_rows >= rows {
-                    skip_rows -= rows;
-                    continue 'outer;
-                } else {
-                    local_skip = skip_rows;
-                    skip_rows = 0;
-                }
-            }
-
-            // Remaining height available
-            if cur_y >= area.y.saturating_add(area.height) {
-                break;
-            }
-            let avail = area.y.saturating_add(area.height) - cur_y;
-            let draw_h = rows.saturating_sub(local_skip).min(avail);
-            if draw_h == 0 {
-                continue;
-            }
-
-            // Draw content with hanging indent (left margin = 2)
-            let content_area = Rect {
-                x: content_x,
-                y: cur_y,
-                width: content_w,
-                height: draw_h,
-            };
-            let block = Block::default().style(bg);
-            Paragraph::new(content_text)
-                .block(block)
-                .wrap(Wrap { trim: false })
-                .scroll((local_skip, 0))
-                .style(bg)
-                .render(content_area, buf);
-
-            // Draw marker on the first visible visual row of this logical line
-            let (marker, _content_line2, _) = classify(line);
-            if let Some(m) = marker {
-                if local_skip == 0 && area.width >= 1 {
-                    let color = if m == '+' {
-                        crate::colors::success()
-                    } else {
-                        crate::colors::error()
-                    };
-                    let style = Style::default().fg(color).bg(crate::colors::background());
-                    buf.set_string(marker_col_x, cur_y, m.to_string(), style);
-                }
-            }
-
-            cur_y = cur_y.saturating_add(draw_h);
-            if cur_y >= area.y.saturating_add(area.height) {
-                break;
-            }
-        }
     }
 }
 
@@ -7715,21 +7579,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
 }
 
 pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
-    // Parse the diff output into lines
-    let mut lines = vec![Line::from("/diff").fg(crate::colors::keyword())];
-    for line in diff_output.lines() {
-        if line.starts_with('+') && !line.starts_with("+++") {
-            lines.push(Line::from(line.to_string()).fg(crate::colors::success()));
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            lines.push(Line::from(line.to_string()).fg(crate::colors::error()));
-        } else if line.starts_with("@@") {
-            lines.push(Line::from(line.to_string()).fg(crate::colors::info()));
-        } else {
-            lines.push(Line::from(line.to_string()));
-        }
-    }
-    lines.push(Line::from(""));
-    DiffCell { lines }
+    new_diff_cell_from_string(diff_output)
 }
 
 pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainHistoryCell {
