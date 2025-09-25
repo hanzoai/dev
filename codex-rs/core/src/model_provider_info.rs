@@ -96,9 +96,11 @@ pub struct ModelProviderInfo {
 #[serde(default)]
 pub struct OpenRouterConfig {
     /// Provider-level routing preferences forwarded to OpenRouter.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<OpenRouterProviderConfig>,
 
     /// Optional `route` payload forwarded as-is to OpenRouter for advanced routing.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub route: Option<Value>,
 
     /// Additional top-level fields that may be forwarded to OpenRouter as the API evolves.
@@ -110,15 +112,25 @@ pub struct OpenRouterConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct OpenRouterProviderConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub order: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_fallbacks: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub require_parameters: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data_collection: Option<OpenRouterDataCollectionPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub zdr: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub only: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ignore: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub quantizations: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<OpenRouterProviderSort>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_price: Option<OpenRouterMaxPrice>,
 
     /// Catch-all for additional provider keys so new OpenRouter features do not break deserialization.
@@ -157,8 +169,11 @@ impl Default for OpenRouterProviderSort {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct OpenRouterMaxPrice {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completion: Option<f64>,
 
     #[serde(flatten)]
