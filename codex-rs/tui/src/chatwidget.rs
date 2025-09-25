@@ -2532,7 +2532,7 @@ impl ChatWidget<'_> {
         let history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
         // Insert later via history_push_top_next_req once struct is constructed
 
-        // Removed startup tip for /resume; /resume is now shown under "Popular commands".
+        // Removed the legacy startup tip for /resume.
 
         // Initialize image protocol for rendering screenshots
 
