@@ -8494,6 +8494,7 @@ async fn send_agent_status_update(sess: &Session) {
                 AgentStatus::Failed => "failed".to_string(),
                 AgentStatus::Cancelled => "cancelled".to_string(),
             },
+            batch_id: agent.batch_id.clone(),
             model: Some(agent.model.clone()),
             last_progress: agent.progress.last().cloned(),
             result: agent.result.clone(),
