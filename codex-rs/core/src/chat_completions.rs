@@ -15,6 +15,7 @@ use tokio::time::timeout;
 use tracing::debug;
 use tracing::trace;
 
+use crate::auth::AuthManager;
 use crate::ModelProviderInfo;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
@@ -26,6 +27,7 @@ use crate::model_family::ModelFamily;
 use crate::openai_tools::create_tools_json_for_chat_completions_api;
 use crate::util::backoff;
 use std::sync::{Arc, Mutex};
+use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ResponseItem;
@@ -38,6 +40,7 @@ pub(crate) async fn stream_chat_completions(
     client: &reqwest::Client,
     provider: &ModelProviderInfo,
     debug_logger: &Arc<Mutex<DebugLogger>>,
+    auth_manager: Option<Arc<AuthManager>>,
 ) -> Result<ResponseStream> {
     if prompt.output_schema.is_some() {
         return Err(CodexErr::UnsupportedOperation(
@@ -297,6 +300,23 @@ pub(crate) async fn stream_chat_completions(
         "tools": tools_json,
     });
 
+    if let Some(openrouter_cfg) = provider.openrouter_config() {
+        if let Some(obj) = payload.as_object_mut() {
+            if let Some(provider_cfg) = &openrouter_cfg.provider {
+                obj.insert(
+                    "provider".to_string(),
+                    serde_json::to_value(provider_cfg)?
+                );
+            }
+            if let Some(route) = &openrouter_cfg.route {
+                obj.insert("route".to_string(), route.clone());
+            }
+            for (key, value) in &openrouter_cfg.extra {
+                obj.entry(key.clone()).or_insert(value.clone());
+            }
+        }
+    }
+
     // If an Ollama context override is present, propagate it. Some Ollama
     // builds honor `num_ctx` directly in OpenAI-compatible Chat Completions,
     // and others accept it under an `options` object – include both.
@@ -333,7 +353,16 @@ pub(crate) async fn stream_chat_completions(
     loop {
         attempt += 1;
 
-        let req_builder = provider.create_request_builder(client, &None).await?;
+        let auth = auth_manager.as_ref().and_then(|m| m.auth());
+        let mut req_builder = provider.create_request_builder(client, &auth).await?;
+
+        if let Some(auth) = auth.as_ref() {
+            if auth.mode == AuthMode::ChatGPT {
+                if let Some(account_id) = auth.get_account_id() {
+                    req_builder = req_builder.header("chatgpt-account-id", account_id);
+                }
+            }
+        }
 
         let res = req_builder
             .header(reqwest::header::ACCEPT, "text/event-stream")

@@ -4868,13 +4868,7 @@ async fn try_run_turn(
             }
             ResponseEvent::RateLimits(snapshot) => {
                 let mut state = sess.state.lock().unwrap();
-                state.latest_rate_limits = Some(RateLimitSnapshotEvent {
-                    primary_used_percent: snapshot.primary_used_percent,
-                    secondary_used_percent: snapshot.secondary_used_percent,
-                    primary_to_secondary_ratio_percent: snapshot.primary_to_secondary_ratio_percent,
-                    primary_window_minutes: snapshot.primary_window_minutes,
-                    secondary_window_minutes: snapshot.secondary_window_minutes,
-                });
+                state.latest_rate_limits = Some(snapshot.clone());
                 if let Some(ctx) = account_usage_context(sess) {
                     let usage_home = ctx.codex_home.clone();
                     let usage_account = ctx.account_id.clone();
@@ -5076,17 +5070,57 @@ fn write_agent_file(dir: &Path, filename: &str, content: &str) -> Result<PathBuf
     Ok(path)
 }
 
+const AGENT_PREVIEW_MAX_BYTES: usize = 32 * 1024; // 32 KiB
+
 fn preview_first_n_lines(s: &str, n: usize) -> (String, usize) {
-    let mut lines = s.lines();
-    let mut collected: Vec<&str> = Vec::new();
-    for _ in 0..n {
-        if let Some(l) = lines.next() {
-            collected.push(l);
-        } else {
-            break;
-        }
+    let total_lines = s.lines().count();
+    let mut preview = s.lines().take(n).collect::<Vec<_>>().join("\n");
+
+    let (maybe_truncated, was_truncated) =
+        truncate_middle_bytes(&preview, AGENT_PREVIEW_MAX_BYTES);
+    if was_truncated {
+        preview = maybe_truncated;
+        preview.push_str(&format!(
+            "\n…preview truncated to roughly {AGENT_PREVIEW_MAX_BYTES} bytes…"
+        ));
+    } else {
+        preview = maybe_truncated;
     }
-    (collected.join("\n"), s.lines().count())
+
+    if total_lines > n {
+        if !preview.ends_with('\n') {
+            preview.push('\n');
+        }
+        preview.push_str("…additional lines omitted…");
+    }
+
+    (preview, total_lines)
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn truncates_excessively_long_single_line() {
+        let input = "x".repeat(AGENT_PREVIEW_MAX_BYTES + 1024);
+        let (preview, total_lines) = preview_first_n_lines(&input, 500);
+        assert_eq!(total_lines, 1);
+        assert!(preview.contains("…truncated…"));
+        assert!(preview.contains("preview truncated to roughly"));
+    }
+
+    #[test]
+    fn notes_when_additional_lines_omitted() {
+        let input = (0..600)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (preview, total_lines) = preview_first_n_lines(&input, 500);
+        assert_eq!(total_lines, 600);
+        assert!(preview.contains("…additional lines omitted…"));
+        assert!(!preview.contains("preview truncated to roughly"));
+    }
 }
 
 async fn handle_function_call(
