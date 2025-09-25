@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
@@ -787,6 +788,7 @@ struct State {
     next_internal_sub_id: u64,
     token_usage_info: Option<TokenUsageInfo>,
     latest_rate_limits: Option<RateLimitSnapshotEvent>,
+    pending_manual_compacts: VecDeque<String>,
 }
 
 #[derive(Clone)]
@@ -2440,6 +2442,19 @@ impl Session {
         }
     }
 
+    pub fn enqueue_manual_compact(&self, sub_id: String) -> bool {
+        let mut state = self.state.lock().unwrap();
+        let was_empty = state.pending_manual_compacts.is_empty();
+        state.pending_manual_compacts.push_back(sub_id);
+        was_empty
+    }
+
+    pub fn dequeue_manual_compact(&self) -> Option<String> {
+        let mut state = self.state.lock().unwrap();
+        state.pending_manual_compacts.pop_front()
+    }
+
+
     pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
         let mut state = self.state.lock().unwrap();
         if state.pending_input.is_empty() && state.pending_user_input.is_empty() {
@@ -3528,6 +3543,18 @@ async fn submission_loop(
                 }]) {
                     let turn_context = sess.make_turn_context();
                     compact::spawn_compact_task(sess.clone(), turn_context, sub.id.clone(), items);
+                } else {
+                    let was_empty = sess.enqueue_manual_compact(sub.id.clone());
+                    let message = if was_empty {
+                        "Manual compact queued; it will run after the current response finishes.".to_string()
+                    } else {
+                        "Manual compact already queued; waiting for the current response to finish.".to_string()
+                    };
+                    let event = sess.make_event(
+                        &sub.id,
+                        EventMsg::AgentMessage(AgentMessageEvent { message }),
+                    );
+                    sess.send_event(event).await;
                 }
             }
             Op::Review { review_request } => {
@@ -4124,6 +4151,19 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
     if sess.pro_is_enabled() {
         let sub = Uuid::new_v4().to_string();
         sess.observer_maybe_trigger(sub, true, "task_complete");
+    }
+
+    if let Some(compact_sub_id) = sess.dequeue_manual_compact() {
+        let turn_context = sess.make_turn_context();
+        compact::spawn_compact_task(
+            Arc::clone(&sess),
+            turn_context,
+            compact_sub_id,
+            vec![InputItem::Text {
+                text: compact::SUMMARIZATION_PROMPT.to_string(),
+            }],
+        );
+        return;
     }
 
     if let Some(queued) = sess.pop_next_queued_user_input() {
