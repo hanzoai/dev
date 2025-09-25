@@ -38,6 +38,7 @@ mod file_search;
 mod get_git_diff;
 mod glitch_animation;
 mod history_cell;
+mod history;
 mod insert_history;
 pub mod live_wrap;
 mod markdown;

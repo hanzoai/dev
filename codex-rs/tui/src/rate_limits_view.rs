@@ -64,20 +64,18 @@ pub(crate) struct LimitsView {
 }
 
 impl LimitsView {
-    /// Render the gauge for the provided width if the data supports it.
-    pub(crate) fn gauge_lines(&self, width: u16) -> Vec<Line<'static>> {
-        match self.grid_state {
-            Some(state) => render_limit_grid(state, self.grid, width),
-            None => Vec::new(),
-        }
-    }
-
     pub(crate) fn lines_for_width(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines = self.summary_lines.clone();
         lines.extend(self.gauge_lines(width));
         lines.extend(self.legend_lines.clone());
         lines.extend(self.footer_lines.clone());
         lines
+    }
+
+    pub(crate) fn gauge_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.grid_state
+            .map(|state| render_limit_grid(state, self.grid, width))
+            .unwrap_or_default()
     }
 }
 
@@ -157,7 +155,7 @@ impl RateLimitMetrics {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct GridState {
+pub(crate) struct GridState {
     weekly_used_ratio: f64,
     hourly_remaining_ratio: f64,
 }
@@ -897,7 +895,11 @@ fn scale_grid_state(state: GridState, grid: GridConfig) -> GridState {
 }
 
 /// Convert the grid state to rendered lines for the TUI.
-fn render_limit_grid(state: GridState, grid_config: GridConfig, width: u16) -> Vec<Line<'static>> {
+pub(crate) fn render_limit_grid(
+    state: GridState,
+    grid_config: GridConfig,
+    width: u16,
+) -> Vec<Line<'static>> {
     GridLayout::new(grid_config, width)
         .map(|layout| layout.render(state))
         .unwrap_or_default()
