@@ -86,6 +86,14 @@ fn default_confirm_guard_patterns() -> Vec<ConfirmGuardPattern> {
             message: Some("Blocked rm -f/-r combination targeting broad paths. Confirm before running.".to_string()),
         },
         ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\b[^\n]*\s+-[a-z-]*rf[a-z-]*\b".to_string(),
+            message: Some("Blocked rm -rf. Force-recursive delete requires explicit confirmation.".to_string()),
+        },
+        ConfirmGuardPattern {
+            regex: r"(?i)^\s*(?:sudo\s+)?rm\b[^\n]*\s+-[-0-9a-qs-z]*f[-0-9a-qs-z]*\b".to_string(),
+            message: Some("Blocked rm -f. Force delete requires explicit confirmation.".to_string()),
+        },
+        ConfirmGuardPattern {
             regex: r"(?i)^\s*(?:sudo\s+)?find\s+\.(?:\s|$).*\s-delete\b".to_string(),
             message: Some("Blocked find . ... -delete. Recursive deletes require confirmation.".to_string()),
         },
@@ -257,7 +265,8 @@ pub struct GithubConfig {
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct ValidationConfig {
-    /// Master toggle for the patch validation harness.
+    /// Legacy master toggle for the validation harness (kept for config compatibility).
+    /// `run_patch_harness` now relies solely on the functional/stylistic group toggles.
     #[serde(default)]
     pub patch_harness: bool,
 
@@ -268,6 +277,10 @@ pub struct ValidationConfig {
     /// Timeout (seconds) for each external tool invocation.
     #[serde(default)]
     pub timeout_seconds: Option<u64>,
+
+    /// Group toggles that control which classes of validation run.
+    #[serde(default)]
+    pub groups: ValidationGroups,
 
     /// Per-tool enable flags (unset implies enabled).
     #[serde(default)]
@@ -280,8 +293,26 @@ impl Default for ValidationConfig {
             patch_harness: false,
             tools_allowlist: None,
             timeout_seconds: None,
+            groups: ValidationGroups::default(),
             tools: ValidationTools::default(),
         }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ValidationGroups {
+    /// Functional checks catch correctness regressions.
+    #[serde(default = "default_true")]
+    pub functional: bool,
+
+    /// Stylistic checks enforce formatting and best practices.
+    #[serde(default)]
+    pub stylistic: bool,
+}
+
+impl Default for ValidationGroups {
+    fn default() -> Self {
+        Self { functional: false, stylistic: false }
     }
 }
 
@@ -295,6 +326,51 @@ pub struct ValidationTools {
     pub cargo_check: Option<bool>,
     pub shfmt: Option<bool>,
     pub prettier: Option<bool>,
+    #[serde(rename = "tsc")]
+    pub tsc: Option<bool>,
+    pub eslint: Option<bool>,
+    pub phpstan: Option<bool>,
+    pub psalm: Option<bool>,
+    pub mypy: Option<bool>,
+    pub pyright: Option<bool>,
+    #[serde(rename = "golangci-lint")]
+    pub golangci_lint: Option<bool>,
+}
+
+/// Category groupings for validation checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationCategory {
+    Functional,
+    Stylistic,
+}
+
+impl ValidationCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ValidationCategory::Functional => "functional",
+            ValidationCategory::Stylistic => "stylistic",
+        }
+    }
+}
+
+/// Map a validation tool name to its category grouping.
+pub fn validation_tool_category(name: &str) -> ValidationCategory {
+    match name {
+        "actionlint"
+        | "shellcheck"
+        | "cargo-check"
+        | "tsc"
+        | "eslint"
+        | "phpstan"
+        | "psalm"
+        | "mypy"
+        | "pyright"
+        | "golangci-lint" => ValidationCategory::Functional,
+        "markdownlint" | "hadolint" | "yamllint" | "shfmt" | "prettier" => {
+            ValidationCategory::Stylistic
+        }
+        _ => ValidationCategory::Stylistic,
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
