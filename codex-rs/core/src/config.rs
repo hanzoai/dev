@@ -5,6 +5,7 @@ use crate::config_types::AgentConfig;
 use crate::config_types::AllowedCommand;
 use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
+use crate::config_types::CachedTerminalBackground;
 use crate::config_types::ClientTools;
 use crate::config_types::History;
 use crate::config_types::GithubConfig;
@@ -644,6 +645,53 @@ pub fn set_tui_theme_name(codex_home: &Path, theme: ThemeName) -> anyhow::Result
     // atomically move the tmp file into config.toml
     tmp_file.persist(config_path)?;
 
+    Ok(())
+}
+
+/// Record the most recent terminal background autodetect result under `[tui.cached_terminal_background]`.
+pub fn set_cached_terminal_background(
+    codex_home: &Path,
+    cache: &CachedTerminalBackground,
+) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(s) => s.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    let mut tbl = toml_edit::Table::new();
+    tbl.set_implicit(false);
+    tbl.insert("is_dark", toml_edit::value(cache.is_dark));
+    if let Some(term) = &cache.term {
+        tbl.insert("term", toml_edit::value(term.as_str()));
+    }
+    if let Some(term_program) = &cache.term_program {
+        tbl.insert("term_program", toml_edit::value(term_program.as_str()));
+    }
+    if let Some(term_program_version) = &cache.term_program_version {
+        tbl.insert(
+            "term_program_version",
+            toml_edit::value(term_program_version.as_str()),
+        );
+    }
+    if let Some(colorfgbg) = &cache.colorfgbg {
+        tbl.insert("colorfgbg", toml_edit::value(colorfgbg.as_str()));
+    }
+    if let Some(source) = &cache.source {
+        tbl.insert("source", toml_edit::value(source.as_str()));
+    }
+    if let Some(rgb) = &cache.rgb {
+        tbl.insert("rgb", toml_edit::value(rgb.as_str()));
+    }
+
+    doc["tui"]["cached_terminal_background"] = toml_edit::Item::Table(tbl);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
     Ok(())
 }
 

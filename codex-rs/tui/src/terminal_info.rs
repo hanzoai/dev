@@ -24,6 +24,19 @@ const ANSI_16_TO_RGB: [(u8, u8, u8); 16] = [
     (255, 255, 255),
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalBackgroundSource {
+    Osc11,
+    ColorFgBg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalBackgroundDetection {
+    pub is_dark: bool,
+    pub source: TerminalBackgroundSource,
+    pub rgb: Option<(u8, u8, u8)>,
+}
+
 fn set_nonblocking(tty: &std::fs::File) {
     #[cfg(unix)]
     {
@@ -221,8 +234,43 @@ fn query_osc_background_color() -> Option<(u8, u8, u8)> {
     tty_w.flush().ok()?;
 
     let reply = read_osc_reply(&mut tty_r, Duration::from_millis(150))?;
+    let _ = tty_w.write_all(b"\r\x1b[K");
+    let _ = tty_w.flush();
     let reply_str = String::from_utf8_lossy(&reply);
     parse_osc_rgb(&reply_str)
+}
+
+fn osc_background_query_supported() -> bool {
+    if env::var("TMUX").is_ok() || env::var("STY").is_ok() {
+        return false;
+    }
+
+    let term = env::var("TERM").unwrap_or_default();
+    if term.is_empty() {
+        return false;
+    }
+    let term_lower = term.to_ascii_lowercase();
+
+    const UNSUPPORTED_PREFIXES: [&str; 2] = ["screen", "tmux"];
+    if UNSUPPORTED_PREFIXES
+        .iter()
+        .any(|prefix| term_lower.starts_with(prefix))
+    {
+        return false;
+    }
+
+    const UNSUPPORTED_TERMS: [&str; 5] = [
+        "dumb",
+        "linux",
+        "vt100",
+        "xterm-color",
+        "ansi",
+    ];
+    if UNSUPPORTED_TERMS.contains(&term_lower.as_str()) {
+        return false;
+    }
+
+    true
 }
 
 fn xterm_color_to_rgb(idx: u32) -> Option<(u8, u8, u8)> {
@@ -279,19 +327,29 @@ fn detect_dark_from_rgb(rgb: (u8, u8, u8)) -> bool {
     relative_luminance(rgb) < 0.45
 }
 
-pub fn detect_dark_terminal_background() -> Option<bool> {
+pub fn detect_dark_terminal_background() -> Option<TerminalBackgroundDetection> {
     if let Ok(value) = env::var("CODE_DISABLE_THEME_AUTODETECT") {
         if matches!(value.as_str(), "1" | "true" | "TRUE" | "True") {
             return None;
         }
     }
 
-    if let Some(rgb) = query_osc_background_color() {
-        return Some(detect_dark_from_rgb(rgb));
+    if osc_background_query_supported() {
+        if let Some(rgb) = query_osc_background_color() {
+            return Some(TerminalBackgroundDetection {
+                is_dark: detect_dark_from_rgb(rgb),
+                source: TerminalBackgroundSource::Osc11,
+                rgb: Some(rgb),
+            });
+        }
     }
 
     if let Some(rgb) = parse_colorfgbg_env() {
-        return Some(detect_dark_from_rgb(rgb));
+        return Some(TerminalBackgroundDetection {
+            is_dark: detect_dark_from_rgb(rgb),
+            source: TerminalBackgroundSource::ColorFgBg,
+            rgb: Some(rgb),
+        });
     }
 
     None

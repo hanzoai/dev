@@ -1,5 +1,12 @@
 # History Cell Refactor Plan
 
+## Background
+
+We're seeing a lot of issues with the conversation history in the TUI. It's slow to scroll (not easily cached), has inconsistent ordering, does not reconstruct correctly when using resume or undo. We also want to be able to import conversations from sub-agents, so need a portable format. We're also seeing some really large files (such as chatwidget.rs) which we want to reduce to improve maintainability.
+
+To do that we're working on refactoring the history cells so that state is separated from rendering. Each cell should be able to be rendered from a state object along with the system settings. This state should be React-style so determine how the cell works, but the actual rendering logic should be entirely in the cell. The state should be easily serializable in JSON and will be built entirely from events in the new HistoryState. So, for example, the state should not have presentation logic like color etc.. that would be handled by the cell during rendering.
+
+
 ## Primary Goals (Plan & Status)
 - [x] **Extract per-cell modules** – core message/tool/plan/upgrade/reasoning/image/loading/animated files live under `history_cell/`; exec/diff/streaming still inline and pending extraction.
 - [ ] **Finish semantic state refactor** – continue replacing ad-hoc `SemanticLine` usage with rich typed structs (`MessageSegment`, `ToolArgument`, etc.) so renderers never infer structure from strings.
