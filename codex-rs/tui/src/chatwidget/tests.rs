@@ -12,6 +12,8 @@ use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
+use codex_core::protocol::AgentStatusUpdateEvent;
+use codex_core::protocol::AgentInfo as ProtocolAgentInfo;
 use codex_core::protocol::AgentReasoningDeltaEvent;
 use codex_core::protocol::AgentReasoningEvent;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
@@ -307,6 +309,7 @@ fn make_chatwidget_manual() -> (
         task_complete_pending: false,
         interrupts: InterruptManager::new(),
         needs_redraw: false,
+        agents_terminal: AgentsTerminalState::new(),
     };
     (widget, rx, op_rx)
 }
@@ -370,12 +373,134 @@ fn run_script(chat: &mut ChatWidget<'_>, steps: &[ScriptStep], rx: &std::sync::m
     pump_app_events(chat, rx);
 }
 
+#[test]
+fn agents_terminal_tracks_logs() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let mut event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            model: Some("gemini-pro".into()),
+            last_progress: Some("12:00:01: creating worktree".into()),
+            result: None,
+            error: None,
+        }],
+        context: Some("monorepo".into()),
+        task: Some("upgrade agents UI".into()),
+    };
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event.clone()),
+    });
+
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .expect("expected agent entry");
+    assert_eq!(entry.logs.len(), 2, "expect status + initial progress logged");
+
+    // Duplicate update should not add new logs
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event.clone()),
+    });
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .unwrap();
+    assert_eq!(entry.logs.len(), 2, "duplicate progress should be deduped");
+
+    // Completed update should append status + result
+    event.agents[0].status = "completed".into();
+    event.agents[0].last_progress = Some("12:04:12: finalizing".into());
+    event.agents[0].result = Some("Plan delivered".into());
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .unwrap();
+    assert!(
+        entry
+            .logs
+            .iter()
+            .any(|log| matches!(log.kind, AgentLogKind::Result) && log.message.contains("Plan delivered")),
+        "result log expected"
+    );
+    assert!(
+        entry
+            .logs
+            .iter()
+            .any(|log| matches!(log.kind, AgentLogKind::Status) && log.message.contains("Completed")),
+        "status transition expected"
+    );
+
+    drop(rx);
+}
+
+#[test]
+fn agents_terminal_toggle_via_shortcuts() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            model: Some("gemini-pro".into()),
+            last_progress: Some("progress".into()),
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_codex_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    assert!(chat.agents_terminal.order.contains(&"agent-1".to_string()));
+    assert!(!chat.agents_terminal.active);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "Ctrl+A should open terminal");
+
+    // Esc should exit the terminal view
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Esc should exit terminal");
+}
+
 fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
     while let Ok(event) = rx.try_recv() {
         match event {
             AppEvent::PrepareAgents => chat.prepare_agents(),
             AppEvent::DispatchCommand(SlashCommand::Agents, args) => {
                 chat.handle_agents_command(args);
+            }
+            AppEvent::DispatchCommand(SlashCommand::Undo, _command_text) => {
+                chat.handle_undo_command();
+            }
+            AppEvent::ShowUndoOptions { index } => {
+                chat.show_undo_restore_options(index);
+            }
+            AppEvent::PerformUndoRestore { index, restore_files, restore_conversation } => {
+                chat.perform_undo_restore(index, restore_files, restore_conversation);
             }
             AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
             AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
@@ -454,6 +579,84 @@ fn slash_agents_opens_overview() {
     assert!(
         lower.contains("add new"),
         "expected Add new row in overview\n{plain}"
+    );
+}
+
+#[test]
+fn slash_undo_shows_no_snapshot_state() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('u'),
+        ScriptStep::key_char('n'),
+        ScriptStep::key_char('d'),
+        ScriptStep::key_char('o'),
+        ScriptStep::enter(),
+    ];
+    run_script(&mut chat, &script, &rx);
+
+    assert!(
+        chat.bottom_pane.has_active_modal_view(),
+        "expected undo modal to be active"
+    );
+
+    let width: u16 = 120;
+    let height = chat.desired_height(width).max(40);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw undo status");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(
+        lower.contains("no snapshots yet"),
+        "expected undo status title\n{plain}"
+    );
+    assert!(
+        lower.contains("no snapshot is available to restore"),
+        "expected undo status detail\n{plain}"
+    );
+    assert!(
+        lower.contains("chat history stays unchanged"),
+        "expected scope hint to mention chat history\n{plain}"
+    );
+}
+
+#[test]
+fn undo_options_view_shows_toggles() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push(history_cell::new_user_prompt("latest change".to_string()));
+
+    let commit = codex_git_tooling::GhostCommit::new("abcdef1234567890".to_string(), None);
+    chat.ghost_snapshots.push(GhostSnapshot::new(
+        commit,
+        Some("Initial checkpoint".to_string()),
+        ConversationSnapshot::new(0, 0),
+    ));
+
+    chat.show_undo_restore_options(0);
+
+    let width: u16 = 100;
+    let height = chat.desired_height(width).max(24);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw undo options");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(
+        lower.contains("restore workspace files"),
+        "expected workspace toggle\n{plain}"
+    );
+    assert!(
+        lower.contains("restore conversation"),
+        "expected conversation toggle\n{plain}"
     );
 }
 

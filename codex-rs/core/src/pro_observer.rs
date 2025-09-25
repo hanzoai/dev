@@ -81,6 +81,7 @@ fn observer_tools(sess: &Session, reason: &'static str) -> Vec<OpenAiTool> {
         "activity" => vec![
             create_pro_recommend_tool(),
             crate::openai_tools::create_wait_tool(),
+            crate::openai_tools::create_kill_tool(),
             create_run_agent_tool(),
         ],
         _ => {
@@ -88,6 +89,7 @@ fn observer_tools(sess: &Session, reason: &'static str) -> Vec<OpenAiTool> {
                 create_pro_recommend_tool(),
                 create_assist_core_tool(),
                 crate::openai_tools::create_wait_tool(),
+                crate::openai_tools::create_kill_tool(),
                 create_run_agent_tool(),
             ];
             if sess.pro_autonomous_enabled() {
