@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.164] - 2025-09-25
+
+- TUI/Limits: track API reset timers across core and TUI so rate windows stay accurate. (417c1867)
+- CLI/Postinstall: restore shim detector and avoid overwriting existing code shim so installs stay intact. (ff63c4d0, 480640fa, ce317cbf)
+- Core/Config: allow overriding OpenAI wire API and support OpenRouter routing metadata for custom deployments. (a49cd2cd, 060cd5e2)
+- Core/Agents: cap agent previews and handle updated truncation tuple to stay within API limits. (a52dd361, c47f6767)
+
 ## [0.2.162] - 2025-09-22
 
 - CLI/Resume: fix --last to reliably select the most recent session under active runtimes. (1a2521ff)
