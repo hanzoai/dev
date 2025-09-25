@@ -3,12 +3,19 @@ use codex_core::ConversationManager;
 use codex_core::ModelProviderInfo;
 use codex_core::NewConversation;
 use codex_core::built_in_model_providers;
+use codex_core::models::ContentItem;
+use codex_core::protocol::CompactedItem;
 use codex_core::protocol::ErrorEvent;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
+use codex_core::protocol::ResponseItem;
 use codex_core::protocol::RolloutItem;
 use codex_core::protocol::RolloutLine;
+use codex_core::protocol::SessionMeta;
+use codex_core::protocol::SessionMetaLine;
+use codex_core::InitialHistory;
+use codex_core::RolloutRecorder;
 use core_test_support::load_default_config_for_test;
 use core_test_support::wait_for_event;
 use tempfile::TempDir;
@@ -30,10 +37,14 @@ use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use pretty_assertions::assert_eq;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use chrono::Utc;
+use codex_protocol::mcp_protocol::ConversationId;
 // --- Test helpers -----------------------------------------------------------
 
 pub(super) const FIRST_REPLY: &str = "FIRST_REPLY";
@@ -264,6 +275,82 @@ async fn summarize_context_three_requests_and_instructions() {
         saw_compacted_summary,
         "expected a Compacted entry containing the summarizer output"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_rollout_history_retains_compacted_entries() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let path = dir.path().join("session.jsonl");
+    let conversation_id = ConversationId::new();
+
+    let session_meta = RolloutLine {
+        timestamp: Utc::now().to_rfc3339(),
+        item: RolloutItem::SessionMeta(SessionMetaLine {
+            meta: SessionMeta {
+                id: conversation_id,
+                timestamp: Utc::now().to_rfc3339(),
+                cwd: PathBuf::from("/tmp"),
+                originator: "code".to_string(),
+                cli_version: "test".to_string(),
+                instructions: None,
+            },
+            git: None,
+        }),
+    };
+
+    let user_line = RolloutLine {
+        timestamp: Utc::now().to_rfc3339(),
+        item: RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: "original user message".to_string(),
+            }],
+        }),
+    };
+
+    let assistant_line = RolloutLine {
+        timestamp: Utc::now().to_rfc3339(),
+        item: RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: "assistant reply".to_string(),
+            }],
+        }),
+    };
+
+    let compacted_line = RolloutLine {
+        timestamp: Utc::now().to_rfc3339(),
+        item: RolloutItem::Compacted(CompactedItem {
+            message: "compact summary".to_string(),
+        }),
+    };
+
+    let mut file = std::fs::File::create(&path).expect("open session file");
+    for line in [&session_meta, &user_line, &assistant_line, &compacted_line] {
+        let serialized = serde_json::to_string(line).expect("serialize rollout line");
+        writeln!(file, "{}", serialized).expect("write rollout line");
+    }
+
+    let history = RolloutRecorder::get_rollout_history(&path)
+        .await
+        .expect("load history");
+
+    let resumed = match history {
+        InitialHistory::Resumed(resumed) => resumed,
+        other => panic!("expected resumed history, got {other:?}"),
+    };
+
+    assert_eq!(resumed.conversation_id, conversation_id);
+    let mut saw_compacted = false;
+    for item in resumed.history {
+        if matches!(item, RolloutItem::Compacted(ref compacted) if compacted.message == "compact summary") {
+            saw_compacted = true;
+            break;
+        }
+    }
+    assert!(saw_compacted, "expected compacted rollout item to be preserved");
 }
 
 // Windows CI only: bump to 4 workers to prevent SSE/event starvation and test timeouts.
