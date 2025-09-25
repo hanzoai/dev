@@ -4013,8 +4013,10 @@ impl ChatWidget<'_> {
         self.autoscroll_if_near_bottom();
         self.bottom_pane.set_has_chat_history(true);
         self.process_animation_cleanup();
-        // Maintain input focus when new history arrives
-        self.bottom_pane.ensure_input_focus();
+        // Maintain input focus when new history arrives unless a modal overlay owns it
+        if !self.agents_terminal.active {
+            self.bottom_pane.ensure_input_focus();
+        }
         self.app_event_tx.send(AppEvent::RequestRedraw);
         self.refresh_explore_trailing_flags();
         self.refresh_reasoning_collapsed_visibility();
@@ -5113,7 +5115,9 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_task_running(false);
         self.active_task_ids.clear();
         self.pending_jump_back = None;
-        self.bottom_pane.ensure_input_focus();
+        if !self.agents_terminal.active {
+            self.bottom_pane.ensure_input_focus();
+        }
     }
 
     fn flush_pending_agent_notes(&mut self) {
