@@ -5,7 +5,7 @@ use crate::environment_context::EnvironmentContext;
 use crate::error::Result;
 use crate::model_family::ModelFamily;
 use crate::openai_tools::OpenAiTool;
-use codex_protocol::protocol::RateLimitSnapshotEvent;
+use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
 use codex_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 use codex_protocol::models::ContentItem;
@@ -267,12 +267,28 @@ pub(crate) struct Reasoning {
     pub(crate) summary: Option<ReasoningSummaryConfig>,
 }
 
-/// Text configuration for verbosity level in OpenAI API responses.
-#[derive(Debug, Serialize)]
+/// Text configuration for verbosity/format in OpenAI API responses.
+#[derive(Debug)]
 pub(crate) struct Text {
     pub(crate) verbosity: OpenAiTextVerbosity,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) format: Option<TextFormat>,
+}
+
+impl serde::Serialize for Text {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(fmt) = &self.format {
+            // When a structured format is present, omit `verbosity` per API expectations.
+            map.serialize_entry("format", fmt)?;
+        } else {
+            map.serialize_entry("verbosity", &self.verbosity)?;
+        }
+        map.end()
+    }
 }
 
 /// OpenAI text verbosity level for serialization.

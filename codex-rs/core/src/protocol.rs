@@ -490,21 +490,41 @@ pub struct RecordedEvent {
 }
 
 pub fn event_msg_to_protocol(msg: &EventMsg) -> Option<codex_protocol::protocol::EventMsg> {
-    if matches!(msg, EventMsg::ReplayHistory(_)) {
-        return None;
+    match msg {
+        EventMsg::ReplayHistory(_) => None,
+        EventMsg::TokenCount(payload) => {
+            let info = convert_value(&payload.info)?;
+            let rate_limits = payload
+                .rate_limits
+                .as_ref()
+                .map(rate_limit_snapshot_to_protocol);
+            Some(codex_protocol::protocol::EventMsg::TokenCount(
+                codex_protocol::protocol::TokenCountEvent { info, rate_limits },
+            ))
+        }
+        _ => convert_value(msg),
     }
-    convert_value(msg)
 }
 
 
 pub fn event_msg_from_protocol(msg: &codex_protocol::protocol::EventMsg) -> Option<EventMsg> {
-    let Some(converted) = convert_value(msg) else {
-        return None;
-    };
-    if matches!(converted, EventMsg::ReplayHistory(_)) {
-        return None;
+    match msg {
+        codex_protocol::protocol::EventMsg::TokenCount(payload) => {
+            let info = convert_value(&payload.info).unwrap_or(None);
+            let rate_limits = payload
+                .rate_limits
+                .as_ref()
+                .map(rate_limit_snapshot_from_protocol);
+            Some(EventMsg::TokenCount(TokenCountEvent { info, rate_limits }))
+        }
+        _ => {
+            let converted = convert_value(msg)?;
+            if matches!(converted, EventMsg::ReplayHistory(_)) {
+                return None;
+            }
+            Some(converted)
+        }
     }
-    Some(converted)
 }
 
 
@@ -568,6 +588,68 @@ where
         return None;
     };
     serde_json::from_value(json).ok()
+}
+
+fn rate_limit_snapshot_to_protocol(
+    snapshot: &RateLimitSnapshotEvent,
+) -> codex_protocol::protocol::RateLimitSnapshot {
+    let primary = codex_protocol::protocol::RateLimitWindow {
+        used_percent: snapshot.primary_used_percent,
+        window_minutes: Some(snapshot.primary_window_minutes),
+        resets_in_seconds: None,
+    };
+    let secondary = codex_protocol::protocol::RateLimitWindow {
+        used_percent: snapshot.secondary_used_percent,
+        window_minutes: Some(snapshot.secondary_window_minutes),
+        resets_in_seconds: None,
+    };
+    codex_protocol::protocol::RateLimitSnapshot {
+        primary: Some(primary),
+        secondary: Some(secondary),
+    }
+}
+
+fn rate_limit_snapshot_from_protocol(
+    snapshot: &codex_protocol::protocol::RateLimitSnapshot,
+) -> RateLimitSnapshotEvent {
+    let primary_used = snapshot
+        .primary
+        .as_ref()
+        .map(|window| window.used_percent)
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0);
+    let secondary_used = snapshot
+        .secondary
+        .as_ref()
+        .map(|window| window.used_percent)
+        .unwrap_or(0.0)
+        .clamp(0.0, 100.0);
+    let primary_window_minutes = snapshot
+        .primary
+        .as_ref()
+        .and_then(|window| window.window_minutes)
+        .unwrap_or(0);
+    let secondary_window_minutes = snapshot
+        .secondary
+        .as_ref()
+        .and_then(|window| window.window_minutes)
+        .unwrap_or(0);
+
+    let ratio_percent = match (primary_window_minutes, secondary_window_minutes) {
+        (0, _) | (_, 0) => f64::NAN,
+        (primary, secondary) => {
+            let ratio = (primary as f64) / (secondary as f64);
+            (ratio * 100.0).clamp(0.0, 100.0)
+        }
+    };
+
+    RateLimitSnapshotEvent {
+        primary_used_percent: primary_used,
+        secondary_used_percent: secondary_used,
+        primary_to_secondary_ratio_percent: ratio_percent,
+        primary_window_minutes,
+        secondary_window_minutes,
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

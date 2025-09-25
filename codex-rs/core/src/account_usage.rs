@@ -3,7 +3,7 @@ use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
-use codex_protocol::protocol::RateLimitSnapshotEvent;
+use crate::protocol::RateLimitSnapshotEvent;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json;
