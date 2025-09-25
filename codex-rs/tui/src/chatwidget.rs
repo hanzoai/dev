@@ -6644,6 +6644,29 @@ impl ChatWidget<'_> {
                 self.agent_context = context;
                 self.agent_task = task;
 
+                // Fallback: if every agent we know about has reached a terminal state and
+                // there is no active streaming or tooling, clear the spinner even if the
+                // backend hasn't sent TaskComplete yet. This prevents the footer from
+                // getting stuck on "Responding..." after multi-agent runs that yield
+                // early.
+                if self.bottom_pane.is_task_running() {
+                    let all_agents_terminal = !self.agent_runtime.is_empty()
+                        && self
+                            .agent_runtime
+                            .values()
+                            .all(|rt| rt.completed_at.is_some());
+                    if all_agents_terminal {
+                        let any_tools_running = !self.exec.running_commands.is_empty()
+                            || !self.tools_state.running_custom_tools.is_empty()
+                            || !self.tools_state.running_web_search.is_empty();
+                        let any_streaming = self.stream.is_write_cycle_active();
+                        if !(any_tools_running || any_streaming) {
+                            self.bottom_pane.set_task_running(false);
+                            self.bottom_pane.update_status_text(String::new());
+                        }
+                    }
+                }
+
                 // Update overall task status based on agent states
                 self.overall_task_status = if self.active_agents.is_empty() {
                     "preparing".to_string()
