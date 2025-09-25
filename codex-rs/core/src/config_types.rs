@@ -457,11 +457,32 @@ impl Default for Notifications {
 }
 
 /// Collection of settings that are specific to the TUI.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct CachedTerminalBackground {
+    pub is_dark: bool,
+    #[serde(default)]
+    pub term: Option<String>,
+    #[serde(default)]
+    pub term_program: Option<String>,
+    #[serde(default)]
+    pub term_program_version: Option<String>,
+    #[serde(default)]
+    pub colorfgbg: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub rgb: Option<String>,
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Tui {
     /// Theme configuration for the TUI
     #[serde(default)]
     pub theme: ThemeConfig,
+
+    /// Cached autodetect result so we can skip probing the terminal repeatedly.
+    #[serde(default)]
+    pub cached_terminal_background: Option<CachedTerminalBackground>,
 
     /// Syntax highlighting configuration (Markdown fenced code blocks)
     #[serde(default)]
@@ -501,6 +522,7 @@ impl Default for Tui {
     fn default() -> Self {
         Self {
             theme: ThemeConfig::default(),
+            cached_terminal_background: None,
             highlight: HighlightConfig::default(),
             show_reasoning: false,
             stream: StreamConfig::default(),
