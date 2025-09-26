@@ -550,16 +550,17 @@ jobs:
              - Do NOT blanket-delete new crates or reintroduced paths. Surface noteworthy cases in MERGE_REPORT.md and make a reasoned choice.
              - For any path listed in purge_globs or perma_removed_paths, ensure it remains deleted if upstream reintroduced it.
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). Use repo context and the provided artifacts to make sensible, minimal decisions. Prefer preserving our local UX/branding and workflows; adopt upstream when it improves correctness, security, or compatibility. Record notable decisions in MERGE_REPORT.md.
-          5) Compatibility (do not break callers):
+          5) Resolve lockfile conflicts early: if `codex-rs/Cargo.lock` contains merge markers or becomes out of sync with the workspace manifests, regenerate it inside `codex-rs/` (e.g., `cargo update --workspace --locked`; fall back to `cargo update --workspace` if the locked run fails). Commit the regenerated lock as part of the merge and note the action in MERGE_REPORT.md. Prefer preserving our crate versions, but do not leave conflict markers in place.
+          6) Compatibility (do not break callers):
              - Keep these public re-exports in codex-core: ModelClient, Prompt, ResponseEvent, ResponseStream.
                Removing them breaks downstream imports and will fail API tests.
              - Keep codex_core::models namespace as an alias to protocol models.
              - Do not remove ICU/sys-locale dependencies unless you confirm (via repo-wide search) they are unused across the workspace.
-          6) Verify with scripts/upstream-merge/verify.sh. If it fails, fix minimally and re-run until it passes.
+          7) Verify with scripts/upstream-merge/verify.sh. If it fails, fix minimally and re-run until it passes.
              - Note: verify.sh includes fork-specific guards for tool registration and UA/version; honor these when resolving conflicts.
-          7) Stage and commit with a conventional message and short build status.
-          8) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
-          9) Push MERGE_BRANCH and prepare PR title/body.
+          8) Stage and commit with a conventional message and short build status.
+          9) Write .github/auto/MERGE_REPORT.md (Incorporated / Dropped / Other changes) summarizing choices.
+          10) Push MERGE_BRANCH and prepare PR title/body.
           </task>
 
           <constraints>
@@ -683,6 +684,7 @@ jobs:
           - Restore or add back missing public re-exports in codex-core that cause `cargo check --tests` to fail (e.g., ModelClient, Prompt, ResponseEvent, ResponseStream), unless you can conclusively update all workspace imports safely.
           - Prefer adding compatibility aliases over large refactors.
           - Do not remove or rename crates. Do not drop ICU/sys-locale unless unused repo-wide.
+          - If verification failed due to `codex-rs/Cargo.lock` parse errors or merge markers, regenerate the lock inside `codex-rs/` (try `cargo update --workspace --locked`; fall back to `cargo update --workspace` if necessary) and include the updated file in the fix.
           - Run scripts/upstream-merge/verify.sh and iterate until it returns success.
           - Update .github/auto/MERGE_REPORT.md with a short note under "Other changes" describing the compatibility adjustments.
           - Push to ${MERGE_BRANCH}.

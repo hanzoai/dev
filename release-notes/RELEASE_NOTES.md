@@ -1,14 +1,14 @@
-## @just-every/code v0.2.166
+## @just-every/code v0.2.167
 
-This release tightens TUI ergonomics, trims command latency, and refreshes packaging defaults.
+This release smooths shell workflows and makes the status view richer and easier to audit.
 
 ### Changes
 
-- TUI/History: refresh the popular commands lineup so quick actions match current workflows.
-- TUI/Auto-upgrade: silence installer chatter and log completion once updates finish.
-- Core/Client: skip the web_search tool when reasoning is minimal to reduce latency.
-- TUI/Input: normalize legacy key press/release cases so hotkeys stay consistent on older terminals.
-- Nix: make codex-rs the default package and drop the broken codex-cli derivation.
+- TUI/Terminal: allow a blank dollar prompt to open a shell instantly.
+- TUI/Status: rebuild /status with card layout and richer reasoning context.
+- TUI/Limits: persist rate-limit warning logs across sessions so spikes stay visible.
+- Core/Compact: store inline auto-compaction history to stabilize collapsed output.
+- TUI/Input: restore Warp.dev command+option editing for smoother text adjustments.
 
 ### Install
 
@@ -17,4 +17,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.165...v0.2.166
+Compare: https://github.com/just-every/code/compare/v0.2.166...v0.2.167
