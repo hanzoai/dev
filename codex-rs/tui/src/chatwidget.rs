@@ -14486,8 +14486,8 @@ impl ChatWidget<'_> {
         let mut items: Vec<SelectionItem> = Vec::new();
 
         items.push(SelectionItem {
-            name: "Review current workspace changes".to_string(),
-            description: Some("Include staged, unstaged, and untracked files".to_string()),
+            name: "Review /branch changes".to_string(),
+            description: Some("Compare your worktree branch against its merge target".to_string()),
             is_current: false,
             actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
                 tx.send(crate::app_event::AppEvent::RunReviewCommand(String::new()));
@@ -14706,7 +14706,7 @@ impl ChatWidget<'_> {
 
             let prompt = if let Some(current) = current_trimmed.as_ref() {
                 format!(
-                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                 )
             } else {
                 format!(
@@ -14800,7 +14800,7 @@ impl ChatWidget<'_> {
                         {
                             if base_branch != current_branch {
                                 let prompt = format!(
-                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                                 );
                                 let hint = format!("against {base_branch}");
                                 let preparation_label =
