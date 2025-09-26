@@ -26,6 +26,16 @@ Adjust the `command` or `args` only if you pin a different version or use a glob
 - The Rust MCP server exposes ACP tools: `session/new`, `session/prompt`, and fast interrupts via `session/cancel`. These are backed by the same conversation manager that powers the TUI, so approvals, confirm guards, and sandbox policies remain intact.
 - Streaming `session/update` notifications bridge Codex events into Zed. You get Answer/Reasoning updates, shell command progress, approvals, and apply_patch diffs in the Zed UI without losing terminal parity.
 - MCP configuration stays centralized in `CODEX_HOME/config.toml`. Use `[experimental_client_tools]` to delegate file read/write and permission requests back to Zed when you want its UI to handle approvals.
+- MCP configuration stays centralized in `CODEX_HOME/config.toml`. Use `[experimental_client_tools]` to delegate file read/write and permission requests back to Zed when you want its UI to handle approvals. A minimal setup looks like:
+
+```toml
+[experimental_client_tools]
+request_permission = { mcp_server = "zed", tool_name = "requestPermission" }
+read_text_file = { mcp_server = "zed", tool_name = "readTextFile" }
+write_text_file = { mcp_server = "zed", tool_name = "writeTextFile" }
+```
+
+Zed wires these tools automatically when you add the Code agent, so the identifiers above match the defaults.
 - The CLI entry point (`npx @just-every/code acp`) is a thin wrapper over the Rust binary (`cargo run -p code-mcp-server -- --stdio`) that ships alongside the rest of Code. Build-from-source workflows plug in by swapping `command` for an absolute path to that binary.
 
 ## Tips and troubleshooting
@@ -33,3 +43,4 @@ Adjust the `command` or `args` only if you pin a different version or use a glob
 - Need to inspect the handshake? Run Zed’s `dev: open acp logs` command from the Command Palette; the log shows JSON‑RPC requests and Codex replies.
 - If prompts hang, make sure no other process is bound to the same MCP port and that your `CODEX_HOME` points to the intended config directory. The ACP server inherits all of Code’s sandbox settings, so restrictive policies (e.g., `approval_policy = "never"`) still apply.
 - Zed currently skips history restores and checkpoint UI for third-party agents. Stick to the TUI if you rely on those features; ACP support is still evolving upstream.
+- After a session starts, the model selector in Zed lists Code’s built-in presets (e.g., `gpt-5-codex`, `gpt-5` high/medium/low). Picking a new preset updates the running Codex session immediately, so you don’t have to restart the agent to change models.
