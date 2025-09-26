@@ -15,6 +15,7 @@ use crate::tui;
 use crate::tui::TerminalInfo;
 use codex_core::config::add_project_allowed_command;
 use codex_core::config::Config;
+use codex_core::config_types::Notifications;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
@@ -1953,6 +1954,8 @@ impl App<'_> {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.set_tui_notifications(enabled);
                     }
+                    self.config.tui.notifications = Notifications::Enabled(enabled);
+                    self.config.tui_notifications = Notifications::Enabled(enabled);
                 }
                 AppEvent::UpdateValidationTool { name, enable } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
