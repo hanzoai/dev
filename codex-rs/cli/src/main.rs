@@ -22,6 +22,8 @@ use codex_core::find_conversation_path_by_id_str;
 use codex_core::RolloutRecorder;
 use codex_exec::Cli as ExecCli;
 use codex_tui::Cli as TuiCli;
+use codex_tui::ExitSummary;
+use codex_tui::RESUME_COMMAND_NAME;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -257,9 +259,22 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 &mut interactive.config_overrides,
                 root_config_overrides.clone(),
             );
-            let usage = codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
-            if !usage.is_zero() {
-                println!("{}", codex_core::protocol::FinalOutput::from(usage));
+            let ExitSummary {
+                token_usage,
+                session_id,
+            } = codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
+            if !token_usage.is_zero() {
+                println!(
+                    "{}",
+                    codex_core::protocol::FinalOutput::from(token_usage.clone())
+                );
+            }
+            if let Some(session_id) = session_id {
+                println!(
+                    "To continue this session, run {} resume {}.",
+                    RESUME_COMMAND_NAME,
+                    session_id
+                );
             }
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
@@ -287,7 +302,23 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 last,
                 config_overrides,
             );
-            codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
+            let ExitSummary {
+                token_usage,
+                session_id,
+            } = codex_tui::run_main(interactive, codex_linux_sandbox_exe).await?;
+            if !token_usage.is_zero() {
+                println!(
+                    "{}",
+                    codex_core::protocol::FinalOutput::from(token_usage.clone())
+                );
+            }
+            if let Some(session_id) = session_id {
+                println!(
+                    "To continue this session, run {} resume {}.",
+                    RESUME_COMMAND_NAME,
+                    session_id
+                );
+            }
         }
         Some(Subcommand::Login(mut login_cli)) => {
             prepend_config_flags(
