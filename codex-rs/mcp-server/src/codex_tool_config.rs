@@ -183,6 +183,27 @@ pub(crate) fn create_tool_for_acp_prompt() -> Tool {
     }
 }
 
+/// Builds a `Tool` definition for the `acp/set_model` tool-call.
+pub(crate) fn create_tool_for_acp_set_model() -> Tool {
+    let input_schema = ToolInputSchema {
+        r#type: "object".to_string(),
+        required: Some(vec!["sessionId".to_string(), "modelId".to_string()]),
+        properties: Some(json!({
+            "sessionId": {"type": "string"},
+            "modelId": {"type": "string"}
+        })),
+    };
+
+    Tool {
+        name: acp::AGENT_METHOD_NAMES.model_select.to_string(),
+        title: Some(acp::AGENT_METHOD_NAMES.model_select.to_string()),
+        input_schema,
+        output_schema: None,
+        description: Some("Select a model for an existing ACP Codex session.".to_string()),
+        annotations: None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpNewSessionToolArgs {
@@ -200,6 +221,15 @@ pub struct AcpPromptToolArgs {
     pub prompt: Vec<acp::ContentBlock>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpSetModelToolArgs {
+    #[serde(rename = "sessionId")]
+    pub session_id: acp::SessionId,
+    #[serde(rename = "modelId")]
+    pub model_id: acp::ModelId,
 }
 
 impl CodexToolCallParam {
