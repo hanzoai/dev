@@ -2456,6 +2456,11 @@ impl App<'_> {
                     // Schedule the next redraw with the requested duration
                     self.schedule_redraw_in(duration);
                 }
+                AppEvent::GhostSnapshotFinished { job_id, result, elapsed } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_ghost_snapshot_finished(job_id, result, elapsed);
+                    }
+                }
             }
         }
         if self.alt_screen_active {
@@ -2554,6 +2559,13 @@ impl App<'_> {
         self.commit_anim_running.store(false, Ordering::Release);
         self.input_running.store(false, Ordering::Release);
         usage
+    }
+
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        match &self.app_state {
+            AppState::Chat { widget } => widget.session_id(),
+            AppState::Onboarding { .. } => None,
+        }
     }
 
     /// Return a human-readable performance summary if timing was enabled.

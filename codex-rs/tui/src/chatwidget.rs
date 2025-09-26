@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::io;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -333,10 +334,14 @@ impl RateLimitWarningState {
     ) -> Vec<RateLimitWarning> {
         let mut warnings = Vec::new();
 
-        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        let mut next_weekly_index = self.weekly_index;
+        while next_weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            next_weekly_index += 1;
+        }
+        if next_weekly_index > self.weekly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Secondary,
                 threshold,
@@ -344,13 +349,17 @@ impl RateLimitWarningState {
                     "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.weekly_index += 1;
+            self.weekly_index = next_weekly_index;
         }
 
-        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        let mut next_hourly_index = self.hourly_index;
+        while next_hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            next_hourly_index += 1;
+        }
+        if next_hourly_index > self.hourly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Primary,
                 threshold,
@@ -358,7 +367,7 @@ impl RateLimitWarningState {
                     "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.hourly_index += 1;
+            self.hourly_index = next_hourly_index;
         }
 
         warnings
@@ -556,6 +565,10 @@ pub(crate) struct ChatWidget<'a> {
     ghost_snapshots: Vec<GhostSnapshot>,
     ghost_snapshots_disabled: bool,
     ghost_snapshots_disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    ghost_snapshot_queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active_ghost_snapshot: Option<(u64, GhostSnapshotRequest)>,
+    next_ghost_snapshot_id: u64,
+    pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -667,6 +680,43 @@ impl GhostSnapshot {
 
     fn age_from(&self, now: DateTime<Local>) -> Option<std::time::Duration> {
         now.signed_duration_since(self.captured_at).to_std().ok()
+    }
+}
+
+#[derive(Clone)]
+struct GhostSnapshotRequest {
+    summary: Option<String>,
+    conversation: ConversationSnapshot,
+    started_at: Instant,
+}
+
+impl GhostSnapshotRequest {
+    fn new(summary: Option<String>, conversation: ConversationSnapshot) -> Self {
+        Self {
+            summary,
+            conversation,
+            started_at: Instant::now(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GhostSnapshotJobHandle {
+    Scheduled(u64),
+    Skipped,
+}
+
+enum PendingSnapshotDispatch {
+    Direct { job_id: u64, batch: Vec<UserMessage> },
+    Queued { job_id: u64, message: UserMessage },
+}
+
+impl PendingSnapshotDispatch {
+    fn job_id(&self) -> u64 {
+        match self {
+            PendingSnapshotDispatch::Direct { job_id, .. } |
+            PendingSnapshotDispatch::Queued { job_id, .. } => *job_id,
+        }
     }
 }
 
@@ -2723,6 +2773,10 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
+            pending_snapshot_dispatches: VecDeque::new(),
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2955,6 +3009,10 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
+            pending_snapshot_dispatches: VecDeque::new(),
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -4887,13 +4945,6 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let prompt_summary = if message.display_text.trim().is_empty() {
-            None
-        } else {
-            Some(message.display_text.clone())
-        };
-        self.capture_ghost_snapshot(prompt_summary);
-
         let turn_active = self.is_task_running()
             || !self.active_task_ids.is_empty()
             || self.stream.is_write_cycle_active()
@@ -4904,54 +4955,216 @@ impl ChatWidget<'_> {
                 "Queuing user input while turn is active (queued: {})",
                 self.queued_user_messages.len() + 1
             );
-            self.queued_user_messages.push_back(message);
+            let queued_clone = message.clone();
+            self.queued_user_messages.push_back(queued_clone);
             self.refresh_queued_user_messages();
 
-            let queue_items = self
-                .queued_user_messages
-                .back()
-                .map(|msg| msg.ordered_items.clone())
-                .unwrap_or_default();
+            let prompt_summary = if message.display_text.trim().is_empty() {
+                None
+            } else {
+                Some(message.display_text.clone())
+            };
 
-            match self.codex_op_tx.send(Op::QueueUserInput { items: queue_items }) {
-                Ok(()) => {
-                    if let Some(sent_message) = self.queued_user_messages.pop_back() {
-                        self.refresh_queued_user_messages();
-                        self.finalize_sent_user_message(sent_message);
-                    }
+            match self.capture_ghost_snapshot(prompt_summary) {
+                GhostSnapshotJobHandle::Scheduled(job_id) => {
+                    self.pending_snapshot_dispatches
+                        .push_back(PendingSnapshotDispatch::Queued { job_id, message });
                 }
-                Err(e) => {
-                    tracing::error!("failed to send QueueUserInput op: {e}");
+                GhostSnapshotJobHandle::Skipped => {
+                    self.dispatch_queued_user_message_now(message);
                 }
             }
-
             return;
         }
 
         let mut batch: Vec<UserMessage> = self.queued_user_messages.drain(..).collect();
         batch.push(message);
         self.refresh_queued_user_messages();
-        self.send_user_messages_to_agent(batch);
+        let summary = batch
+            .last()
+            .and_then(|msg| {
+                let trimmed = msg.display_text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(msg.display_text.clone())
+                }
+            });
+
+        match self.capture_ghost_snapshot(summary) {
+            GhostSnapshotJobHandle::Scheduled(job_id) => {
+                self.pending_snapshot_dispatches
+                    .push_back(PendingSnapshotDispatch::Direct { job_id, batch });
+            }
+            GhostSnapshotJobHandle::Skipped => {
+                self.send_user_messages_to_agent(batch);
+            }
+        }
 
         // (debug watchdog removed)
     }
 
-    fn capture_ghost_snapshot(&mut self, summary: Option<String>) {
+    fn capture_ghost_snapshot(&mut self, summary: Option<String>) -> GhostSnapshotJobHandle {
         if self.ghost_snapshots_disabled {
-            return;
+            return GhostSnapshotJobHandle::Skipped;
         }
 
-        let conversation = self.current_conversation_snapshot();
-        let options = CreateGhostCommitOptions::new(&self.config.cwd);
-        match create_ghost_commit(&options) {
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        self.enqueue_ghost_snapshot(request)
+    }
+
+    fn capture_ghost_snapshot_blocking(&mut self, summary: Option<String>) -> Option<GhostSnapshot> {
+        if self.ghost_snapshots_disabled {
+            return None;
+        }
+
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        let repo_path = self.config.cwd.clone();
+        let started_at = request.started_at;
+        let result = create_ghost_commit(&CreateGhostCommitOptions::new(repo_path.as_path()));
+        let elapsed = started_at.elapsed();
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        snapshot
+    }
+
+    fn dispatch_pending_snapshot(&mut self, job_id: u64) {
+        let Some(position) = self
+            .pending_snapshot_dispatches
+            .iter()
+            .position(|pending| pending.job_id() == job_id)
+        else {
+            return;
+        };
+
+        let Some(pending) = self.pending_snapshot_dispatches.remove(position) else {
+            return;
+        };
+        self.process_snapshot_dispatch(pending);
+    }
+
+    fn flush_pending_snapshot_dispatches(&mut self) {
+        while let Some(pending) = self.pending_snapshot_dispatches.pop_front() {
+            self.process_snapshot_dispatch(pending);
+        }
+    }
+
+    fn process_snapshot_dispatch(&mut self, pending: PendingSnapshotDispatch) {
+        match pending {
+            PendingSnapshotDispatch::Direct { batch, .. } => {
+                self.send_user_messages_to_agent(batch);
+            }
+            PendingSnapshotDispatch::Queued { message, .. } => {
+                self.dispatch_queued_user_message_now(message);
+            }
+        }
+    }
+
+    fn dispatch_queued_user_message_now(&mut self, message: UserMessage) {
+        let message = self.take_queued_user_message(&message).unwrap_or(message);
+        let items = message.ordered_items.clone();
+        match self.codex_op_tx.send(Op::QueueUserInput { items }) {
+            Ok(()) => {
+                self.finalize_sent_user_message(message);
+            }
+            Err(err) => {
+                tracing::error!("failed to send QueueUserInput op: {err}");
+                self.queued_user_messages.push_front(message);
+                self.refresh_queued_user_messages();
+            }
+        }
+    }
+
+    fn take_queued_user_message(&mut self, target: &UserMessage) -> Option<UserMessage> {
+        let position = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message == target)?;
+        let removed = self.queued_user_messages.remove(position)?;
+        self.refresh_queued_user_messages();
+        Some(removed)
+    }
+
+    fn enqueue_ghost_snapshot(&mut self, request: GhostSnapshotRequest) -> GhostSnapshotJobHandle {
+        let job_id = self.next_ghost_snapshot_id;
+        self.next_ghost_snapshot_id = self.next_ghost_snapshot_id.wrapping_add(1);
+        self.ghost_snapshot_queue.push_back((job_id, request));
+        self.spawn_next_ghost_snapshot();
+        GhostSnapshotJobHandle::Scheduled(job_id)
+    }
+
+    fn spawn_next_ghost_snapshot(&mut self) {
+        if self.ghost_snapshots_disabled {
+            self.ghost_snapshot_queue.clear();
+            return;
+        }
+        if self.active_ghost_snapshot.is_some() {
+            return;
+        }
+        let Some((job_id, request)) = self.ghost_snapshot_queue.pop_front() else {
+            return;
+        };
+
+        let repo_path = self.config.cwd.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        let started_at = request.started_at;
+        self.active_ghost_snapshot = Some((job_id, request));
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let options = CreateGhostCommitOptions::new(repo_path.as_path());
+                create_ghost_commit(&options)
+            })
+            .await;
+            let elapsed = started_at.elapsed();
+            let event = match result {
+                Ok(Ok(commit)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Ok(commit),
+                    elapsed,
+                },
+                Ok(Err(err)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Err(err),
+                    elapsed,
+                },
+                Err(join_err) => {
+                    let err = GitToolingError::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("ghost snapshot task failed: {join_err}"),
+                    ));
+                    AppEvent::GhostSnapshotFinished {
+                        job_id,
+                        result: Err(err),
+                        elapsed,
+                    }
+                }
+            };
+            app_event_tx.send(event);
+        });
+    }
+
+    fn finalize_ghost_snapshot(
+        &mut self,
+        request: GhostSnapshotRequest,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) -> Option<GhostSnapshot> {
+        match result {
             Ok(commit) => {
                 self.ghost_snapshots_disabled = false;
                 self.ghost_snapshots_disabled_reason = None;
-                self.ghost_snapshots
-                    .push(GhostSnapshot::new(commit, summary, conversation));
+                let snapshot = GhostSnapshot::new(commit, request.summary, request.conversation);
+                self.ghost_snapshots.push(snapshot.clone());
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
                 }
+                if elapsed >= Duration::from_secs(2) {
+                    self.push_background_tail(format!(
+                        "Workspace snapshot captured in {}.",
+                        format_duration(elapsed)
+                    ));
+                }
+                Some(snapshot)
             }
             Err(err) => {
                 self.ghost_snapshots_disabled = true;
@@ -4976,8 +5189,38 @@ impl ChatWidget<'_> {
                     self.push_background_tail(hint);
                 }
                 tracing::warn!("failed to create ghost snapshot: {err}");
+                self.ghost_snapshot_queue.clear();
+                None
             }
         }
+    }
+
+    pub(crate) fn handle_ghost_snapshot_finished(
+        &mut self,
+        job_id: u64,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) {
+        let Some((active_id, request)) = self.active_ghost_snapshot.take() else {
+            tracing::warn!("ghost snapshot finished without active job (id={job_id})");
+            return;
+        };
+
+        if active_id != job_id {
+            tracing::warn!(
+                "ghost snapshot job id mismatch: expected {active_id}, got {job_id}"
+            );
+            self.active_ghost_snapshot = Some((active_id, request));
+            return;
+        }
+
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        self.request_redraw();
+        self.dispatch_pending_snapshot(job_id);
+        if snapshot.is_none() {
+            self.flush_pending_snapshot_dispatches();
+        }
+        self.spawn_next_ghost_snapshot();
     }
 
     fn current_conversation_snapshot(&self) -> ConversationSnapshot {
@@ -5285,9 +5528,10 @@ impl ChatWidget<'_> {
         if restore_files {
             let previous_len = self.ghost_snapshots.len();
             let pre_summary = Some("Pre-undo checkpoint".to_string());
-            self.capture_ghost_snapshot(pre_summary);
-            if self.ghost_snapshots.len() > previous_len {
-                pre_restore_snapshot = self.ghost_snapshots.last().cloned();
+            let captured_snapshot = self.capture_ghost_snapshot_blocking(pre_summary);
+            let added_snapshot = self.ghost_snapshots.len() > previous_len;
+            if let Some(snapshot) = captured_snapshot {
+                pre_restore_snapshot = Some(snapshot);
             }
 
             match restore_ghost_commit(&self.config.cwd, snapshot.commit()) {
@@ -5302,7 +5546,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 Err(err) => {
-                    if self.ghost_snapshots.len() > previous_len {
+                    if added_snapshot && !self.ghost_snapshots.is_empty() {
                         self.ghost_snapshots.pop();
                     }
                     errors.push(format!("Failed to restore workspace files: {err}"));
@@ -7419,12 +7663,18 @@ impl ChatWidget<'_> {
 
     fn update_rate_limit_resets(&mut self, current: &RateLimitSnapshotEvent) {
         let now = Utc::now();
-        self.rate_limit_primary_next_reset_at = current
-            .primary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
-        self.rate_limit_secondary_next_reset_at = current
-            .secondary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
+        if let Some(secs) = current.primary_reset_after_seconds {
+            self.rate_limit_primary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_primary_next_reset_at = None;
+        }
+        if let Some(secs) = current.secondary_reset_after_seconds {
+            self.rate_limit_secondary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_secondary_next_reset_at = None;
+        }
     }
 
     pub(crate) fn handle_update_command(&mut self) {
@@ -13627,6 +13877,10 @@ impl ChatWidget<'_> {
         &self.total_token_usage
     }
 
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        self.session_id
+    }
+
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
         self.rate_limit_snapshot = None;
@@ -15709,6 +15963,32 @@ mod tests {
                 .closed_reasoning_ids
                 .contains(&StreamId("r-1".into()))
         );
+    }
+
+    #[test]
+    fn rate_limit_warnings_emit_only_highest_threshold() {
+        let mut state = RateLimitWarningState::default();
+
+        // Jump straight past multiple weekly thresholds; emit just the highest crossed one.
+        let weekly = state.take_warnings(80.0, 10.0);
+        assert_eq!(weekly.len(), 1);
+        assert_eq!(weekly[0].threshold, 75.0);
+        assert!(matches!(weekly[0].scope, RateLimitWarningScope::Secondary));
+
+        // Calling again without crossing new thresholds should produce nothing.
+        assert!(state.take_warnings(80.0, 10.0).is_empty());
+
+        // Crossing the final threshold should produce it exactly once.
+        let weekly_final = state.take_warnings(95.0, 10.0);
+        assert_eq!(weekly_final.len(), 1);
+        assert_eq!(weekly_final[0].threshold, 90.0);
+        assert!(matches!(weekly_final[0].scope, RateLimitWarningScope::Secondary));
+
+        // Primary scope follows the same rule.
+        let primary = state.take_warnings(95.0, 80.0);
+        assert_eq!(primary.len(), 1);
+        assert_eq!(primary[0].threshold, 75.0);
+        assert!(matches!(primary[0].scope, RateLimitWarningScope::Primary));
     }
 
     #[tokio::test(flavor = "current_thread")]
