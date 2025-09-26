@@ -3912,17 +3912,9 @@ impl ChatWidget<'_> {
     }
 
     fn format_hour_label(dt: DateTime<Local>) -> String {
-        let suffix = Self::day_suffix(dt.day());
         let (is_pm, hour) = dt.hour12();
         let meridiem = if is_pm { "pm" } else { "am" };
-        format!(
-            "{} {:>2}{} {:>2}{}",
-            dt.format("%b"),
-            dt.day(),
-            suffix,
-            hour,
-            meridiem
-        )
+        format!("{} {:>2}{}", dt.format("%a"), hour, meridiem)
     }
 
     fn usage_history_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
