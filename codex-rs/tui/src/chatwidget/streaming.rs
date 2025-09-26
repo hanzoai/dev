@@ -27,10 +27,14 @@ pub(super) fn begin(chat: &mut ChatWidget<'_>, kind: StreamKind, id: Option<Stri
 pub(super) fn delta_text(chat: &mut ChatWidget<'_>, kind: StreamKind, id: String, delta: String, seq: Option<u64>) {
     chat.stream_state.current_kind = Some(kind);
     let sink = AppEventHistorySink(chat.app_event_tx.clone());
+    let stream_id = id.clone();
     chat.stream.begin_with_id(kind, Some(id), &sink);
     chat.stream.set_last_sequence_number(kind, seq);
     
     chat.stream.push_and_maybe_commit(&delta, &sink);
+    if matches!(kind, StreamKind::Answer) {
+        chat.track_answer_stream_delta(&stream_id, &delta, seq);
+    }
 }
 
 // New facade: finalize a specific kind and optionally follow bottom
