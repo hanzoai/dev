@@ -24,6 +24,7 @@ use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
+use codex_core::config_types::Notifications;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
@@ -614,6 +615,7 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    replay_history_depth: usize,
 }
 
 struct PendingJumpBack {
@@ -2801,6 +2803,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3036,6 +3039,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -5882,6 +5886,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
+                self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let mut max_req = self.last_seen_request_index;
                 if events.is_empty() {
                     for item in &items {
@@ -5914,6 +5919,7 @@ impl ChatWidget<'_> {
                     self.current_request_index = self.last_seen_request_index;
                 }
                 self.request_redraw();
+                self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
                 tools::web_search_complete(self, ev.call_id, ev.query)
@@ -6090,9 +6096,7 @@ impl ChatWidget<'_> {
 
                 self.mark_needs_redraw();
             }
-            EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: _,
-            }) => {
+            EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 // Finalize any active streams
                 if self.stream.is_write_cycle_active() {
                     // Finalize both streams via streaming facade
@@ -6173,6 +6177,7 @@ impl ChatWidget<'_> {
                 self.stream_state.current_kind = None;
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
+                self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -7700,6 +7705,79 @@ impl ChatWidget<'_> {
             "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                 to_string(),
         );
+    }
+
+    pub(crate) fn handle_notifications_command(&mut self, args: String) {
+        use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
+
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            let mode = match &self.config.tui.notifications {
+                Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+                Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
+            };
+
+            let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+            self.bottom_pane.show_notifications_settings(view);
+            return;
+        }
+
+        let keyword = trimmed.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        match keyword.as_str() {
+            "status" => {
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(true) => {
+                        self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+                    }
+                    Notifications::Enabled(false) => {
+                        self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "🔔 TUI notifications use custom filters: [{}]",
+                            filters
+                        ));
+                    }
+                }
+            }
+            "on" | "off" => {
+                let enable = keyword == "on";
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(current) => {
+                        if *current == enable {
+                            self.push_background_tail(format!(
+                                "TUI notifications already {}.",
+                                if enable { "enabled" } else { "disabled" }
+                            ));
+                        } else {
+                            self.app_event_tx
+                                .send(AppEvent::UpdateTuiNotifications(enable));
+                        }
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
+                            filters
+                        ));
+                    }
+                }
+            }
+            _ => {
+                self.push_background_tail(
+                    "Usage: /notifications [status|on|off]".to_string(),
+                );
+            }
+        }
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -19646,6 +19724,96 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+    }
+
+    pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
+        let new_state = Notifications::Enabled(enabled);
+        self.config.tui.notifications = new_state.clone();
+        self.config.tui_notifications = new_state.clone();
+
+        match find_codex_home() {
+            Ok(home) => {
+                match codex_core::config::set_tui_notifications(&home, new_state) {
+                    Ok(()) => {
+                        let msg = format!(
+                            "✅ {} TUI notifications",
+                            if enabled { "Enabled" } else { "Disabled" }
+                        );
+                        self.push_background_tail(msg);
+                    }
+                    Err(err) => {
+                        let msg = format!(
+                            "⚠️ Failed to persist TUI notifications setting: {}",
+                            err
+                        );
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            Err(_) => {
+                let msg = format!(
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    if enabled { "Enabled" } else { "Disabled" }
+                );
+                self.push_background_tail(msg);
+            }
+        }
+    }
+
+    fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
+        if !self.should_emit_tui_notification("agent-turn-complete") {
+            return;
+        }
+
+        let snippet = last_agent_message
+            .as_deref()
+            .map(Self::notification_snippet)
+            .filter(|text| !text.is_empty());
+
+        self.app_event_tx.send(AppEvent::EmitTuiNotification {
+            title: "Code".to_string(),
+            body: snippet,
+        });
+    }
+
+    fn should_emit_tui_notification(&self, event: &str) -> bool {
+        if self.replay_history_depth > 0 {
+            return false;
+        }
+        self.tui_notification_filter_allows(event)
+    }
+
+    fn tui_notification_filter_allows(&self, event: &str) -> bool {
+        match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => *enabled,
+            Notifications::Custom(entries) => entries
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case(event)),
+        }
+    }
+
+    fn notification_snippet(input: &str) -> String {
+        let collapsed = input
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        const LIMIT: usize = 120;
+        if collapsed.chars().count() <= LIMIT {
+            return collapsed;
+        }
+
+        let mut truncated = String::new();
+        let mut count = 0usize;
+        for ch in collapsed.chars() {
+            if count >= LIMIT.saturating_sub(3) {
+                break;
+            }
+            truncated.push(ch);
+            count += 1;
+        }
+        truncated.push_str("...");
+        truncated
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
