@@ -87,6 +87,9 @@ pub(crate) enum AppEvent {
     /// Update the terminal title override. `None` restores the default title.
     SetTerminalTitle { title: Option<String> },
 
+    /// Emit a best-effort OSC 9 notification from the terminal.
+    EmitTuiNotification { title: String, body: Option<String> },
+
     /// Schedule a one-shot animation frame roughly after the given duration.
     /// Multiple requests are coalesced by the central frame scheduler.
     ScheduleFrameIn(Duration),
@@ -149,6 +152,8 @@ pub(crate) enum AppEvent {
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
+    /// Update the TUI notifications toggle
+    UpdateTuiNotifications(bool),
     /// Enable/disable a specific validation tool
     UpdateValidationTool { name: String, enable: bool },
     /// Enable/disable an entire validation group
