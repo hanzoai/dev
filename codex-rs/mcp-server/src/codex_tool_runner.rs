@@ -30,6 +30,7 @@ use crate::exec_approval::handle_exec_approval_request;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotificationMeta;
 use crate::patch_approval::handle_patch_approval_request;
+use crate::session_store::{SessionEntry, SessionMap};
 
 pub(crate) const INVALID_PARAMS_ERROR_CODE: i64 = -32602;
 
@@ -42,10 +43,11 @@ pub async fn run_codex_tool_session(
     initial_prompt: String,
     config: CodexConfig,
     outgoing: Arc<OutgoingMessageSender>,
-    session_map: Arc<Mutex<HashMap<Uuid, Arc<CodexConversation>>>>,
+    session_map: SessionMap,
     conversation_manager: Arc<ConversationManager>,
     running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
 ) {
+    let config_for_session = config.clone();
     let NewConversation {
         conversation_id,
         conversation,
@@ -66,12 +68,9 @@ pub async fn run_codex_tool_session(
             return;
         }
     };
-
     let session_uuid: Uuid = conversation_id.into();
-    session_map
-        .lock()
-        .await
-        .insert(session_uuid, conversation.clone());
+    let entry = SessionEntry::new(conversation.clone(), config_for_session);
+    session_map.lock().await.insert(session_uuid, entry);
 
     let session_configured_event = Event {
         // Use a fake id value for now.

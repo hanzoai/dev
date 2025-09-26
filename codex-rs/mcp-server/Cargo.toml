@@ -16,7 +16,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-agent-client-protocol = "0.4.2"
+agent-client-protocol = { version = "0.4.3", features = ["unstable"] }
 codex-arg0 = { workspace = true }
 codex-common = { workspace = true, features = ["cli"] }
 codex-core = { workspace = true }
