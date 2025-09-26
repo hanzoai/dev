@@ -410,6 +410,11 @@ pub(crate) struct GhostState {
     snapshots: Vec<GhostSnapshot>,
     disabled: bool,
     disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active: Option<(u64, GhostSnapshotRequest)>,
+    next_id: u64,
+    pending_dispatches: VecDeque<PendingSnapshotDispatch>,
+    queued_user_messages: VecDeque<UserMessage>,
 }
 
 struct UndoSnapshotPreview {
@@ -704,6 +709,7 @@ enum GhostSnapshotJobHandle {
     Skipped,
 }
 
+#[derive(Clone)]
 enum PendingSnapshotDispatch {
     Direct { job_id: u64, batch: Vec<UserMessage> },
     Queued { job_id: u64, message: UserMessage },
@@ -5258,6 +5264,11 @@ impl ChatWidget<'_> {
             snapshots: self.ghost_snapshots.clone(),
             disabled: self.ghost_snapshots_disabled,
             disabled_reason: self.ghost_snapshots_disabled_reason.clone(),
+            queue: self.ghost_snapshot_queue.clone(),
+            active: self.active_ghost_snapshot.clone(),
+            next_id: self.next_ghost_snapshot_id,
+            pending_dispatches: self.pending_snapshot_dispatches.clone(),
+            queued_user_messages: self.queued_user_messages.clone(),
         }
     }
 
@@ -5269,6 +5280,13 @@ impl ChatWidget<'_> {
         }
         self.ghost_snapshots_disabled = state.disabled;
         self.ghost_snapshots_disabled_reason = state.disabled_reason;
+        self.ghost_snapshot_queue = state.queue;
+        self.active_ghost_snapshot = state.active;
+        self.next_ghost_snapshot_id = state.next_id;
+        self.pending_snapshot_dispatches = state.pending_dispatches;
+        self.queued_user_messages = state.queued_user_messages;
+        self.refresh_queued_user_messages();
+        self.spawn_next_ghost_snapshot();
     }
 
     fn snapshot_preview(&self, index: usize) -> Option<UndoSnapshotPreview> {
