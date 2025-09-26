@@ -1,12 +1,17 @@
-use super::semantic::{lines_from_ratatui, lines_to_ratatui, SemanticLine};
+//! Collapsible reasoning cells backed by structured reasoning sections.
+
+use super::semantic::{lines_from_ratatui, SemanticLine};
 use super::semantic;
+use super::text;
 use super::*;
+use crate::history::state::{ReasoningBlock, ReasoningSection};
 use std::cell::{Cell, RefCell};
 use unicode_width::UnicodeWidthStr as _;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CollapsibleReasoningState {
     pub lines: Vec<SemanticLine>,
+    pub sections: Vec<ReasoningSection>,
     pub in_progress: bool,
     pub hide_when_collapsed: bool,
     pub id: Option<String>,
@@ -14,8 +19,11 @@ pub(crate) struct CollapsibleReasoningState {
 
 impl CollapsibleReasoningState {
     pub(crate) fn new(lines: Vec<Line<'static>>, id: Option<String>) -> Self {
+        let semantic_lines = lines_from_ratatui(lines);
+        let sections = sections_from_semantic_lines(&semantic_lines);
         Self {
-            lines: lines_from_ratatui(lines),
+            lines: semantic_lines,
+            sections,
             in_progress: false,
             hide_when_collapsed: false,
             id,
@@ -74,6 +82,7 @@ impl CollapsibleReasoningCell {
         let mut incoming = semantic::lines_from_ratatui(new_lines);
         dedup_append_semantic(&mut state.lines, &mut incoming);
         state.lines.extend(incoming);
+        state.sections = sections_from_semantic_lines(&state.lines);
     }
 
     pub(crate) fn retint(&self, _old: &crate::theme::Theme, _new: &crate::theme::Theme) {}
@@ -81,7 +90,7 @@ impl CollapsibleReasoningCell {
     pub(crate) fn debug_title_overlay(&self) -> String {
         let state = self.state.borrow();
         let theme = crate::theme::current_theme();
-        debug_title_overlay(&lines_to_ratatui(&state.lines, &theme))
+        debug_title_overlay(&sections_to_ratatui_lines(&state.sections, &theme))
     }
 }
 
@@ -100,12 +109,12 @@ impl HistoryCell for CollapsibleReasoningCell {
 
     fn display_lines(&self) -> Vec<Line<'static>> {
         let state = self.state.borrow();
-        if state.lines.is_empty() {
+        if state.sections.is_empty() {
             return Vec::new();
         }
 
         let theme = crate::theme::current_theme();
-        let stored_lines = lines_to_ratatui(&state.lines, &theme);
+        let stored_lines = sections_to_ratatui_lines(&state.sections, &theme);
         let normalized = normalized_lines(&stored_lines);
 
         if self.collapsed.get() {
@@ -162,7 +171,7 @@ impl HistoryCell for CollapsibleReasoningCell {
         }
 
         let dim = crate::colors::text_dim();
-        let stored_lines = lines_to_ratatui(&state.lines, &crate::theme::current_theme());
+        let stored_lines = sections_to_ratatui_lines(&state.sections, &crate::theme::current_theme());
         let mut lines = normalized_lines(&stored_lines)
             .into_iter()
             .map(|mut line| {
@@ -269,6 +278,88 @@ fn dedup_append_semantic(
             existing.push(nl);
         }
     }
+}
+
+fn sections_from_semantic_lines(lines: &[SemanticLine]) -> Vec<ReasoningSection> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let mut blocks: Vec<ReasoningBlock> = Vec::with_capacity(lines.len());
+    for line in lines {
+        let spans = line
+            .spans
+            .iter()
+            .cloned()
+            .map(text::inline_span_from_semantic)
+            .collect::<Vec<_>>();
+        let is_blank = spans.iter().all(|span| span.text.trim().is_empty());
+        if is_blank {
+            blocks.push(ReasoningBlock::Separator);
+        } else {
+            blocks.push(ReasoningBlock::Paragraph(spans));
+        }
+    }
+
+    vec![ReasoningSection {
+        heading: None,
+        blocks,
+    }]
+}
+
+fn sections_to_ratatui_lines(
+    sections: &[ReasoningSection],
+    theme: &crate::theme::Theme,
+) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for section in sections {
+        if let Some(heading) = &section.heading {
+            out.push(Line::from(vec![Span::styled(
+                heading.clone(),
+                Style::default()
+                    .fg(crate::colors::text())
+                    .add_modifier(Modifier::BOLD),
+            )]));
+        }
+        for block in &section.blocks {
+            match block {
+                ReasoningBlock::Paragraph(spans) => {
+                    let spans: Vec<Span<'static>> = spans
+                        .iter()
+                        .map(|span| text::inline_span_to_span(span, theme))
+                        .collect();
+                    out.push(Line::from(spans));
+                }
+                ReasoningBlock::Bullet { indent, spans } => {
+                    let mut line_spans = Vec::new();
+                    let indent_spaces = (*indent as usize).saturating_mul(2);
+                    line_spans.push(Span::raw(format!("{}• ", " ".repeat(indent_spaces))));
+                    for span in spans {
+                        line_spans.push(text::inline_span_to_span(span, theme));
+                    }
+                    out.push(Line::from(line_spans));
+                }
+                ReasoningBlock::Code { content, .. } => {
+                    for line in content.lines() {
+                        out.push(Line::from(Span::styled(
+                            line.to_string(),
+                            Style::default()
+                                .fg(crate::colors::text_dim())
+                                .add_modifier(Modifier::DIM),
+                        )));
+                    }
+                }
+                ReasoningBlock::Quote(spans) => {
+                    let mut line_spans = vec![Span::raw("> ")];
+                    for span in spans {
+                        line_spans.push(text::inline_span_to_span(span, theme));
+                    }
+                    out.push(Line::from(line_spans));
+                }
+                ReasoningBlock::Separator => out.push(Line::from(String::new())),
+            }
+        }
+    }
+    out
 }
 
 fn normalized_lines(lines: &[Line<'static>]) -> Vec<Line<'static>> {
