@@ -1767,7 +1767,7 @@ impl App<'_> {
                         }
                         SlashCommand::Notifications => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_notifications_command();
+                                widget.handle_notifications_command(command_args);
                             }
                         }
                         SlashCommand::Agents => {
