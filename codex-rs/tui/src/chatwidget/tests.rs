@@ -229,6 +229,7 @@ fn limits_overlay_renders_snapshot() {
     assert!(joined.contains(" Total: "));
     assert!(joined.contains("Chart"));
     assert!(joined.contains("7 Day History"));
+    assert!(joined.contains("6 Month History"));
     assert!(!joined.contains("/limits"));
     assert!(!joined.contains("Within current limits"));
 
@@ -248,6 +249,19 @@ fn limits_overlay_renders_snapshot() {
         .expect("expected second usage line");
     assert!(latest_line.contains(&latest_label));
     assert!(second_line.contains(&yesterday_label));
+
+    let month_header_idx = strings
+        .iter()
+        .position(|line| line.contains("6 Month History"))
+        .expect("expected monthly usage header");
+    let current_month_label = Local::now().format("%b %Y").to_string();
+    let month_line = strings
+        .get(month_header_idx + 1)
+        .expect("expected latest monthly usage line");
+    assert!(
+        month_line.contains(&current_month_label),
+        "expected month label to contain {current_month_label}, got {month_line}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

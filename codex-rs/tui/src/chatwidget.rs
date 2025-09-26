@@ -3905,6 +3905,81 @@ impl ChatWidget<'_> {
     fn usage_history_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
         let mut lines = Self::hourly_usage_lines(summary);
         lines.extend(Self::daily_usage_lines(summary));
+        lines.extend(Self::six_month_usage_lines(summary));
+        lines
+    }
+
+    fn six_month_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
+        const WIDTH: usize = 14;
+        const MONTHS: usize = 6;
+
+        let today = Local::now().date_naive();
+        let mut year = today.year();
+        let mut month = today.month();
+
+        let mut months: Vec<(chrono::NaiveDate, TokenTotals)> = Vec::with_capacity(MONTHS);
+        for _ in 0..MONTHS {
+            let start = chrono::NaiveDate::from_ymd_opt(year, month, 1)
+                .expect("valid month start");
+            months.push((start, TokenTotals::default()));
+            if month == 1 {
+                month = 12;
+                year -= 1;
+            } else {
+                month -= 1;
+            }
+        }
+
+        let mut lookup: HashMap<(i32, u32), usize> = HashMap::new();
+        for (idx, (start, _)) in months.iter().enumerate() {
+            lookup.insert((start.year(), start.month()), idx);
+        }
+
+        if let Some(summary) = summary {
+            for entry in &summary.hourly_entries {
+                let local_time = entry.timestamp.with_timezone(&Local);
+                let date = local_time.date_naive();
+                if let Some(&pos) = lookup.get(&(date.year(), date.month())) {
+                    let (_, totals) = &mut months[pos];
+                    Self::accumulate_token_totals(totals, &entry.tokens);
+                }
+            }
+        }
+
+        let max_total = months
+            .iter()
+            .map(|(_, totals)| totals.total_tokens)
+            .max()
+            .unwrap_or(0);
+
+        let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(RtLine::from(vec![RtSpan::styled(
+            "6 Month History",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+
+        let prefix = status_content_prefix();
+        for (start, totals) in months.iter() {
+            let label = start.format("%b %Y").to_string();
+            let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
+            let tokens = format_with_separators(totals.total_tokens);
+            let cost_text = Self::format_usd(Self::usage_cost_usd_from_totals(totals));
+            let cost_span = RtSpan::styled(
+                format!(" ({cost_text})"),
+                Style::default().fg(crate::colors::text_dim()),
+            );
+            lines.push(RtLine::from(vec![
+                RtSpan::raw(prefix.clone()),
+                RtSpan::styled(
+                    format!("{label} "),
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+                RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
+                RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
+                RtSpan::raw(format!(" {tokens} tokens")),
+                cost_span,
+            ]));
+        }
         lines
     }
 
