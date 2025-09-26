@@ -76,8 +76,6 @@ pub mod plan_tool;
 pub mod project_doc;
 pub mod project_features;
 mod rollout;
-mod pro_supervisor;
-mod pro_observer;
 pub(crate) mod safety;
 pub mod seatbelt;
 pub mod shell;
