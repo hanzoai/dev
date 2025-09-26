@@ -291,6 +291,33 @@ fn limits_overlay_renders_snapshot() {
     assert!(!joined.contains("/limits"));
     assert!(!joined.contains("Within current limits"));
 
+    let tokens_line = strings
+        .iter()
+        .find(|line| line.contains("cached"))
+        .expect("expected cached tokens line");
+    assert!(
+        tokens_line.starts_with("             "),
+        "expected tokens line to begin with 13 spaces: {tokens_line}"
+    );
+
+    let chart_row = strings
+        .iter()
+        .find(|line| line.contains("▇▇") && line.contains("▓▓"))
+        .expect("expected chart grid row");
+    assert!(
+        chart_row.starts_with("    "),
+        "expected chart grid row to start with four spaces: {chart_row}"
+    );
+
+    let legend_line = strings
+        .iter()
+        .find(|line| line.contains("weekly usage"))
+        .expect("expected legend line");
+    assert!(
+        legend_line.starts_with("    "),
+        "expected legend line to start with four spaces: {legend_line}"
+    );
+
     let header_idx = strings
         .iter()
         .position(|line| line.contains("7 Day History"))
@@ -305,6 +332,10 @@ fn limits_overlay_renders_snapshot() {
     let second_line = strings
         .get(header_idx + 2)
         .expect("expected second usage line");
+    assert!(
+        latest_line.starts_with("    "),
+        "expected daily usage line to start with four spaces: {latest_line}"
+    );
     assert!(latest_line.contains(&latest_label));
     assert!(second_line.contains(&yesterday_label));
 
@@ -316,6 +347,10 @@ fn limits_overlay_renders_snapshot() {
     let month_line = strings
         .get(month_header_idx + 1)
         .expect("expected latest monthly usage line");
+    assert!(
+        month_line.starts_with("    "),
+        "expected monthly usage line to start with four spaces: {month_line}"
+    );
     assert!(
         month_line.contains(&current_month_label),
         "expected month label to contain {current_month_label}, got {month_line}"
