@@ -295,11 +295,21 @@ impl TextArea {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => self.delete_backward(1),
-            KeyEvent {
-                code: KeyCode::Delete,
-                modifiers: KeyModifiers::ALT,
-                ..
-            }  => self.delete_forward_word(),
+            KeyEvent { code: KeyCode::Delete, modifiers, .. }
+                if modifiers.contains(KeyModifiers::SUPER)
+                    && !modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) =>
+            {
+                self.delete_entire_line();
+            }
+            // Option+Fn+Delete (Forward Delete on macOS) arrives as ALT+Delete. Keep
+            // it deleting the word ahead of the cursor so we do not regress the
+            // default macOS terminal behavior. Option+Backspace already covers the
+            // "delete previous word" shortcut exposed in Warp.
+            KeyEvent { code: KeyCode::Delete, modifiers, .. }
+                if modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.delete_forward_word();
+            }
             KeyEvent {
                 code: KeyCode::Delete,
                 ..
@@ -335,7 +345,7 @@ impl TextArea {
             // macOS-like shortcuts (when terminals report the Command key as SUPER):
             // Cmd+Left  -> move to beginning of line
             // Cmd+Right -> move to end of line
-            // Cmd+Backspace -> delete entire current line contents
+            // Cmd+Backspace / Cmd+Delete -> delete entire current line contents
             KeyEvent { code: KeyCode::Left, modifiers, .. }
                 if modifiers.contains(KeyModifiers::SUPER)
                     && !modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) =>
@@ -349,7 +359,8 @@ impl TextArea {
                 self.move_cursor_to_end_of_line(false);
             }
             KeyEvent { code: KeyCode::Backspace, modifiers, .. }
-                if modifiers.contains(KeyModifiers::SUPER) =>
+                if modifiers.contains(KeyModifiers::SUPER)
+                    && !modifiers.contains(KeyModifiers::ALT) =>
             {
                 self.delete_entire_line();
             }
@@ -1272,7 +1283,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_forward_word_with_without_alt_modifier() {
+    fn option_fn_delete_deletes_next_word() {
         let mut t = ta_with("hello world");
         t.set_cursor(0);
         t.input(KeyEvent::new(KeyCode::Delete, KeyModifiers::ALT));
@@ -1283,6 +1294,21 @@ mod tests {
         t.set_cursor(0);
         t.input(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
         assert_eq!(t.text(), "ello");
+        assert_eq!(t.cursor(), 0);
+    }
+
+    #[test]
+    fn super_delete_and_backspace_clear_current_line() {
+        let mut t = ta_with("example text");
+        t.set_cursor(4);
+        t.input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::SUPER));
+        assert_eq!(t.text(), "");
+        assert_eq!(t.cursor(), 0);
+
+        let mut t = ta_with("example text");
+        t.set_cursor(4);
+        t.input(KeyEvent::new(KeyCode::Delete, KeyModifiers::SUPER));
+        assert_eq!(t.text(), "");
         assert_eq!(t.cursor(), 0);
     }
 
