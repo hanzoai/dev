@@ -1,25 +1,31 @@
 use super::*;
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct LoadingCellState {
-    pub message: String,
-}
-
-impl LoadingCellState {
-    pub(crate) fn new(message: String) -> Self {
-        Self { message }
-    }
-}
+use crate::history::state::{HistoryId, LoadingState};
 
 pub(crate) struct LoadingCell {
-    state: LoadingCellState,
+    state: LoadingState,
 }
 
 impl LoadingCell {
     pub(crate) fn new(message: String) -> Self {
         Self {
-            state: LoadingCellState::new(message),
+            state: LoadingState {
+                id: HistoryId::ZERO,
+                message,
+            },
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_state(state: LoadingState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn state(&self) -> &LoadingState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut LoadingState {
+        &mut self.state
     }
 }
 

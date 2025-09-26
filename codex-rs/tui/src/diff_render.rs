@@ -287,8 +287,11 @@ pub(super) fn create_diff_summary_with_width(
     let mut header_spans: Vec<RtSpan<'static>> = Vec::new();
     // Colorize title: success for apply events, keep primary for approval requests
     let title_style = match event_type {
-        PatchEventType::ApplyBegin { .. } => Style::default()
+        PatchEventType::ApplyBegin { .. } | PatchEventType::ApplySuccess => Style::default()
             .fg(crate::colors::success())
+            .add_modifier(Modifier::BOLD),
+        PatchEventType::ApplyFailure => Style::default()
+            .fg(crate::colors::error())
             .add_modifier(Modifier::BOLD),
         PatchEventType::ApprovalRequest => Style::default()
             .fg(crate::colors::primary())
@@ -346,7 +349,9 @@ pub(super) fn create_diff_summary_with_width(
         event_type,
         PatchEventType::ApplyBegin {
             auto_approved: true
-        } | PatchEventType::ApprovalRequest
+        }
+            | PatchEventType::ApplySuccess
+            | PatchEventType::ApprovalRequest
     );
 
     if show_details {
