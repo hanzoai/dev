@@ -46,6 +46,7 @@ mod verbosity_selection_view;
 pub(crate) mod validation_settings_view;
 mod update_settings_view;
 mod undo_restore_view;
+mod notifications_settings_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -63,6 +64,7 @@ pub(crate) use login_accounts_view::{
 };
 
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
+pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSettingsView};
 
 use codex_core::protocol::Op;
 use approval_modal_view::ApprovalModalView;
@@ -156,6 +158,12 @@ impl BottomPane<'_> {
             return;
         }
 
+        self.active_view = Some(Box::new(view));
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub fn show_notifications_settings(&mut self, view: NotificationsSettingsView) {
         self.active_view = Some(Box::new(view));
         self.status_view_active = false;
         self.request_redraw();

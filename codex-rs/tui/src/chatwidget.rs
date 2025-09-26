@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::io;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
+use codex_core::config_types::Notifications;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
@@ -103,11 +105,6 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
-use codex_core::protocol::ProAction;
-use codex_core::protocol::ProEvent;
-use codex_core::protocol::ProPhase;
-use codex_core::protocol::ProStats;
-use codex_core::protocol::ProCategory;
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -126,7 +123,6 @@ use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
@@ -344,10 +340,14 @@ impl RateLimitWarningState {
     ) -> Vec<RateLimitWarning> {
         let mut warnings = Vec::new();
 
-        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        let mut next_weekly_index = self.weekly_index;
+        while next_weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            next_weekly_index += 1;
+        }
+        if next_weekly_index > self.weekly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Secondary,
                 threshold,
@@ -355,13 +355,17 @@ impl RateLimitWarningState {
                     "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.weekly_index += 1;
+            self.weekly_index = next_weekly_index;
         }
 
-        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        let mut next_hourly_index = self.hourly_index;
+        while next_hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            next_hourly_index += 1;
+        }
+        if next_hourly_index > self.hourly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Primary,
                 threshold,
@@ -369,7 +373,7 @@ impl RateLimitWarningState {
                     "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.hourly_index += 1;
+            self.hourly_index = next_hourly_index;
         }
 
         warnings
@@ -413,6 +417,11 @@ pub(crate) struct GhostState {
     snapshots: Vec<GhostSnapshot>,
     disabled: bool,
     disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active: Option<(u64, GhostSnapshotRequest)>,
+    next_id: u64,
+    pending_dispatches: VecDeque<PendingSnapshotDispatch>,
+    queued_user_messages: VecDeque<UserMessage>,
 }
 
 struct UndoSnapshotPreview {
@@ -490,7 +499,6 @@ pub(crate) struct ChatWidget<'a> {
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
     agent_runtime: HashMap<String, AgentRuntime>,
-    pro: ProState,
     // Sparkline data for showing agent activity (using RefCell for interior mutability)
     // Each tuple is (value, is_completed) where is_completed indicates if any agent was complete at that time
     sparkline_data: std::cell::RefCell<Vec<(u64, bool)>>,
@@ -569,6 +577,10 @@ pub(crate) struct ChatWidget<'a> {
     ghost_snapshots: Vec<GhostSnapshot>,
     ghost_snapshots_disabled: bool,
     ghost_snapshots_disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    ghost_snapshot_queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active_ghost_snapshot: Option<(u64, GhostSnapshotRequest)>,
+    next_ghost_snapshot_id: u64,
+    pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -610,6 +622,7 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    replay_history_depth: usize,
 }
 
 struct PendingJumpBack {
@@ -679,6 +692,44 @@ impl GhostSnapshot {
 
     fn age_from(&self, now: DateTime<Local>) -> Option<std::time::Duration> {
         now.signed_duration_since(self.captured_at).to_std().ok()
+    }
+}
+
+#[derive(Clone)]
+struct GhostSnapshotRequest {
+    summary: Option<String>,
+    conversation: ConversationSnapshot,
+    started_at: Instant,
+}
+
+impl GhostSnapshotRequest {
+    fn new(summary: Option<String>, conversation: ConversationSnapshot) -> Self {
+        Self {
+            summary,
+            conversation,
+            started_at: Instant::now(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GhostSnapshotJobHandle {
+    Scheduled(u64),
+    Skipped,
+}
+
+#[derive(Clone)]
+enum PendingSnapshotDispatch {
+    Direct { job_id: u64, batch: Vec<UserMessage> },
+    Queued { job_id: u64, message: UserMessage },
+}
+
+impl PendingSnapshotDispatch {
+    fn job_id(&self) -> u64 {
+        match self {
+            PendingSnapshotDispatch::Direct { job_id, .. } |
+            PendingSnapshotDispatch::Queued { job_id, .. } => *job_id,
+        }
     }
 }
 
@@ -2726,7 +2777,6 @@ impl ChatWidget<'_> {
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
-            pro: ProState::default(),
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
@@ -2772,7 +2822,6 @@ impl ChatWidget<'_> {
                 last_hud_present: std::cell::Cell::new(false),
                 browser_hud_expanded: false,
                 agents_hud_expanded: false,
-                pro_hud_expanded: false,
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
@@ -2790,6 +2839,10 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
+            pending_snapshot_dispatches: VecDeque::new(),
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2810,6 +2863,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -2960,7 +3014,6 @@ impl ChatWidget<'_> {
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
-            pro: ProState::default(),
             sparkline_data: std::cell::RefCell::new(Vec::new()),
             last_sparkline_update: std::cell::RefCell::new(std::time::Instant::now()),
             stream: crate::streaming::controller::StreamController::new(config.clone()),
@@ -3006,7 +3059,6 @@ impl ChatWidget<'_> {
                 last_hud_present: std::cell::Cell::new(false),
                 browser_hud_expanded: false,
                 agents_hud_expanded: false,
-                pro_hud_expanded: false,
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
@@ -3024,6 +3076,10 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
+            pending_snapshot_dispatches: VecDeque::new(),
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3044,6 +3100,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3194,14 +3251,6 @@ impl ChatWidget<'_> {
         if self.diffs.overlay.is_some() {
             return;
         }
-        if self.pro.overlay_visible {
-            if self.handle_pro_overlay_key(key_event) {
-                return;
-            }
-            if self.pro.overlay_visible {
-                return;
-            }
-        }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
         }
@@ -3302,24 +3351,6 @@ impl ChatWidget<'_> {
                 _ => {
                     return;
                 }
-            }
-        }
-
-        if let KeyEvent {
-            code: crossterm::event::KeyCode::Char('p'),
-            modifiers,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        } = key_event
-        {
-            use crossterm::event::KeyModifiers;
-            if modifiers.contains(KeyModifiers::CONTROL) && modifiers.contains(KeyModifiers::SHIFT) {
-                self.toggle_pro_hud();
-                return;
-            }
-            if modifiers == KeyModifiers::CONTROL {
-                self.toggle_pro_overlay();
-                return;
             }
         }
 
@@ -3476,20 +3507,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn toggle_pro_hud(&mut self) {
-        layout_scroll::toggle_pro_hud(self);
-    }
-
-    fn toggle_pro_overlay(&mut self) {
-        let new_state = !self.pro.overlay_visible;
-        self.pro.overlay_visible = new_state;
-        if new_state {
-            let overlay = self.pro.ensure_overlay();
-            overlay.set_scroll(0);
-        }
-        self.request_redraw();
-    }
-
     fn set_limits_overlay_content(&mut self, content: LimitsOverlayContent) {
         if let Some(existing) = self.limits.overlay.as_mut() {
             existing.set_content(content);
@@ -3527,7 +3544,7 @@ impl ChatWidget<'_> {
 
         let codex_home = self.config.codex_home.clone();
         let accounts = auth_accounts::list_accounts(&codex_home).unwrap_or_default();
-        let mut account_map: HashMap<String, StoredAccount> = accounts
+        let account_map: HashMap<String, StoredAccount> = accounts
             .into_iter()
             .map(|account| (account.id.clone(), account))
             .collect();
@@ -3539,19 +3556,22 @@ impl ChatWidget<'_> {
         let usage_records = account_usage::list_rate_limit_snapshots(&codex_home).unwrap_or_default();
         let mut snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
             .into_iter()
+            .filter(|record| account_map.contains_key(&record.account_id))
             .map(|record| (record.account_id.clone(), record))
             .collect();
 
-        let mut summary_ids: HashSet<String> = account_map.keys().cloned().collect();
-        summary_ids.extend(snapshot_map.keys().cloned());
-        if let Some(id) = active_id.as_ref() {
-            summary_ids.insert(id.clone());
+        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
+        for id in account_map.keys() {
+            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, id) {
+                usage_summary_map.insert(id.clone(), summary);
+            }
         }
 
-        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
-        for id in summary_ids {
-            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, &id) {
-                usage_summary_map.insert(id, summary);
+        if let Some(active_id) = active_id.as_ref() {
+            if !usage_summary_map.contains_key(active_id) {
+                if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, active_id) {
+                    usage_summary_map.insert(active_id.clone(), summary);
+                }
             }
         }
 
@@ -3577,25 +3597,21 @@ impl ChatWidget<'_> {
             let extra = Self::usage_history_lines(summary_ref);
             let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG);
             tabs.push(LimitsTab::view(title, header, view, extra));
-            if let Some(id) = active_id.as_ref() {
-                seen_ids.insert(id.clone());
-                account_map.remove(id);
-                snapshot_map.remove(id);
-                usage_summary_map.remove(id);
+
+            if let Some(active_id) = active_id.as_ref() {
+                if account_map.contains_key(active_id) {
+                    seen_ids.insert(active_id.clone());
+                    snapshot_map.remove(active_id);
+                    usage_summary_map.remove(active_id);
+                }
             }
         }
 
-        let mut remaining_ids: Vec<String> = Vec::new();
-        for id in account_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
-        for id in snapshot_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
+        let mut remaining_ids: Vec<String> = account_map
+            .keys()
+            .filter(|id| !seen_ids.contains(*id))
+            .cloned()
+            .collect();
         remaining_ids.sort_by(|a, b| {
             let a_label = account_map
                 .get(a)
@@ -3605,9 +3621,14 @@ impl ChatWidget<'_> {
                 .get(b)
                 .map(Self::account_label)
                 .unwrap_or_else(|| b.clone());
-            a_label
-                .to_ascii_lowercase()
-                .cmp(&b_label.to_ascii_lowercase())
+            let a_cmp = a_label.to_ascii_lowercase();
+            let b_cmp = b_label.to_ascii_lowercase();
+            let order = a_cmp.cmp(&b_cmp);
+            if order == std::cmp::Ordering::Equal {
+                a_label.cmp(&b_label)
+            } else {
+                order
+            }
         });
 
         for id in remaining_ids {
@@ -4097,82 +4118,6 @@ impl ChatWidget<'_> {
             text.into(),
             Style::default().fg(crate::colors::text_dim()),
         )])
-    }
-
-    fn close_pro_overlay(&mut self) {
-        if self.pro.overlay_visible {
-            self.pro.overlay_visible = false;
-            self.request_redraw();
-        }
-    }
-
-    fn handle_pro_overlay_key(&mut self, key_event: KeyEvent) -> bool {
-        if !self.pro.overlay_visible {
-            return false;
-        }
-        let Some(overlay) = self.pro.overlay.as_ref() else {
-            return false;
-        };
-        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-            return true;
-        }
-        use crossterm::event::{KeyCode, KeyModifiers};
-        match key_event.code {
-            KeyCode::Esc => {
-                self.close_pro_overlay();
-                true
-            }
-            KeyCode::Char('p') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.toggle_pro_overlay();
-                true
-            }
-            KeyCode::Up => {
-                let current = overlay.scroll();
-                if current > 0 {
-                    overlay.set_scroll(current.saturating_sub(1));
-                    self.request_redraw();
-                }
-                true
-            }
-            KeyCode::Down => {
-                let current = overlay.scroll();
-                let max = overlay.max_scroll();
-                let next = current.saturating_add(1).min(max);
-                if next != current {
-                    overlay.set_scroll(next);
-                    self.request_redraw();
-                }
-                true
-            }
-            KeyCode::PageUp => {
-                let step = overlay.visible_rows().max(1);
-                let current = overlay.scroll();
-                let next = current.saturating_sub(step);
-                overlay.set_scroll(next);
-                self.request_redraw();
-                true
-            }
-            KeyCode::PageDown => {
-                let step = overlay.visible_rows().max(1);
-                let current = overlay.scroll();
-                let max = overlay.max_scroll();
-                let next = current.saturating_add(step).min(max);
-                overlay.set_scroll(next);
-                self.request_redraw();
-                true
-            }
-            KeyCode::Home => {
-                overlay.set_scroll(0);
-                self.request_redraw();
-                true
-            }
-            KeyCode::End => {
-                overlay.set_scroll(overlay.max_scroll());
-                self.request_redraw();
-                true
-            }
-            _ => false,
-        }
     }
 
     // dispatch_command() removed — command routing is handled at the App layer via AppEvent::DispatchCommand
@@ -5368,13 +5313,6 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let prompt_summary = if message.display_text.trim().is_empty() {
-            None
-        } else {
-            Some(message.display_text.clone())
-        };
-        self.capture_ghost_snapshot(prompt_summary);
-
         let turn_active = self.is_task_running()
             || !self.active_task_ids.is_empty()
             || self.stream.is_write_cycle_active()
@@ -5385,54 +5323,216 @@ impl ChatWidget<'_> {
                 "Queuing user input while turn is active (queued: {})",
                 self.queued_user_messages.len() + 1
             );
-            self.queued_user_messages.push_back(message);
+            let queued_clone = message.clone();
+            self.queued_user_messages.push_back(queued_clone);
             self.refresh_queued_user_messages();
 
-            let queue_items = self
-                .queued_user_messages
-                .back()
-                .map(|msg| msg.ordered_items.clone())
-                .unwrap_or_default();
+            let prompt_summary = if message.display_text.trim().is_empty() {
+                None
+            } else {
+                Some(message.display_text.clone())
+            };
 
-            match self.codex_op_tx.send(Op::QueueUserInput { items: queue_items }) {
-                Ok(()) => {
-                    if let Some(sent_message) = self.queued_user_messages.pop_back() {
-                        self.refresh_queued_user_messages();
-                        self.finalize_sent_user_message(sent_message);
-                    }
+            match self.capture_ghost_snapshot(prompt_summary) {
+                GhostSnapshotJobHandle::Scheduled(job_id) => {
+                    self.pending_snapshot_dispatches
+                        .push_back(PendingSnapshotDispatch::Queued { job_id, message });
                 }
-                Err(e) => {
-                    tracing::error!("failed to send QueueUserInput op: {e}");
+                GhostSnapshotJobHandle::Skipped => {
+                    self.dispatch_queued_user_message_now(message);
                 }
             }
-
             return;
         }
 
         let mut batch: Vec<UserMessage> = self.queued_user_messages.drain(..).collect();
         batch.push(message);
         self.refresh_queued_user_messages();
-        self.send_user_messages_to_agent(batch);
+        let summary = batch
+            .last()
+            .and_then(|msg| {
+                let trimmed = msg.display_text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(msg.display_text.clone())
+                }
+            });
+
+        match self.capture_ghost_snapshot(summary) {
+            GhostSnapshotJobHandle::Scheduled(job_id) => {
+                self.pending_snapshot_dispatches
+                    .push_back(PendingSnapshotDispatch::Direct { job_id, batch });
+            }
+            GhostSnapshotJobHandle::Skipped => {
+                self.send_user_messages_to_agent(batch);
+            }
+        }
 
         // (debug watchdog removed)
     }
 
-    fn capture_ghost_snapshot(&mut self, summary: Option<String>) {
+    fn capture_ghost_snapshot(&mut self, summary: Option<String>) -> GhostSnapshotJobHandle {
         if self.ghost_snapshots_disabled {
-            return;
+            return GhostSnapshotJobHandle::Skipped;
         }
 
-        let conversation = self.current_conversation_snapshot();
-        let options = CreateGhostCommitOptions::new(&self.config.cwd);
-        match create_ghost_commit(&options) {
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        self.enqueue_ghost_snapshot(request)
+    }
+
+    fn capture_ghost_snapshot_blocking(&mut self, summary: Option<String>) -> Option<GhostSnapshot> {
+        if self.ghost_snapshots_disabled {
+            return None;
+        }
+
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        let repo_path = self.config.cwd.clone();
+        let started_at = request.started_at;
+        let result = create_ghost_commit(&CreateGhostCommitOptions::new(repo_path.as_path()));
+        let elapsed = started_at.elapsed();
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        snapshot
+    }
+
+    fn dispatch_pending_snapshot(&mut self, job_id: u64) {
+        let Some(position) = self
+            .pending_snapshot_dispatches
+            .iter()
+            .position(|pending| pending.job_id() == job_id)
+        else {
+            return;
+        };
+
+        let Some(pending) = self.pending_snapshot_dispatches.remove(position) else {
+            return;
+        };
+        self.process_snapshot_dispatch(pending);
+    }
+
+    fn flush_pending_snapshot_dispatches(&mut self) {
+        while let Some(pending) = self.pending_snapshot_dispatches.pop_front() {
+            self.process_snapshot_dispatch(pending);
+        }
+    }
+
+    fn process_snapshot_dispatch(&mut self, pending: PendingSnapshotDispatch) {
+        match pending {
+            PendingSnapshotDispatch::Direct { batch, .. } => {
+                self.send_user_messages_to_agent(batch);
+            }
+            PendingSnapshotDispatch::Queued { message, .. } => {
+                self.dispatch_queued_user_message_now(message);
+            }
+        }
+    }
+
+    fn dispatch_queued_user_message_now(&mut self, message: UserMessage) {
+        let message = self.take_queued_user_message(&message).unwrap_or(message);
+        let items = message.ordered_items.clone();
+        match self.codex_op_tx.send(Op::QueueUserInput { items }) {
+            Ok(()) => {
+                self.finalize_sent_user_message(message);
+            }
+            Err(err) => {
+                tracing::error!("failed to send QueueUserInput op: {err}");
+                self.queued_user_messages.push_front(message);
+                self.refresh_queued_user_messages();
+            }
+        }
+    }
+
+    fn take_queued_user_message(&mut self, target: &UserMessage) -> Option<UserMessage> {
+        let position = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message == target)?;
+        let removed = self.queued_user_messages.remove(position)?;
+        self.refresh_queued_user_messages();
+        Some(removed)
+    }
+
+    fn enqueue_ghost_snapshot(&mut self, request: GhostSnapshotRequest) -> GhostSnapshotJobHandle {
+        let job_id = self.next_ghost_snapshot_id;
+        self.next_ghost_snapshot_id = self.next_ghost_snapshot_id.wrapping_add(1);
+        self.ghost_snapshot_queue.push_back((job_id, request));
+        self.spawn_next_ghost_snapshot();
+        GhostSnapshotJobHandle::Scheduled(job_id)
+    }
+
+    fn spawn_next_ghost_snapshot(&mut self) {
+        if self.ghost_snapshots_disabled {
+            self.ghost_snapshot_queue.clear();
+            return;
+        }
+        if self.active_ghost_snapshot.is_some() {
+            return;
+        }
+        let Some((job_id, request)) = self.ghost_snapshot_queue.pop_front() else {
+            return;
+        };
+
+        let repo_path = self.config.cwd.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        let started_at = request.started_at;
+        self.active_ghost_snapshot = Some((job_id, request));
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let options = CreateGhostCommitOptions::new(repo_path.as_path());
+                create_ghost_commit(&options)
+            })
+            .await;
+            let elapsed = started_at.elapsed();
+            let event = match result {
+                Ok(Ok(commit)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Ok(commit),
+                    elapsed,
+                },
+                Ok(Err(err)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Err(err),
+                    elapsed,
+                },
+                Err(join_err) => {
+                    let err = GitToolingError::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("ghost snapshot task failed: {join_err}"),
+                    ));
+                    AppEvent::GhostSnapshotFinished {
+                        job_id,
+                        result: Err(err),
+                        elapsed,
+                    }
+                }
+            };
+            app_event_tx.send(event);
+        });
+    }
+
+    fn finalize_ghost_snapshot(
+        &mut self,
+        request: GhostSnapshotRequest,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) -> Option<GhostSnapshot> {
+        match result {
             Ok(commit) => {
                 self.ghost_snapshots_disabled = false;
                 self.ghost_snapshots_disabled_reason = None;
-                self.ghost_snapshots
-                    .push(GhostSnapshot::new(commit, summary, conversation));
+                let snapshot = GhostSnapshot::new(commit, request.summary, request.conversation);
+                self.ghost_snapshots.push(snapshot.clone());
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
                 }
+                if elapsed >= Duration::from_secs(2) {
+                    self.push_background_tail(format!(
+                        "Workspace snapshot captured in {}.",
+                        format_duration(elapsed)
+                    ));
+                }
+                Some(snapshot)
             }
             Err(err) => {
                 self.ghost_snapshots_disabled = true;
@@ -5457,8 +5557,38 @@ impl ChatWidget<'_> {
                     self.push_background_tail(hint);
                 }
                 tracing::warn!("failed to create ghost snapshot: {err}");
+                self.ghost_snapshot_queue.clear();
+                None
             }
         }
+    }
+
+    pub(crate) fn handle_ghost_snapshot_finished(
+        &mut self,
+        job_id: u64,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) {
+        let Some((active_id, request)) = self.active_ghost_snapshot.take() else {
+            tracing::warn!("ghost snapshot finished without active job (id={job_id})");
+            return;
+        };
+
+        if active_id != job_id {
+            tracing::warn!(
+                "ghost snapshot job id mismatch: expected {active_id}, got {job_id}"
+            );
+            self.active_ghost_snapshot = Some((active_id, request));
+            return;
+        }
+
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        self.request_redraw();
+        self.dispatch_pending_snapshot(job_id);
+        if snapshot.is_none() {
+            self.flush_pending_snapshot_dispatches();
+        }
+        self.spawn_next_ghost_snapshot();
     }
 
     fn current_conversation_snapshot(&self) -> ConversationSnapshot {
@@ -5500,6 +5630,11 @@ impl ChatWidget<'_> {
             snapshots: self.ghost_snapshots.clone(),
             disabled: self.ghost_snapshots_disabled,
             disabled_reason: self.ghost_snapshots_disabled_reason.clone(),
+            queue: self.ghost_snapshot_queue.clone(),
+            active: self.active_ghost_snapshot.clone(),
+            next_id: self.next_ghost_snapshot_id,
+            pending_dispatches: self.pending_snapshot_dispatches.clone(),
+            queued_user_messages: self.queued_user_messages.clone(),
         }
     }
 
@@ -5511,6 +5646,13 @@ impl ChatWidget<'_> {
         }
         self.ghost_snapshots_disabled = state.disabled;
         self.ghost_snapshots_disabled_reason = state.disabled_reason;
+        self.ghost_snapshot_queue = state.queue;
+        self.active_ghost_snapshot = state.active;
+        self.next_ghost_snapshot_id = state.next_id;
+        self.pending_snapshot_dispatches = state.pending_dispatches;
+        self.queued_user_messages = state.queued_user_messages;
+        self.refresh_queued_user_messages();
+        self.spawn_next_ghost_snapshot();
     }
 
     fn snapshot_preview(&self, index: usize) -> Option<UndoSnapshotPreview> {
@@ -5766,9 +5908,10 @@ impl ChatWidget<'_> {
         if restore_files {
             let previous_len = self.ghost_snapshots.len();
             let pre_summary = Some("Pre-undo checkpoint".to_string());
-            self.capture_ghost_snapshot(pre_summary);
-            if self.ghost_snapshots.len() > previous_len {
-                pre_restore_snapshot = self.ghost_snapshots.last().cloned();
+            let captured_snapshot = self.capture_ghost_snapshot_blocking(pre_summary);
+            let added_snapshot = self.ghost_snapshots.len() > previous_len;
+            if let Some(snapshot) = captured_snapshot {
+                pre_restore_snapshot = Some(snapshot);
             }
 
             match restore_ghost_commit(&self.config.cwd, snapshot.commit()) {
@@ -5783,7 +5926,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 Err(err) => {
-                    if self.ghost_snapshots.len() > previous_len {
+                    if added_snapshot && !self.ghost_snapshots.is_empty() {
                         self.ghost_snapshots.pop();
                     }
                     errors.push(format!("Failed to restore workspace files: {err}"));
@@ -5995,123 +6138,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn handle_pro_event(&mut self, event: ProEvent) {
-        match event {
-            ProEvent::Toggled { enabled } => {
-                self.pro.set_enabled(enabled);
-                if !enabled {
-                    self.layout.pro_hud_expanded = false;
-                    if self.pro.overlay_visible {
-                        self.pro.overlay_visible = false;
-                    }
-                }
-                let title = if enabled {
-                    "Pro mode enabled"
-                } else {
-                    "Pro mode disabled"
-                };
-                self.pro
-                    .push_log(ProLogEntry::new(title, None, ProLogCategory::Status));
-            }
-            ProEvent::Status { phase, stats } => {
-                self.pro.update_status(phase.clone(), stats.clone());
-            }
-            ProEvent::DeveloperNote { turn_id, note, artifacts } => {
-                let lower = note.to_ascii_lowercase();
-                if lower.contains("autonomous") && lower.contains("enabled") {
-                    self.pro.set_auto_enabled(true);
-                } else if lower.contains("autonomous") && lower.contains("disabled") {
-                    self.pro.set_auto_enabled(false);
-                }
-                let mut body_lines = vec![note.clone()];
-                for artifact in artifacts {
-                    if !artifact.summary.is_empty() {
-                        body_lines.push(format!("{}: {}", artifact.kind, artifact.summary));
-                    }
-                }
-                let body = if body_lines.is_empty() {
-                    None
-                } else {
-                    Some(body_lines.join("\n"))
-                };
-                let category = if turn_id.contains("observer") {
-                    ProLogCategory::Recommendation
-                } else {
-                    ProLogCategory::Note
-                };
-                self.pro
-                    .push_log(ProLogEntry::new("Developer note", body, category));
-            }
-            ProEvent::AgentSpawned { category, budget_ms, .. } => {
-                let title = format!(
-                    "{} helper spawned",
-                    self.describe_pro_category(&category)
-                );
-                let body = if budget_ms > 0 {
-                    Some(format!("Budget: {} ms", budget_ms))
-                } else {
-                    None
-                };
-                self.pro
-                    .push_log(ProLogEntry::new(title, body, ProLogCategory::Agent));
-            }
-            ProEvent::AgentResult {
-                category,
-                ok,
-                note,
-                artifacts,
-                ..
-            } => {
-                let status = if ok { "completed" } else { "failed" };
-                let title = format!(
-                    "{} helper {}",
-                    self.describe_pro_category(&category),
-                    status
-                );
-                let mut body_lines = Vec::new();
-                if let Some(note) = note {
-                    if !note.is_empty() {
-                        body_lines.push(note);
-                    }
-                }
-                for artifact in artifacts {
-                    if !artifact.summary.is_empty() {
-                        body_lines.push(format!("{}: {}", artifact.kind, artifact.summary));
-                    }
-                }
-                let body = if body_lines.is_empty() {
-                    None
-                } else {
-                    Some(body_lines.join("\n"))
-                };
-                self.pro
-                    .push_log(ProLogEntry::new(title, body, ProLogCategory::Agent));
-            }
-        }
-        self.request_redraw();
-    }
-
-    fn describe_pro_category(&self, category: &ProCategory) -> &'static str {
-        match category {
-            ProCategory::Planning => "Planning",
-            ProCategory::Research => "Research",
-            ProCategory::Debugging => "Debugging",
-            ProCategory::Review => "Review",
-            ProCategory::Background => "Background",
-        }
-    }
-
-    fn describe_pro_phase(&self, phase: &ProPhase) -> &'static str {
-        match phase {
-            ProPhase::Idle => "Idle",
-            ProPhase::Planning => "Planning",
-            ProPhase::Research => "Research",
-            ProPhase::Debug => "Debug",
-            ProPhase::Review => "Review",
-            ProPhase::Background => "Background",
-        }
-    }
-
     pub(crate) fn handle_codex_event(&mut self, event: Event) {
         tracing::debug!(
             "handle_codex_event({})",
@@ -6155,9 +6181,6 @@ impl ChatWidget<'_> {
                 }
 
                 self.request_redraw();
-            }
-            EventMsg::Pro(event) => {
-                self.handle_pro_event(event);
             }
             EventMsg::WebSearchBegin(ev) => {
                 // Enforce order presence (tool events should carry it)
@@ -6225,6 +6248,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
+                self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let mut max_req = self.last_seen_request_index;
                 if events.is_empty() {
                     for item in &items {
@@ -6257,6 +6281,7 @@ impl ChatWidget<'_> {
                     self.current_request_index = self.last_seen_request_index;
                 }
                 self.request_redraw();
+                self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
                 tools::web_search_complete(self, ev.call_id, ev.query)
@@ -6433,9 +6458,7 @@ impl ChatWidget<'_> {
 
                 self.mark_needs_redraw();
             }
-            EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: _,
-            }) => {
+            EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 // Finalize any active streams
                 if self.stream.is_write_cycle_active() {
                     // Finalize both streams via streaming facade
@@ -6516,6 +6539,7 @@ impl ChatWidget<'_> {
                 self.stream_state.current_kind = None;
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
+                self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -8042,12 +8066,18 @@ impl ChatWidget<'_> {
 
     fn update_rate_limit_resets(&mut self, current: &RateLimitSnapshotEvent) {
         let now = Utc::now();
-        self.rate_limit_primary_next_reset_at = current
-            .primary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
-        self.rate_limit_secondary_next_reset_at = current
-            .secondary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
+        if let Some(secs) = current.primary_reset_after_seconds {
+            self.rate_limit_primary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_primary_next_reset_at = None;
+        }
+        if let Some(secs) = current.secondary_reset_after_seconds {
+            self.rate_limit_secondary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_secondary_next_reset_at = None;
+        }
     }
 
     pub(crate) fn handle_update_command(&mut self) {
@@ -8060,6 +8090,79 @@ impl ChatWidget<'_> {
             "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                 to_string(),
         );
+    }
+
+    pub(crate) fn handle_notifications_command(&mut self, args: String) {
+        use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
+
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            let mode = match &self.config.tui.notifications {
+                Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+                Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
+            };
+
+            let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+            self.bottom_pane.show_notifications_settings(view);
+            return;
+        }
+
+        let keyword = trimmed.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        match keyword.as_str() {
+            "status" => {
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(true) => {
+                        self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+                    }
+                    Notifications::Enabled(false) => {
+                        self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "🔔 TUI notifications use custom filters: [{}]",
+                            filters
+                        ));
+                    }
+                }
+            }
+            "on" | "off" => {
+                let enable = keyword == "on";
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(current) => {
+                        if *current == enable {
+                            self.push_background_tail(format!(
+                                "TUI notifications already {}.",
+                                if enable { "enabled" } else { "disabled" }
+                            ));
+                        } else {
+                            self.app_event_tx
+                                .send(AppEvent::UpdateTuiNotifications(enable));
+                        }
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
+                            filters
+                        ));
+                    }
+                }
+            }
+            _ => {
+                self.push_background_tail(
+                    "Usage: /notifications [status|on|off]".to_string(),
+                );
+            }
+        }
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -14180,6 +14283,10 @@ impl ChatWidget<'_> {
         &self.total_token_usage
     }
 
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        self.session_id
+    }
+
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
         self.rate_limit_snapshot = None;
@@ -14767,8 +14874,8 @@ impl ChatWidget<'_> {
         let mut items: Vec<SelectionItem> = Vec::new();
 
         items.push(SelectionItem {
-            name: "Review current workspace changes".to_string(),
-            description: Some("Include staged, unstaged, and untracked files".to_string()),
+            name: "Review /branch changes".to_string(),
+            description: Some("Compare your worktree branch against its merge target".to_string()),
             is_current: false,
             actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
                 tx.send(crate::app_event::AppEvent::RunReviewCommand(String::new()));
@@ -14987,7 +15094,7 @@ impl ChatWidget<'_> {
 
             let prompt = if let Some(current) = current_trimmed.as_ref() {
                 format!(
-                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                 )
             } else {
                 format!(
@@ -15060,6 +15167,62 @@ impl ChatWidget<'_> {
 
         let trimmed = args.trim();
         if trimmed.is_empty() {
+            if Self::is_branch_worktree_path(&self.config.cwd) {
+                if let Some(git_root) =
+                    codex_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+                {
+                    let worktree_cwd = self.config.cwd.clone();
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let default_branch = codex_core::git_worktree::detect_default_branch(&git_root)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+                        let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+
+                        if let (Some(base_branch), Some(current_branch)) =
+                            (default_branch, current_branch)
+                        {
+                            if base_branch != current_branch {
+                                let prompt = format!(
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                                );
+                                let hint = format!("against {base_branch}");
+                                let preparation_label =
+                                    Some(format!("Preparing code review against {base_branch}"));
+                                let metadata = Some(ReviewContextMetadata {
+                                    scope: Some("branch_diff".to_string()),
+                                    base_branch: Some(base_branch.clone()),
+                                    current_branch: Some(current_branch.clone()),
+                                    ..Default::default()
+                                });
+                                tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                                    prompt,
+                                    hint,
+                                    preparation_label,
+                                    metadata,
+                                });
+                                return;
+                            }
+                        }
+
+                        tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                            prompt: "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
+                            hint: "current workspace changes".to_string(),
+                            preparation_label: Some("Preparing code review request...".to_string()),
+                            metadata: Some(ReviewContextMetadata {
+                                scope: Some("workspace".to_string()),
+                                ..Default::default()
+                            }),
+                        });
+                    });
+                    return;
+                }
+            }
+
             let metadata = ReviewContextMetadata {
                 scope: Some("workspace".to_string()),
                 ..Default::default()
@@ -16264,6 +16427,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rate_limit_warnings_emit_only_highest_threshold() {
+        let mut state = RateLimitWarningState::default();
+
+        // Jump straight past multiple weekly thresholds; emit just the highest crossed one.
+        let weekly = state.take_warnings(80.0, 10.0);
+        assert_eq!(weekly.len(), 1);
+        assert_eq!(weekly[0].threshold, 75.0);
+        assert!(matches!(weekly[0].scope, RateLimitWarningScope::Secondary));
+
+        // Calling again without crossing new thresholds should produce nothing.
+        assert!(state.take_warnings(80.0, 10.0).is_empty());
+
+        // Crossing the final threshold should produce it exactly once.
+        let weekly_final = state.take_warnings(95.0, 10.0);
+        assert_eq!(weekly_final.len(), 1);
+        assert_eq!(weekly_final[0].threshold, 90.0);
+        assert!(matches!(weekly_final[0].scope, RateLimitWarningScope::Secondary));
+
+        // Primary scope follows the same rule.
+        let primary = state.take_warnings(95.0, 80.0);
+        assert_eq!(primary.len(), 1);
+        assert_eq!(primary[0].threshold, 75.0);
+        assert!(matches!(primary[0].scope, RateLimitWarningScope::Primary));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn spinner_stays_while_any_agent_running() {
         let mut chat = make_widget();
@@ -16401,9 +16590,7 @@ impl ChatWidget<'_> {
             .map(|lock| lock.is_some())
             .unwrap_or(false);
         let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
-        let has_pro = self.pro_surface_present();
-
-        if !has_browser_screenshot && !has_active_agents && !has_pro {
+        if !has_browser_screenshot && !has_active_agents {
             return;
         }
 
@@ -16433,7 +16620,6 @@ impl ChatWidget<'_> {
         enum HudKind {
             Browser,
             Agents,
-            Pro,
         }
 
         let mut panels: Vec<(HudKind, bool)> = Vec::new();
@@ -16443,10 +16629,6 @@ impl ChatWidget<'_> {
         if has_active_agents {
             panels.push((HudKind::Agents, self.layout.agents_hud_expanded));
         }
-        if has_pro {
-            panels.push((HudKind::Pro, self.layout.pro_hud_expanded));
-        }
-
         if panels.is_empty() {
             return;
         }
@@ -16483,8 +16665,6 @@ impl ChatWidget<'_> {
                 (HudKind::Browser, false) => self.render_browser_header(rect, buf),
                 (HudKind::Agents, true) => self.render_agent_panel(rect, buf),
                 (HudKind::Agents, false) => self.render_agents_header(rect, buf),
-                (HudKind::Pro, true) => self.render_pro_panel(rect, buf),
-                (HudKind::Pro, false) => self.render_pro_header(rect, buf),
             }
         }
     }
@@ -16635,227 +16815,6 @@ impl ChatWidget<'_> {
         let mut spans = left_spans;
         spans.extend(right_spans);
         Paragraph::new(RLine::from(spans)).render(content, buf);
-    }
-
-    fn render_pro_header(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::layout::Margin;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Paragraph;
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .title(" Pro ");
-        let inner = block.inner(area);
-        block.render(area, buf);
-        let content = inner.inner(Margin::new(1, 0));
-
-        let dot_color = if self.pro.enabled {
-            crate::colors::success_green()
-        } else {
-            crate::colors::text_dim()
-        };
-        let mut left_spans: Vec<Span> = Vec::new();
-        left_spans.push(Span::styled("•", Style::default().fg(dot_color)));
-        left_spans.push(Span::raw(" "));
-        left_spans.push(Span::raw(self.pro_summary_line()));
-
-        let action = if self.layout.pro_hud_expanded {
-            " collapse"
-        } else {
-            " expand"
-        };
-        let key_style = Style::default().fg(crate::colors::function());
-        let label_style = Style::default().dim();
-        let mut right_spans: Vec<Span> = Vec::new();
-        right_spans.push(Span::from("Ctrl+Shift+P").style(key_style));
-        right_spans.push(Span::styled(action, label_style));
-        right_spans.push(Span::raw("  "));
-        right_spans.push(Span::from("Ctrl+P").style(key_style));
-        right_spans.push(Span::styled(" overlay", label_style));
-
-        let measure =
-            |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
-        let left_len = measure(&left_spans);
-        let right_len = measure(&right_spans);
-        let total_width = content.width as usize;
-        if total_width > left_len + right_len {
-            left_spans.push(Span::from(" ".repeat(total_width - left_len - right_len)));
-        }
-        let mut spans = left_spans;
-        spans.extend(right_spans);
-        Paragraph::new(RLine::from(spans)).render(content, buf);
-    }
-
-    fn render_pro_panel(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::layout::Margin;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Paragraph;
-        use ratatui::widgets::Wrap;
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .title(" Pro ");
-        let inner = block.inner(area);
-        block.render(area, buf);
-        let content = inner.inner(Margin::new(1, 0));
-        if content.height == 0 {
-            return;
-        }
-
-        let mut lines: Vec<RLine<'static>> = Vec::new();
-        let summary_style = Style::default()
-            .fg(crate::colors::text())
-            .add_modifier(Modifier::BOLD);
-        lines.push(RLine::from(vec![Span::styled(
-            self.pro_summary_line(),
-            summary_style,
-        )]));
-        let key_style = Style::default().fg(crate::colors::function());
-        let label_style = Style::default().fg(crate::colors::text_dim());
-        lines.push(RLine::from(vec![
-            Span::raw(" "),
-            Span::from("Ctrl+Shift+P").style(key_style),
-            Span::styled(" collapse  ", label_style),
-            Span::from("Ctrl+P").style(key_style),
-            Span::styled(" overlay", label_style),
-        ]));
-        lines.push(RLine::from(" "));
-
-        if self.pro.log.is_empty() {
-            lines.push(RLine::from(vec![Span::styled(
-                "No Pro activity yet",
-                Style::default().fg(crate::colors::text_dim()),
-            )]));
-        } else {
-            for entry in self.pro.log.iter().rev() {
-                for line in self.format_pro_log_entry(entry) {
-                    lines.push(line);
-                }
-                lines.push(RLine::from(" "));
-            }
-            // Remove trailing blank line for neatness
-            if lines
-                .last()
-                .map(|line| line.spans.iter().all(|s| s.content.trim().is_empty()))
-                .unwrap_or(false)
-            {
-                lines.pop();
-            }
-        }
-
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .render(content, buf);
-    }
-
-    fn render_pro_overlay(&self, frame_area: Rect, history_area: Rect, buf: &mut Buffer) {
-        use ratatui::layout::Margin;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Clear;
-        use ratatui::widgets::Paragraph;
-        use ratatui::widgets::Wrap;
-
-        let Some(overlay) = self.pro.overlay.as_ref() else {
-            return;
-        };
-
-        // Dim entire frame as scrim
-        let scrim_style = Style::default()
-            .bg(crate::colors::overlay_scrim())
-            .fg(crate::colors::text_dim());
-        fill_rect(buf, frame_area, None, scrim_style);
-
-        // Match horizontal padding used by history content
-        let padding = 1u16;
-        let overlay_area = Rect {
-            x: history_area.x + padding,
-            y: history_area.y,
-            width: history_area.width.saturating_sub(padding * 2),
-            height: history_area.height,
-        };
-
-        Clear.render(overlay_area, buf);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(RLine::from(vec![
-                Span::styled(" Pro activity ", Style::default().fg(crate::colors::text())),
-                Span::styled("— Esc close  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Ctrl+P overlay  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("↑↓ scroll", Style::default().fg(crate::colors::text_dim())),
-            ]))
-            .style(Style::default().bg(crate::colors::background()))
-            .border_style(
-                Style::default()
-                    .fg(crate::colors::border())
-                    .bg(crate::colors::background()),
-            );
-        let inner = block.inner(overlay_area);
-        block.render(overlay_area, buf);
-
-        let body = inner.inner(Margin::new(1, 1));
-        if body.height == 0 {
-            return;
-        }
-
-        let mut lines: Vec<RLine<'static>> = Vec::new();
-        let summary_style = Style::default()
-            .fg(crate::colors::text())
-            .add_modifier(Modifier::BOLD);
-        lines.push(RLine::from(vec![Span::styled(
-            self.pro_summary_line(),
-            summary_style,
-        )]));
-        lines.push(RLine::from(" "));
-
-        if self.pro.log.is_empty() {
-            lines.push(RLine::from(vec![Span::styled(
-                "No Pro activity captured yet",
-                Style::default().fg(crate::colors::text_dim()),
-            )]));
-        } else {
-            for entry in self.pro.log.iter().rev() {
-                for line in self.format_pro_log_entry(entry) {
-                    lines.push(line);
-                }
-                lines.push(RLine::from(" "));
-            }
-        }
-
-        while lines
-            .last()
-            .map(|line| line.spans.iter().all(|s| s.content.trim().is_empty()))
-            .unwrap_or(false)
-        {
-            lines.pop();
-        }
-
-        let total_lines = lines.len();
-        let visible_rows = body.height as usize;
-        overlay.set_visible_rows(body.height);
-        let max_scroll = total_lines.saturating_sub(visible_rows.max(1));
-        overlay.set_max_scroll(max_scroll.min(u16::MAX as usize) as u16);
-        let skip = overlay.scroll().min(overlay.max_scroll()) as usize;
-        let end = (skip + visible_rows).min(total_lines);
-        let slice = if skip < total_lines {
-            lines[skip..end].to_vec()
-        } else {
-            Vec::new()
-        };
-
-        let paragraph = Paragraph::new(slice).wrap(Wrap { trim: false });
-        paragraph.render(body, buf);
     }
 
     fn render_limits_overlay(&self, frame_area: Rect, history_area: Rect, buf: &mut Buffer) {
@@ -17044,159 +17003,6 @@ impl ChatWidget<'_> {
         Paragraph::new(RtText::from(slice))
             .wrap(Wrap { trim: false })
             .render(text_area, buf);
-    }
-
-    fn pro_summary_line(&self) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        parts.push(if self.pro.enabled { "on" } else { "off" }.to_string());
-        parts.push(format!(
-            "auto {}",
-            if self.pro.auto_enabled { "on" } else { "off" }
-        ));
-        if let Some(status) = &self.pro.status {
-            parts.push(self.describe_pro_phase(&status.phase).to_string());
-            parts.push(format!(
-                "A{}/C{}/S{}",
-                status.stats.active, status.stats.completed, status.stats.spawned
-            ));
-        }
-        if let Some(ts) = self.pro.last_status_update {
-            parts.push(format!("updated {}", self.format_recent_timestamp(ts)));
-        }
-        parts.join(" · ")
-    }
-
-    fn format_pro_log_entry(&self, entry: &ProLogEntry) -> Vec<ratatui::text::Line<'static>> {
-        use ratatui::text::Span;
-
-        let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
-        let timestamp = entry.timestamp.format("%H:%M:%S").to_string();
-        let mut header_spans: Vec<Span<'static>> = Vec::new();
-        header_spans.push(Span::styled(
-            timestamp,
-            Style::default().fg(crate::colors::text_dim()),
-        ));
-        header_spans.push(Span::raw("  "));
-        header_spans.push(Span::styled(
-            entry.title.clone(),
-            Style::default()
-                .fg(self.pro_category_color(entry.category))
-                .add_modifier(Modifier::BOLD),
-        ));
-        lines.push(ratatui::text::Line::from(header_spans));
-
-        if let Some(body) = &entry.body {
-            for body_line in body.lines() {
-                let trimmed = body_line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                lines.push(ratatui::text::Line::from(Span::raw(format!(
-                    "  {}",
-                    trimmed
-                ))));
-            }
-        }
-
-        lines
-    }
-
-    fn pro_category_color(&self, category: ProLogCategory) -> ratatui::style::Color {
-        match category {
-            ProLogCategory::Status => crate::colors::text(),
-            ProLogCategory::Recommendation => crate::colors::primary(),
-            ProLogCategory::Agent => crate::colors::info(),
-            ProLogCategory::Note => crate::colors::text_mid(),
-        }
-    }
-
-    pub(crate) fn parse_pro_action(&self, args: &str) -> Result<ProAction, String> {
-        let trimmed = args.trim();
-        if trimmed.is_empty() {
-            return Ok(ProAction::Status);
-        }
-        let mut parts = trimmed.split_whitespace();
-        let first = parts
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let ensure_no_extra = |iter: &mut dyn Iterator<Item = &str>| {
-            if iter.next().is_some() {
-                Err("Too many arguments for /pro [auto] command".to_string())
-            } else {
-                Ok(())
-            }
-        };
-        match first.as_str() {
-            "toggle" | "switch" => {
-                ensure_no_extra(&mut parts)?;
-                Ok(ProAction::Toggle)
-            }
-            "on" | "enable" | "start" => {
-                ensure_no_extra(&mut parts)?;
-                Ok(ProAction::On)
-            }
-            "off" | "disable" | "stop" => {
-                ensure_no_extra(&mut parts)?;
-                Ok(ProAction::Off)
-            }
-            "status" | "state" => {
-                ensure_no_extra(&mut parts)?;
-                Ok(ProAction::Status)
-            }
-            "auto" => {
-                let next = parts.next().map(|s| s.to_ascii_lowercase());
-                match next.as_deref() {
-                    None => Ok(ProAction::AutoToggle),
-                    Some("toggle" | "switch") => {
-                        ensure_no_extra(&mut parts)?;
-                        Ok(ProAction::AutoToggle)
-                    }
-                    Some("on" | "enable" | "start") => {
-                        ensure_no_extra(&mut parts)?;
-                        Ok(ProAction::AutoOn)
-                    }
-                    Some("off" | "disable" | "stop") => {
-                        ensure_no_extra(&mut parts)?;
-                        Ok(ProAction::AutoOff)
-                    }
-                    Some("status" | "state") => {
-                        ensure_no_extra(&mut parts)?;
-                        Ok(ProAction::AutoStatus)
-                    }
-                    Some(other) => Err(format!("Unknown /pro auto option: {}", other)),
-                }
-            }
-            other => Err(format!("Unknown /pro subcommand: {}", other)),
-        }
-    }
-
-    fn pro_surface_present(&self) -> bool {
-        if !(self.pro.enabled || self.pro.auto_enabled) {
-            return false;
-        }
-        self.pro.status.is_some() || !self.pro.log.is_empty() || self.pro.overlay_visible
-    }
-
-    fn format_recent_timestamp(&self, timestamp: DateTime<Local>) -> String {
-        let now = Local::now();
-        let delta = now.signed_duration_since(timestamp);
-        if delta.num_seconds() < 0 {
-            return "just now".to_string();
-        }
-        if delta.num_seconds() < 10 {
-            return "just now".to_string();
-        }
-        if delta.num_seconds() < 60 {
-            return format!("{}s ago", delta.num_seconds());
-        }
-        if delta.num_minutes() < 60 {
-            return format!("{}m ago", delta.num_minutes());
-        }
-        if delta.num_hours() < 24 {
-            return format!("{}h ago", delta.num_hours());
-        }
-        timestamp.format("%b %e %H:%M").to_string()
     }
 
     /// Render a collapsed header for the agents HUD with counts/list (1 line + border)
@@ -19485,8 +19291,6 @@ impl WidgetRef for &ChatWidget<'_> {
         if self.terminal.overlay().is_none() && !self.agents_terminal.active {
             if self.limits.overlay.is_some() {
                 self.render_limits_overlay(area, history_area, buf);
-            } else if self.pro.overlay_visible {
-                self.render_pro_overlay(area, history_area, buf);
             } else if let Some(overlay) = &self.diffs.overlay {
                 // Global scrim: dim the whole background to draw focus to the viewer
                 // We intentionally do this across the entire widget area rather than just the
@@ -20085,126 +19889,8 @@ struct LayoutState {
     last_hud_present: std::cell::Cell<bool>,
     browser_hud_expanded: bool,
     agents_hud_expanded: bool,
-    pro_hud_expanded: bool,
     last_frame_height: std::cell::Cell<u16>,
     last_frame_width: std::cell::Cell<u16>,
-}
-
-#[derive(Default)]
-struct ProState {
-    enabled: bool,
-    auto_enabled: bool,
-    status: Option<ProStatusSnapshot>,
-    last_status_update: Option<DateTime<Local>>,
-    log: Vec<ProLogEntry>,
-    overlay: Option<ProOverlay>,
-    overlay_visible: bool,
-}
-
-#[derive(Clone)]
-struct ProStatusSnapshot {
-    phase: ProPhase,
-    stats: ProStats,
-}
-
-#[derive(Clone)]
-struct ProLogEntry {
-    timestamp: DateTime<Local>,
-    title: String,
-    body: Option<String>,
-    category: ProLogCategory,
-}
-
-#[derive(Clone, Copy)]
-enum ProLogCategory {
-    Status,
-    Recommendation,
-    Agent,
-    Note,
-}
-
-struct ProOverlay {
-    scroll: Cell<u16>,
-    max_scroll: Cell<u16>,
-    visible_rows: Cell<u16>,
-}
-
-impl ProOverlay {
-    fn new() -> Self {
-        Self {
-            scroll: Cell::new(0),
-            max_scroll: Cell::new(0),
-            visible_rows: Cell::new(0),
-        }
-    }
-
-    fn scroll(&self) -> u16 {
-        self.scroll.get()
-    }
-
-    fn set_scroll(&self, value: u16) {
-        let max = self.max_scroll.get();
-        self.scroll.set(value.min(max));
-    }
-
-    fn set_max_scroll(&self, max: u16) {
-        self.max_scroll.set(max);
-        self.set_scroll(self.scroll.get());
-    }
-
-    fn set_visible_rows(&self, rows: u16) {
-        self.visible_rows.set(rows);
-    }
-
-    fn visible_rows(&self) -> u16 {
-        self.visible_rows.get()
-    }
-
-    fn max_scroll(&self) -> u16 {
-        self.max_scroll.get()
-    }
-}
-
-impl ProLogEntry {
-    fn new(title: impl Into<String>, body: Option<String>, category: ProLogCategory) -> Self {
-        Self {
-            timestamp: Local::now(),
-            title: title.into(),
-            body,
-            category,
-        }
-    }
-}
-
-impl ProState {
-    fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-
-    fn set_auto_enabled(&mut self, enabled: bool) {
-        self.auto_enabled = enabled;
-    }
-
-    fn update_status(&mut self, phase: ProPhase, stats: ProStats) {
-        self.status = Some(ProStatusSnapshot { phase, stats });
-        self.last_status_update = Some(Local::now());
-    }
-
-    fn push_log(&mut self, entry: ProLogEntry) {
-        const MAX_LOG_ENTRIES: usize = 200;
-        self.log.push(entry);
-        if self.log.len() > MAX_LOG_ENTRIES {
-            let excess = self.log.len() - MAX_LOG_ENTRIES;
-            self.log.drain(0..excess);
-        }
-    }
-
-    fn ensure_overlay(&mut self) -> &mut ProOverlay {
-        if self.overlay.is_none() {
-            self.overlay = Some(ProOverlay::new());
-        }
-        self.overlay.as_mut().unwrap()
-    }
 }
 
 #[derive(Default)]
@@ -20482,6 +20168,96 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+    }
+
+    pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
+        let new_state = Notifications::Enabled(enabled);
+        self.config.tui.notifications = new_state.clone();
+        self.config.tui_notifications = new_state.clone();
+
+        match find_codex_home() {
+            Ok(home) => {
+                match codex_core::config::set_tui_notifications(&home, new_state) {
+                    Ok(()) => {
+                        let msg = format!(
+                            "✅ {} TUI notifications",
+                            if enabled { "Enabled" } else { "Disabled" }
+                        );
+                        self.push_background_tail(msg);
+                    }
+                    Err(err) => {
+                        let msg = format!(
+                            "⚠️ Failed to persist TUI notifications setting: {}",
+                            err
+                        );
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            Err(_) => {
+                let msg = format!(
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    if enabled { "Enabled" } else { "Disabled" }
+                );
+                self.push_background_tail(msg);
+            }
+        }
+    }
+
+    fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
+        if !self.should_emit_tui_notification("agent-turn-complete") {
+            return;
+        }
+
+        let snippet = last_agent_message
+            .as_deref()
+            .map(Self::notification_snippet)
+            .filter(|text| !text.is_empty());
+
+        self.app_event_tx.send(AppEvent::EmitTuiNotification {
+            title: "Code".to_string(),
+            body: snippet,
+        });
+    }
+
+    fn should_emit_tui_notification(&self, event: &str) -> bool {
+        if self.replay_history_depth > 0 {
+            return false;
+        }
+        self.tui_notification_filter_allows(event)
+    }
+
+    fn tui_notification_filter_allows(&self, event: &str) -> bool {
+        match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => *enabled,
+            Notifications::Custom(entries) => entries
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case(event)),
+        }
+    }
+
+    fn notification_snippet(input: &str) -> String {
+        let collapsed = input
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        const LIMIT: usize = 120;
+        if collapsed.chars().count() <= LIMIT {
+            return collapsed;
+        }
+
+        let mut truncated = String::new();
+        let mut count = 0usize;
+        for ch in collapsed.chars() {
+            if count >= LIMIT.saturating_sub(3) {
+                break;
+            }
+            truncated.push(ch);
+            count += 1;
+        }
+        truncated.push_str("...");
+        truncated
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
