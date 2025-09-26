@@ -14,6 +14,7 @@ const USAGE_VERSION: u32 = 1;
 const USAGE_SUBDIR: &str = "usage";
 const HOURLY_HISTORY_DAYS: i64 = 183; // retain ~6 months of hourly usage for history views
 const UNKNOWN_RESET_RELOG_INTERVAL: Duration = Duration::hours(24);
+const RESET_PASSED_TOLERANCE: Duration = Duration::seconds(5);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RateLimitWarningScope {
@@ -375,18 +376,6 @@ pub fn record_usage_limit_hint(
     })
 }
 
-fn reset_changed(prev: Option<DateTime<Utc>>, next: Option<DateTime<Utc>>) -> bool {
-    match (prev, next) {
-        (Some(a), Some(b)) => a
-            .signed_duration_since(b)
-            .num_seconds()
-            .abs()
-            > 5,
-        (None, None) => false,
-        _ => true,
-    }
-}
-
 fn record_threshold_log(
     logs: &mut Vec<RateLimitWarningRecord>,
     threshold: f64,
@@ -396,20 +385,49 @@ fn record_threshold_log(
     if let Some(existing) = logs.iter_mut().find(|entry| {
         (entry.threshold - threshold).abs() < f64::EPSILON
     }) {
-        if reset_changed(existing.reset_at, reset_at) {
-            existing.logged_at = None;
-        } else if reset_at.is_none()
-            && existing
-                .logged_at
-                .is_some_and(|logged| observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL)
-        {
+        let previous_reset = existing.reset_at;
+        let previous_logged = existing.logged_at;
+        let new_reset = reset_at;
+
+        let reset_moved_earlier = match (previous_reset, new_reset) {
+            (Some(prev), Some(next)) => next + RESET_PASSED_TOLERANCE < prev,
+            _ => false,
+        };
+
+        let logged_after_prev_reset = match (previous_logged, previous_reset) {
+            (Some(logged), Some(prev)) => logged >= prev,
+            _ => false,
+        };
+
+        let prev_reset_elapsed = previous_reset
+            .map(|prev| observed_at + RESET_PASSED_TOLERANCE >= prev)
+            .unwrap_or(false);
+
+        let unknown_reset_elapsed = (previous_reset.is_none() || new_reset.is_none())
+            && previous_logged
+                .is_some_and(|logged| observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL);
+
+        let mut should_clear = false;
+
+        if reset_moved_earlier {
+            should_clear = true;
+        } else if prev_reset_elapsed && !logged_after_prev_reset {
+            should_clear = true;
+        } else if unknown_reset_elapsed {
+            should_clear = true;
+        }
+
+        existing.reset_at = new_reset;
+
+        if should_clear {
             existing.logged_at = None;
         }
-        existing.reset_at = reset_at;
+
         if existing.logged_at.is_none() {
             existing.logged_at = Some(observed_at);
             return true;
         }
+
         return false;
     }
 
@@ -537,6 +555,25 @@ pub fn load_account_usage(
 
 #[cfg(test)]
 mod tests {
+    //! Regression coverage for rate-limit warning relogging.
+    //!
+    //! These cases enforce the desired behaviour:
+    //! - **No duplicate within a window**: once a threshold logs, subsequent polls before
+    //!   the stored reset timestamp must remain silent even if the backend repeats or
+    //!   extends the reset time.
+    //! - **Relog after reset passes**: the first poll at or after the recorded reset may
+    //!   emit again, regardless of whether the backend has already advanced the window.
+    //! - **Relog on earlier reset**: if the backend moves the reset earlier (window
+    //!   shrinks), we allow an immediate relog even before the previously stored reset.
+    //! - **Unknown reset fallback**: when reset metadata disappears, we rely on the
+    //!   24-hour `UNKNOWN_RESET_RELOG_INTERVAL` to unblock further warnings. When the
+    //!   backend begins reporting timestamps again, we should also allow a relog provided
+    //!   the fallback window has elapsed.
+    //! - **Missing metadata alone is not enough**: before the fallback timer elapses we
+    //!   must keep warnings muted even if new snapshots omit reset times.
+    //!
+    //! The helper tests below construct scenarios targeting each rule so the state
+    //! machine in `record_threshold_log` can be refactored confidently.
     use super::*;
     use std::fs::File;
     use crate::protocol::TokenUsage;
@@ -550,6 +587,233 @@ mod tests {
             reasoning_output_tokens: 10,
             total_tokens: 210,
         }
+    }
+
+    #[test]
+    fn rate_limit_warning_only_logs_once_per_reset() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let reset_at = now + Duration::days(7);
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at),
+            now,
+            "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.",
+        )
+        .expect("first record succeeds");
+
+        assert!(first, "first logging should emit");
+
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::days(7) + Duration::hours(6)),
+            now + Duration::hours(6),
+            "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.",
+        )
+        .expect("second record succeeds");
+
+        assert!(!second, "duplicate logging before reset should be suppressed");
+
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::days(15)),
+            now + Duration::days(8),
+            "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.",
+        )
+        .expect("third record succeeds");
+
+        assert!(third, "after reset passes we should emit again");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_reset_with_new_timestamp() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(1)),
+            now,
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // Backend extends reset window beyond the old reset time; we should re-emit now that
+        // the prior window has expired and a new one started.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(2)),
+            now + Duration::minutes(65),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(second, "after reset we should log again even if next window is later");
+
+        // Subsequent updates inside the new window should remain suppressed until that reset passes.
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(2)),
+            now + Duration::minutes(70),
+            msg,
+        )
+        .expect("third record succeeds");
+        assert!(!third, "duplicate logging inside the same window should stay muted");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_reset_even_if_logged_just_before() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let reset_at = now + Duration::minutes(1);
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at),
+            reset_at - Duration::seconds(3),
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // After the reset passes, with a new window scheduled further out, we should relog.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at + Duration::hours(1)),
+            reset_at + Duration::seconds(45),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(second, "post-reset poll should emit again even if prior log was moments before reset");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_unknown_reset_interval() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(1)),
+            now,
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // Backend stops providing reset info — still within backoff window.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            None,
+            now + Duration::minutes(20),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(!second, "dropping reset info should keep warning muted initially");
+
+        // After the unknown interval we should allow another log.
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            None,
+            now + Duration::hours(25),
+            msg,
+        )
+        .expect("third record succeeds");
+        assert!(third, "after backoff expires we should re-emit");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_when_reset_info_returns() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(1)),
+            now,
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            None,
+            now + Duration::minutes(20),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(!second);
+
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(30)),
+            now + Duration::hours(25),
+            msg,
+        )
+        .expect("third record succeeds");
+        assert!(third, "restored reset metadata after fallback window should re-log");
     }
 
     #[test]
