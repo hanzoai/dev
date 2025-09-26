@@ -8,6 +8,7 @@ use crate::util::buffer::{fill_rect, write_line};
 use crate::insert_history::word_wrap_lines;
 use crate::text_formatting::format_json_compact;
 use crate::history::state::{
+    AssistantStreamState,
     BackgroundEventRecord,
     HistoryId,
     PlanIcon,
@@ -2540,15 +2541,11 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
     PlainHistoryCell::new(vec![line], HistoryCellType::Notice)
 }
 
-pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
-    StreamingContentCell::new(lines)
-}
-
-pub(crate) fn new_streaming_content_with_id(
-    id: Option<String>,
-    lines: Vec<Line<'static>>,
+pub(crate) fn new_streaming_content(
+    state: AssistantStreamState,
+    cfg: &Config,
 ) -> StreamingContentCell {
-    StreamingContentCell::new_with_id(id, lines)
+    StreamingContentCell::from_state(state, cfg)
 }
 
 pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
@@ -6068,94 +6065,6 @@ pub(crate) fn trim_empty_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'stati
     }
 
     result
-}
-
-/// Retint a set of pre-rendered lines by mapping colors from the previous
-/// theme palette to the new one. This pragmatically applies a theme change
-/// to already materialized `Line` structures without rebuilding them from
-/// semantic sources.
-pub(crate) fn retint_lines_in_place(
-    lines: &mut Vec<Line<'static>>,
-    old: &crate::theme::Theme,
-    new: &crate::theme::Theme,
-) {
-    use ratatui::style::Color;
-    fn map_color(c: Color, old: &crate::theme::Theme, new: &crate::theme::Theme) -> Color {
-        if c == old.text {
-            return new.text;
-        }
-        if c == old.text_dim {
-            return new.text_dim;
-        }
-        if c == old.text_bright {
-            return new.text_bright;
-        }
-        if c == old.primary {
-            return new.primary;
-        }
-        if c == old.success {
-            return new.success;
-        }
-        if c == old.error {
-            return new.error;
-        }
-        if c == old.info {
-            return new.info;
-        }
-        if c == old.border {
-            return new.border;
-        }
-        if c == old.foreground {
-            return new.foreground;
-        }
-        if c == old.background {
-            return new.background;
-        }
-
-        match c {
-            Color::White => return new.text_bright,
-            Color::Gray | Color::DarkGray => return new.text_dim,
-            Color::Black => return new.text,
-            Color::Red | Color::LightRed => return new.error,
-            Color::Green | Color::LightGreen => return new.success,
-            Color::Yellow | Color::LightYellow => return new.warning,
-            Color::Blue | Color::LightBlue | Color::Cyan | Color::LightCyan => return new.info,
-            Color::Magenta | Color::LightMagenta => return new.primary,
-            _ => {}
-        }
-
-        c
-    }
-
-    for line in lines.iter_mut() {
-        let mut st = line.style;
-        if let Some(fg) = st.fg {
-            st.fg = Some(map_color(fg, old, new));
-        }
-        if let Some(bg) = st.bg {
-            st.bg = Some(map_color(bg, old, new));
-        }
-        if let Some(uc) = st.underline_color {
-            st.underline_color = Some(map_color(uc, old, new));
-        }
-        line.style = st;
-
-        let mut new_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
-        for s in line.spans.drain(..) {
-            let mut st = s.style;
-            if let Some(fg) = st.fg {
-                st.fg = Some(map_color(fg, old, new));
-            }
-            if let Some(bg) = st.bg {
-                st.bg = Some(map_color(bg, old, new));
-            }
-            if let Some(uc) = st.underline_color {
-                st.underline_color = Some(map_color(uc, old, new));
-            }
-            new_spans.push(Span::styled(s.content, st));
-        }
-        line.spans = new_spans;
-    }
 }
 
 fn format_inline_node_for_display(command_escaped: &str) -> Option<String> {
