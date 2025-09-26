@@ -3,6 +3,7 @@
 use super::ChatWidget;
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
+use crate::history::state::ExecAction;
 use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
 use codex_core::parse_command::ParsedCommand;
@@ -331,10 +332,10 @@ pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize)
     }
     let to_kind = |e: &history_cell::ExecCell| -> history_cell::ExecKind {
         match history_cell::action_enum_from_parsed(&e.parsed) {
-            history_cell::ExecAction::Read => history_cell::ExecKind::Read,
-            history_cell::ExecAction::Search => history_cell::ExecKind::Search,
-            history_cell::ExecAction::List => history_cell::ExecKind::List,
-            history_cell::ExecAction::Run => history_cell::ExecKind::Run,
+            ExecAction::Read => history_cell::ExecKind::Read,
+            ExecAction::Search => history_cell::ExecKind::Search,
+            ExecAction::List => history_cell::ExecKind::List,
+            ExecAction::Run => history_cell::ExecKind::Run,
         }
     };
 
@@ -459,9 +460,7 @@ pub(super) fn handle_exec_begin_now(
 
     if matches!(
         action,
-        history_cell::ExecAction::Read
-            | history_cell::ExecAction::Search
-            | history_cell::ExecAction::List
+        ExecAction::Read | ExecAction::Search | ExecAction::List
     ) || has_read_command
     {
         let mut created_new = false;
@@ -526,7 +525,7 @@ pub(super) fn handle_exec_begin_now(
                 chat.request_redraw();
                 chat.bottom_pane.set_has_chat_history(true);
                 let status_text = match action {
-                    history_cell::ExecAction::Read => "reading files…",
+                    ExecAction::Read => "reading files…",
                     _ => "exploring…",
                 };
                 chat.bottom_pane.update_status_text(status_text.to_string());
@@ -627,16 +626,14 @@ pub(super) fn handle_exec_end_now(
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
         let action = history_cell::action_enum_from_parsed(&parsed);
-        let status = match (exit_code, action) {
-            (0, _) => history_cell::ExploreEntryStatus::Success,
-            // No matches for searches
-            (1, history_cell::ExecAction::Search) => history_cell::ExploreEntryStatus::NotFound,
-            // Missing file/dir for list operations (e.g., ls path)
-            (1, history_cell::ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
-            // Anything else is an error; preserve exit code
-            _ => history_cell::ExploreEntryStatus::Error {
-                exit_code: Some(exit_code),
-            },
+    let status = match (exit_code, action) {
+        (0, _) => history_cell::ExploreEntryStatus::Success,
+        (1, ExecAction::Search) => history_cell::ExploreEntryStatus::NotFound,
+        (1, ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
+        // Anything else is an error; preserve exit code
+        _ => history_cell::ExploreEntryStatus::Error {
+            exit_code: Some(exit_code),
+        },
         };
         if agg_idx < chat.history_cells.len() {
             if let Some(agg) = chat.history_cells[agg_idx]
@@ -658,19 +655,19 @@ pub(super) fn handle_exec_end_now(
         chat.request_redraw();
         let status_text = match status {
             history_cell::ExploreEntryStatus::Success => match action {
-                history_cell::ExecAction::Read => "files read".to_string(),
+                ExecAction::Read => "files read".to_string(),
                 _ => "exploration updated".to_string(),
             },
             history_cell::ExploreEntryStatus::NotFound => match action {
-                history_cell::ExecAction::List => "path not found".to_string(),
+                ExecAction::List => "path not found".to_string(),
                 _ => "no matches found".to_string(),
             },
             history_cell::ExploreEntryStatus::Error { .. } => match action {
-                history_cell::ExecAction::Read => format!("read failed (exit {exit_code})"),
-                history_cell::ExecAction::Search => {
+                ExecAction::Read => format!("read failed (exit {exit_code})"),
+                ExecAction::Search => {
                     if exit_code == 2 { "invalid pattern".to_string() } else { format!("search failed (exit {exit_code})") }
                 }
-                history_cell::ExecAction::List => format!("list failed (exit {exit_code})"),
+                ExecAction::List => format!("list failed (exit {exit_code})"),
                 _ => format!("exploration failed (exit {exit_code})"),
             },
             history_cell::ExploreEntryStatus::Running => "exploring…".to_string(),
