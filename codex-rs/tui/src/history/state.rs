@@ -575,6 +575,13 @@ impl HistoryState {
         self.push(HistoryRecord::AssistantMessage(state))
     }
 
+    pub fn assistant_stream_state(&self, stream_id: &str) -> Option<&AssistantStreamState> {
+        self.records.iter().find_map(|record| match record {
+            HistoryRecord::AssistantStream(state) if state.stream_id == stream_id => Some(state),
+            _ => None,
+        })
+    }
+
     pub fn insert(&mut self, index: usize, record: HistoryRecord) -> HistoryId {
         let id = self.next_history_id();
         self.records.insert(index, record.with_id(id));

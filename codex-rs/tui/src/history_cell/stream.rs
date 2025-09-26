@@ -1,16 +1,16 @@
 use super::*;
 use super::assistant::{AssistantLayoutCache, AssistantMarkdownCell, AssistantSeg};
+use crate::history::state::AssistantStreamState;
+use codex_core::config::Config;
 
 // ==================== StreamingContentCell ====================
-// For live streaming content that's being actively rendered
+// Renders in-progress assistant answers backed by `AssistantStreamState`.
 
 pub(crate) struct StreamingContentCell {
     pub(crate) id: Option<String>,
-    lines: Vec<Line<'static>>,
-    // Show an ellipsis on a new line while streaming is in progress
+    state: AssistantStreamState,
+    assistant: AssistantMarkdownCell,
     pub(crate) show_ellipsis: bool,
-    // Cached per-width wrap plan to avoid re-segmentation; invalidated on extend
-    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>, // reuse same struct
 }
 
 impl HistoryCell for StreamingContentCell {
@@ -44,8 +44,12 @@ impl HistoryCell for StreamingContentCell {
         let bg_style = Style::default().bg(cell_bg);
         fill_rect(buf, area, Some(' '), bg_style);
 
-        let plan = self.ensure_stream_layout(area.width);
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
         let text_wrap_width = area.width;
+        let plan = self.ensure_stream_layout(text_wrap_width);
         let mut segs = plan.segs.clone();
         let mut seg_rows = plan.seg_rows.clone();
 
@@ -70,21 +74,22 @@ impl HistoryCell for StreamingContentCell {
         let mut remaining_skip = skip_rows;
         let mut cur_y = area.y;
         let end_y = area.y.saturating_add(area.height);
+
         if remaining_skip == 0 && cur_y < end_y {
             cur_y = cur_y.saturating_add(1);
         }
         remaining_skip = remaining_skip.saturating_sub(1);
 
-        #[derive(Debug, Clone)]
+        #[derive(Clone)]
         enum Seg {
             Text(Vec<Line<'static>>),
             Bullet(Vec<Line<'static>>),
-            Code(Vec<Line<'static>>),
+            Code {
+                lines: Vec<Line<'static>>,
+                lang_label: Option<String>,
+                max_line_width: u16,
+            },
         }
-
-        use unicode_width::UnicodeWidthStr as UW;
-        let measure_line =
-            |l: &Line<'_>| -> usize { l.spans.iter().map(|s| UW::width(s.content.as_ref())).sum() };
 
         let mut draw_segment = |seg: &Seg, y: &mut u16, skip: &mut u16| {
             if *y >= end_y {
@@ -148,28 +153,17 @@ impl HistoryCell for StreamingContentCell {
                     *y = y.saturating_add(draw_h);
                     *skip = 0;
                 }
-                Seg::Code(lines_in) => {
-                    if lines_in.is_empty() {
-                        return;
-                    }
-                    let mut lang_label: Option<String> = None;
-                    let mut lines = lines_in.clone();
-                    if let Some(first) = lines.first() {
-                        let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-                        if let Some(s) = flat.strip_prefix("⟦LANG:") {
-                            if let Some(end) = s.find('⟧') {
-                                lang_label = Some(s[..end].to_string());
-                                lines.remove(0);
-                            }
-                        }
-                    }
+                Seg::Code {
+                    lines,
+                    lang_label,
+                    max_line_width,
+                } => {
                     if lines.is_empty() {
                         return;
                     }
-                    let max_w = lines.iter().map(|l| measure_line(l)).max().unwrap_or(0) as u16;
-                    let inner_w = max_w.max(1);
+                    let inner_w = (*max_line_width).max(1);
                     let card_w = inner_w.saturating_add(6).min(area.width.max(6));
-                    let total = lines.len() as u16 + 2;
+                    let total = lines.len() as u16 + 2; // borders
                     if *skip >= total {
                         *skip -= total;
                         return;
@@ -214,7 +208,7 @@ impl HistoryCell for StreamingContentCell {
                             top: 0,
                             bottom: 0,
                         });
-                    if let Some(lang) = &lang_label {
+                    if let Some(lang) = lang_label {
                         blk = blk.title(Span::styled(
                             format!(" {} ", lang),
                             Style::default().fg(crate::colors::text_dim()),
@@ -238,11 +232,11 @@ impl HistoryCell for StreamingContentCell {
             }
         };
 
-        for (i, seg) in segs.iter().enumerate() {
+        for (idx, seg) in segs.iter().enumerate() {
             if cur_y >= end_y {
                 break;
             }
-            let rows = seg_rows.get(i).copied().unwrap_or(0);
+            let rows = seg_rows.get(idx).copied().unwrap_or(0);
             if remaining_skip >= rows {
                 remaining_skip -= rows;
                 continue;
@@ -250,7 +244,15 @@ impl HistoryCell for StreamingContentCell {
             let seg_draw = match seg {
                 AssistantSeg::Text(lines) => Seg::Text(lines.clone()),
                 AssistantSeg::Bullet(lines) => Seg::Bullet(lines.clone()),
-                AssistantSeg::Code { lines, .. } => Seg::Code(lines.clone()),
+                AssistantSeg::Code {
+                    lines,
+                    lang_label,
+                    max_line_width,
+                } => Seg::Code {
+                    lines: lines.clone(),
+                    lang_label: lang_label.clone(),
+                    max_line_width: *max_line_width,
+                },
             };
             draw_segment(&seg_draw, &mut cur_y, &mut remaining_skip);
         }
@@ -264,84 +266,43 @@ impl HistoryCell for StreamingContentCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
-        let has_leading_header = self
-            .lines
-            .first()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>()
-                    .trim()
-                    .eq_ignore_ascii_case("codex")
-            })
-            .unwrap_or(false);
-
-        if has_leading_header {
-            if self.lines.len() == 1 {
-                Vec::new()
-            } else {
-                self.lines[1..].to_vec()
-            }
-        } else {
-            self.lines.clone()
-        }
+        self.assistant.display_lines()
     }
 }
 
 impl StreamingContentCell {
-    pub(crate) fn new(lines: Vec<Line<'static>>) -> Self {
-        Self::new_with_id(None, lines)
-    }
-
-    pub(crate) fn new_with_id(id: Option<String>, lines: Vec<Line<'static>>) -> Self {
+    pub(crate) fn from_state(state: AssistantStreamState, cfg: &Config) -> Self {
+        let assistant = AssistantMarkdownCell::new_with_id(
+            state.preview_markdown.clone(),
+            None,
+            cfg,
+        );
+        let show_ellipsis = state.in_progress;
         Self {
-            id,
-            lines,
-            show_ellipsis: true,
-            cached_layout: std::cell::RefCell::new(None),
+            id: Some(state.stream_id.clone()),
+            state,
+            assistant,
+            show_ellipsis,
         }
     }
 
-    pub(crate) fn extend_lines(&mut self, mut new_lines: Vec<Line<'static>>) {
-        if new_lines.is_empty() {
-            return;
-        }
-        self.lines.append(&mut new_lines);
-        *self.cached_layout.borrow_mut() = None;
+    pub(crate) fn update_from_state(&mut self, state: AssistantStreamState, cfg: &Config) {
+        self.state = state;
+        self.id = Some(self.state.stream_id.clone());
+        self.assistant.raw = self.state.preview_markdown.clone();
+        self.assistant.rebuild(cfg);
+        self.show_ellipsis = self.state.in_progress;
     }
 
-    pub(crate) fn retint(&mut self, old: &crate::theme::Theme, new: &crate::theme::Theme) {
-        retint_lines_in_place(&mut self.lines, old, new);
-        *self.cached_layout.borrow_mut() = None;
+    pub(crate) fn rebuild_with_config(&mut self, cfg: &Config) {
+        self.assistant.rebuild(cfg);
+    }
+
+    pub(crate) fn matches_id(&self, want: &str) -> bool {
+        self.id.as_deref() == Some(want) || self.state.stream_id == want
     }
 
     fn ensure_stream_layout(&self, width: u16) -> AssistantLayoutCache {
-        if let Some(cache) = self.cached_layout.borrow().as_ref() {
-            if cache.width == width {
-                return cache.clone();
-            }
-        }
-
-        let mut body_lines = self.lines.clone();
-        let mut had_header = false;
-        if let Some(first) = body_lines.first() {
-            let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
-            if flat.trim().eq_ignore_ascii_case("codex") {
-                had_header = true;
-            }
-        }
-        if !had_header {
-            body_lines.insert(0, ratatui::text::Line::from("codex"));
-        }
-        let tmp = AssistantMarkdownCell {
-            raw: String::new(),
-            id: None,
-            lines: body_lines,
-            cached_layout: std::cell::RefCell::new(None),
-        };
-        let cache = tmp.ensure_layout(width);
-        *self.cached_layout.borrow_mut() = Some(cache.clone());
-        cache
+        self.assistant.ensure_layout(width)
     }
 }
