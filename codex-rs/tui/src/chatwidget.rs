@@ -211,7 +211,13 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
-use crate::history::state::{AssistantStreamDelta, HistoryState};
+use crate::history::state::{
+    AssistantStreamDelta,
+    AssistantStreamState,
+    HistoryId,
+    HistoryState,
+    MessageMetadata,
+};
 use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
@@ -6264,6 +6270,7 @@ impl ChatWidget<'_> {
                     self.last_token_usage.clone(),
                     self.config.model_context_window,
                 );
+                self.update_stream_token_usage_metadata();
             }
             EventMsg::Error(ErrorEvent { message }) => {
                 self.on_error(message);
@@ -7393,12 +7400,12 @@ impl ChatWidget<'_> {
             reasoning_cell.set_in_progress(false);
             self.history_push(reasoning_cell);
 
-            let streaming_preview = history_cell::new_streaming_content(
-                stream_lines
-                    .iter()
-                    .map(|line| Line::from((*line).to_string()))
-                    .collect(),
-            );
+            let preview_lines: Vec<ratatui::text::Line<'static>> = stream_lines
+                .iter()
+                .map(|line| Line::from((*line).to_string()))
+                .collect();
+            let state = self.synthesize_stream_state_from_lines(None, &preview_lines, false);
+            let streaming_preview = history_cell::new_streaming_content(state, &self.config);
             self.history_push(streaming_preview);
 
             let assistant_cell =
@@ -7493,10 +7500,13 @@ impl ChatWidget<'_> {
             self.history_push(history_cell::new_prompts_output());
         }
 
-        let final_stream = history_cell::new_streaming_content(vec![
+        let final_preview_lines = vec![
             Line::from("streaming preview: final tokens rendered."),
             Line::from("streaming preview: viewport ready for scroll testing."),
-        ]);
+        ];
+        let final_state =
+            self.synthesize_stream_state_from_lines(None, &final_preview_lines, false);
+        let final_stream = history_cell::new_streaming_content(final_state, &self.config);
         self.history_push(final_stream);
 
         self.push_background_tail("demo: finished populating sample history.");
@@ -10439,7 +10449,7 @@ impl ChatWidget<'_> {
                 .as_any_mut()
                 .downcast_mut::<history_cell::StreamingContentCell>()
             {
-                stream.retint(&old, &new);
+                stream.rebuild_with_config(&self.config);
             } else if let Some(wait) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::WaitStatusCell>()
@@ -10723,7 +10733,7 @@ impl ChatWidget<'_> {
         &mut self,
         kind: StreamKind,
         id: Option<String>,
-        mut lines: Vec<ratatui::text::Line<'static>>,
+        lines: Vec<ratatui::text::Line<'static>>,
     ) {
         // No debug logging: we rely on preserving span modifiers end-to-end.
         // Insert all lines as a single streaming content cell to preserve spacing
@@ -10844,76 +10854,35 @@ impl ChatWidget<'_> {
                     id,
                     lines.len()
                 );
-                // Any incoming Answer means reasoning is no longer bottom-most
                 self.clear_reasoning_in_progress();
                 if let Some(ref want) = id {
                     self.ensure_answer_stream_state(want);
                 }
-                // Keep a single StreamingContentCell and append to it
+
+                let state_lookup = id
+                    .as_ref()
+                    .and_then(|want| self.history_state.assistant_stream_state(want).cloned());
+                let fallback_state =
+                    self.synthesize_stream_state_from_lines(id.as_ref(), &lines, true);
+
                 if let Some(last) = self.history_cells.last_mut() {
                     if let Some(stream_cell) = last
                         .as_any_mut()
                         .downcast_mut::<history_cell::StreamingContentCell>()
                     {
-                        // If id is specified, only append when ids match
-                        if let Some(ref want) = id {
-                            if stream_cell.id.as_ref() != Some(want) {
-                                // fall through to create/find matching cell below
-                            } else {
-                                tracing::debug!(
-                                    "history.append -> last StreamingContentCell (id match) lines+={}",
-                                    lines.len()
-                                );
-                                // Guard against stray header sneaking into a later chunk
-                                if lines
-                                    .first()
-                                    .map(|l| {
-                                        l.spans
-                                            .iter()
-                                            .map(|s| s.content.as_ref())
-                                            .collect::<String>()
-                                            .trim()
-                                            .eq_ignore_ascii_case("codex")
-                                    })
-                                    .unwrap_or(false)
-                                {
-                                    if lines.len() == 1 {
-                                        return;
-                                    } else {
-                                        lines.remove(0);
-                                    }
-                                }
-                                stream_cell.extend_lines(lines);
-                                self.invalidate_height_cache();
-                                self.autoscroll_if_near_bottom();
-                                self.request_redraw();
-                                return;
-                            }
-                        } else {
-                            // No id — legacy: append to last
+                        let ids_match = match id.as_ref() {
+                            Some(want) => stream_cell.matches_id(want),
+                            None => true,
+                        };
+                        if ids_match {
+                            let state = state_lookup
+                                .clone()
+                                .unwrap_or_else(|| fallback_state.clone());
                             tracing::debug!(
-                                "history.append -> last StreamingContentCell (no id provided) lines+={}",
-                                lines.len()
+                                "history.update -> tail StreamingContentCell id={:?}",
+                                id
                             );
-                            if lines
-                                .first()
-                                .map(|l| {
-                                    l.spans
-                                        .iter()
-                                        .map(|s| s.content.as_ref())
-                                        .collect::<String>()
-                                        .trim()
-                                        .eq_ignore_ascii_case("codex")
-                                })
-                                .unwrap_or(false)
-                            {
-                                if lines.len() == 1 {
-                                    return;
-                                } else {
-                                    lines.remove(0);
-                                }
-                            }
-                            stream_cell.extend_lines(lines);
+                            stream_cell.update_from_state(state, &self.config);
                             self.invalidate_height_cache();
                             self.autoscroll_if_near_bottom();
                             self.request_redraw();
@@ -10922,42 +10891,26 @@ impl ChatWidget<'_> {
                     }
                 }
 
-                // If id is specified, try to locate an existing streaming cell with that id
                 if let Some(ref want) = id {
                     if let Some(idx) = self.history_cells.iter().rposition(|c| {
                         c.as_any()
                             .downcast_ref::<history_cell::StreamingContentCell>()
-                            .map(|sc| sc.id.as_ref() == Some(want))
+                            .map(|sc| sc.matches_id(want))
                             .unwrap_or(false)
                     }) {
                         if let Some(stream_cell) = self.history_cells[idx]
                             .as_any_mut()
-                            .downcast_mut::<history_cell::StreamingContentCell>(
-                        ) {
+                            .downcast_mut::<history_cell::StreamingContentCell>()
+                        {
+                            let state = state_lookup
+                                .clone()
+                                .unwrap_or_else(|| fallback_state.clone());
                             tracing::debug!(
-                                "history.append -> StreamingContentCell by id at idx={} lines+={}",
+                                "history.update -> StreamingContentCell at idx={} id={}",
                                 idx,
-                                lines.len()
+                                want
                             );
-                            if lines
-                                .first()
-                                .map(|l| {
-                                    l.spans
-                                        .iter()
-                                        .map(|s| s.content.as_ref())
-                                        .collect::<String>()
-                                        .trim()
-                                        .eq_ignore_ascii_case("codex")
-                                })
-                                .unwrap_or(false)
-                            {
-                                if lines.len() == 1 {
-                                    return;
-                                } else {
-                                    lines.remove(0);
-                                }
-                            }
-                            stream_cell.extend_lines(lines);
+                            stream_cell.update_from_state(state, &self.config);
                             self.invalidate_height_cache();
                             self.autoscroll_if_near_bottom();
                             self.request_redraw();
@@ -10966,26 +10919,8 @@ impl ChatWidget<'_> {
                     }
                 }
 
-                // Ensure a hidden 'codex' header is present
-                let has_header = lines
-                    .first()
-                    .map(|l| {
-                        l.spans
-                            .iter()
-                            .map(|s| s.content.as_ref())
-                            .collect::<String>()
-                            .trim()
-                            .eq_ignore_ascii_case("codex")
-                    })
-                    .unwrap_or(false);
-                if !has_header {
-                    let mut with_header: Vec<ratatui::text::Line<'static>> =
-                        Vec::with_capacity(lines.len() + 1);
-                    with_header.push(ratatui::text::Line::from("codex"));
-                    with_header.extend(lines);
-                    lines = with_header;
-                }
-                // Use pre-seeded key for this stream id when present; otherwise synthesize.
+                let state = state_lookup.unwrap_or(fallback_state);
+
                 let key = match id.as_deref() {
                     Some(rid) => self.try_stream_order_key(kind, rid).unwrap_or_else(|| {
                         tracing::warn!(
@@ -11005,10 +10940,7 @@ impl ChatWidget<'_> {
                     Self::debug_fmt_order_key(key)
                 );
                 let new_idx = self.history_insert_with_key_global(
-                    Box::new(history_cell::new_streaming_content_with_id(
-                        id.clone(),
-                        lines,
-                    )),
+                    Box::new(history_cell::new_streaming_content(state, &self.config)),
                     key,
                 );
                 tracing::debug!(
@@ -11031,6 +10963,96 @@ impl ChatWidget<'_> {
             .unwrap_or_default();
         self.history_state
             .upsert_assistant_stream_state(stream_id, preview, None, None);
+    }
+
+    fn synthesize_stream_state_from_lines(
+        &self,
+        stream_id: Option<&String>,
+        lines: &[ratatui::text::Line<'static>],
+        in_progress: bool,
+    ) -> AssistantStreamState {
+        let mut preview = String::new();
+        for (idx, line) in lines.iter().enumerate() {
+            let flat: String = line
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+            if idx == 0 && flat.trim().eq_ignore_ascii_case("codex") {
+                continue;
+            }
+            if !preview.is_empty() {
+                preview.push('\n');
+            }
+            preview.push_str(&flat);
+        }
+        if !preview.is_empty() && !preview.ends_with('\n') {
+            preview.push('\n');
+        }
+        let mut stream_id_string = stream_id
+            .cloned()
+            .unwrap_or_else(|| "stream-preview".to_string());
+        if stream_id_string.is_empty() {
+            stream_id_string = "stream-preview".to_string();
+        }
+        AssistantStreamState {
+            id: HistoryId::ZERO,
+            stream_id: stream_id_string,
+            preview_markdown: preview,
+            deltas: Vec::new(),
+            citations: Vec::new(),
+            metadata: None,
+            in_progress,
+            last_updated_at: SystemTime::now(),
+        }
+    }
+
+    fn refresh_streaming_cell_for_stream_id(
+        &mut self,
+        stream_id: &str,
+        state: AssistantStreamState,
+    ) {
+        if let Some(idx) = self.history_cells.iter().rposition(|c| {
+            c.as_any()
+                .downcast_ref::<history_cell::StreamingContentCell>()
+                .map(|sc| sc.matches_id(stream_id))
+                .unwrap_or(false)
+        }) {
+            if let Some(stream_cell) = self.history_cells[idx]
+                .as_any_mut()
+                .downcast_mut::<history_cell::StreamingContentCell>()
+            {
+                stream_cell.update_from_state(state, &self.config);
+                self.invalidate_height_cache();
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn update_stream_token_usage_metadata(&mut self) {
+        let Some(stream_id) = self.stream.current_stream_id().cloned() else {
+            return;
+        };
+        let Some(preview) = self
+            .stream
+            .preview_source_for_kind(StreamKind::Answer)
+        else {
+            return;
+        };
+        let metadata = MessageMetadata {
+            citations: Vec::new(),
+            token_usage: Some(self.last_token_usage.clone()),
+        };
+        self
+            .history_state
+            .upsert_assistant_stream_state(&stream_id, preview, None, Some(&metadata));
+        if let Some(state) = self
+            .history_state
+            .assistant_stream_state(&stream_id)
+            .cloned()
+        {
+            self.refresh_streaming_cell_for_stream_id(&stream_id, state);
+        }
     }
 
     fn track_answer_stream_delta(&mut self, stream_id: &str, delta: &str, seq: Option<u64>) {
@@ -17824,7 +17846,9 @@ impl WidgetRef for &ChatWidget<'_> {
             .collect::<Vec<_>>();
 
         let streaming_cell = if !streaming_lines.is_empty() {
-            Some(history_cell::new_streaming_content(streaming_lines))
+            let state =
+                self.synthesize_stream_state_from_lines(None, &streaming_lines, true);
+            Some(history_cell::new_streaming_content(state, &self.config))
         } else {
             None
         };
