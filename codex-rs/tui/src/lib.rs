@@ -406,45 +406,8 @@ fn cleanup_session_worktrees_and_print() {
     let pid = std::process::id();
     let home = match std::env::var_os("HOME") { Some(h) => std::path::PathBuf::from(h), None => return };
     let session_dir = home.join(".code").join("working").join("_session");
-    cleanup_stale_session_files(&session_dir, pid);
     let file = session_dir.join(format!("pid-{}.txt", pid));
     reclaim_worktrees_from_file(&file, "current session");
-}
-
-fn cleanup_stale_session_files(session_dir: &std::path::Path, current_pid: u32) {
-    let Ok(entries) = std::fs::read_dir(session_dir) else { return; };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() { continue; }
-        let filename = match entry.file_name().into_string() {
-            Ok(name) => name,
-            Err(_) => continue,
-        };
-        let Some(pid_str) = filename.strip_prefix("pid-").and_then(|s| s.strip_suffix(".txt")) else { continue; };
-        let Ok(pid) = pid_str.parse::<u32>() else { continue; };
-        if pid == current_pid { continue; }
-
-        #[cfg(unix)]
-        let still_running = unsafe {
-            if libc::kill(pid as libc::pid_t, 0) == 0 {
-                true
-            } else {
-                matches!(
-                    std::io::Error::last_os_error().raw_os_error(),
-                    Some(code) if code != libc::ESRCH
-                )
-            }
-        };
-
-        #[cfg(not(unix))]
-        let still_running = true;
-
-        if still_running {
-            continue;
-        }
-
-        reclaim_worktrees_from_file(&path, &format!("stale pid {pid}"));
-    }
 }
 
 fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
