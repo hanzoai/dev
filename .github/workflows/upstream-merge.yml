@@ -45,18 +45,53 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      skip_due_to_active: ${{ steps.active_guard.outputs.skip_due_to_active }}
       action: ${{ steps.check.outputs.action }}
       upstream_only: ${{ steps.check.outputs.upstream_only }}
       merge_only: ${{ steps.check.outputs.merge_only }}
       upstream_in_merge: ${{ steps.check.outputs.upstream_in_merge }}
     steps:
+      - name: Guard concurrent upstream-merge run
+        id: active_guard
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.CODE_GH_PAT || github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const workflowId = 'upstream-merge.yml';
+            const resp = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: workflowId,
+              per_page: 20
+            });
+            const blocking = resp.data.workflow_runs.filter(run =>
+              run.status === 'in_progress' && run.id !== context.runId
+            );
+            const skip = blocking.length > 0;
+            core.setOutput('skip_due_to_active', skip ? 'true' : 'false');
+
+            if (skip) {
+              const latest = blocking[0];
+              await core.summary
+                .addHeading('Upstream Merge: Active Run Guard')
+                .addRaw(`- blocking_runs: ${blocking.length}`, true)
+                .addRaw(`- blocking_run: #${latest.run_number} (${latest.status})`, true)
+                .addLink('Blocking run logs', latest.html_url)
+                .write();
+              core.notice(`Another Upstream Merge run (#${latest.run_number}) is still ${latest.status}; skipping remaining steps.`);
+              core.info('Exiting early because another upstream-merge run is still active.');
+            }
+
       - name: Check out repository (full history)
+        if: steps.active_guard.outputs.skip_due_to_active != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: "Quick precheck: compute upstream/merge deltas"
+        if: steps.active_guard.outputs.skip_due_to_active != 'true'
         id: check
         shell: bash
         env:
@@ -109,7 +144,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Close stale upstream-merge PR on skip when zero diff (opt-in)
-        if: steps.check.outputs.skip == 'true' && steps.check.outputs.mirror_on_skip == 'true' && env.CLOSE_ZERO_DIFF_ON_SKIP == 'true'
+        if: steps.active_guard.outputs.skip_due_to_active != 'true' && steps.check.outputs.skip == 'true' && steps.check.outputs.mirror_on_skip == 'true' && env.CLOSE_ZERO_DIFF_ON_SKIP == 'true'
         uses: actions/github-script@v7
         env:
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
@@ -141,7 +176,7 @@ jobs:
 
   merge:
     needs: [precheck]
-    if: needs.precheck.outputs.action == 'merge'
+    if: needs.precheck.outputs.skip_due_to_active != 'true' && needs.precheck.outputs.action == 'merge'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -644,38 +679,37 @@ jobs:
           cat .github/auto/VERIFY.json || true
           if jq -e '.build_fast=="ok" and .api_check=="ok"' .github/auto/VERIFY.json >/dev/null 2>&1; then echo "failed=false" >> "$GITHUB_OUTPUT"; else echo "failed=true" >> "$GITHUB_OUTPUT"; fi
 
-      - name: Upload artifact - VERIFY logs
-        if: steps.check_upstream.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: VERIFY
-          if-no-files-found: warn
-          path: |
-            .github/auto/VERIFY.json
-            .github/auto/VERIFY_build-fast.log
-            .github/auto/VERIFY_api-check.log
-
-      - name: Remediate verification failures with Code agent
+      - name: Remediate verification failures with Code agent (loop)
+        id: remediation_loop
         if: steps.check_upstream.outputs.skip != 'true' && steps.verify.outputs.failed == 'true'
         env:
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
           MERGE_BRANCH: ${{ env.MERGE_BRANCH }}
+          MAX_REMEDIATION_ATTEMPTS: ${{ env.MAX_REMEDIATION_ATTEMPTS || '3' }}
         run: |
           set -euo pipefail
           SAFE_PATH="$PATH"; SAFE_HOME="$HOME"
-          {
-            echo 'Context';
-            echo "- MERGE_BRANCH=${MERGE_BRANCH}";
-            echo "- DEFAULT_BRANCH=${DEFAULT_BRANCH}";
-            echo '';
-            echo 'Previous step (VERIFY) failed. Here are the logs:';
-            echo '---8<---';
-            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_build-fast.log" 2>/dev/null || true
-            tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_api-check.log" 2>/dev/null || true
-            echo '---8<---';
-            echo '';
-            cat << 'PROMPT'
+          : > "$GITHUB_WORKSPACE/.github/auto/AGENT_REMEDIATION_STDOUT.txt"
+          MAX_ATTEMPTS=${MAX_REMEDIATION_ATTEMPTS:-3}
+          attempt=1
+
+          while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
+            echo "::notice::Remediation attempt $attempt of $MAX_ATTEMPTS"
+            {
+              echo 'Context';
+              echo "- MERGE_BRANCH=${MERGE_BRANCH}";
+              echo "- DEFAULT_BRANCH=${DEFAULT_BRANCH}";
+              echo "- ATTEMPT=${attempt}/${MAX_ATTEMPTS}";
+              echo '';
+              echo 'Previous verify logs (tail):';
+              echo '---8<---';
+              tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_build-fast.log" 2>/dev/null || true
+              tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_api-check.log" 2>/dev/null || true
+              tail -n 200 "$GITHUB_WORKSPACE/.github/auto/VERIFY_guards.log" 2>/dev/null || true
+              echo '---8<---';
+              echo '';
+              cat << 'PROMPT'
           You are acting as a maintainer to remediate compile-only API test failures after an upstream merge.
 
           Tasks (minimal and surgical):
@@ -693,35 +727,53 @@ jobs:
           - No history rewriting; only commit on ${MERGE_BRANCH}.
           - Treat warnings as failures during the build-fast step.
           PROMPT
-          } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
-            OPENAI_API_KEY="x" \
-            OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
-            OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
-            GH_TOKEN="$GH_TOKEN" \
-            RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
-            npm_config_cache="$SAFE_HOME/.npm" \
-            npx -y @just-every/code@latest \
-            exec \
-            -s workspace-write \
-            -c sandbox_workspace_write.allow_git_writes=true \
-            -c sandbox_workspace_write.network_access=true \
-            -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
-            -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
-            -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
-            -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
-            -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
-            -c shell_environment_policy.r#set.SCCACHE_CACHE_SIZE="5G" \
-            -c shell_environment_policy.r#set.KEEP_ENV="1" \
-            --cd "$GITHUB_WORKSPACE" \
-            --skip-git-repo-check \
-            - | tee "$GITHUB_WORKSPACE/.github/auto/AGENT_REMEDIATION_STDOUT.txt"
+            } | env -i PATH="$SAFE_PATH" HOME="$SAFE_HOME" \
+              OPENAI_API_KEY="x" \
+              OPENAI_BASE_URL="http://127.0.0.1:5055/v1" \
+              OPENAI_API_BASE="http://127.0.0.1:5055/v1" \
+              GH_TOKEN="$GH_TOKEN" \
+              RUSTC_WRAPPER="sccache" SCCACHE_GHA_ENABLED="true" SCCACHE_IDLE_TIMEOUT="1800" SCCACHE_CACHE_SIZE="5G" \
+              npm_config_cache="$SAFE_HOME/.npm" \
+              npx -y @just-every/code@latest \
+              exec \
+              -s workspace-write \
+              -c sandbox_workspace_write.allow_git_writes=true \
+              -c sandbox_workspace_write.network_access=true \
+              -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
+              -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+              -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
+              -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
+              -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
+              -c shell_environment_policy.r#set.SCCACHE_CACHE_SIZE="5G" \
+              -c shell_environment_policy.r#set.KEEP_ENV="1" \
+              --cd "$GITHUB_WORKSPACE" \
+              --skip-git-repo-check \
+              - | tee -a "$GITHUB_WORKSPACE/.github/auto/AGENT_REMEDIATION_STDOUT.txt"
 
-      - name: Re-run verify after remediation
-        if: steps.check_upstream.outputs.skip != 'true' && steps.verify.outputs.failed == 'true'
-        working-directory: .
-        run: |
-          set -euo pipefail
-          bash scripts/upstream-merge/verify.sh
+            if bash scripts/upstream-merge/verify.sh; then
+              echo "remediated=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$MAX_ATTEMPTS" ]; then
+              echo "::error::Verification still failing after ${MAX_ATTEMPTS} remediation attempts" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload artifact - VERIFY logs
+        if: steps.check_upstream.outputs.skip != 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VERIFY
+          if-no-files-found: warn
+          path: |
+            .github/auto/VERIFY.json
+            .github/auto/VERIFY_build-fast.log
+            .github/auto/VERIFY_api-check.log
+            .github/auto/VERIFY_guards.log
+            .github/auto/AGENT_REMEDIATION_STDOUT.txt
 
       - name: Enforce policy removals on merge branch (images + caches + purge_globs)
         if: steps.check_upstream.outputs.skip != 'true'
@@ -997,7 +1049,7 @@ jobs:
   pr:
     name: Open/Update PR (no merge work)
     needs: [precheck]
-    if: needs.precheck.outputs.action == 'pr_only'
+    if: needs.precheck.outputs.skip_due_to_active != 'true' && needs.precheck.outputs.action == 'pr_only'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
