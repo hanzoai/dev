@@ -13799,6 +13799,10 @@ impl ChatWidget<'_> {
         &self.total_token_usage
     }
 
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        self.session_id
+    }
+
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
         self.rate_limit_snapshot = None;
