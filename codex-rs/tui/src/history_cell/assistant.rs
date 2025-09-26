@@ -1,33 +1,24 @@
 use super::*;
+use crate::history::state::{AssistantMessageState, AssistantStreamState};
 
 // ==================== AssistantMarkdownCell ====================
-// Stores raw assistant markdown and rebuilds on demand (e.g., theme/syntax changes)
+// Stores assistant markdown state and rebuilds on demand (e.g., theme/syntax changes)
 
 pub(crate) struct AssistantMarkdownCell {
-    // Raw markdown used to rebuild when theme/syntax changes
-    pub(crate) raw: String,
-    // Optional stream/item id that produced this finalized cell
-    pub(crate) id: Option<String>,
+    state: AssistantMessageState,
     // Pre-rendered lines (first line is a hidden "codex" header)
-    pub(crate) lines: Vec<Line<'static>>, // includes hidden header "codex"
+    lines: Vec<Line<'static>>, // includes hidden header "codex"
     // Cached per-width wrap plan to avoid re-segmentation and re-measure
-    pub(crate) cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>,
+    cached_layout: std::cell::RefCell<Option<AssistantLayoutCache>>,
 }
 
 impl AssistantMarkdownCell {
-    #[allow(dead_code)]
-    pub(crate) fn new(raw: String, cfg: &codex_core::config::Config) -> Self {
-        Self::new_with_id(raw, None, cfg)
-    }
-
-    pub(crate) fn new_with_id(
-        raw: String,
-        id: Option<String>,
+    pub(crate) fn from_state(
+        state: AssistantMessageState,
         cfg: &codex_core::config::Config,
     ) -> Self {
         let mut me = Self {
-            raw,
-            id,
+            state,
             lines: Vec::new(),
             cached_layout: std::cell::RefCell::new(None),
         };
@@ -35,10 +26,50 @@ impl AssistantMarkdownCell {
         me
     }
 
-    pub(crate) fn rebuild(&mut self, cfg: &codex_core::config::Config) {
+    pub(crate) fn from_stream_state(
+        state: &AssistantStreamState,
+        cfg: &codex_core::config::Config,
+    ) -> Self {
+        let message_state = AssistantMessageState {
+            id: state.id,
+            stream_id: Some(state.stream_id.clone()),
+            markdown: state.preview_markdown.clone(),
+            citations: state.citations.clone(),
+            metadata: state.metadata.clone(),
+            token_usage: state
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.token_usage.clone()),
+            created_at: state.last_updated_at,
+        };
+        Self::from_state(message_state, cfg)
+    }
+
+    pub(crate) fn update_state(
+        &mut self,
+        state: AssistantMessageState,
+        cfg: &codex_core::config::Config,
+    ) {
+        self.state = state;
+        self.rebuild(cfg);
+    }
+
+    pub(crate) fn stream_id(&self) -> Option<&str> {
+        self.state.stream_id.as_deref()
+    }
+
+    pub(crate) fn markdown(&self) -> &str {
+        &self.state.markdown
+    }
+
+    pub(crate) fn state(&self) -> &AssistantMessageState {
+        &self.state
+    }
+
+    fn rebuild(&mut self, cfg: &codex_core::config::Config) {
         let mut out: Vec<Line<'static>> = Vec::new();
         out.push(Line::from("codex"));
-        crate::markdown::append_markdown_with_bold_first(&self.raw, &mut out, cfg);
+        crate::markdown::append_markdown_with_bold_first(&self.state.markdown, &mut out, cfg);
         // Apply bright text to body like streaming finalize
         let bright = crate::colors::text_bright();
         for line in out.iter_mut().skip(1) {

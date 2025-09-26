@@ -272,11 +272,7 @@ impl HistoryCell for StreamingContentCell {
 
 impl StreamingContentCell {
     pub(crate) fn from_state(state: AssistantStreamState, cfg: &Config) -> Self {
-        let assistant = AssistantMarkdownCell::new_with_id(
-            state.preview_markdown.clone(),
-            None,
-            cfg,
-        );
+        let assistant = AssistantMarkdownCell::from_stream_state(&state, cfg);
         let show_ellipsis = state.in_progress;
         Self {
             id: Some(state.stream_id.clone()),
@@ -289,13 +285,13 @@ impl StreamingContentCell {
     pub(crate) fn update_from_state(&mut self, state: AssistantStreamState, cfg: &Config) {
         self.state = state;
         self.id = Some(self.state.stream_id.clone());
-        self.assistant.raw = self.state.preview_markdown.clone();
-        self.assistant.rebuild(cfg);
+        self.assistant = AssistantMarkdownCell::from_stream_state(&self.state, cfg);
         self.show_ellipsis = self.state.in_progress;
     }
 
     pub(crate) fn rebuild_with_config(&mut self, cfg: &Config) {
-        self.assistant.rebuild(cfg);
+        let current = self.assistant.state().clone();
+        self.assistant.update_state(current, cfg);
     }
 
     pub(crate) fn matches_id(&self, want: &str) -> bool {
