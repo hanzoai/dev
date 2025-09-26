@@ -189,6 +189,10 @@ impl ChatComposer {
         }
     }
 
+    pub fn set_using_chatgpt_auth(&mut self, using: bool) {
+        self.using_chatgpt_auth = using;
+    }
+
     /// Returns true if the input starts with a slash command and the cursor
     /// is positioned within the command head (i.e., before the first
     /// whitespace on the first line). Used to decide whether to keep the
@@ -326,6 +330,10 @@ impl ChatComposer {
 
     // Map technical status messages to user-friendly ones
     fn map_status_message(technical_message: &str) -> String {
+        if technical_message.trim().is_empty() {
+            return String::new();
+        }
+
         let lower = technical_message.to_lowercase();
 
         // Thinking/reasoning patterns
@@ -1592,7 +1600,7 @@ impl ChatComposer {
         self.dismissed_file_popup_token = None;
     }
 
-    fn set_has_focus(&mut self, has_focus: bool) {
+    pub(crate) fn set_has_focus(&mut self, has_focus: bool) {
         self.has_focus = has_focus;
     }
 

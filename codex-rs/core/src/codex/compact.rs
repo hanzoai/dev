@@ -18,6 +18,7 @@ use crate::truncate::truncate_middle;
 use crate::util::backoff;
 use askama::Template;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::CompactedItem;
@@ -28,6 +29,10 @@ use futures::prelude::*;
 
 pub const SUMMARIZATION_PROMPT: &str = include_str!("../../templates/compact/prompt.md");
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
+const COMPACT_TEXT_CONTENT_MAX_BYTES: usize = 8 * 1024;
+const COMPACT_TOOL_ARGS_MAX_BYTES: usize = 4 * 1024;
+const COMPACT_TOOL_OUTPUT_MAX_BYTES: usize = 4 * 1024;
+const COMPACT_IMAGE_URL_MAX_BYTES: usize = 512;
 
 #[derive(Template)]
 #[template(path = "compact/history_bridge.md", escape = "none")]
@@ -69,7 +74,6 @@ pub(super) async fn run_inline_auto_compact_task(
     .await
 }
 
-#[allow(dead_code)]
 pub(super) async fn run_compact_task(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -109,6 +113,8 @@ pub(super) async fn perform_compaction(
     // Convert core InputItem -> ResponseInputItem using the same logic as the main turn flow
     let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
     let turn_input = sess.turn_input_with_history(vec![initial_input_for_turn.clone().into()]);
+
+    let turn_input = sanitize_items_for_compact(turn_input);
 
     let prompt = Prompt {
         input: turn_input,
@@ -195,10 +201,15 @@ pub(super) async fn perform_compaction(
     });
     sess.persist_rollout_items(&[rollout_item]).await;
 
+    let display_message = if summary_text.trim().is_empty() {
+        "Compact task completed.".to_string()
+    } else {
+        summary_text.clone()
+    };
     let event = sess.make_event(
         &sub_id,
         EventMsg::AgentMessage(AgentMessageEvent {
-            message: "Compact task completed".to_string(),
+            message: display_message,
         }),
     );
     sess.send_event(event).await;
@@ -216,6 +227,8 @@ async fn run_compact_task_inner_inline(
     // Convert core InputItem -> ResponseInputItem and build prompt
     let initial_input_for_turn: ResponseInputItem = response_input_from_core_items(input);
     let turn_input = sess.turn_input_with_history(vec![initial_input_for_turn.clone().into()]);
+
+    let turn_input = sanitize_items_for_compact(turn_input);
 
     let prompt = Prompt {
         input: turn_input,
@@ -278,7 +291,22 @@ async fn run_compact_task_inner_inline(
     let summary_text = get_last_assistant_message_from_turn(&history_snapshot).unwrap_or_default();
     let user_messages = collect_user_messages(&history_snapshot);
     let initial_context = sess.build_initial_context(turn_context.as_ref());
-    build_compacted_history(initial_context, &user_messages, &summary_text)
+    let new_history = build_compacted_history(initial_context, &user_messages, &summary_text);
+
+    let display_message = if summary_text.trim().is_empty() {
+        "Compact task completed.".to_string()
+    } else {
+        summary_text.clone()
+    };
+    let event = sess.make_event(
+        &sub_id,
+        EventMsg::AgentMessage(AgentMessageEvent {
+            message: display_message,
+        }),
+    );
+    sess.send_event(event).await;
+
+    new_history
 }
 
 pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
@@ -298,6 +326,110 @@ pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
     } else {
         Some(pieces.join("\n"))
     }
+}
+
+fn truncate_for_compact(text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    truncate_middle(&text, max_bytes).0
+}
+
+fn sanitize_items_for_compact(items: Vec<ResponseItem>) -> Vec<ResponseItem> {
+    items
+        .into_iter()
+        .filter_map(|item| match item {
+            ResponseItem::Message { id, role, content } => {
+                let mut filtered_content = Vec::with_capacity(content.len());
+                for content_item in content {
+                    match content_item {
+                        ContentItem::InputText { text } => {
+                            filtered_content.push(ContentItem::InputText {
+                                text: truncate_for_compact(text, COMPACT_TEXT_CONTENT_MAX_BYTES),
+                            });
+                        }
+                        ContentItem::OutputText { text } => {
+                            filtered_content.push(ContentItem::OutputText {
+                                text: truncate_for_compact(text, COMPACT_TEXT_CONTENT_MAX_BYTES),
+                            });
+                        }
+                        ContentItem::InputImage { image_url } => {
+                            if image_url.starts_with("data:")
+                                || image_url.len() > COMPACT_IMAGE_URL_MAX_BYTES
+                            {
+                                let bytes = image_url.len();
+                                filtered_content.push(ContentItem::InputText {
+                                    text: format!(
+                                        "(image omitted for compaction; {bytes} bytes)",
+                                    ),
+                                });
+                            } else {
+                                filtered_content.push(ContentItem::InputImage { image_url });
+                            }
+                        }
+                    }
+                }
+                if filtered_content.is_empty() {
+                    None
+                } else {
+                    Some(ResponseItem::Message {
+                        id,
+                        role,
+                        content: filtered_content,
+                    })
+                }
+            }
+            ResponseItem::FunctionCall {
+                id,
+                name,
+                arguments,
+                call_id,
+            } => {
+                let arguments = truncate_for_compact(arguments, COMPACT_TOOL_ARGS_MAX_BYTES);
+                Some(ResponseItem::FunctionCall {
+                    id,
+                    name,
+                    arguments,
+                    call_id,
+                })
+            }
+            ResponseItem::FunctionCallOutput { call_id, output } => {
+                let FunctionCallOutputPayload { content, success } = output;
+                let content = truncate_for_compact(content, COMPACT_TOOL_OUTPUT_MAX_BYTES);
+                Some(ResponseItem::FunctionCallOutput {
+                    call_id,
+                    output: FunctionCallOutputPayload { content, success },
+                })
+            }
+            ResponseItem::CustomToolCall {
+                id,
+                status,
+                call_id,
+                name,
+                input,
+            } => {
+                let input = truncate_for_compact(input, COMPACT_TOOL_ARGS_MAX_BYTES);
+                Some(ResponseItem::CustomToolCall {
+                    id,
+                    status,
+                    call_id,
+                    name,
+                    input,
+                })
+            }
+            ResponseItem::CustomToolCallOutput { call_id, output } => {
+                let output = truncate_for_compact(output, COMPACT_TOOL_OUTPUT_MAX_BYTES);
+                Some(ResponseItem::CustomToolCallOutput { call_id, output })
+            }
+            ResponseItem::Reasoning { id, summary, .. } => Some(ResponseItem::Reasoning {
+                id,
+                summary,
+                content: None,
+                encrypted_content: None,
+            }),
+            other => Some(other),
+        })
+        .collect()
 }
 
 pub(crate) fn collect_user_messages(items: &[ResponseItem]) -> Vec<String> {
