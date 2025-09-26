@@ -2478,6 +2478,13 @@ impl App<'_> {
         usage
     }
 
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        match &self.app_state {
+            AppState::Chat { widget } => widget.session_id(),
+            AppState::Onboarding { .. } => None,
+        }
+    }
+
     /// Return a human-readable performance summary if timing was enabled.
     pub(crate) fn perf_summary(&self) -> Option<String> {
         if !self.timing_enabled {
