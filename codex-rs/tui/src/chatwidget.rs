@@ -5112,6 +5112,7 @@ impl ChatWidget<'_> {
         }
 
         self.finalize_ghost_snapshot(request, result, elapsed);
+        self.request_redraw();
         self.spawn_next_ghost_snapshot();
     }
 
