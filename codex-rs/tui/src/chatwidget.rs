@@ -222,6 +222,9 @@ use crate::history::state::{
     HistoryRecord,
     HistoryState,
     MessageMetadata,
+    RateLimitLegendEntry,
+    RateLimitsRecord,
+    TextTone,
 };
 use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
@@ -2185,11 +2188,9 @@ impl ChatWidget<'_> {
     /// Handle patch apply end immediately
     fn handle_patch_apply_end_now(&mut self, ev: PatchApplyEndEvent) {
         if ev.success {
-            // Update the most recent patch cell header from "Updating..." to "Updated"
-            // without creating a new history section.
-            if let Some(last) = self.history_cells.iter_mut().rev().find(|c| {
+            if let Some(idx) = self.history_cells.iter().rposition(|cell| {
                 matches!(
-                    c.kind(),
+                    cell.kind(),
                     crate::history_cell::HistoryCellType::Patch {
                         kind: crate::history_cell::PatchKind::ApplyBegin
                     } | crate::history_cell::HistoryCellType::Patch {
@@ -2197,59 +2198,86 @@ impl ChatWidget<'_> {
                     }
                 )
             }) {
-                // Case 1: Patch summary cell – update title/kind in-place
-                if let Some(summary) = last
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::PatchSummaryCell>()
+                if let Some(summary) = self.history_cells[idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::PatchSummaryCell>()
                 {
-                    summary.title = "Updated".to_string();
-                    summary.kind = history_cell::PatchKind::ApplySuccess;
-                    summary.record_mut().patch_type = HistoryPatchEventType::ApplySuccess;
-                    self.request_redraw();
+                    let mut updated = history_cell::new_patch_event(
+                        PatchEventType::ApplySuccess,
+                        summary.record().changes.clone(),
+                    );
+                    updated.title = "Updated".to_string();
+                    updated.kind = history_cell::PatchKind::ApplySuccess;
+                    updated.record_mut().patch_type = HistoryPatchEventType::ApplySuccess;
+                    self.history_replace_at(idx, Box::new(updated));
                     return;
                 }
-                // Case 2: Plain history cell fallback – adjust first span and kind
-                if let Some(plain) = last
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::PlainHistoryCell>()
-                {
-                    let state = plain.state_mut();
-                    if let Some(header) = state.header.as_mut() {
-                        header.label = "Updated".to_string();
-                    }
-                    if let Some(first_line) = state.lines.first_mut() {
-                        if first_line.spans.is_empty() {
-                            first_line.kind = crate::history::MessageLineKind::Paragraph;
-                            first_line.spans.push(crate::history::InlineSpan {
-                                text: "Updated".to_string(),
-                                tone: crate::history::TextTone::Success,
-                                emphasis: crate::history::TextEmphasis {
-                                    bold: true,
-                                    italic: false,
-                                    dim: false,
-                                    strike: false,
-                                    underline: false,
-                                },
-                                entity: None,
-                            });
-                        } else {
-                            for span in &mut first_line.spans {
-                                span.tone = crate::history::TextTone::Success;
-                                span.emphasis.bold = true;
-                                span.emphasis.dim = false;
+
+                if let Some(cell) = self.history_cells.get_mut(idx) {
+                    if let Some(plain) = cell
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::PlainHistoryCell>()
+                    {
+                        let state = plain.state_mut();
+                        if let Some(header) = state.header.as_mut() {
+                            header.label = "Updated".to_string();
+                        }
+                        if let Some(first_line) = state.lines.first_mut() {
+                            if first_line.spans.is_empty() {
+                                first_line.kind = crate::history::MessageLineKind::Paragraph;
+                                first_line.spans.push(crate::history::InlineSpan {
+                                    text: "Updated".to_string(),
+                                    tone: crate::history::TextTone::Success,
+                                    emphasis: crate::history::TextEmphasis {
+                                        bold: true,
+                                        italic: false,
+                                        dim: false,
+                                        strike: false,
+                                        underline: false,
+                                    },
+                                    entity: None,
+                                });
+                            } else {
+                                for span in &mut first_line.spans {
+                                    span.tone = crate::history::TextTone::Success;
+                                    span.emphasis.bold = true;
+                                    span.emphasis.dim = false;
+                                }
+                                first_line.spans[0].text = "Updated".to_string();
                             }
-                            first_line.spans[0].text = "Updated".to_string();
+                        }
+                        plain.set_kind(history_cell::HistoryCellType::Patch {
+                            kind: history_cell::PatchKind::ApplySuccess,
+                        });
+                        plain.invalidate_layout_cache();
+                    }
+                }
+
+                let record = self.history_record_from_cell(self.history_cells[idx].as_ref());
+                if let Some(record) = record {
+                    if let HistoryMutation::Replaced { id, .. } = self
+                        .history_state
+                        .apply_event(HistoryEvent::Replace { index: idx, record })
+                    {
+                        if let Some(cell) = self.history_cells.get_mut(idx) {
+                            if let Some(plain_cell) = cell
+                                .as_any_mut()
+                                .downcast_mut::<history_cell::PlainHistoryCell>()
+                            {
+                                let state = plain_cell.state_mut();
+                                state.id = id;
+                            }
+                        }
+                        if idx < self.history_cell_ids.len() {
+                            self.history_cell_ids[idx] = Some(id);
                         }
                     }
-                    plain.set_kind(history_cell::HistoryCellType::Patch {
-                        kind: history_cell::PatchKind::ApplySuccess,
-                    });
-                    plain.invalidate_layout_cache();
-                    self.request_redraw();
-                    return;
                 }
+
+                self.request_redraw();
+                return;
             }
-            // Fallback: if no prior cell found, do nothing (avoid extra section)
+            // If nothing to update, fall through without inserting a duplicate cell.
         } else {
             let key = self.next_internal_key();
             let _ = self.history_insert_with_key_global(
@@ -4377,11 +4405,14 @@ impl ChatWidget<'_> {
         let mut cell = cell;
 
         let record = record.or_else(|| self.history_record_from_cell(cell.as_ref()));
-
         let maybe_id = if let Some(record) = record {
+            let record_index = self.record_index_for_position(pos);
             match self
                 .history_state
-                .apply_event(HistoryEvent::Insert { index: pos, record })
+                .apply_event(HistoryEvent::Insert {
+                    index: record_index,
+                    record,
+                })
             {
                 HistoryMutation::Inserted { id, .. } => {
                     self.assign_history_id(&mut cell, id);
@@ -4526,6 +4557,16 @@ impl ChatWidget<'_> {
             .downcast_mut::<crate::history_cell::PatchSummaryCell>()
         {
             patch.record_mut().id = id;
+        } else if let Some(explore) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ExploreAggregationCell>()
+        {
+            explore.record_mut().id = id;
+        } else if let Some(rate_limits) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::RateLimitsCell>()
+        {
+            rate_limits.record_mut().id = id;
         }
     }
 
@@ -4619,6 +4660,18 @@ impl ChatWidget<'_> {
             .downcast_ref::<crate::history_cell::PatchSummaryCell>()
         {
             return Some(HistoryRecord::Patch(patch.record().clone()));
+        }
+        if let Some(explore) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ExploreAggregationCell>()
+        {
+            return Some(HistoryRecord::Explore(explore.record().clone()));
+        }
+        if let Some(rate_limits) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::RateLimitsCell>()
+        {
+            return Some(HistoryRecord::RateLimits(rate_limits.record().clone()));
         }
         None
     }
@@ -4714,17 +4767,56 @@ impl ChatWidget<'_> {
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt", None);
     }
 
-    fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
-        if idx < self.history_cells.len() {
-            self.history_cells[idx] = cell;
-            if idx < self.history_cell_ids.len() {
-                self.history_cell_ids[idx] = None;
-            }
-            self.invalidate_height_cache();
-            self.request_redraw();
-            self.refresh_explore_trailing_flags();
-            // Keep debug info for this cell index as-is.
+    fn history_replace_at(&mut self, idx: usize, mut cell: Box<dyn HistoryCell>) {
+        if idx >= self.history_cells.len() {
+            return;
         }
+
+        let record = self.history_record_from_cell(cell.as_ref());
+        let mut maybe_id = None;
+
+        match (record, self.record_index_for_cell(idx)) {
+            (Some(record), Some(record_idx)) => {
+                if let HistoryMutation::Replaced { id, .. } = self
+                    .history_state
+                    .apply_event(HistoryEvent::Replace {
+                        index: record_idx,
+                        record,
+                    })
+                {
+                    self.assign_history_id(&mut cell, id);
+                    maybe_id = Some(id);
+                }
+            }
+            (Some(record), None) => {
+                let record_idx = self.record_index_for_position(idx);
+                if let HistoryMutation::Inserted { id, .. } = self
+                    .history_state
+                    .apply_event(HistoryEvent::Insert {
+                        index: record_idx,
+                        record,
+                    })
+                {
+                    self.assign_history_id(&mut cell, id);
+                    maybe_id = Some(id);
+                }
+            }
+            (None, Some(record_idx)) => {
+                let _ = self
+                    .history_state
+                    .apply_event(HistoryEvent::Remove { index: record_idx });
+            }
+            (None, None) => {}
+        }
+
+        self.history_cells[idx] = cell;
+        if idx < self.history_cell_ids.len() {
+            self.history_cell_ids[idx] = maybe_id;
+        }
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
+        // Keep debug info for this cell index as-is.
     }
 
     fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
@@ -4742,21 +4834,29 @@ impl ChatWidget<'_> {
     }
 
     fn history_remove_at(&mut self, idx: usize) {
-        if idx < self.history_cells.len() {
-            self.history_cells.remove(idx);
-            if idx < self.history_cell_ids.len() {
-                self.history_cell_ids.remove(idx);
-            }
-            if idx < self.cell_order_seq.len() {
-                self.cell_order_seq.remove(idx);
-            }
-            if idx < self.cell_order_dbg.len() {
-                self.cell_order_dbg.remove(idx);
-            }
-            self.invalidate_height_cache();
-            self.request_redraw();
-            self.refresh_explore_trailing_flags();
+        if idx >= self.history_cells.len() {
+            return;
         }
+
+        if let Some(record_idx) = self.record_index_for_cell(idx) {
+            let _ = self
+                .history_state
+                .apply_event(HistoryEvent::Remove { index: record_idx });
+        }
+
+        self.history_cells.remove(idx);
+        if idx < self.history_cell_ids.len() {
+            self.history_cell_ids.remove(idx);
+        }
+        if idx < self.cell_order_seq.len() {
+            self.cell_order_seq.remove(idx);
+        }
+        if idx < self.cell_order_dbg.len() {
+            self.cell_order_dbg.remove(idx);
+        }
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
     }
 
     fn history_replace_and_maybe_merge(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
@@ -4828,6 +4928,20 @@ impl ChatWidget<'_> {
             )),
         );
         self.history_remove_at(idx);
+    }
+
+    fn record_index_for_position(&self, ui_index: usize) -> usize {
+        self.history_cell_ids
+            .iter()
+            .take(ui_index)
+            .filter(|entry| entry.is_some())
+            .count()
+    }
+
+    fn record_index_for_cell(&self, idx: usize) -> Option<usize> {
+        self.history_cell_ids
+            .get(idx)
+            .and_then(|entry| entry.map(|_| self.record_index_for_position(idx)))
     }
 
     /// Clean up faded-out animation cells
@@ -6503,16 +6617,38 @@ impl ChatWidget<'_> {
                     let warnings = self
                         .rate_limit_warnings
                         .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
-                    let mut displayed_warning = false;
+                    let mut legend_entries: Vec<RateLimitLegendEntry> = Vec::new();
                     for warning in warnings {
                         if self.log_and_should_display_warning(&warning) {
-                            self.history_push(history_cell::new_warning_event(
-                                warning.message.clone(),
-                            ));
-                            displayed_warning = true;
+                            let label = match warning.scope {
+                                RateLimitWarningScope::Primary => {
+                                    format!("Hourly usage ≥ {:.0}%", warning.threshold)
+                                }
+                                RateLimitWarningScope::Secondary => {
+                                    format!("Weekly usage ≥ {:.0}%", warning.threshold)
+                                }
+                            };
+                            legend_entries.push(RateLimitLegendEntry {
+                                label,
+                                description: warning.message.clone(),
+                                tone: TextTone::Warning,
+                            });
                         }
                     }
-                    if displayed_warning {
+                    if !legend_entries.is_empty() {
+                        let record = RateLimitsRecord {
+                            id: HistoryId::ZERO,
+                            snapshot: snapshot.clone(),
+                            legend: legend_entries,
+                        };
+                        let cell = history_cell::RateLimitsCell::from_record(record.clone());
+                        let key = self.next_internal_key();
+                        let _ = self.history_insert_with_key_global_tagged(
+                            Box::new(cell),
+                            key,
+                            "rate-limits",
+                            Some(HistoryRecord::RateLimits(record)),
+                        );
                         self.request_redraw();
                     }
 
