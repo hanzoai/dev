@@ -15,6 +15,14 @@ impl DiffCell {
         }
     }
 
+    pub(crate) fn record(&self) -> &DiffRecord {
+        &self.record
+    }
+
+    pub(crate) fn record_mut(&mut self) -> &mut DiffRecord {
+        &mut self.record
+    }
+
     pub(crate) fn rebuild_with_theme(&self) {
         self.layout.borrow_mut().take();
     }

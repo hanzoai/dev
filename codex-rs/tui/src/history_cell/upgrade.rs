@@ -1,7 +1,7 @@
 //! Upgrade notice cell built from `UpgradeNoticeState` metadata.
 
 use super::*;
-use crate::history::state::UpgradeNoticeState;
+use crate::history::state::{HistoryId, UpgradeNoticeState};
 
 const TARGET_WIDTH: u16 = 70;
 
@@ -13,6 +13,17 @@ pub(crate) struct UpgradeNoticeCell {
 
 impl UpgradeNoticeCell {
     pub(crate) fn new(state: UpgradeNoticeState) -> Self {
+        let mut state = state;
+        state.id = HistoryId::ZERO;
+        Self::with_state(state)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_state(state: UpgradeNoticeState) -> Self {
+        Self::with_state(state)
+    }
+
+    fn with_state(state: UpgradeNoticeState) -> Self {
         let primary = crate::colors::primary();
         let backdrop = crate::colors::mix_toward(primary, crate::colors::background(), 0.95);
         let border_style = Style::default().bg(backdrop).fg(primary);
@@ -21,6 +32,14 @@ impl UpgradeNoticeCell {
             backdrop,
             border_style,
         }
+    }
+
+    pub(crate) fn state(&self) -> &UpgradeNoticeState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut UpgradeNoticeState {
+        &mut self.state
     }
 
     fn text(&self) -> Text<'static> {
