@@ -88,14 +88,20 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
         }
         if let Some((agg_idx, entry_idx)) = explore_entry {
             if *agg_idx < chat.history_cells.len() {
-                if let Some(agg) = chat.history_cells[*agg_idx]
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::ExploreAggregationCell>()
+                if let Some(existing) = chat.history_cells[*agg_idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::ExploreAggregationCell>()
                 {
-                    agg.update_status(
+                    let mut record = existing.record().clone();
+                    record.update_status(
                         *entry_idx,
                         history_cell::ExploreEntryStatus::Error { exit_code: None },
                     );
+                    let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+                    cell.set_trailing(existing.is_trailing());
+                    chat.history_replace_at(*agg_idx, Box::new(cell));
+                    chat.autoscroll_if_near_bottom();
+                    chat.request_redraw();
                 }
             }
         }
@@ -232,11 +238,17 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
 
         if let Some((agg_idx, entry_idx)) = explore_entry {
             if *agg_idx < chat.history_cells.len() {
-                if let Some(agg) = chat.history_cells[*agg_idx]
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::ExploreAggregationCell>()
+                if let Some(existing) = chat.history_cells[*agg_idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::ExploreAggregationCell>()
                 {
-                    agg.update_status(*entry_idx, history_cell::ExploreEntryStatus::Success);
+                    let mut record = existing.record().clone();
+                    record.update_status(*entry_idx, history_cell::ExploreEntryStatus::Success);
+                    let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+                    cell.set_trailing(existing.is_trailing());
+                    chat.history_replace_at(*agg_idx, Box::new(cell));
+                    chat.autoscroll_if_near_bottom();
+                    chat.request_redraw();
                     agg_was_updated = true;
                 }
             }
@@ -492,47 +504,52 @@ pub(super) fn handle_exec_begin_now(
         }
 
         if let Some(idx) = agg_idx {
-            let entry_idx = chat.history_cells[idx]
-                .as_any_mut()
-                .downcast_mut::<history_cell::ExploreAggregationCell>()
-                .and_then(|agg| {
-                    agg.push_from_parsed(
-                        &parsed_command,
-                        history_cell::ExploreEntryStatus::Running,
-                        &ev.cwd,
-                        &chat.config.cwd,
-                        &ev.command,
-                    )
-                });
-            if let Some(entry_idx) = entry_idx {
-                chat.exec.running_explore_agg_index = Some(idx);
-                chat.exec.running_commands.insert(
-                    super::ExecCallId(ev.call_id.clone()),
-                    super::RunningCommand {
-                        command: ev.command.clone(),
-                        parsed: parsed_command.clone(),
-                        history_index: None,
-                        explore_entry: Some((idx, entry_idx)),
-                        stdout: String::new(),
-                        stderr: String::new(),
-                        wait_total: None,
-                        wait_active: false,
-                        wait_notes: Vec::new(),
-                    },
-                );
-                chat.invalidate_height_cache();
+            if let Some((mut record, trailing)) = chat.history_cells.get(idx).and_then(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::ExploreAggregationCell>()
+                    .map(|existing| (existing.record().clone(), existing.is_trailing()))
+            }) {
+                if let Some(entry_idx) = record.push_from_parsed(
+                    &parsed_command,
+                    history_cell::ExploreEntryStatus::Running,
+                    &ev.cwd,
+                    &chat.config.cwd,
+                    &ev.command,
+                ) {
+                    let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+                    cell.set_trailing(trailing);
+                    chat.history_replace_at(idx, Box::new(cell));
+                    chat.autoscroll_if_near_bottom();
+                    chat.request_redraw();
+                    chat.exec.running_explore_agg_index = Some(idx);
+                    chat.exec.running_commands.insert(
+                        super::ExecCallId(ev.call_id.clone()),
+                        super::RunningCommand {
+                            command: ev.command.clone(),
+                            parsed: parsed_command.clone(),
+                            history_index: None,
+                            explore_entry: Some((idx, entry_idx)),
+                            stdout: String::new(),
+                            stderr: String::new(),
+                            wait_total: None,
+                            wait_active: false,
+                            wait_notes: Vec::new(),
+                        },
+                    );
+                    chat.bottom_pane.set_has_chat_history(true);
+                    let status_text = match action {
+                        ExecAction::Read => "reading files…",
+                        _ => "exploring…",
+                    };
+                    chat.bottom_pane.update_status_text(status_text.to_string());
+                    return;
+                }
+            }
+
+            if created_new {
+                chat.history_remove_at(idx);
                 chat.autoscroll_if_near_bottom();
                 chat.request_redraw();
-                chat.bottom_pane.set_has_chat_history(true);
-                let status_text = match action {
-                    ExecAction::Read => "reading files…",
-                    _ => "exploring…",
-                };
-                chat.bottom_pane.update_status_text(status_text.to_string());
-                return;
-            } else if created_new {
-                chat.history_remove_at(idx);
-                chat.invalidate_height_cache();
             }
         }
     }
@@ -626,22 +643,25 @@ pub(super) fn handle_exec_end_now(
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
         let action = history_cell::action_enum_from_parsed(&parsed);
-    let status = match (exit_code, action) {
-        (0, _) => history_cell::ExploreEntryStatus::Success,
-        (1, ExecAction::Search) => history_cell::ExploreEntryStatus::NotFound,
-        (1, ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
-        // Anything else is an error; preserve exit code
-        _ => history_cell::ExploreEntryStatus::Error {
-            exit_code: Some(exit_code),
-        },
+        let status = match (exit_code, action) {
+            (0, _) => history_cell::ExploreEntryStatus::Success,
+            (1, ExecAction::Search) => history_cell::ExploreEntryStatus::NotFound,
+            (1, ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
+            _ => history_cell::ExploreEntryStatus::Error {
+                exit_code: Some(exit_code),
+            },
         };
-        if agg_idx < chat.history_cells.len() {
-            if let Some(agg) = chat.history_cells[agg_idx]
-                .as_any_mut()
-                .downcast_mut::<history_cell::ExploreAggregationCell>()
-            {
-                agg.update_status(entry_idx, status.clone());
-            }
+        if let Some((mut record, trailing)) = chat.history_cells.get(agg_idx).and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .map(|existing| (existing.record().clone(), existing.is_trailing()))
+        }) {
+            record.update_status(entry_idx, status.clone());
+            let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+            cell.set_trailing(trailing);
+            chat.history_replace_at(agg_idx, Box::new(cell));
+            chat.autoscroll_if_near_bottom();
+            chat.request_redraw();
         }
         if !chat
             .exec
@@ -651,8 +671,6 @@ pub(super) fn handle_exec_end_now(
         {
             chat.exec.running_explore_agg_index = None;
         }
-        chat.invalidate_height_cache();
-        chat.request_redraw();
         let status_text = match status {
             history_cell::ExploreEntryStatus::Success => match action {
                 ExecAction::Read => "files read".to_string(),

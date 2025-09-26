@@ -58,7 +58,6 @@ use shlex::Shlex;
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -79,6 +78,7 @@ mod reasoning;
 mod tool;
 mod wait_status;
 mod plan_update;
+mod rate_limits;
 mod plain;
 mod upgrade;
 mod semantic;
@@ -95,7 +95,9 @@ pub(crate) use exec::{
     ParsedExecMetadata,
 };
 pub(crate) use diff::{diff_record_from_string, new_diff_cell_from_string, DiffCell};
-pub(crate) use explore::{ExploreAggregationCell, ExploreEntryStatus};
+pub(crate) use explore::ExploreAggregationCell;
+pub(crate) use rate_limits::RateLimitsCell;
+pub(crate) use crate::history::state::ExploreEntryStatus;
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
 pub(crate) use reasoning::CollapsibleReasoningCell;
