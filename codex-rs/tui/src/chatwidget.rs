@@ -3477,7 +3477,7 @@ impl ChatWidget<'_> {
 
         let codex_home = self.config.codex_home.clone();
         let accounts = auth_accounts::list_accounts(&codex_home).unwrap_or_default();
-        let mut account_map: HashMap<String, StoredAccount> = accounts
+        let account_map: HashMap<String, StoredAccount> = accounts
             .into_iter()
             .map(|account| (account.id.clone(), account))
             .collect();
@@ -3489,19 +3489,22 @@ impl ChatWidget<'_> {
         let usage_records = account_usage::list_rate_limit_snapshots(&codex_home).unwrap_or_default();
         let mut snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
             .into_iter()
+            .filter(|record| account_map.contains_key(&record.account_id))
             .map(|record| (record.account_id.clone(), record))
             .collect();
 
-        let mut summary_ids: HashSet<String> = account_map.keys().cloned().collect();
-        summary_ids.extend(snapshot_map.keys().cloned());
-        if let Some(id) = active_id.as_ref() {
-            summary_ids.insert(id.clone());
+        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
+        for id in account_map.keys() {
+            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, id) {
+                usage_summary_map.insert(id.clone(), summary);
+            }
         }
 
-        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
-        for id in summary_ids {
-            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, &id) {
-                usage_summary_map.insert(id, summary);
+        if let Some(active_id) = active_id.as_ref() {
+            if !usage_summary_map.contains_key(active_id) {
+                if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, active_id) {
+                    usage_summary_map.insert(active_id.clone(), summary);
+                }
             }
         }
 
@@ -3527,25 +3530,21 @@ impl ChatWidget<'_> {
             let extra = Self::usage_history_lines(summary_ref);
             let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG);
             tabs.push(LimitsTab::view(title, header, view, extra));
-            if let Some(id) = active_id.as_ref() {
-                seen_ids.insert(id.clone());
-                account_map.remove(id);
-                snapshot_map.remove(id);
-                usage_summary_map.remove(id);
+
+            if let Some(active_id) = active_id.as_ref() {
+                if account_map.contains_key(active_id) {
+                    seen_ids.insert(active_id.clone());
+                    snapshot_map.remove(active_id);
+                    usage_summary_map.remove(active_id);
+                }
             }
         }
 
-        let mut remaining_ids: Vec<String> = Vec::new();
-        for id in account_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
-        for id in snapshot_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
+        let mut remaining_ids: Vec<String> = account_map
+            .keys()
+            .filter(|id| !seen_ids.contains(*id))
+            .cloned()
+            .collect();
         remaining_ids.sort_by(|a, b| {
             let a_label = account_map
                 .get(a)
@@ -3555,9 +3554,14 @@ impl ChatWidget<'_> {
                 .get(b)
                 .map(Self::account_label)
                 .unwrap_or_else(|| b.clone());
-            a_label
-                .to_ascii_lowercase()
-                .cmp(&b_label.to_ascii_lowercase())
+            let a_cmp = a_label.to_ascii_lowercase();
+            let b_cmp = b_label.to_ascii_lowercase();
+            let order = a_cmp.cmp(&b_cmp);
+            if order == std::cmp::Ordering::Equal {
+                a_label.cmp(&b_label)
+            } else {
+                order
+            }
         });
 
         for id in remaining_ids {
