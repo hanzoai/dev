@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.167] - 2025-09-26
+
+- TUI/Terminal: allow blank dollar prompt to open a shell instantly. (e8ed566)
+- TUI/Status: rebuild /status with card layout and richer reasoning context. (e363dac)
+- TUI/Limits: persist rate-limit warning logs across sessions so spikes stay visible. (3617541)
+- Core/Compact: store inline auto-compaction history to stabilize collapsed output. (5b3c7b5)
+- TUI/Input: restore Warp.dev command+option editing for smoother text adjustments. (2fa3f47)
+
 ## [0.2.166] - 2025-09-25
 
 - TUI/History: refresh the popular commands lineup so quick actions match current workflows. (03af55d1)
