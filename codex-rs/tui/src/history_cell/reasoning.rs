@@ -4,7 +4,14 @@ use super::semantic::SemanticLine;
 use super::text;
 use super::*;
 use crate::history::state::{
-    BulletMarker, InlineSpan, ReasoningBlock, ReasoningSection, TextEmphasis, TextTone,
+    BulletMarker,
+    HistoryId,
+    InlineSpan,
+    ReasoningBlock,
+    ReasoningSection,
+    ReasoningState,
+    TextEmphasis,
+    TextTone,
 };
 use crate::history_cell::assistant::detect_bullet_prefix;
 use crate::render::line_utils;
@@ -19,6 +26,7 @@ pub(crate) struct CollapsibleReasoningState {
     pub in_progress: bool,
     pub hide_when_collapsed: bool,
     pub id: Option<String>,
+    pub history_id: HistoryId,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +51,7 @@ impl CollapsibleReasoningState {
             in_progress: false,
             hide_when_collapsed: false,
             id,
+            history_id: HistoryId::ZERO,
         }
     }
 }
@@ -113,6 +122,20 @@ impl CollapsibleReasoningCell {
         let state = self.state.borrow();
         let theme = crate::theme::current_theme();
         debug_title_overlay(&sections_to_ratatui_lines(&state.sections, &theme))
+    }
+
+    pub(crate) fn set_history_id(&self, id: HistoryId) {
+        self.state.borrow_mut().history_id = id;
+    }
+
+    pub(crate) fn reasoning_state(&self) -> ReasoningState {
+        let state = self.state.borrow();
+        ReasoningState {
+            id: state.history_id,
+            sections: state.sections.clone(),
+            effort: None,
+            in_progress: state.in_progress,
+        }
     }
 }
 

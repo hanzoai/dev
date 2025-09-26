@@ -1,4 +1,6 @@
 use super::*;
+use crate::history::state::{HistoryId, ImageRecord};
+use sha2::{Digest, Sha256};
 
 #[derive(Clone)]
 pub(crate) struct ImageCellState {
@@ -18,13 +20,33 @@ impl ImageCellState {
 
 pub(crate) struct ImageOutputCell {
     state: ImageCellState,
+    record: ImageRecord,
 }
 
 impl ImageOutputCell {
     pub(crate) fn new(image: DynamicImage) -> Self {
-        Self {
-            state: ImageCellState::from_dynamic(image),
-        }
+        let state = ImageCellState::from_dynamic(image);
+        let width_u16 = state.width.min(u16::MAX as u32) as u16;
+        let height_u16 = state.height.min(u16::MAX as u32) as u16;
+        let sha = Sha256::digest(&state.rgba);
+        let sha_hex = format!("{:x}", sha);
+        let record = ImageRecord {
+            id: HistoryId::ZERO,
+            source_path: None,
+            alt_text: None,
+            width: width_u16,
+            height: height_u16,
+            sha256: Some(sha_hex),
+        };
+        Self { state, record }
+    }
+
+    pub(crate) fn record(&self) -> &ImageRecord {
+        &self.record
+    }
+
+    pub(crate) fn record_mut(&mut self) -> &mut ImageRecord {
+        &mut self.record
     }
 }
 

@@ -211,11 +211,14 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
     AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
+    HistoryEvent,
     HistoryId,
+    HistoryMutation,
     HistoryRecord,
     HistoryState,
     MessageMetadata,
@@ -428,6 +431,7 @@ pub(crate) struct ChatWidget<'a> {
     login_add_view_state: Option<Weak<RefCell<LoginAddAccountState>>>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
+    history_cell_ids: Vec<Option<HistoryId>>,
     history_render: HistoryRenderState,
     history_state: HistoryState,
     config: Config,
@@ -1210,7 +1214,7 @@ impl ChatWidget<'_> {
             }
         }
         let key = self.system_order_key(placement, order);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag);
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, None);
         if let Some(id) = id_for_replace {
             self.system_cell_by_id.insert(id, pos);
         }
@@ -1567,7 +1571,7 @@ impl ChatWidget<'_> {
         use crate::history::state::ExecStatus;
         use crate::history_cell::HistoryCellType;
         use crate::history_cell::PatchKind;
-        use crate::history_cell::ToolStatus;
+        use crate::history_cell::ToolCellStatus;
         match item.kind() {
             HistoryCellType::Plain => "Plain".to_string(),
             HistoryCellType::User => "User".to_string(),
@@ -1590,9 +1594,9 @@ impl ChatWidget<'_> {
             }
             HistoryCellType::Tool { status } => {
                 let s = match status {
-                    ToolStatus::Running => "Running",
-                    ToolStatus::Success => "Success",
-                    ToolStatus::Failed => "Failed",
+                    ToolCellStatus::Running => "Running",
+                    ToolCellStatus::Success => "Success",
+                    ToolCellStatus::Failed => "Failed",
                 };
                 format!("Tool:{}", s)
             }
@@ -1738,9 +1742,10 @@ impl ChatWidget<'_> {
                     let mut lines = Vec::new();
                     crate::markdown::append_markdown(text, &mut lines, &self.config);
                     let key = self.next_internal_key();
-                    let _ = self.history_insert_with_key_global(
-                        Box::new(PlainHistoryCell::new(lines, HistoryCellType::Assistant)),
+                    let _ = self.history_insert_plain_cell_with_key(
+                        PlainHistoryCell::new(lines, HistoryCellType::Assistant),
                         key,
+                        "epilogue",
                     );
                 }
             }
@@ -1761,6 +1766,7 @@ impl ChatWidget<'_> {
                     Box::new(crate::history_cell::new_background_event(message)),
                     key,
                     "background",
+                    None,
                 );
             }
             ResponseItem::Reasoning { summary, .. } => {
@@ -1824,6 +1830,7 @@ impl ChatWidget<'_> {
                     Box::new(crate::history_cell::new_background_event(message)),
                     key,
                     "background",
+                    None,
                 );
             }
             _ => {
@@ -2033,9 +2040,32 @@ impl ChatWidget<'_> {
         // invalidate the height cache since indices shift and our cache is
         // keyed by (idx,width).
         let before_len = self.history_cells.len();
-        self.history_cells.retain(|cell| !cell.should_remove());
-        if self.history_cells.len() != before_len {
-            self.invalidate_height_cache();
+        if before_len > 0 {
+            let old_cells = std::mem::take(&mut self.history_cells);
+            let old_ids = std::mem::take(&mut self.history_cell_ids);
+            debug_assert_eq!(
+                old_cells.len(),
+                old_ids.len(),
+                "history ids out of sync with cells"
+            );
+            let mut removed_any = false;
+            let mut kept_cells = Vec::with_capacity(old_cells.len());
+            let mut kept_ids = Vec::with_capacity(old_ids.len());
+            for (cell, id) in old_cells.into_iter().zip(old_ids.into_iter()) {
+                if cell.should_remove() {
+                    removed_any = true;
+                    continue;
+                }
+                kept_ids.push(id);
+                kept_cells.push(cell);
+            }
+            self.history_cells = kept_cells;
+            self.history_cell_ids = kept_ids;
+            if removed_any {
+                self.invalidate_height_cache();
+            }
+        } else if !self.history_cell_ids.is_empty() {
+            self.history_cell_ids.clear();
         }
 
         // Send a redraw event to trigger UI update
@@ -2174,6 +2204,7 @@ impl ChatWidget<'_> {
                 {
                     summary.title = "Updated".to_string();
                     summary.kind = history_cell::PatchKind::ApplySuccess;
+                    summary.record_mut().patch_type = HistoryPatchEventType::ApplySuccess;
                     self.request_redraw();
                     return;
                 }
@@ -2699,6 +2730,7 @@ impl ChatWidget<'_> {
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             history_state: HistoryState::new(),
+            history_cell_ids: Vec::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2932,6 +2964,7 @@ impl ChatWidget<'_> {
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             history_state: HistoryState::new(),
+            history_cell_ids: Vec::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -4224,7 +4257,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         key: OrderKey,
     ) -> usize {
-        self.history_insert_with_key_global_tagged(cell, key, "untagged")
+        self.history_insert_with_key_global_tagged(cell, key, "untagged", None)
     }
 
     // Internal: same as above but with a short tag for debug overlays.
@@ -4233,6 +4266,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         key: OrderKey,
         tag: &'static str,
+        record: Option<HistoryRecord>,
     ) -> usize {
         #[cfg(debug_assertions)]
         {
@@ -4340,7 +4374,27 @@ impl ChatWidget<'_> {
             None
         };
 
+        let mut cell = cell;
+
+        let record = record.or_else(|| self.history_record_from_cell(cell.as_ref()));
+
+        let maybe_id = if let Some(record) = record {
+            match self
+                .history_state
+                .apply_event(HistoryEvent::Insert { index: pos, record })
+            {
+                HistoryMutation::Inserted { id, .. } => {
+                    self.assign_history_id(&mut cell, id);
+                    Some(id)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         self.history_cells.insert(pos, cell);
+        self.history_cell_ids.insert(pos, maybe_id);
         // In terminal mode, App mirrors history lines into the native buffer.
         // Ensure order vector is also long enough for position after cell insert
         if self.cell_order_seq.len() < pos {
@@ -4396,6 +4450,179 @@ impl ChatWidget<'_> {
         pos
     }
 
+    fn assign_history_id(&self, cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
+        if let Some(plain) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PlainHistoryCell>()
+        {
+            plain.state_mut().id = id;
+        } else if let Some(wait) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::WaitStatusCell>()
+        {
+            wait.state_mut().id = id;
+        } else if let Some(loading) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::LoadingCell>()
+        {
+            loading.state_mut().id = id;
+        } else if let Some(background) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::BackgroundEventCell>()
+        {
+            background.state_mut().id = id;
+        } else if let Some(tool_call) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ToolCallCell>()
+        {
+            tool_call.state_mut().id = id;
+        } else if let Some(running_tool) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::RunningToolCallCell>()
+        {
+            running_tool.state_mut().id = id;
+        } else if let Some(plan) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PlanUpdateCell>()
+        {
+            plan.state_mut().id = id;
+        } else if let Some(upgrade) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::UpgradeNoticeCell>()
+        {
+            upgrade.state_mut().id = id;
+        } else if let Some(reasoning) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::CollapsibleReasoningCell>()
+        {
+            reasoning.set_history_id(id);
+        } else if let Some(exec) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ExecCell>()
+        {
+            exec.record.id = id;
+        } else if let Some(stream) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::StreamingContentCell>()
+        {
+            stream.state_mut().id = id;
+        } else if let Some(assistant) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::AssistantMarkdownCell>()
+        {
+            assistant.state_mut().id = id;
+        } else if let Some(diff) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::DiffCell>()
+        {
+            diff.record_mut().id = id;
+        } else if let Some(image) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ImageOutputCell>()
+        {
+            image.record_mut().id = id;
+        } else if let Some(patch) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PatchSummaryCell>()
+        {
+            patch.record_mut().id = id;
+        }
+    }
+
+    fn history_record_from_cell(&self, cell: &dyn HistoryCell) -> Option<HistoryRecord> {
+        if let Some(plain) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::PlainHistoryCell>()
+        {
+            return Some(HistoryRecord::PlainMessage(plain.state().clone()));
+        }
+        if let Some(wait) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::WaitStatusCell>()
+        {
+            return Some(HistoryRecord::WaitStatus(wait.state().clone()));
+        }
+        if let Some(loading) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::LoadingCell>()
+        {
+            return Some(HistoryRecord::Loading(loading.state().clone()));
+        }
+        if let Some(background) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::BackgroundEventCell>()
+        {
+            return Some(HistoryRecord::BackgroundEvent(background.state().clone()));
+        }
+        if let Some(tool_call) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ToolCallCell>()
+        {
+            return Some(HistoryRecord::ToolCall(tool_call.state().clone()));
+        }
+        if let Some(running_tool) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
+        {
+            return Some(HistoryRecord::RunningTool(running_tool.state().clone()));
+        }
+        if let Some(plan) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::PlanUpdateCell>()
+        {
+            return Some(HistoryRecord::PlanUpdate(plan.state().clone()));
+        }
+        if let Some(upgrade) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::UpgradeNoticeCell>()
+        {
+            return Some(HistoryRecord::UpgradeNotice(upgrade.state().clone()));
+        }
+        if let Some(reasoning) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+        {
+            return Some(HistoryRecord::Reasoning(reasoning.reasoning_state()));
+        }
+        if let Some(exec) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ExecCell>()
+        {
+            return Some(HistoryRecord::Exec(exec.record.clone()));
+        }
+        if let Some(stream) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::StreamingContentCell>()
+        {
+            return Some(HistoryRecord::AssistantStream(stream.state().clone()));
+        }
+        if let Some(assistant) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+        {
+            return Some(HistoryRecord::AssistantMessage(assistant.state().clone()));
+        }
+        if let Some(diff) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::DiffCell>()
+        {
+            return Some(HistoryRecord::Diff(diff.record().clone()));
+        }
+        if let Some(image) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ImageOutputCell>()
+        {
+            return Some(HistoryRecord::Image(image.record().clone()));
+        }
+        if let Some(patch) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::PatchSummaryCell>()
+        {
+            return Some(HistoryRecord::Patch(patch.record().clone()));
+        }
+        None
+    }
+
     /// Push a cell using a synthetic global order key at the bottom of the current request.
     pub(crate) fn history_push(&mut self, cell: impl HistoryCell + 'static) {
         #[cfg(debug_assertions)]
@@ -4406,18 +4633,29 @@ impl ChatWidget<'_> {
             );
         }
         let key = self.next_internal_key();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue", None);
+    }
+
+    fn history_insert_plain_cell_with_key(
+        &mut self,
+        cell: crate::history_cell::PlainHistoryCell,
+        key: OrderKey,
+        tag: &'static str,
+    ) -> usize {
+        let record = HistoryRecord::PlainMessage(cell.state().clone());
+        self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, Some(record))
+    }
+
+    fn history_push_plain_cell(&mut self, cell: crate::history_cell::PlainHistoryCell) {
+        let key = self.next_internal_key();
+        let _ = self.history_insert_plain_cell_with_key(cell, key, "epilogue");
     }
 
     fn history_push_diff(&mut self, title: Option<String>, diff_output: String) {
-        let mut record = history_cell::diff_record_from_string(
+        let record = history_cell::diff_record_from_string(
             title.unwrap_or_default(),
             &diff_output,
         );
-        let id = self
-            .history_state
-            .push(HistoryRecord::Diff(record.clone()));
-        record.id = id;
         let cell = history_cell::DiffCell::from_record(record);
         self.history_push(cell);
     }
@@ -4468,17 +4706,20 @@ impl ChatWidget<'_> {
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude");
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude", None);
     }
     /// Push a user prompt so it appears right under banners and above model output for the next request.
     fn history_push_prompt_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_prompt();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt");
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt", None);
     }
 
     fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
         if idx < self.history_cells.len() {
             self.history_cells[idx] = cell;
+            if idx < self.history_cell_ids.len() {
+                self.history_cell_ids[idx] = None;
+            }
             self.invalidate_height_cache();
             self.request_redraw();
             self.refresh_explore_trailing_flags();
@@ -4503,6 +4744,9 @@ impl ChatWidget<'_> {
     fn history_remove_at(&mut self, idx: usize) {
         if idx < self.history_cells.len() {
             self.history_cells.remove(idx);
+            if idx < self.history_cell_ids.len() {
+                self.history_cell_ids.remove(idx);
+            }
             if idx < self.cell_order_seq.len() {
                 self.cell_order_seq.remove(idx);
             }
@@ -4762,7 +5006,7 @@ impl ChatWidget<'_> {
                         "command: {}",
                         original_text.trim()
                     )));
-                    self.history_push(crate::history_cell::PlainHistoryCell::new(
+                    self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
                         ack,
                         crate::history_cell::HistoryCellType::Notice,
                     ));
@@ -4817,7 +5061,7 @@ impl ChatWidget<'_> {
                         }
                     )));
                     lines.push(Line::from(format!("command: {}", original_text.trim())));
-                    self.history_push(crate::history_cell::PlainHistoryCell::new(
+                    self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
                         lines,
                         crate::history_cell::HistoryCellType::Notice,
                     ));
@@ -6874,9 +7118,10 @@ impl ChatWidget<'_> {
                     if let Some(idx) = resolved_idx {
                         self.history_replace_at(idx, Box::new(wait_cancelled_cell));
                     } else {
-                        let _ = self.history_insert_with_key_global(
-                            Box::new(wait_cancelled_cell),
+                        let _ = self.history_insert_plain_cell_with_key(
+                            wait_cancelled_cell,
                             ok,
+                            "untagged",
                         );
                     }
 
@@ -7170,7 +7415,7 @@ impl ChatWidget<'_> {
                     for line in prompt_text.lines() {
                         lines.push(Line::from(line.to_string()));
                     }
-                    self.history_push(history_cell::PlainHistoryCell::new(
+                    self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
                         lines,
                         history_cell::HistoryCellType::Notice,
                     ));
@@ -7543,7 +7788,7 @@ impl ChatWidget<'_> {
         for l in text.lines() {
             lines.push(ratatui::text::Line::from(l.to_string()))
         }
-        self.history_push(crate::history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
             lines,
             crate::history_cell::HistoryCellType::Notice,
         ));
@@ -7849,7 +8094,7 @@ impl ChatWidget<'_> {
             }
         }
 
-        self.history_push(crate::history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
             lines,
             crate::history_cell::HistoryCellType::Notice,
         ));
@@ -10442,7 +10687,7 @@ impl ChatWidget<'_> {
         }
         // Insert new status near the top of this request window
         let key = self.near_time_key(None);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background");
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background", None);
         self.access_status_idx = Some(pos);
     }
 
@@ -10672,7 +10917,10 @@ impl ChatWidget<'_> {
     pub(crate) fn undo_jump_back(&mut self) {
         if let Some(mut st) = self.pending_jump_back.take() {
             // Restore removed cells in original order
-            self.history_cells.extend(st.removed_cells.drain(..));
+            for cell in st.removed_cells.drain(..) {
+                self.history_cell_ids.push(None);
+                self.history_cells.push(cell);
+            }
             // Clear composer (no reliable way to restore prior text)
             self.insert_str("");
             self.request_redraw();
@@ -11699,7 +11947,7 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
             vec![Line::from("✅ Chrome launched with user profile")],
             history_cell::HistoryCellType::BackgroundEvent,
         ));
@@ -12324,7 +12572,7 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
             vec![Line::from(format!(
                 "✅ Chrome launched with temporary profile at {}",
                 profile_dir.display()
@@ -12433,7 +12681,7 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.history_push(history_cell::PlainHistoryCell::new(
+                self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
                     vec![Line::from(status_msg)],
                     history_cell::HistoryCellType::BackgroundEvent,
                 ));
@@ -12831,7 +13079,7 @@ impl ChatWidget<'_> {
             .lines()
             .map(|line| Line::from(line.to_string()))
             .collect();
-        self.history_push(history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
             lines,
             history_cell::HistoryCellType::BackgroundEvent,
         ));
@@ -13627,7 +13875,7 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.history_push(history_cell::PlainHistoryCell::new(
+            self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
                 lines,
                 history_cell::HistoryCellType::BackgroundEvent,
             ));
