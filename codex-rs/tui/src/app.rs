@@ -2378,6 +2378,11 @@ impl App<'_> {
                     // Schedule the next redraw with the requested duration
                     self.schedule_redraw_in(duration);
                 }
+                AppEvent::GhostSnapshotFinished { job_id, result, elapsed } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_ghost_snapshot_finished(job_id, result, elapsed);
+                    }
+                }
             }
         }
         if self.alt_screen_active {
