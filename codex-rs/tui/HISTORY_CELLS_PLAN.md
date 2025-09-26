@@ -80,7 +80,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 
 ### ✅ Reasoning – `CollapsibleReasoningCell`
 - **Desired state:** `ReasoningState { id, sections: Vec<ReasoningSection>, in_progress, hide_when_collapsed }` with sections broken into semantic blocks.
-- **Status:** ✅ state maintains `ReasoningSection` blocks; follow-up: richer block typing + metadata.
+- **Status:** ✅ state maintains `ReasoningSection` blocks with persisted summaries and typed bullet markers (2025-09-26 follow-up complete).
 - **External settings:** `Ctrl+R` (collapsed vs expanded), theme, width.
 - **Widget state:** collapse flag held outside the serialized state (driven by the global toggle).
 
@@ -137,9 +137,9 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 1.2 **Tool calls (running & completed)** – ✅ constructors now emit `ToolArgument`/`ToolResultPreview`; remaining work: tighten JSON summaries + result truncation heuristics.
 1.3 **Plan updates** – ✅ `PlanUpdateCell` now renders from `PlanProgress`/`PlanStep` + `PlanIcon`; follow-up: improved summary metadata.
 1.4 **Upgrade notice** – ✅ cell consumes `UpgradeNoticeState` (versions + message), custom render derived at draw time.
-1.5 **Reasoning** – ⏳ sections/blocks stored; next: enrich block types (code/bullets) and attach metadata for collapse summaries.
+1.5 **Reasoning** – ✅ sections/blocks stored; block metadata now includes typed bullets and per-section summaries for collapse previews (2025-09-26).
 1.6 **Wait status & background notices** – ✅ wait tools use `WaitStatusState`; background notices render via `BackgroundEventRecord`.
-1.7 **Documentation** – Update module docs/tests to reflect new structs; ensure all constructors return strongly typed states.
+1.7 **Documentation** – ✅ inline docs now cover reasoning summaries/bullets; audit of constructors confirmed strongly typed state (2025-09-26).
 
 ## Step 2 – Exec / Streaming / Diff Family *(Pending)*
 2.1 **Exec state extraction & module split** – `ExecRecord` already lives in `history/state.rs`; migrate the inline `ExecCell` into `history_cell/exec.rs`, adapt it to consume the record, and relocate per-width layout caches out of the state layer.
