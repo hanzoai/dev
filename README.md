@@ -195,7 +195,7 @@ model = "gpt-5"
 model_provider = "openai"
 
 # Behavior
-approval_policy = "on_request"  # untrusted | on-failure | on-request | never
+approval_policy = "on-request"  # untrusted | on-failure | on-request | never
 model_reasoning_effort = "medium" # low | medium | high
 sandbox_mode = "workspace_write"
 
