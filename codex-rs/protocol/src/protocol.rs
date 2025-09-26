@@ -594,7 +594,7 @@ pub struct TaskStartedEvent {
     pub model_context_window: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
@@ -603,7 +603,7 @@ pub struct TokenUsage {
     pub total_tokens: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
     pub last_token_usage: TokenUsage,
@@ -640,24 +640,26 @@ impl TokenUsageInfo {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
-    pub rate_limits: Option<RateLimitSnapshotEvent>,
+    pub rate_limits: Option<RateLimitSnapshot>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct RateLimitSnapshotEvent {
-    /// Percentage (0-100) of the primary window that has been consumed.
-    pub primary_used_percent: f64,
-    /// Percentage (0-100) of the secondary window that has been consumed.
-    pub secondary_used_percent: f64,
-    /// Size of the primary window relative to secondary (0-100).
-    pub primary_to_secondary_ratio_percent: f64,
-    /// Rolling window duration for the primary limit, in minutes.
-    pub primary_window_minutes: u64,
-    /// Rolling window duration for the secondary limit, in minutes.
-    pub secondary_window_minutes: u64,
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+pub struct RateLimitSnapshot {
+    pub primary: Option<RateLimitWindow>,
+    pub secondary: Option<RateLimitWindow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+pub struct RateLimitWindow {
+    /// Percentage (0-100) of the window that has been consumed.
+    pub used_percent: f64,
+    /// Rolling window duration, in minutes.
+    pub window_minutes: Option<u64>,
+    /// Seconds until the window resets.
+    pub resets_in_seconds: Option<u64>,
 }
 
 /// Payload for `ReplayHistory` containing prior `ResponseItem`s and optional events.
@@ -1054,6 +1056,25 @@ pub struct GitInfo {
 pub struct ReviewRequest {
     pub prompt: String,
     pub user_facing_hint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub metadata: Option<ReviewContextMetadata>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS, Default)]
+pub struct ReviewContextMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current_branch: Option<String>,
 }
 
 /// Structured review result produced by a child review session.
@@ -1284,7 +1305,7 @@ pub enum ReviewDecision {
     Abort,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum FileChange {
     Add {

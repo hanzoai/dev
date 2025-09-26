@@ -946,6 +946,7 @@ mod tests {
     use super::*;
     // crossterm types are intentionally not imported here to avoid unused warnings
     use rand::prelude::*;
+    use ratatui::layout::Rect;
 
     fn rand_grapheme(rng: &mut rand::rngs::StdRng) -> String {
         let r: u8 = rng.gen_range(0..100);
@@ -992,6 +993,14 @@ mod tests {
         let mut t = TextArea::new();
         t.insert_str(text);
         t
+    }
+
+    #[test]
+    fn cursor_pos_returns_coordinates_for_visible_cursor() {
+        let mut t = ta_with("hello");
+        t.set_cursor("hello".len());
+        let rect = Rect::new(0, 0, 20, 5);
+        assert_eq!(t.cursor_pos(rect), Some((5, 0)));
     }
 
     #[test]
@@ -1396,7 +1405,8 @@ mod tests {
         // Place cursor in "world"
         let world_start = t.text().find("world").unwrap();
         t.set_cursor(world_start + 3);
-        let (_x, y) = t.cursor_pos(area).unwrap();
+        let default_state = TextAreaState::default();
+        let (_x, y) = t.cursor_pos_with_state(area, &default_state).unwrap();
         assert_eq!(y, 1); // world should be on second wrapped line
 
         // With state and small height, cursor is mapped onto visible row
@@ -1469,7 +1479,10 @@ mod tests {
         // Cursor at boundary index 4 should be displayed at start of second wrapped line
         t.set_cursor(4);
         let area = Rect::new(0, 0, 4, 10);
-        let (x, y) = t.cursor_pos(area).unwrap();
+        let default_state = TextAreaState::default();
+        let (x, y) = t
+            .cursor_pos_with_state(area, &default_state)
+            .unwrap();
         assert_eq!((x, y), (0, 1));
 
         // With state and small height, cursor should be visible at row 0, col 0
@@ -1789,7 +1802,8 @@ mod tests {
                 ratatui::widgets::WidgetRef::render_ref(&(&ta), full_area, &mut buf);
 
                 // cursor_pos: x must be within width when present
-                let _ = ta.cursor_pos(area);
+                let baseline_state = TextAreaState::default();
+                let _ = ta.cursor_pos_with_state(area, &baseline_state);
 
                 // cursor_pos_with_state: always within viewport rows
                 let (_x, _y) = ta
