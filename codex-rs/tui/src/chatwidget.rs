@@ -33,6 +33,7 @@ use codex_core::account_usage::{
     RateLimitWarningScope,
     StoredRateLimitSnapshot,
     StoredUsageSummary,
+    TokenTotals,
 };
 use codex_core::auth_accounts::{self, StoredAccount};
 use codex_login::AuthManager;
@@ -147,6 +148,35 @@ use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
 // use image::GenericImageView;
 
+const TOKENS_PER_MILLION: f64 = 1_000_000.0;
+const INPUT_COST_PER_MILLION_USD: f64 = 1.25;
+const CACHED_INPUT_COST_PER_MILLION_USD: f64 = 0.125;
+const OUTPUT_COST_PER_MILLION_USD: f64 = 10.0;
+const STATUS_LABEL_INDENT: &str = "   ";
+const STATUS_LABEL_TARGET_WIDTH: usize = 7;
+const STATUS_LABEL_GAP: usize = 2;
+const STATUS_CONTENT_PREFIX: &str = "    ";
+const STATUS_TOKENS_PREFIX: &str = "             ";
+
+fn status_field_prefix(label: &str) -> String {
+    let padding = STATUS_LABEL_GAP
+        .saturating_add(STATUS_LABEL_TARGET_WIDTH.saturating_sub(label.len()));
+    format!(
+        "{indent}{label}:{spaces}",
+        indent = STATUS_LABEL_INDENT,
+        label = label,
+        spaces = " ".repeat(padding)
+    )
+}
+
+fn status_content_prefix() -> String {
+    STATUS_CONTENT_PREFIX.to_string()
+}
+
+fn status_tokens_prefix() -> &'static str {
+    STATUS_TOKENS_PREFIX
+}
+
 use crate::app_event::{
     AppEvent,
     BackgroundPlacement,
@@ -181,6 +211,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::history::state::{AssistantStreamDelta, HistoryState};
 use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
@@ -209,7 +240,7 @@ use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::ValidationGroup;
 use crate::rate_limits_view::{build_limits_view, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use codex_core::review_format::format_review_findings_block;
-use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -390,6 +421,7 @@ pub(crate) struct ChatWidget<'a> {
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     history_render: HistoryRenderState,
+    history_state: HistoryState,
     config: Config,
     latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
@@ -2658,6 +2690,7 @@ impl ChatWidget<'_> {
             agents_terminal: AgentsTerminalState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
+            history_state: HistoryState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2890,6 +2923,7 @@ impl ChatWidget<'_> {
             agents_terminal: AgentsTerminalState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
+            history_state: HistoryState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -3471,7 +3505,7 @@ impl ChatWidget<'_> {
                 .or_else(|| active_id.clone())
                 .unwrap_or_else(|| "Current session".to_string());
             let header = Self::account_header_lines(account_ref, snapshot_ref, summary_ref);
-            let extra = Self::daily_usage_lines(summary_ref);
+            let extra = Self::usage_history_lines(summary_ref);
             let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG);
             tabs.push(LimitsTab::view(title, header, view, extra));
             if let Some(id) = active_id.as_ref() {
@@ -3533,10 +3567,10 @@ impl ChatWidget<'_> {
                             Some(&record),
                             usage_summary.as_ref(),
                         );
-                        let extra = Self::daily_usage_lines(usage_summary.as_ref());
+                        let extra = Self::usage_history_lines(usage_summary.as_ref());
                         tabs.push(LimitsTab::view(title, header, view, extra));
                     } else {
-                        let mut lines = Self::daily_usage_lines(usage_summary.as_ref());
+                        let mut lines = Self::usage_history_lines(usage_summary.as_ref());
                         lines.push(Self::dim_line(
                             " Rate limit snapshot not yet available.",
                         ));
@@ -3549,7 +3583,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 None => {
-                    let mut lines = Self::daily_usage_lines(usage_summary.as_ref());
+                    let mut lines = Self::usage_history_lines(usage_summary.as_ref());
                     lines.push(Self::dim_line(
                         " Rate limit snapshot not yet available.",
                     ));
@@ -3564,7 +3598,7 @@ impl ChatWidget<'_> {
         }
 
         if tabs.is_empty() {
-            let mut lines = Self::daily_usage_lines(None);
+            let mut lines = Self::usage_history_lines(None);
             lines.push(Self::dim_line(
                 " Rate limit snapshot not yet available.",
             ));
@@ -3580,6 +3614,54 @@ impl ChatWidget<'_> {
             .clone()
             .filter(|label| !label.trim().is_empty())
             .unwrap_or_else(|| account.id.clone())
+    }
+
+    fn usage_cost_usd_from_totals(totals: &TokenTotals) -> f64 {
+        let non_cached_input = totals
+            .input_tokens
+            .saturating_sub(totals.cached_input_tokens);
+        let input_cost = (non_cached_input as f64 / TOKENS_PER_MILLION)
+            * INPUT_COST_PER_MILLION_USD;
+        let cached_cost = (totals.cached_input_tokens as f64 / TOKENS_PER_MILLION)
+            * CACHED_INPUT_COST_PER_MILLION_USD;
+        let output_cost = (totals.output_tokens as f64 / TOKENS_PER_MILLION)
+            * OUTPUT_COST_PER_MILLION_USD;
+        input_cost + cached_cost + output_cost
+    }
+
+    fn format_usd(amount: f64) -> String {
+        let cents = (amount * 100.0).round().max(0.0);
+        let cents_u128 = cents as u128;
+        let dollars_u128 = cents_u128 / 100;
+        let cents_part = (cents_u128 % 100) as u8;
+        let dollars = (dollars_u128.min(u128::from(u64::MAX))) as u64;
+        if cents_part == 0 {
+            format!("${} USD", format_with_separators(dollars))
+        } else {
+            format!(
+                "${}.{:02} USD",
+                format_with_separators(dollars),
+                cents_part
+            )
+        }
+    }
+
+    fn accumulate_token_totals(target: &mut TokenTotals, delta: &TokenTotals) {
+        target.input_tokens = target
+            .input_tokens
+            .saturating_add(delta.input_tokens);
+        target.cached_input_tokens = target
+            .cached_input_tokens
+            .saturating_add(delta.cached_input_tokens);
+        target.output_tokens = target
+            .output_tokens
+            .saturating_add(delta.output_tokens);
+        target.reasoning_output_tokens = target
+            .reasoning_output_tokens
+            .saturating_add(delta.reasoning_output_tokens);
+        target.total_tokens = target
+            .total_tokens
+            .saturating_add(delta.total_tokens);
     }
 
     fn account_header_lines(
@@ -3601,35 +3683,159 @@ impl ChatWidget<'_> {
             .or_else(|| usage.and_then(|u| u.plan.as_deref()))
             .unwrap_or("Unknown");
 
-        let total_tokens = usage
-            .map(|u| u.totals.total_tokens)
-            .unwrap_or(0);
-
         let value_style = Style::default().fg(crate::colors::text_dim());
+        let is_api_key = matches!(account.map(|acc| acc.mode), Some(McpAuthMode::ApiKey));
+        let totals = usage
+            .map(|u| u.totals.clone())
+            .unwrap_or_default();
+        let non_cached_input = totals
+            .input_tokens
+            .saturating_sub(totals.cached_input_tokens);
+        let cached_input = totals.cached_input_tokens;
+        let output_tokens = totals.output_tokens;
+        let reasoning_tokens = totals.reasoning_output_tokens;
+        let total_tokens = totals.total_tokens;
+
+        let cost_usd = Self::usage_cost_usd_from_totals(&totals);
+        let formatted_total = format_with_separators(total_tokens);
+        let formatted_cost = Self::format_usd(cost_usd);
+        let cost_suffix = if is_api_key {
+            format!("({formatted_cost})")
+        } else {
+            format!("(API would cost {formatted_cost})")
+        };
 
         lines.push(RtLine::from(String::new()));
 
         lines.push(RtLine::from(vec![
-            RtSpan::raw(" Type:  "),
+            RtSpan::raw(status_field_prefix("Type")),
             RtSpan::styled(account_type.to_string(), value_style),
         ]));
         lines.push(RtLine::from(vec![
-            RtSpan::raw(" Plan:  "),
+            RtSpan::raw(status_field_prefix("Plan")),
             RtSpan::styled(plan.to_string(), value_style),
         ]));
-        let total_value = format!("{} tokens", format_with_separators(total_tokens));
+        let tokens_summary = format!("{formatted_total} total {cost_suffix}");
         lines.push(RtLine::from(vec![
-            RtSpan::raw(" Total: "),
-            RtSpan::styled(total_value, value_style),
+            RtSpan::raw(status_field_prefix("Tokens")),
+            RtSpan::styled(tokens_summary, value_style),
         ]));
+
+        let indent = status_tokens_prefix();
+        let mut counts = vec![
+            (format_with_separators(cached_input), "cached"),
+            (format_with_separators(non_cached_input), "input"),
+            (format_with_separators(output_tokens), "output"),
+            (format_with_separators(reasoning_tokens), "reasoning"),
+        ];
+        let max_width = counts
+            .iter()
+            .map(|(count, _)| count.len())
+            .max()
+            .unwrap_or(0);
+        for (count, label) in counts.drain(..) {
+            let line_text = format!(
+                "{indent}{count:>width$} {label}",
+                indent = indent,
+                count = count,
+                label = label,
+                width = max_width
+            );
+            lines.push(RtLine::from(vec![RtSpan::styled(line_text, value_style)]));
+        }
+        lines
+    }
+
+    fn hourly_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
+        const WIDTH: usize = 14;
+        let now = Local::now();
+        let anchor = now
+            - ChronoDuration::minutes(now.minute() as i64)
+            - ChronoDuration::seconds(now.second() as i64)
+            - ChronoDuration::nanoseconds(now.nanosecond() as i64);
+
+        let mut hours: Vec<(DateTime<Local>, TokenTotals)> = (0..12)
+            .map(|offset| {
+                (
+                    anchor - ChronoDuration::hours(offset as i64),
+                    TokenTotals::default(),
+                )
+            })
+            .collect();
+
+        let mut lookup: HashMap<i64, usize> = HashMap::new();
+        for (idx, (dt, _)) in hours.iter().enumerate() {
+            lookup.insert(dt.timestamp(), idx);
+        }
+
+        if let Some(summary) = summary {
+            for entry in &summary.hourly_entries {
+                let local_time = entry.timestamp.with_timezone(&Local);
+                let truncated = local_time
+                    - ChronoDuration::minutes(local_time.minute() as i64)
+                    - ChronoDuration::seconds(local_time.second() as i64)
+                    - ChronoDuration::nanoseconds(local_time.nanosecond() as i64);
+                if let Some(&pos) = lookup.get(&truncated.timestamp()) {
+                    let (_, totals) = &mut hours[pos];
+                    Self::accumulate_token_totals(totals, &entry.tokens);
+                }
+            }
+        }
+
+        let max_total = hours
+            .iter()
+            .map(|(_, totals)| totals.total_tokens)
+            .max()
+            .unwrap_or(0);
+
+        let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(RtLine::from(vec![RtSpan::styled(
+            "12 Hour History",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+
+        let prefix = status_content_prefix();
+        let tokens_width = hours
+            .iter()
+            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .max()
+            .unwrap_or(0);
+        for (dt, totals) in hours.iter() {
+            let label = Self::format_hour_label(*dt);
+            let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
+            let tokens = format_with_separators(totals.total_tokens);
+            let padding = tokens_width.saturating_sub(tokens.len());
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
+            let cost_text = Self::format_usd(Self::usage_cost_usd_from_totals(totals));
+            let cost_span = RtSpan::styled(
+                format!(" ({cost_text})"),
+                Style::default().fg(crate::colors::text_dim()),
+            );
+            lines.push(RtLine::from(vec![
+                RtSpan::raw(prefix.clone()),
+                RtSpan::styled(
+                    format!("{label} "),
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+                RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
+                RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
+                RtSpan::raw(format!(" {formatted_tokens} tokens")),
+                cost_span,
+            ]));
+        }
         lines
     }
 
     fn daily_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
         const WIDTH: usize = 14;
         let today = Local::now().date_naive();
-        let mut daily: Vec<(chrono::NaiveDate, u64)> = (0..7)
-            .map(|offset| (today - ChronoDuration::days(offset as i64), 0u64))
+        let mut daily: Vec<(chrono::NaiveDate, TokenTotals)> = (0..7)
+            .map(|offset| {
+                (
+                    today - ChronoDuration::days(offset as i64),
+                    TokenTotals::default(),
+                )
+            })
             .collect();
 
         if let Some(summary) = summary {
@@ -3638,31 +3844,171 @@ impl ChatWidget<'_> {
                 let diff = today.signed_duration_since(entry_date).num_days();
                 if (0..=6).contains(&diff) {
                     let idx = diff as usize;
-                    let (_, total) = &mut daily[idx];
-                    *total = total.saturating_add(entry.tokens.total_tokens);
+                    let (_, totals) = &mut daily[idx];
+                    Self::accumulate_token_totals(totals, &entry.tokens);
                 }
             }
         }
 
-        let max_total = daily.iter().map(|(_, total)| *total).max().unwrap_or(0);
+        let max_total = daily
+            .iter()
+            .map(|(_, totals)| totals.total_tokens)
+            .max()
+            .unwrap_or(0);
         let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(Self::dim_line(String::new()));
         lines.push(RtLine::from(vec![RtSpan::styled(
             "7 Day History",
             Style::default().add_modifier(Modifier::BOLD),
         )]));
-
-        for (day, total) in daily.iter() {
-            let label = day.format("%b %d").to_string();
-            let bar = Self::bar_segment(*total, max_total, WIDTH);
-            let tokens = format_with_separators(*total);
+        let prefix = status_content_prefix();
+        let tokens_width = daily
+            .iter()
+            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .max()
+            .unwrap_or(0);
+        for (day, totals) in daily.iter() {
+            let label = Self::format_daily_label(*day);
+            let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
+            let tokens = format_with_separators(totals.total_tokens);
+            let padding = tokens_width.saturating_sub(tokens.len());
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
+            let daily_cost = Self::usage_cost_usd_from_totals(totals);
+            let cost_text = Self::format_usd(daily_cost);
+            let cost_span = RtSpan::styled(
+                format!(" ({cost_text})"),
+                Style::default().fg(crate::colors::text_dim()),
+            );
             lines.push(RtLine::from(vec![
+                RtSpan::raw(prefix.clone()),
                 RtSpan::styled(
-                    format!(" {label} "),
+                    format!("{label} "),
                     Style::default().fg(crate::colors::text_dim()),
                 ),
                 RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
                 RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
-                RtSpan::raw(format!(" {tokens} tokens")),
+                RtSpan::raw(format!(" {formatted_tokens} tokens")),
+                cost_span,
+            ]));
+        }
+        lines
+    }
+
+    fn day_suffix(day: u32) -> &'static str {
+        if (11..=13).contains(&(day % 100)) {
+            return "th";
+        }
+        match day % 10 {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        }
+    }
+
+    fn format_daily_label(date: chrono::NaiveDate) -> String {
+        let suffix = Self::day_suffix(date.day());
+        format!("{} {:>2}{}", date.format("%b"), date.day(), suffix)
+    }
+
+    fn format_hour_label(dt: DateTime<Local>) -> String {
+        let suffix = Self::day_suffix(dt.day());
+        let (is_pm, hour) = dt.hour12();
+        let meridiem = if is_pm { "pm" } else { "am" };
+        format!(
+            "{} {:>2}{} {:>2}{}",
+            dt.format("%b"),
+            dt.day(),
+            suffix,
+            hour,
+            meridiem
+        )
+    }
+
+    fn usage_history_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
+        let mut lines = Self::hourly_usage_lines(summary);
+        lines.extend(Self::daily_usage_lines(summary));
+        lines.extend(Self::six_month_usage_lines(summary));
+        lines
+    }
+
+    fn six_month_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
+        const WIDTH: usize = 14;
+        const MONTHS: usize = 6;
+
+        let today = Local::now().date_naive();
+        let mut year = today.year();
+        let mut month = today.month();
+
+        let mut months: Vec<(chrono::NaiveDate, TokenTotals)> = Vec::with_capacity(MONTHS);
+        for _ in 0..MONTHS {
+            let start = chrono::NaiveDate::from_ymd_opt(year, month, 1)
+                .expect("valid month start");
+            months.push((start, TokenTotals::default()));
+            if month == 1 {
+                month = 12;
+                year -= 1;
+            } else {
+                month -= 1;
+            }
+        }
+
+        let mut lookup: HashMap<(i32, u32), usize> = HashMap::new();
+        for (idx, (start, _)) in months.iter().enumerate() {
+            lookup.insert((start.year(), start.month()), idx);
+        }
+
+        if let Some(summary) = summary {
+            for entry in &summary.hourly_entries {
+                let local_time = entry.timestamp.with_timezone(&Local);
+                let date = local_time.date_naive();
+                if let Some(&pos) = lookup.get(&(date.year(), date.month())) {
+                    let (_, totals) = &mut months[pos];
+                    Self::accumulate_token_totals(totals, &entry.tokens);
+                }
+            }
+        }
+
+        let max_total = months
+            .iter()
+            .map(|(_, totals)| totals.total_tokens)
+            .max()
+            .unwrap_or(0);
+
+        let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(Self::dim_line(String::new()));
+        lines.push(RtLine::from(vec![RtSpan::styled(
+            "6 Month History",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+
+        let prefix = status_content_prefix();
+        let tokens_width = months
+            .iter()
+            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .max()
+            .unwrap_or(0);
+        for (start, totals) in months.iter() {
+            let label = start.format("%b %Y").to_string();
+            let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
+            let tokens = format_with_separators(totals.total_tokens);
+            let padding = tokens_width.saturating_sub(tokens.len());
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
+            let cost_text = Self::format_usd(Self::usage_cost_usd_from_totals(totals));
+            let cost_span = RtSpan::styled(
+                format!(" ({cost_text})"),
+                Style::default().fg(crate::colors::text_dim()),
+            );
+            lines.push(RtLine::from(vec![
+                RtSpan::raw(prefix.clone()),
+                RtSpan::styled(
+                    format!("{label} "),
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+                RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
+                RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
+                RtSpan::raw(format!(" {formatted_tokens} tokens")),
+                cost_span,
             ]));
         }
         lines
@@ -10508,6 +10854,9 @@ impl ChatWidget<'_> {
                 );
                 // Any incoming Answer means reasoning is no longer bottom-most
                 self.clear_reasoning_in_progress();
+                if let Some(ref want) = id {
+                    self.ensure_answer_stream_state(want);
+                }
                 // Keep a single StreamingContentCell and append to it
                 if let Some(last) = self.history_cells.last_mut() {
                     if let Some(stream_cell) = last
@@ -10683,6 +11032,48 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
+    fn ensure_answer_stream_state(&mut self, stream_id: &str) {
+        let preview = self
+            .stream
+            .preview_source_for_kind(StreamKind::Answer)
+            .unwrap_or_default();
+        self.history_state
+            .upsert_assistant_stream_state(stream_id, preview, None, None);
+    }
+
+    fn track_answer_stream_delta(&mut self, stream_id: &str, delta: &str, seq: Option<u64>) {
+        let preview = self
+            .stream
+            .preview_source_for_kind(StreamKind::Answer)
+            .unwrap_or_default();
+        let delta = if delta.is_empty() {
+            None
+        } else {
+            Some(AssistantStreamDelta {
+                delta: delta.to_string(),
+                sequence: seq,
+                received_at: SystemTime::now(),
+            })
+        };
+        self
+            .history_state
+            .upsert_assistant_stream_state(stream_id, preview, delta, None);
+    }
+
+    fn finalize_answer_stream_state(&mut self, stream_id: Option<&str>, source: &str) {
+        self.history_state.finalize_assistant_stream_state(
+            stream_id,
+            source.to_string(),
+            None,
+            None,
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn history_state(&self) -> &HistoryState {
+        &self.history_state
+    }
+
     /// Replace the in-progress streaming assistant cell with a final markdown cell that
     /// stores raw markdown for future re-rendering.
     pub(crate) fn insert_final_answer_with_id(
@@ -10698,6 +11089,7 @@ impl ChatWidget<'_> {
             lines.len()
         );
         tracing::info!("[order] final Answer id={:?}", id);
+        let final_source = source.clone();
         if self.is_review_flow_active() {
             if let Some(ref want) = id {
                 if let Some(idx) = self.history_cells.iter().rposition(|c| {
@@ -10719,7 +11111,8 @@ impl ChatWidget<'_> {
             }) {
                 self.history_remove_at(idx);
             }
-            self.last_assistant_message = Some(source);
+            self.last_assistant_message = Some(final_source.clone());
+            self.finalize_answer_stream_state(id.as_deref(), &final_source);
             return;
         }
         // Debug: list last few history cell kinds so we can see what's present
@@ -10850,6 +11243,7 @@ impl ChatWidget<'_> {
                     .closed_answer_ids
                     .insert(StreamId(want.clone()));
             }
+            self.finalize_answer_stream_state(id.as_deref(), &final_source);
             self.autoscroll_if_near_bottom();
             return;
         }
@@ -10883,6 +11277,7 @@ impl ChatWidget<'_> {
                         .closed_answer_ids
                         .insert(StreamId(want.clone()));
                 }
+                self.finalize_answer_stream_state(id.as_deref(), &final_source);
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -10929,6 +11324,7 @@ impl ChatWidget<'_> {
                     &self.config,
                 );
                 self.history_replace_at(idx, Box::new(cell));
+                self.finalize_answer_stream_state(id.as_deref(), &final_source);
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -10967,6 +11363,7 @@ impl ChatWidget<'_> {
                 .closed_answer_ids
                 .insert(StreamId(want.clone()));
         }
+        self.finalize_answer_stream_state(id.as_deref(), &final_source);
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
