@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::app_event_sender::AppEventSender;
+use crate::history::state::{HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -98,6 +99,63 @@ fn final_answer_without_newline_is_flushed_immediately() {
         found_final,
         "expected final answer text to be flushed to history"
     );
+}
+
+#[test]
+fn assistant_history_state_tracks_stream_and_final() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Hello world\n".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let stream_records: Vec<_> = chat
+        .history_state()
+        .records
+        .iter()
+        .filter_map(|rec| match rec {
+            HistoryRecord::AssistantStream(state) => Some(state.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stream_records.len(), 1, "expected single assistant stream state");
+    let stream_state = &stream_records[0];
+    assert_eq!(stream_state.stream_id, "turn-1");
+    assert!(stream_state.in_progress);
+    assert_eq!(stream_state.deltas.len(), 1);
+    assert_eq!(stream_state.deltas[0].delta, "Hello world\n");
+
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello world\n".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let mut has_stream = false;
+    let mut has_final = false;
+    for record in &chat.history_state().records {
+        match record {
+            HistoryRecord::AssistantStream(state) if state.stream_id == "turn-1" => {
+                has_stream = true;
+            }
+            HistoryRecord::AssistantMessage(state)
+                if state.stream_id.as_deref() == Some("turn-1")
+                    && state.markdown.contains("Hello world") =>
+            {
+                has_final = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(has_final, "expected finalized assistant message state");
+    assert!(!has_stream, "stream state should be removed after finalization");
 }
 
 fn cell_texts(chat: &ChatWidget<'_>) -> Vec<String> {
@@ -307,6 +365,7 @@ fn make_chatwidget_manual() -> (
         app_event_tx,
         codex_op_tx: op_tx,
         bottom_pane: bottom,
+        history_state: HistoryState::new(),
         active_exec_cell: None,
         config: cfg.clone(),
         latest_upgrade_version: None,
@@ -368,6 +427,21 @@ fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
         s.push('\n');
     }
     s
+}
+
+fn flush_stream_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::InsertHistory(lines) => chat.insert_history_lines(lines),
+            AppEvent::InsertHistoryWithKind { id, kind, lines } => {
+                chat.insert_history_lines_with_kind(kind, id, lines);
+            }
+            AppEvent::InsertFinalAnswer { id, lines, source } => {
+                chat.insert_final_answer_with_id(id, lines, source);
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
