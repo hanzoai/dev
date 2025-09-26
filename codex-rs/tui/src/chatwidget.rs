@@ -155,7 +155,8 @@ const OUTPUT_COST_PER_MILLION_USD: f64 = 10.0;
 const STATUS_LABEL_INDENT: &str = "   ";
 const STATUS_LABEL_TARGET_WIDTH: usize = 7;
 const STATUS_LABEL_GAP: usize = 2;
-const STATUS_CONTENT_PREFIX: &str = "             ";
+const STATUS_CONTENT_PREFIX: &str = "    ";
+const STATUS_TOKENS_PREFIX: &str = "             ";
 
 fn status_field_prefix(label: &str) -> String {
     let padding = STATUS_LABEL_GAP
@@ -170,6 +171,10 @@ fn status_field_prefix(label: &str) -> String {
 
 fn status_content_prefix() -> String {
     STATUS_CONTENT_PREFIX.to_string()
+}
+
+fn status_tokens_prefix() -> &'static str {
+    STATUS_TOKENS_PREFIX
 }
 
 use crate::app_event::{
@@ -3716,7 +3721,7 @@ impl ChatWidget<'_> {
             RtSpan::styled(tokens_summary, value_style),
         ]));
 
-        let indent = status_content_prefix();
+        let indent = status_tokens_prefix();
         let mut counts = vec![
             (format_with_separators(cached_input), "cached"),
             (format_with_separators(non_cached_input), "input"),
@@ -3731,7 +3736,7 @@ impl ChatWidget<'_> {
         for (count, label) in counts.drain(..) {
             let line_text = format!(
                 "{indent}{count:>width$} {label}",
-                indent = indent.as_str(),
+                indent = indent,
                 count = count,
                 label = label,
                 width = max_width
@@ -3790,10 +3795,17 @@ impl ChatWidget<'_> {
         )]));
 
         let prefix = status_content_prefix();
+        let tokens_width = hours
+            .iter()
+            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .max()
+            .unwrap_or(0);
         for (dt, totals) in hours.iter() {
             let label = Self::format_hour_label(*dt);
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
             let tokens = format_with_separators(totals.total_tokens);
+            let padding = tokens_width.saturating_sub(tokens.len());
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
             let cost_text = Self::format_usd(Self::usage_cost_usd_from_totals(totals));
             let cost_span = RtSpan::styled(
                 format!(" ({cost_text})"),
@@ -3807,7 +3819,7 @@ impl ChatWidget<'_> {
                 ),
                 RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
                 RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
-                RtSpan::raw(format!(" {tokens} tokens")),
+                RtSpan::raw(format!(" {formatted_tokens} tokens")),
                 cost_span,
             ]));
         }
@@ -3844,16 +3856,23 @@ impl ChatWidget<'_> {
             .max()
             .unwrap_or(0);
         let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(Self::dim_line(String::new()));
         lines.push(RtLine::from(vec![RtSpan::styled(
             "7 Day History",
             Style::default().add_modifier(Modifier::BOLD),
         )]));
-
         let prefix = status_content_prefix();
+        let tokens_width = daily
+            .iter()
+            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .max()
+            .unwrap_or(0);
         for (day, totals) in daily.iter() {
             let label = Self::format_daily_label(*day);
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
             let tokens = format_with_separators(totals.total_tokens);
+            let padding = tokens_width.saturating_sub(tokens.len());
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
             let daily_cost = Self::usage_cost_usd_from_totals(totals);
             let cost_text = Self::format_usd(daily_cost);
             let cost_span = RtSpan::styled(
@@ -3868,7 +3887,7 @@ impl ChatWidget<'_> {
                 ),
                 RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
                 RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
-                RtSpan::raw(format!(" {tokens} tokens")),
+                RtSpan::raw(format!(" {formatted_tokens} tokens")),
                 cost_span,
             ]));
         }
@@ -3893,17 +3912,9 @@ impl ChatWidget<'_> {
     }
 
     fn format_hour_label(dt: DateTime<Local>) -> String {
-        let suffix = Self::day_suffix(dt.day());
         let (is_pm, hour) = dt.hour12();
         let meridiem = if is_pm { "pm" } else { "am" };
-        format!(
-            "{} {:>2}{} {:>2}{}",
-            dt.format("%b"),
-            dt.day(),
-            suffix,
-            hour,
-            meridiem
-        )
+        format!("{} {:>2}{}", dt.format("%a"), hour, meridiem)
     }
 
     fn usage_history_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
@@ -3957,16 +3968,24 @@ impl ChatWidget<'_> {
             .unwrap_or(0);
 
         let mut lines: Vec<RtLine<'static>> = Vec::new();
+        lines.push(Self::dim_line(String::new()));
         lines.push(RtLine::from(vec![RtSpan::styled(
             "6 Month History",
             Style::default().add_modifier(Modifier::BOLD),
         )]));
 
         let prefix = status_content_prefix();
+        let tokens_width = months
+            .iter()
+            .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
+            .max()
+            .unwrap_or(0);
         for (start, totals) in months.iter() {
             let label = start.format("%b %Y").to_string();
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
             let tokens = format_with_separators(totals.total_tokens);
+            let padding = tokens_width.saturating_sub(tokens.len());
+            let formatted_tokens = format!("{space}{tokens}", space = " ".repeat(padding), tokens = tokens);
             let cost_text = Self::format_usd(Self::usage_cost_usd_from_totals(totals));
             let cost_span = RtSpan::styled(
                 format!(" ({cost_text})"),
@@ -3980,7 +3999,7 @@ impl ChatWidget<'_> {
                 ),
                 RtSpan::styled("│ ", Style::default().fg(crate::colors::text_dim())),
                 RtSpan::styled(bar, Style::default().fg(crate::colors::primary())),
-                RtSpan::raw(format!(" {tokens} tokens")),
+                RtSpan::raw(format!(" {formatted_tokens} tokens")),
                 cost_span,
             ]));
         }

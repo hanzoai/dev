@@ -23,6 +23,7 @@ To do that we're working on refactoring the history cells so that state is separ
 ## Cell Inventory
 Status legend: ✅ complete (semantic deterministic state ready), ⏳ still needs semantic refactor.
 
+### ✅ Plain Messages – `PlainHistoryCell`
 - **Desired state:**
   ```rust
   struct PlainMessageState {
@@ -33,6 +34,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
   ```
 - **Current status:** ✅ state now stored as `PlainMessageState` (header + `Vec<MessageLine>`); follow-up: richer `MessageSegment` types for code/bullets plus metadata serialization.
 
+### ✅ Wait Status – `WaitStatusCell`
 - **Desired state:** `WaitStatusState { header: WaitHeader, bullet_points: Vec<WaitDetail> }`
 - **Status:** ✅ migrated to `WaitStatusState` with explicit header/detail tones; renderer rebuilds lines from structured data.
 
@@ -40,6 +42,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **State:** `LoadingCellState { message: String }`
 - **External settings:** theme.
 
+### ✅ Tool Calls – `ToolCallCell`
 - **Desired state:**
   ```rust
   struct ToolCallState {
@@ -52,22 +55,22 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **Status:** ✅ constructors now populate `ToolArgument`/`ToolResultPreview`; follow-up: polish preview truncation + metadata serialization.
 - **External settings:** theme, width.
 
+### ✅ Running Tool Calls – `RunningToolCallCell`
 - **Desired state:** same struct but `arguments: Vec<ToolArgument>` instead of rendered lines.
 - **Status:** ✅ running tool state stores `Vec<ToolArgument>` with wait caps/call ids tracked separately.
 - **External settings:** theme, width, current time (for elapsed label).
 
+### ✅ Plan Updates – `PlanUpdateCell`
 - **Desired state:** `PlanUpdateState { icon: PlanIcon, items: Vec<PlanLine>, completion: PlanCompletion }`
 - **Status:** ✅ stores `PlanUpdateState` with `PlanProgress`/`PlanStep`; follow-up: richer icons + metadata serialization.
 - **External settings:** theme, width.
 
-- **Desired state:** snapshot rate-limit metrics and legend entries as structured data (percentages, reset times, etc.).
-- **Status:** ⏳ currently storing rendered lines.
-- **External settings:** theme, width.
-
+### ✅ Upgrade Notices – `UpgradeNoticeCell`
 - **Desired state:** `UpgradeNoticeState { current_version: String, latest_version: String, message: UpgradeMessage }`
 - **Status:** ✅ upgrade notices now keep `{ current_version, latest_version, message }`; follow-up: wire optional CTA metadata.
 - **External settings:** theme, width.
 
+### ✅ Background Events – `BackgroundEventCell`
 - **Status:** ✅ already semantic (metadata only).
 - **External settings:** theme; renderer currently emits metadata text.
 
@@ -75,41 +78,56 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **Persistence:** not stored in the state vector (UI-only animation).
 - **Runtime state:** start time, fade progress, cached height.
 
+### ✅ Reasoning – `CollapsibleReasoningCell`
 - **Desired state:** `ReasoningState { id, sections: Vec<ReasoningSection>, in_progress, hide_when_collapsed }` with sections broken into semantic blocks.
 - **Status:** ✅ state maintains `ReasoningSection` blocks; follow-up: richer block typing + metadata.
 - **External settings:** `Ctrl+R` (collapsed vs expanded), theme, width.
 - **Widget state:** collapse flag held outside the serialized state (driven by the global toggle).
 
+### ✅ Explore Aggregations – `ExploreAggregationCell`
 - **Status:** ✅ already semantic (summary enums + statuses).
 - **External settings:** theme, width.
 
+### ⏳ Image Outputs – `ImageOutputCell`
 - **Status:** ⏳ verify each uses structured data; replace any remaining rendered-line storage with semantic fields.
 
-- **Status:** remains ⏳; in addition to layout caches, output/wait info must become serializable metadata (no rendered lines).
-- **Current:** mixes command metadata with cached layout and mutable wait state.
-- **Needed:** extract `ExecCellState { command, parsed, output, stream_preview, wait_snapshot, metadata, status }` with only serializable fields; move layout caches to renderer.
+### ⏳ Patch Summaries – `PatchSummaryCell`
+- **Status:** ⏳ cells build summaries directly from diff hunks and cache per-width render output without touching `HistoryState::Patch`.
+- **Current:** `new_patch_event` constructs `PatchSummaryCell` instances ad hoc, so patch events bypass the serialized state vector.
+- **Needed:** emit `PatchRecord` entries in `HistoryState`, render from the recorded metadata, and retire the cached per-width line buffer.
+
+### ⏳ Exec Commands – `ExecCell`
+- **Status:** [~] `ExecRecord` lives in `HistoryState`, but rendering still depends on the legacy `ExecCell` caches.
+- **Current:** command metadata, layout caches, and wait state remain coupled to the UI struct instead of the serialized record.
+- **Needed:** read/write `ExecRecord` via a dedicated `history_cell/exec.rs`, and move per-width layout caches into the renderer layer.
 - **External settings:** theme, width, monotonic time for “running” durations.
 
-- **Status:** ⏳ convert to semantic buffer of markdown delta segments.
-- **Current:** stores rendered lines plus layout cache.
-- **Needed:** persist stream id + raw markdown chunks; rebuild styled lines during render.
+### ⏳ Assistant Streaming – `StreamingContentCell`
+- **Status:** [~] streaming records capture IDs, markdown deltas, citations, and metadata in `AssistantStreamState`; the cell still owns a redundant `Vec<Line>` cache.
+- **Current:** renderer ignores the stored deltas and instead maintains wrapped lines per width.
+- **Needed:** rebuild previews from `AssistantStreamState`, drop the duplicated line cache, and finish piping citations/token usage through serialization.
 
-- **Status:** ⏳ store raw markdown + formatting options only.
-- **Current:** retains raw markdown but also caches wrapped lines.
-- **Needed:** keep raw markdown and formatting options only; rebuild on demand.
+### ⏳ Assistant Answers – `AssistantMarkdownCell`
+- **Status:** [~] finalized messages persist markdown/citations/token usage via `AssistantMessageState`, while the cell caches a wrapped copy for legacy rendering.
+- **Current:** raw markdown and per-width layout live in the UI layer, so `HistoryState` snapshots cannot rehydrate the answer alone.
+- **Needed:** render directly from `AssistantMessageState`, move layout caching to the renderer, and delete the redundant `lines` buffer.
 
-- **Status:** ⏳ reuse semantic exec state fragments.
-- **Current:** holds a vec of rendered preamble/output line pairs.
-- **Needed:** reuse the new `ExecCellState` fragments instead of storing rendered lines.
+### ⏳ Merged Exec Summary – `MergedExecCell`
+- **Status:** ⏳ still reuses rendered `ExecCell` line pairs instead of the structured `ExecRecord` output chunks.
+- **Current:** keeps preformatted preamble/output text, preventing reuse of serialized exec data.
+- **Needed:** rebuild merged summaries from `Vec<ExecRecord>` snapshots once the exec module is refactored.
 
-- **Status:** ⏳ store diff hunks, headers, metadata.
-- **Current:** persists styled diff lines.
-- **Needed:** store structured diff hunks + metadata; renderer applies styling.
+### ⏳ Diffs – `DiffCell`
+- **Status:** [~] `DiffRecord` already stores hunks and `DiffLineKind`; the cell precomputes styled lines for legacy rendering.
+- **Current:** cached `Vec<Line<'static>>` duplicates the structured data and bypasses `HistoryState` for updates.
+- **Needed:** route diff events through `HistoryState`, render directly from `DiffRecord`, then remove the cached line buffer.
 
+### ⏳ Explore Fetch / HTTP – `ExploreRecord`
 - **Status:** ⏳ store URL, status, body.
 - **Current:** cached display lines.
 - **Needed:** serialize fetched URL, status, and body; render into lines at runtime.
 
+### ⏳ Legacy Plain Producers
 - **Status:** ⏳ ensure producers emit semantic data before handing to cells.
 - **Current:** some paths still inject raw `Vec<Line<'static>>` via `PlainHistoryCell` constructors.
 - **Needed:** convert producers to build `RichTextLine` or structured records before handing off.
@@ -124,7 +142,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 1.7 **Documentation** – Update module docs/tests to reflect new structs; ensure all constructors return strongly typed states.
 
 ## Step 2 – Exec / Streaming / Diff Family *(Pending)*
-2.1 **Exec state extraction & module split** – Create `ExecRecord { command, parsed, action, stdout_chunks, stderr_chunks, exit_code, wait_notes }`, move exec rendering/state into `history_cell/exec.rs`, and drop layout caches from the shared module.
+2.1 **Exec state extraction & module split** – `ExecRecord` already lives in `history/state.rs`; migrate the inline `ExecCell` into `history_cell/exec.rs`, adapt it to consume the record, and relocate per-width layout caches out of the state layer.
 2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. **Status:** renderer now lives in `history_cell/stream.rs`; `HistoryState` records per-stream deltas/preview snapshots; **follow-up:** flow citations/token usage from streaming events, persist provenance metadata, and remove redundant layout caches.
 2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. **Status:** rendering has been split into `history_cell/assistant.rs`; finalized answers now land in `HistoryState`; **follow-up:** carry citation/token metadata through `InsertFinalAnswer`, expose state to resume snapshots, and drop raw `AssistantMarkdownCell` caching once render adapters exist.
 2.4 **Diff module breakout** – Persist diff hunks (`DiffHunk`, `DiffLine`) and patch metadata, move diff rendering into `history_cell/diff.rs`, and have the renderer apply styling based on line kind.
