@@ -1,28 +1,44 @@
 //! Collapsible reasoning cells backed by structured reasoning sections.
 
-use super::semantic::{lines_from_ratatui, SemanticLine};
-use super::semantic;
+use super::semantic::SemanticLine;
 use super::text;
 use super::*;
-use crate::history::state::{ReasoningBlock, ReasoningSection};
+use crate::history::state::{
+    BulletMarker, InlineSpan, ReasoningBlock, ReasoningSection, TextEmphasis, TextTone,
+};
+use crate::history_cell::assistant::detect_bullet_prefix;
+use crate::render::line_utils;
+use ratatui::text::Line;
 use std::cell::{Cell, RefCell};
 use unicode_width::UnicodeWidthStr as _;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CollapsibleReasoningState {
-    pub lines: Vec<SemanticLine>,
+    lines: Vec<ReasoningLineEntry>,
     pub sections: Vec<ReasoningSection>,
     pub in_progress: bool,
     pub hide_when_collapsed: bool,
     pub id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct ReasoningLineEntry {
+    raw: Line<'static>,
+    semantic: SemanticLine,
+}
+
 impl CollapsibleReasoningState {
     pub(crate) fn new(lines: Vec<Line<'static>>, id: Option<String>) -> Self {
-        let semantic_lines = lines_from_ratatui(lines);
-        let sections = sections_from_semantic_lines(&semantic_lines);
+        let entries = lines
+            .into_iter()
+            .map(|line| ReasoningLineEntry {
+                semantic: SemanticLine::from_line(line.clone()),
+                raw: line,
+            })
+            .collect::<Vec<_>>();
+        let sections = sections_from_entries(&entries);
         Self {
-            lines: semantic_lines,
+            lines: entries,
             sections,
             in_progress: false,
             hide_when_collapsed: false,
@@ -79,10 +95,16 @@ impl CollapsibleReasoningCell {
             return;
         }
         let mut state = self.state.borrow_mut();
-        let mut incoming = semantic::lines_from_ratatui(new_lines);
-        dedup_append_semantic(&mut state.lines, &mut incoming);
+        let mut incoming = new_lines
+            .into_iter()
+            .map(|line| ReasoningLineEntry {
+                semantic: SemanticLine::from_line(line.clone()),
+                raw: line,
+            })
+            .collect::<Vec<_>>();
+        dedup_append_entries(&mut state.lines, &mut incoming);
         state.lines.extend(incoming);
-        state.sections = sections_from_semantic_lines(&state.lines);
+        state.sections = sections_from_entries(&state.lines);
     }
 
     pub(crate) fn retint(&self, _old: &crate::theme::Theme, _new: &crate::theme::Theme) {}
@@ -121,7 +143,7 @@ impl HistoryCell for CollapsibleReasoningCell {
             if state.hide_when_collapsed {
                 return Vec::new();
             }
-            let mut titles = extract_section_titles_locked(&state, &normalized);
+            let mut titles = extract_section_titles_locked(&state, &normalized, &theme);
             if state.in_progress {
                 if let Some(mut last) = titles.pop() {
                     last.spans.push(Span::styled(
@@ -213,21 +235,23 @@ impl HistoryCell for CollapsibleReasoningCell {
     }
 }
 
-fn dedup_append_semantic(
-    existing: &mut Vec<semantic::SemanticLine>,
-    incoming: &mut Vec<semantic::SemanticLine>,
+fn dedup_append_entries(
+    existing: &mut Vec<ReasoningLineEntry>,
+    incoming: &mut Vec<ReasoningLineEntry>,
 ) {
     if incoming.is_empty() {
         return;
     }
 
-    let to_plain = |line: &semantic::SemanticLine| -> String {
-        line.spans
+    let to_plain = |line: &ReasoningLineEntry| -> String {
+        line
+            .semantic
+            .spans
             .iter()
             .map(|span| span.text.as_str())
             .collect::<String>()
     };
-    let is_marker = |line: &semantic::SemanticLine| -> bool {
+    let is_marker = |line: &ReasoningLineEntry| -> bool {
         let t = to_plain(line).trim().to_string();
         t.starts_with('[') && t.ends_with(']')
     };
@@ -258,7 +282,7 @@ fn dedup_append_semantic(
 
     if overlap > 0 {
         let mut to_drop = overlap;
-        let mut trimmed: Vec<semantic::SemanticLine> = Vec::with_capacity(incoming.len());
+        let mut trimmed: Vec<ReasoningLineEntry> = Vec::with_capacity(incoming.len());
         for l in incoming.drain(..) {
             if to_drop > 0 && !is_marker(&l) {
                 to_drop -= 1;
@@ -280,30 +304,384 @@ fn dedup_append_semantic(
     }
 }
 
-fn sections_from_semantic_lines(lines: &[SemanticLine]) -> Vec<ReasoningSection> {
+fn sections_from_entries(lines: &[ReasoningLineEntry]) -> Vec<ReasoningSection> {
     if lines.is_empty() {
         return Vec::new();
     }
-    let mut blocks: Vec<ReasoningBlock> = Vec::with_capacity(lines.len());
-    for line in lines {
-        let spans = line
-            .spans
-            .iter()
-            .cloned()
-            .map(text::inline_span_from_semantic)
-            .collect::<Vec<_>>();
-        let is_blank = spans.iter().all(|span| span.text.trim().is_empty());
-        if is_blank {
-            blocks.push(ReasoningBlock::Separator);
-        } else {
-            blocks.push(ReasoningBlock::Paragraph(spans));
+
+    let mut sections: Vec<ReasoningSection> = Vec::new();
+    let mut current = new_empty_section();
+    let mut summary_set = false;
+    let mut idx = 0usize;
+
+    while idx < lines.len() {
+        let entry = &lines[idx];
+        let plain = plain_text(entry);
+        if plain.trim().is_empty() {
+            if !current.blocks.is_empty()
+                && !matches!(current.blocks.last(), Some(ReasoningBlock::Separator))
+            {
+                current.blocks.push(ReasoningBlock::Separator);
+            }
+            idx += 1;
+            continue;
         }
+
+        if is_marker_text(&plain) {
+            idx += 1;
+            continue;
+        }
+
+        if line_utils::is_code_block_painted(&entry.raw) {
+            let (block_opt, next_idx) = extract_code_block(lines, idx);
+            idx = next_idx;
+            if let Some(block) = block_opt {
+                if !summary_set {
+                    if let ReasoningBlock::Code { content, .. } = &block {
+                        if let Some(first_line) = content.lines().find(|l| !l.trim().is_empty()) {
+                            current.summary = Some(vec![InlineSpan {
+                                text: first_line.trim().to_string(),
+                                tone: TextTone::Dim,
+                                emphasis: TextEmphasis::default(),
+                                entity: None,
+                            }]);
+                            summary_set = true;
+                        }
+                    }
+                }
+                current.blocks.push(block);
+            }
+            continue;
+        }
+
+        if is_heading_entry(entry) {
+            trim_section(&mut current);
+            if current.heading.is_some() || !current.blocks.is_empty() || current.summary.is_some() {
+                sections.push(current);
+                current = new_empty_section();
+            }
+
+            let spans = spans_from_entry(entry);
+            if !spans_are_blank(&spans) {
+                current.summary = Some(spans.clone());
+                summary_set = true;
+            } else {
+                summary_set = false;
+            }
+            current.heading = Some(plain.trim().to_string());
+            idx += 1;
+            continue;
+        }
+
+        if let Some((indent, marker, mut spans)) = detect_bullet_block(entry) {
+            if !summary_set && !spans_are_blank(&spans) {
+                current.summary = Some(spans.clone());
+                summary_set = true;
+            }
+            trim_leading_whitespace(&mut spans);
+            current.blocks.push(ReasoningBlock::Bullet {
+                indent,
+                marker,
+                spans,
+            });
+            idx += 1;
+            continue;
+        }
+
+        if let Some(mut quote_spans) = extract_quote_spans(entry) {
+            if !summary_set && !spans_are_blank(&quote_spans) {
+                current.summary = Some(quote_spans.clone());
+                summary_set = true;
+            }
+            trim_leading_whitespace(&mut quote_spans);
+            current.blocks.push(ReasoningBlock::Quote(quote_spans));
+            idx += 1;
+            continue;
+        }
+
+        let spans = spans_from_entry(entry);
+        if !spans_are_blank(&spans) {
+            if !summary_set {
+                current.summary = Some(spans.clone());
+                summary_set = true;
+            }
+            current.blocks.push(ReasoningBlock::Paragraph(spans));
+        }
+        idx += 1;
     }
 
-    vec![ReasoningSection {
+    trim_section(&mut current);
+    if current.heading.is_some() || !current.blocks.is_empty() || current.summary.is_some() {
+        sections.push(current);
+    }
+
+    sections
+}
+
+fn new_empty_section() -> ReasoningSection {
+    ReasoningSection {
         heading: None,
-        blocks,
-    }]
+        summary: None,
+        blocks: Vec::new(),
+    }
+}
+
+fn trim_section(section: &mut ReasoningSection) {
+    while section
+        .blocks
+        .last()
+        .is_some_and(|b| matches!(b, ReasoningBlock::Separator))
+    {
+        let _ = section.blocks.pop();
+    }
+}
+
+fn plain_text(entry: &ReasoningLineEntry) -> String {
+    entry
+        .semantic
+        .spans
+        .iter()
+        .map(|span| span.text.as_str())
+        .collect::<String>()
+}
+
+fn spans_from_entry(entry: &ReasoningLineEntry) -> Vec<InlineSpan> {
+    entry
+        .semantic
+        .spans
+        .iter()
+        .cloned()
+        .map(text::inline_span_from_semantic)
+        .collect()
+}
+
+fn spans_are_blank(spans: &[InlineSpan]) -> bool {
+    spans.iter().all(|span| span.text.trim().is_empty())
+}
+
+fn is_marker_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with('[') && trimmed.ends_with(']')
+}
+
+fn is_heading_entry(entry: &ReasoningLineEntry) -> bool {
+    let mut has_content = false;
+    for span in &entry.semantic.spans {
+        if span.text.trim().is_empty() {
+            continue;
+        }
+        has_content = true;
+        if !span.emphasis.bold {
+            return false;
+        }
+    }
+    has_content
+}
+
+fn detect_bullet_block(entry: &ReasoningLineEntry) -> Option<(u8, BulletMarker, Vec<InlineSpan>)> {
+    let (indent_spaces, bullet) = detect_bullet_prefix(&entry.raw)?;
+    let plain = plain_text(entry);
+    let prefix_len = compute_bullet_prefix_len(&plain, indent_spaces, &bullet);
+    let spans = strip_prefix_from_inline_spans(spans_from_entry(entry), prefix_len);
+    if spans_are_blank(&spans) {
+        return None;
+    }
+    let indent_level = (indent_spaces / 2).min(u8::MAX as usize) as u8;
+    let marker = parse_bullet_marker(&bullet);
+    Some((indent_level, marker, spans))
+}
+
+fn compute_bullet_prefix_len(plain: &str, indent_spaces: usize, bullet: &str) -> usize {
+    let mut consumed = 0usize;
+    let mut chars = plain.chars();
+    for _ in 0..indent_spaces {
+        if chars.next().is_some() {
+            consumed += 1;
+        }
+    }
+    for ch in bullet.chars() {
+        match chars.next() {
+            Some(c) if c == ch => consumed += 1,
+            Some(_) => {
+                consumed += 1;
+            }
+            None => break,
+        }
+    }
+    if matches!(chars.clone().next(), Some(c) if c.is_whitespace()) {
+        chars.next();
+        consumed += 1;
+    }
+    consumed
+}
+
+fn parse_bullet_marker(bullet: &str) -> BulletMarker {
+    if let Some(num) = bullet
+        .strip_suffix('.')
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        return BulletMarker::Numbered(num);
+    }
+    if let Some(num) = bullet
+        .strip_suffix(')')
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        return BulletMarker::Numbered(num);
+    }
+    if matches!(bullet, "-" | "*") {
+        BulletMarker::Dash
+    } else {
+        BulletMarker::Custom(bullet.to_string())
+    }
+}
+
+fn strip_prefix_from_inline_spans(spans: Vec<InlineSpan>, mut chars_to_strip: usize) -> Vec<InlineSpan> {
+    let mut out: Vec<InlineSpan> = Vec::new();
+    for mut span in spans.into_iter() {
+        if chars_to_strip == 0 {
+            if !span.text.is_empty() {
+                out.push(span);
+            }
+            continue;
+        }
+        let len = span.text.chars().count();
+        if chars_to_strip >= len {
+            chars_to_strip -= len;
+            continue;
+        }
+        let trimmed: String = span.text.chars().skip(chars_to_strip).collect();
+        span.text = trimmed;
+        chars_to_strip = 0;
+        if !span.text.is_empty() {
+            out.push(span);
+        }
+    }
+    out
+}
+
+fn trim_leading_whitespace(spans: &mut Vec<InlineSpan>) {
+    while let Some(first) = spans.first_mut() {
+        let original = first.text.clone();
+        let trimmed = original.trim_start().to_string();
+        if trimmed.is_empty() {
+            spans.remove(0);
+            continue;
+        }
+        if trimmed.len() != original.len() {
+            first.text = trimmed;
+        }
+        break;
+    }
+}
+
+fn extract_quote_spans(entry: &ReasoningLineEntry) -> Option<Vec<InlineSpan>> {
+    let plain = plain_text(entry);
+    let mut chars = plain.chars().peekable();
+    let mut prefix = 0usize;
+    let mut saw_marker = false;
+    while let Some(&c) = chars.peek() {
+        if c.is_whitespace() && !saw_marker {
+            chars.next();
+            prefix += 1;
+            continue;
+        }
+        if c == '>' {
+            chars.next();
+            prefix += 1;
+            saw_marker = true;
+            if matches!(chars.peek(), Some(' ')) {
+                chars.next();
+                prefix += 1;
+            }
+            break;
+        }
+        break;
+    }
+    if !saw_marker {
+        return None;
+    }
+    let spans = strip_prefix_from_inline_spans(spans_from_entry(entry), prefix);
+    if spans_are_blank(&spans) {
+        return None;
+    }
+    Some(spans)
+}
+
+fn extract_code_block(
+    lines: &[ReasoningLineEntry],
+    start_idx: usize,
+) -> (Option<ReasoningBlock>, usize) {
+    let mut idx = start_idx;
+    let mut chunk: Vec<Line<'static>> = Vec::new();
+    while idx < lines.len() && line_utils::is_code_block_painted(&lines[idx].raw) {
+        chunk.push(lines[idx].raw.clone());
+        idx += 1;
+    }
+    if chunk.is_empty() {
+        return (None, idx);
+    }
+
+    let mut lang_label: Option<String> = None;
+    let mut content_lines: Vec<Line<'static>> = Vec::new();
+    for (line_idx, line) in chunk.into_iter().enumerate() {
+        let flat = flatten_line(&line);
+        if line_idx == 0 {
+            if let Some(label) = extract_lang_label(&flat) {
+                lang_label = Some(label);
+                continue;
+            }
+        }
+        if flat.contains("⟦LANG:") {
+            continue;
+        }
+        content_lines.push(line);
+    }
+
+    while content_lines
+        .first()
+        .is_some_and(|l| line_utils::is_blank_line_spaces_only(l))
+    {
+        let _ = content_lines.remove(0);
+    }
+    while content_lines
+        .last()
+        .is_some_and(|l| line_utils::is_blank_line_spaces_only(l))
+    {
+        let _ = content_lines.pop();
+    }
+
+    if content_lines.is_empty() {
+        return (None, idx);
+    }
+
+    let mut content = String::new();
+    for (i, line) in content_lines.iter().enumerate() {
+        if i > 0 {
+            content.push('\n');
+        }
+        content.push_str(flatten_line(line).trim_end_matches('\n'));
+    }
+
+    (
+        Some(ReasoningBlock::Code {
+            language: lang_label,
+            content,
+        }),
+        idx,
+    )
+}
+
+fn flatten_line(line: &Line<'static>) -> String {
+    line.spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect::<String>()
+}
+
+fn extract_lang_label(flat: &str) -> Option<String> {
+    let tail = flat.strip_prefix("⟦LANG:")?;
+    let end = tail.find('⟧')?;
+    Some(tail[..end].to_string())
 }
 
 fn sections_to_ratatui_lines(
@@ -329,10 +707,23 @@ fn sections_to_ratatui_lines(
                         .collect();
                     out.push(Line::from(spans));
                 }
-                ReasoningBlock::Bullet { indent, spans } => {
-                    let mut line_spans = Vec::new();
+                ReasoningBlock::Bullet {
+                    indent,
+                    marker,
+                    spans,
+                } => {
                     let indent_spaces = (*indent as usize).saturating_mul(2);
-                    line_spans.push(Span::raw(format!("{}• ", " ".repeat(indent_spaces))));
+                    let marker_text = match marker {
+                        BulletMarker::Dash => "•".to_string(),
+                        BulletMarker::Numbered(n) => format!("{}.", n),
+                        BulletMarker::Custom(s) => s.clone(),
+                    };
+                    let mut line_spans = Vec::new();
+                    line_spans.push(Span::raw(format!(
+                        "{}{} ",
+                        " ".repeat(indent_spaces),
+                        marker_text
+                    )));
                     for span in spans {
                         line_spans.push(text::inline_span_to_span(span, theme));
                     }
@@ -357,6 +748,30 @@ fn sections_to_ratatui_lines(
                 }
                 ReasoningBlock::Separator => out.push(Line::from(String::new())),
             }
+        }
+    }
+    out
+}
+
+fn collect_section_summaries(
+    sections: &[ReasoningSection],
+    theme: &crate::theme::Theme,
+) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    for section in sections {
+        if let Some(summary) = section.summary.as_ref().filter(|spans| !spans_are_blank(spans)) {
+            let spans = summary
+                .iter()
+                .map(|span| text::inline_span_to_span(span, theme))
+                .collect::<Vec<_>>();
+            out.push(Line::from(spans));
+        } else if let Some(heading) = &section.heading {
+            out.push(Line::from(vec![Span::styled(
+                heading.clone(),
+                Style::default()
+                    .fg(crate::colors::text())
+                    .add_modifier(Modifier::BOLD),
+            )]));
         }
     }
     out
@@ -412,32 +827,15 @@ fn normalized_lines(lines: &[Line<'static>]) -> Vec<Line<'static>> {
 fn extract_section_titles_locked(
     state: &CollapsibleReasoningState,
     normalized: &[Line<'static>],
+    theme: &crate::theme::Theme,
 ) -> Vec<Line<'static>> {
-    let mut titles: Vec<Line<'static>> = Vec::new();
-    for l in normalized {
-        let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-        if text.trim().is_empty() {
-            continue;
-        }
-        let all_bold = !l.spans.is_empty()
-            && l
-                .spans
-                .iter()
-                .all(|s| s.style.add_modifier.contains(Modifier::BOLD) || s.content.trim().is_empty());
-        if all_bold {
-            titles.push(l.clone());
-        }
-    }
-
+    let mut titles = collect_section_summaries(&state.sections, theme);
     if titles.is_empty() && !state.in_progress {
-        for l in normalized {
-            let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-            if text.trim().is_empty() {
-                continue;
-            }
-            titles.push(l.clone());
-            break;
-        }
+        titles = normalized
+            .iter()
+            .filter(|line| line.spans.iter().any(|s| !s.content.trim().is_empty()))
+            .cloned()
+            .collect();
     }
 
     let color = crate::colors::text_dim();

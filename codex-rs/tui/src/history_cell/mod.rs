@@ -8,7 +8,11 @@ use crate::util::buffer::{fill_rect, write_line};
 use crate::insert_history::word_wrap_lines;
 use crate::text_formatting::format_json_compact;
 use crate::history::state::{
+    AssistantStreamState,
     BackgroundEventRecord,
+    ExecAction,
+    ExecRecord,
+    ExecStatus,
     HistoryId,
     PlanIcon,
     PlanProgress,
@@ -48,12 +52,10 @@ use ratatui::widgets::Wrap;
 use shlex::Shlex;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
@@ -63,6 +65,7 @@ use tracing::error;
 mod assistant;
 mod animated;
 mod background;
+mod exec;
 mod diff;
 mod explore;
 mod image;
@@ -80,7 +83,13 @@ mod text;
 pub(crate) use assistant::{AssistantLayoutCache, AssistantMarkdownCell};
 pub(crate) use animated::AnimatedWelcomeCell;
 pub(crate) use background::BackgroundEventCell;
-pub(crate) use diff::{new_diff_cell_from_string, DiffCell};
+pub(crate) use exec::{
+    new_active_exec_command,
+    new_completed_exec_command,
+    ExecCell,
+    ParsedExecMetadata,
+};
+pub(crate) use diff::{diff_record_from_string, new_diff_cell_from_string, DiffCell};
 pub(crate) use explore::{ExploreAggregationCell, ExploreEntryStatus};
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
@@ -142,14 +151,6 @@ pub(crate) enum ExecKind {
     Run,
 }
 
-// Unified action classification for exec commands
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ExecAction {
-    Read,
-    Search,
-    List,
-    Run,
-}
 
 pub(crate) fn action_enum_from_parsed(
     parsed: &[codex_core::parse_command::ParsedCommand],
@@ -164,13 +165,6 @@ pub(crate) fn action_enum_from_parsed(
         }
     }
     ExecAction::Run
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ExecStatus {
-    Running,
-    Success,
-    Error,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -463,777 +457,43 @@ fn looks_like_shell(token: &str) -> bool {
 
 // Remove formatting-only pipes (sed/head/tail) when we already provide a line-range
 // annotation alongside the command summary. Keeps the core command intact for display.
-// ==================== ExecCell ====================
-
-#[derive(Clone, PartialEq, Eq)]
-struct ExecWaitNote {
-    text: String,
-    is_error: bool,
-}
-
-#[derive(Clone, Default)]
-struct ExecWaitState {
-    total_wait: Option<Duration>,
-    run_duration: Option<Duration>,
-    waiting: bool,
-    notes: Vec<ExecWaitNote>,
-}
-
-pub(crate) struct ExecCell {
-    pub(crate) command: Vec<String>,
-    pub(crate) parsed: Vec<ParsedCommand>,
-    pub(crate) output: Option<CommandOutput>,
-    pub(crate) start_time: Option<Instant>,
-    pub(crate) stream_preview: Option<CommandOutput>,
-    // Caches to avoid recomputing expensive line construction for completed execs
-    cached_display_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    cached_pre_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    cached_out_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    // Cached per-width layout (wrapped rows + totals) while content is stable
-    cached_layout: std::cell::RefCell<Option<Rc<ExecLayoutCache>>>,
-    cached_command_lines: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    cached_wait_extras: std::cell::RefCell<Option<Vec<Line<'static>>>>,
-    parsed_meta: Option<ParsedExecMetadata>,
-    has_bold_command: bool,
-    wait_state: std::cell::RefCell<ExecWaitState>,
-}
-
-#[derive(Clone)]
-struct ExecLayoutCache {
-    width: u16,
-    pre_lines: Vec<Line<'static>>,
-    out_lines: Vec<Line<'static>>,
-    pre_total: u16,
-    out_block_total: u16,
-}
-
-#[derive(Clone)]
-struct ParsedExecMetadata {
-    action: ExecAction,
-    ctx_path: Option<String>,
-    search_paths: HashSet<String>,
-}
-
-impl ParsedExecMetadata {
-    fn from_commands(parsed: &[ParsedCommand]) -> Self {
-        let action = action_enum_from_parsed(parsed);
-        let ctx_path = first_context_path(parsed);
-        let mut search_paths: HashSet<String> = HashSet::new();
-        for pc in parsed {
-            if let ParsedCommand::Search { path: Some(p), .. } = pc {
-                search_paths.insert(p.to_string());
-            }
-        }
-        Self {
-            action,
-            ctx_path,
-            search_paths,
-        }
-    }
-}
-
-impl HistoryCell for ExecCell {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn kind(&self) -> HistoryCellType {
-        let kind = match self.parsed_action() {
-            ExecAction::Read => ExecKind::Read,
-            ExecAction::Search => ExecKind::Search,
-            ExecAction::List => ExecKind::List,
-            ExecAction::Run => ExecKind::Run,
-        };
-        let status = match &self.output {
-            None => ExecStatus::Running,
-            Some(o) if o.exit_code == 0 => ExecStatus::Success,
-            Some(_) => ExecStatus::Error,
-        };
-        HistoryCellType::Exec { kind, status }
-    }
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        match self.kind() {
-            HistoryCellType::Exec {
-                kind: ExecKind::Run,
-                status,
-            } => {
-                if matches!(status, ExecStatus::Error) {
-                    Some("✖")
-                } else if self.has_bold_command {
-                    Some("❯")
-                } else {
-                    None
-                }
-            }
-            HistoryCellType::Exec { .. } => None,
-            _ => None,
-        }
-    }
-    fn display_lines(&self) -> Vec<Line<'static>> {
-        // Fallback textual representation (used for height measurement only when custom rendering).
-        // For completed executions, cache the computed lines since they are immutable.
-        if let Some(cached) = self.cached_display_lines.borrow().as_ref() {
-            return cached.clone();
-        }
-        let lines = exec_command_lines(
-            &self.command,
-            &self.parsed,
-            self.output.as_ref(),
-            self.stream_preview.as_ref(),
-            self.start_time,
-        );
-        if self.output.is_some() {
-            *self.cached_display_lines.borrow_mut() = Some(lines.clone());
-        }
-        lines
-    }
-    fn has_custom_render(&self) -> bool {
-        true
-    }
-    fn is_animating(&self) -> bool {
-        self.output.is_none() && self.start_time.is_some()
-    }
-    fn desired_height(&self, width: u16) -> u16 {
-        let (pre_total, _out_block_total, out_total_with_status) = self.ensure_wrap_totals(width);
-        pre_total.saturating_add(out_total_with_status)
-    }
-    fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        let plan = self.ensure_layout(area.width);
-        let plan_ref = plan.as_ref();
-
-        let pre_total = plan_ref.pre_total;
-        let out_block_total = plan_ref.out_block_total;
-
-        let pre_skip = skip_rows.min(pre_total);
-        let after_pre_skip = skip_rows.saturating_sub(pre_total);
-        let block_skip = after_pre_skip.min(out_block_total);
-        let after_block_skip = after_pre_skip.saturating_sub(block_skip);
-
-        let pre_height = pre_total
-            .saturating_sub(pre_skip)
-            .min(area.height);
-        let mut remaining_height = area.height.saturating_sub(pre_height);
-
-        let block_height = out_block_total
-            .saturating_sub(block_skip)
-            .min(remaining_height);
-        remaining_height = remaining_height.saturating_sub(block_height);
-
-        let status_line_to_render = if self.output.is_none()
-            && after_block_skip == 0
-            && remaining_height > 0
-        {
-            self.streaming_status_line()
-        } else {
-            None
-        };
-        let status_height = status_line_to_render.is_some().then_some(1).unwrap_or(0);
-
-        let mut cur_y = area.y;
-
-        if pre_height > 0 {
-            let pre_area = Rect {
-                x: area.x,
-                y: cur_y,
-                width: area.width,
-                height: pre_height,
-            };
-            let bg_style = Style::default()
-                .bg(crate::colors::background())
-                .fg(crate::colors::text());
-            fill_rect(buf, pre_area, Some(' '), bg_style);
-            for (idx, line) in plan_ref
-                .pre_lines
-                .iter()
-                .skip(pre_skip as usize)
-                .take(pre_height as usize)
-                .enumerate()
-            {
-                let y = pre_area.y.saturating_add(idx as u16);
-                if y >= pre_area.y.saturating_add(pre_area.height) {
-                    break;
-                }
-                write_line(buf, pre_area.x, y, pre_area.width, line, bg_style);
-            }
-            cur_y = cur_y.saturating_add(pre_height);
-        }
-
-        if block_height > 0 && area.width > 0 {
-            let out_area = Rect {
-                x: area.x,
-                y: cur_y,
-                width: area.width,
-                height: block_height,
-            };
-            let bg_style = Style::default()
-                .bg(crate::colors::background())
-                .fg(crate::colors::text_dim());
-            fill_rect(buf, out_area, Some(' '), bg_style);
-            let block = Block::default()
-                .borders(Borders::LEFT)
-                .border_style(
-                    Style::default()
-                        .fg(crate::colors::border_dim())
-                        .bg(crate::colors::background()),
-                )
-                .style(Style::default().bg(crate::colors::background()))
-                .padding(Padding {
-                    left: 1,
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                });
-            let inner_rect = block.inner(out_area);
-            block.render(out_area, buf);
-
-            if inner_rect.width > 0 {
-                for (idx, line) in plan_ref
-                    .out_lines
-                    .iter()
-                    .skip(block_skip as usize)
-                    .take(block_height as usize)
-                    .enumerate()
-                {
-                    let y = inner_rect.y.saturating_add(idx as u16);
-                    if y >= inner_rect.y.saturating_add(inner_rect.height) {
-                        break;
-                    }
-                    write_line(buf, inner_rect.x, y, inner_rect.width, line, bg_style);
-                }
-            }
-            cur_y = cur_y.saturating_add(block_height);
-        }
-
-        if let Some(line) = status_line_to_render {
-            if status_height > 0 {
-                let status_area = Rect {
-                    x: area.x,
-                    y: cur_y,
-                    width: area.width,
-                    height: status_height,
-                };
-                let bg_style = Style::default().bg(crate::colors::background());
-                fill_rect(buf, status_area, Some(' '), bg_style);
-                write_line(buf, status_area.x, status_area.y, status_area.width, &line, bg_style);
-            }
-        }
-    }
-}
-
-impl ExecCell {
-    fn invalidate_render_caches(&self) {
-        self.cached_display_lines.borrow_mut().take();
-        self.cached_pre_lines.borrow_mut().take();
-        self.cached_out_lines.borrow_mut().take();
-        self.cached_layout.borrow_mut().take();
-        self.cached_wait_extras.borrow_mut().take();
-    }
-
-    fn parsed_action(&self) -> ExecAction {
-        self
-            .parsed_meta
-            .as_ref()
-            .map(|meta| meta.action)
-            .unwrap_or(ExecAction::Run)
-    }
-
-
-    pub(crate) fn set_waiting(&self, waiting: bool) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.waiting != waiting {
-            state.waiting = waiting;
-            drop(state);
-            self.invalidate_render_caches();
-        }
-    }
-
-    pub(crate) fn set_wait_total(&self, total: Option<Duration>) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.total_wait != total {
-            state.total_wait = total;
-            drop(state);
-            self.invalidate_render_caches();
-        }
-    }
-
-    pub(crate) fn set_run_duration(&self, duration: Option<Duration>) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.run_duration != duration {
-            state.run_duration = duration;
-            drop(state);
-            self.invalidate_render_caches();
-        }
-    }
-
-    pub(crate) fn wait_total(&self) -> Option<Duration> {
-        self.wait_state.borrow().total_wait
-    }
-
-    pub(crate) fn clear_wait_notes(&self) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.notes.is_empty() {
-            return;
-        }
-        state.notes.clear();
-        drop(state);
-        self.invalidate_render_caches();
-    }
-
-    pub(crate) fn push_wait_note(&self, text: &str, is_error: bool) {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let mut state = self.wait_state.borrow_mut();
-        if state
-            .notes
-            .last()
-            .map(|note| note.text == trimmed && note.is_error == is_error)
-            .unwrap_or(false)
-        {
-            return;
-        }
-        state.notes.push(ExecWaitNote {
-            text: trimmed.to_string(),
-            is_error,
-        });
-        drop(state);
-        self.invalidate_render_caches();
-    }
-
-    pub(crate) fn set_wait_notes(&self, notes: &[(String, bool)]) {
-        let mut state = self.wait_state.borrow_mut();
-        let mut changed = state.notes.len() != notes.len();
-        if !changed {
-            for (existing, (text, is_error)) in state.notes.iter().zip(notes.iter()) {
-                if existing.text != text.trim() || existing.is_error != *is_error {
-                    changed = true;
-                    break;
-                }
-            }
-        }
-        if !changed {
-            return;
-        }
-        state.notes = notes
-            .iter()
-            .map(|(text, is_error)| ExecWaitNote {
-                text: text.trim().to_string(),
-                is_error: *is_error,
-            })
-            .filter(|note| !note.text.is_empty())
-            .collect();
-        drop(state);
-        self.invalidate_render_caches();
-    }
-
-    fn wait_note_lines(&self, state: &ExecWaitState) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-        for note in &state.notes {
-            let mut line = Line::from(note.text.clone());
-            let mut style = Style::default().fg(if note.is_error {
-                crate::colors::error()
-            } else {
-                crate::colors::text_dim()
-            });
-            if note.is_error {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            for span in line.spans.iter_mut() {
-                span.style = style;
-            }
-            lines.push(line);
-        }
-        lines
-    }
-
-    fn wait_state_snapshot(&self) -> ExecWaitState {
-        self.wait_state.borrow().clone()
-    }
-
-    fn wait_summary_line(&self, state: &ExecWaitState) -> Option<Line<'static>> {
-        if state.waiting {
-            return None;
-        }
-        if let Some(run_duration) = state.run_duration {
-            if run_duration.is_zero() {
-                return None;
-            }
-            let text = format!("Ran for {}", format_duration(run_duration));
-            return Some(Line::styled(
-                text,
-                Style::default().fg(crate::colors::text_dim()),
-            ));
-        }
-        let total = state.total_wait?;
-        if total.is_zero() {
-            return None;
-        }
-        let text = format!("Waited {}", format_duration(total));
-        Some(Line::styled(
-            text,
-            Style::default().fg(crate::colors::text_dim()),
-        ))
-    }
-
-    fn wait_extras(&self, state: &ExecWaitState) -> Vec<Line<'static>> {
-        if let Some(cached) = self.cached_wait_extras.borrow().as_ref() {
-            return cached.clone();
-        }
-        let mut extra_lines: Vec<Line<'static>> = Vec::new();
-        if let Some(summary_line) = self.wait_summary_line(state) {
-            extra_lines.push(summary_line);
-        }
-        extra_lines.extend(self.wait_note_lines(state));
-        if self.output.is_some() && !extra_lines.is_empty() {
-            *self.cached_wait_extras.borrow_mut() = Some(extra_lines.clone());
-        }
-        extra_lines
-    }
-
-    #[cfg(test)]
-    fn has_bold_command(&self) -> bool {
-        self.has_bold_command
-    }
-
-    pub(crate) fn replace_command_metadata(
-        &mut self,
-        command: Vec<String>,
-        parsed: Vec<ParsedCommand>,
-    ) {
-        self.command = command;
-        self.parsed = parsed;
-        self.has_bold_command = command_has_bold_token(&self.command);
-        self.cached_command_lines.borrow_mut().take();
-        self.cached_wait_extras.borrow_mut().take();
-        self.parsed_meta = if self.parsed.is_empty() {
-            None
-        } else {
-            Some(ParsedExecMetadata::from_commands(&self.parsed))
-        };
-        self.invalidate_render_caches();
-    }
-    /// Compute wrapped row totals for the preamble and the output at the given width.
-    /// Delegates to the per-width layout cache to avoid redundant reflow work.
-    fn ensure_wrap_totals(&self, width: u16) -> (u16, u16, u16) {
-        let layout = self.ensure_layout(width);
-        let status_height = if self.output.is_none() {
-            self.streaming_status_line().map(|_| 1).unwrap_or(0)
-        } else {
-            0
-        };
-        (
-            layout.pre_total,
-            layout.out_block_total,
-            layout
-                .out_block_total
-                .saturating_add(status_height),
-        )
-    }
-
-    fn ensure_layout(&self, width: u16) -> Rc<ExecLayoutCache> {
-        if let Some(layout) = self.cached_layout.borrow().as_ref() {
-            if layout.width == width {
-                return layout.clone();
-            }
-        }
-
-        let (pre_lines_raw, out_lines_raw, _status_line_opt) = self.exec_render_parts();
-        let pre_trimmed = trim_empty_lines(pre_lines_raw);
-        let out_trimmed = trim_empty_lines(out_lines_raw);
-
-        let pre_wrap_width = width;
-        let out_wrap_width = width.saturating_sub(2);
-
-        let pre_wrapped = if pre_wrap_width == 0 {
-            Vec::new()
-        } else {
-            word_wrap_lines(&pre_trimmed, pre_wrap_width)
-        };
-        let out_wrapped = if out_wrap_width == 0 {
-            Vec::new()
-        } else {
-            word_wrap_lines(&out_trimmed, out_wrap_width)
-        };
-
-        let clamp_len = |len: usize| -> u16 { len.min(u16::MAX as usize) as u16 };
-        let pre_total = clamp_len(pre_wrapped.len());
-        let out_block_total = clamp_len(out_wrapped.len());
-
-        let layout = Rc::new(ExecLayoutCache {
-            width,
-            pre_lines: pre_wrapped,
-            out_lines: out_wrapped,
-            pre_total,
-            out_block_total,
-        });
-        *self.cached_layout.borrow_mut() = Some(layout.clone());
-        layout
-    }
-    // Build separate segments: (preamble lines, output lines)
-    fn exec_render_parts(
-        &self,
-    ) -> (
-        Vec<Line<'static>>,
-        Vec<Line<'static>>,
-        Option<Line<'static>>,
-    ) {
-        if let (Some(pre), Some(out)) = (
-            self.cached_pre_lines.borrow().as_ref(),
-            self.cached_out_lines.borrow().as_ref(),
-        ) {
-            if self.output.is_some() {
-                return (pre.clone(), out.clone(), None);
-            }
-            if self.stream_preview.is_some() {
-                let wait_state = self.wait_state_snapshot();
-                let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
-                let status = self.streaming_status_line_for_label(status_label);
-                return (pre.clone(), out.clone(), status);
-            }
-        }
-
-        let wait_state = self.wait_state_snapshot();
-        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
-
-        let (pre, mut out, status) = if self.parsed.is_empty() {
-            if let (Some(pre_cached), Some(out_cached)) = (
-                self.cached_pre_lines.borrow().as_ref(),
-                self.cached_out_lines.borrow().as_ref(),
-            ) {
-                let status_cached = if self.output.is_none() {
-                    self.streaming_status_line_for_label(status_label)
-                } else {
-                    None
-                };
-                return (pre_cached.clone(), out_cached.clone(), status_cached);
-            }
-
-            self.exec_render_parts_generic(status_label)
-        } else {
-            if self.output.is_some() {
-                if let (Some(pre_cached), Some(out_cached)) = (
-                    self.cached_pre_lines.borrow().as_ref(),
-                    self.cached_out_lines.borrow().as_ref(),
-                ) {
-                    return (pre_cached.clone(), out_cached.clone(), None);
-                }
-            }
-
-            match self.parsed_meta.as_ref() {
-                Some(meta) => exec_render_parts_parsed_with_meta(
-                    &self.parsed,
-                    meta,
-                    self.output.as_ref(),
-                    self.stream_preview.as_ref(),
-                    self.start_time,
-                    status_label,
-                ),
-                None => exec_render_parts_parsed(
-                    &self.parsed,
-                    self.output.as_ref(),
-                    self.stream_preview.as_ref(),
-                    self.start_time,
-                    status_label,
-                ),
-            }
-        };
-
-        if self.output.is_some() {
-            let extra_lines = self.wait_extras(&wait_state);
-            if !extra_lines.is_empty() {
-                let is_blank_line = |line: &Line<'static>| {
-                    line.spans
-                        .iter()
-                        .all(|span| span.content.as_ref().trim().is_empty())
-                };
-                let is_error_line = |line: &Line<'static>| {
-                    line.spans
-                        .first()
-                        .map(|span| span.content.as_ref().starts_with("Error (exit code"))
-                        .unwrap_or(false)
-                };
-                let insert_at = if let Some(pos) = out.iter().position(is_error_line) {
-                    pos
-                } else {
-                    out.len()
-                };
-
-                let mut block: Vec<Line<'static>> = Vec::new();
-                if insert_at > 0 && !is_blank_line(&out[insert_at - 1]) {
-                    block.push(Line::from(""));
-                }
-                block.extend(extra_lines.into_iter());
-                if insert_at < out.len() {
-                    if !is_blank_line(&out[insert_at]) {
-                        block.push(Line::from(""));
-                    }
-                } else {
-                    block.push(Line::from(""));
-                }
-
-                out.splice(insert_at..insert_at, block);
-            }
-            *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
-            *self.cached_out_lines.borrow_mut() = Some(out.clone());
-        } else if self.output.is_none() {
-            *self.cached_pre_lines.borrow_mut() = Some(pre.clone());
-            *self.cached_out_lines.borrow_mut() = Some(out.clone());
-        }
-        (pre, out, status)
-    }
-
-    pub(crate) fn update_stream_preview(&mut self, stdout: &str, stderr: &str) {
-        if stdout.is_empty() && stderr.is_empty() {
-            if self.stream_preview.is_none() {
-                return;
-            }
-            self.stream_preview = None;
-        } else {
-            self.stream_preview = Some(CommandOutput {
-                exit_code: STREAMING_EXIT_CODE,
-                stdout: stdout.to_string(),
-                stderr: stderr.to_string(),
-            });
-        }
-        self.invalidate_render_caches();
-    }
-
-    fn exec_render_parts_generic(
-        &self,
-        status_label: &str,
-    ) -> (
-        Vec<Line<'static>>,
-        Vec<Line<'static>>,
-        Option<Line<'static>>,
-    ) {
-        let mut pre = self.generic_command_lines();
-        let display_output = self
-            .output
-            .as_ref()
-            .or(self.stream_preview.as_ref());
-        let mut out = output_lines(display_output, false, false);
-        let has_output = !trim_empty_lines(out.clone()).is_empty();
-
-        if self.output.is_none() && has_output {
-            if let Some(last) = pre.last_mut() {
-                last.spans.insert(
-                    0,
-                    Span::styled(
-                        "┌ ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
-                );
-            }
-        }
-
-        let mut status = None;
-        if self.output.is_none() {
-            let status_line = self.streaming_status_line_for_label(status_label);
-            if status_line.is_some() {
-                if let Some(last) = out.last() {
-                    let is_blank = last
-                        .spans
-                        .iter()
-                        .all(|sp| sp.content.as_ref().trim().is_empty());
-                    if is_blank {
-                        out.pop();
-                    }
-                }
-            }
-            status = status_line;
-        }
-
-        (pre, out, status)
-    }
-
-    fn generic_command_lines(&self) -> Vec<Line<'static>> {
-        if let Some(cached) = self.cached_command_lines.borrow().as_ref() {
-            return cached.clone();
-        }
-
-        let command_escaped = strip_bash_lc_and_escape(&self.command);
-        let formatted = format_inline_script_for_display(&command_escaped);
-        let normalized = normalize_shell_command_display(&formatted);
-        let command_display = insert_line_breaks_after_double_ampersand(&normalized);
-
-        let mut highlighted_cmd =
-            crate::syntax_highlight::highlight_code_block(&command_display, Some("bash"));
-        for (idx, line) in highlighted_cmd.iter_mut().enumerate() {
-            emphasize_shell_command_name(line);
-            if idx > 0 {
-                line.spans.insert(
-                    0,
-                    Span::styled(
-                        "  ",
-                        Style::default().fg(crate::colors::text()),
-                    ),
-                );
-            }
-        }
-
-        let owned: Vec<Line<'static>> = highlighted_cmd;
-        *self.cached_command_lines.borrow_mut() = Some(owned.clone());
-        owned
-    }
-
-    fn streaming_status_line(&self) -> Option<Line<'static>> {
-        if self.output.is_some() {
-            return None;
-        }
-        let wait_state = self.wait_state_snapshot();
-        let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
-        self.streaming_status_line_for_label(status_label)
-    }
-
-    fn streaming_status_line_for_label(&self, status_label: &str) -> Option<Line<'static>> {
-        if self.output.is_some() {
-            return None;
-        }
-
-        if self.parsed.is_empty() {
-            let mut message = format!("{status_label}...");
-            if let Some(start) = self.start_time {
-                let elapsed = start.elapsed();
-                if !elapsed.is_zero() {
-                    message = format!("{message} ({})", format_duration(elapsed));
-                }
-            }
-            return Some(running_status_line(message));
-        }
-
-        let meta = match self.parsed_meta.as_ref() {
-            Some(meta) => meta,
-            None => return None,
-        };
-        if !matches!(meta.action, ExecAction::Run) {
-            return None;
-        }
-
-        let mut message = match meta.ctx_path.as_deref() {
-            Some(p) => format!("{status_label}... in {p}"),
-            None => format!("{status_label}..."),
-        };
-        if let Some(start) = self.start_time {
-            let elapsed = start.elapsed();
-            if !elapsed.is_zero() {
-                message = format!("{message} ({})", format_duration(elapsed));
-            }
-        }
-        Some(running_status_line(message))
-    }
-}
-
 // ==================== MergedExecCell ====================
 // Represents multiple completed exec results merged into one cell while preserving
 // the bordered, dimmed output styling for each command's stdout/stderr preview.
 
+struct MergedExecSegment {
+    record: ExecRecord,
+    cached_pre: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+    cached_out: std::cell::RefCell<Option<Vec<Line<'static>>>>,
+}
+
+impl MergedExecSegment {
+    fn new(record: ExecRecord) -> Self {
+        Self {
+            record,
+            cached_pre: std::cell::RefCell::new(None),
+            cached_out: std::cell::RefCell::new(None),
+        }
+    }
+
+    fn lines(&self) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+        if let (Some(pre), Some(out)) = (
+            self.cached_pre.borrow().as_ref(),
+            self.cached_out.borrow().as_ref(),
+        ) {
+            return (pre.clone(), out.clone());
+        }
+
+        let exec_cell = ExecCell::from_record(self.record.clone());
+        let (pre, out, _) = exec_cell.exec_render_parts();
+        *self.cached_pre.borrow_mut() = Some(pre.clone());
+        *self.cached_out.borrow_mut() = Some(out.clone());
+        (pre, out)
+    }
+}
+
 pub(crate) struct MergedExecCell {
-    // Sequence of (preamble lines, output lines) for each completed exec
-    segments: Vec<(Vec<Line<'static>>, Vec<Line<'static>>)>,
-    // Choose icon/behavior based on predominant action kind for gutter
+    segments: Vec<MergedExecSegment>,
     kind: ExecKind,
 }
 
@@ -1241,8 +501,20 @@ impl MergedExecCell {
     pub(crate) fn exec_kind(&self) -> ExecKind {
         self.kind
     }
+
+    #[cfg(test)]
+    fn segment_count(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub(crate) fn rebuild_with_theme(&self) {
+        for segment in &self.segments {
+            segment.cached_pre.borrow_mut().take();
+            segment.cached_out.borrow_mut().take();
+        }
+    }
+
     pub(crate) fn from_exec(exec: &ExecCell) -> Self {
-        let (pre, out, _) = exec.exec_render_parts();
         let kind = match exec.parsed_action() {
             ExecAction::Read => ExecKind::Read,
             ExecAction::Search => ExecKind::Search,
@@ -1250,30 +522,21 @@ impl MergedExecCell {
             ExecAction::Run => ExecKind::Run,
         };
         Self {
-            segments: vec![(pre, out)],
+            segments: vec![MergedExecSegment::new(exec.record.clone())],
             kind,
         }
     }
+
     pub(crate) fn push_exec(&mut self, exec: &ExecCell) {
-        let (pre, out, _) = exec.exec_render_parts();
-        self.segments.push((pre, out));
+        self.segments.push(MergedExecSegment::new(exec.record.clone()));
     }
 
-    // Build an aggregated preamble for Read segments by concatenating
-    // all per-exec preambles and coalescing contiguous ranges for the
-    // same file. Returns None for non-Read kinds.
     fn aggregated_read_preamble_lines(&self) -> Option<Vec<Line<'static>>> {
         if self.kind != ExecKind::Read {
             return None;
         }
         use ratatui::text::Span;
-        // Concatenate per-segment preambles (without their headers), but KEEP ONLY
-        // read-like entries. Then normalize the connector so only the very first
-        // visible line uses a corner marker and subsequent lines use two spaces.
-        // Finally, coalesce contiguous ranges for the same file.
 
-        // Local helper: parse a read range line of the form
-        // "└ <file> (lines A to B)" or "  <file> (lines A to B)".
         fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32)> {
             if line.spans.is_empty() {
                 return None;
@@ -1303,8 +566,6 @@ impl MergedExecCell {
             None
         }
 
-        // Heuristic: identify search-like lines (e.g., "… in dir/" or " (in dir)") so
-        // they can be dropped from a Read aggregation if they slipped in.
         fn is_search_like(line: &Line<'_>) -> bool {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             let t = text.trim();
@@ -1315,22 +576,20 @@ impl MergedExecCell {
         }
 
         let mut kept: Vec<Line<'static>> = Vec::new();
-        for (seg_idx, (pre_raw, _)) in self.segments.iter().enumerate() {
-            let mut pre = trim_empty_lines(pre_raw.clone());
+        for (seg_idx, segment) in self.segments.iter().enumerate() {
+            let (pre_raw, _) = segment.lines();
+            let mut pre = trim_empty_lines(pre_raw);
             if !pre.is_empty() {
                 pre.remove(0);
-            } // drop per-exec header
-            // Filter: keep definite read-range lines; drop obvious search-like lines.
-            for l in pre.into_iter() {
-                if is_search_like(&l) {
+            }
+            for line in pre.into_iter() {
+                if is_search_like(&line) {
                     continue;
                 }
-                // Prefer lines that parse as read ranges; otherwise allow if they are not search-like.
-                let keep = parse_read_line(&l).is_some() || seg_idx == 0; // be permissive for first segment
-                if !keep {
-                    continue;
+                let keep = parse_read_line(&line).is_some() || seg_idx == 0;
+                if keep {
+                    kept.push(line);
                 }
-                kept.push(l);
             }
         }
 
@@ -1338,7 +597,6 @@ impl MergedExecCell {
             return Some(kept);
         }
 
-        // Normalize connector: first visible line uses "└ ", later lines use "  ".
         if let Some(first) = kept.first_mut() {
             let flat: String = first.spans.iter().map(|s| s.content.as_ref()).collect();
             let has_connector = flat.trim_start().starts_with("└ ");
@@ -1349,17 +607,15 @@ impl MergedExecCell {
                 );
             }
         }
-        for l in kept.iter_mut().skip(1) {
-            if let Some(sp0) = l.spans.get_mut(0) {
-                if sp0.content.as_ref() == "└ " {
-                    sp0.content = "  ".into();
-                    // Keep dim styling for alignment consistency
-                    sp0.style = sp0.style.add_modifier(Modifier::DIM);
+        for line in kept.iter_mut().skip(1) {
+            if let Some(span0) = line.spans.get_mut(0) {
+                if span0.content.as_ref() == "└ " {
+                    span0.content = "  ".into();
+                    span0.style = span0.style.add_modifier(Modifier::DIM);
                 }
             }
         }
 
-        // Merge adjacent/overlapping ranges in-place
         coalesce_read_ranges_in_lines_local(&mut kept);
         Some(kept)
     }
@@ -1557,10 +813,9 @@ config.toml.example\tNOTICE\r\n";
         );
         let mut merged = MergedExecCell::from_exec(&e1);
         assert!(matches!(merged.exec_kind(), ExecKind::Read));
-        // Push the second and ensure it keeps kind and adds a segment
-        let before = merged.segments.len();
+        let before = merged.segment_count();
         merged.push_exec(&e2);
-        assert_eq!(merged.segments.len(), before + 1);
+        assert_eq!(merged.segment_count(), before + 1);
         assert!(matches!(merged.exec_kind(), ExecKind::Read));
     }
 
@@ -1695,16 +950,10 @@ impl HistoryCell for MergedExecCell {
         }
     }
     fn desired_height(&self, width: u16) -> u16 {
-        // Match custom_render_with_skip exactly:
-        // - Shared header row for non-Run kinds (1)
-        // - For each segment:
-        //   - Measure preamble after dropping the per-segment header when present
-        //     and normalizing the leading "└ " prefix at full `width`.
-        //   - Measure output inside a left-bordered block with left padding,
-        //     which reduces the effective wrapping width by 2 columns.
-        let mut total: u16 = if self.kind == ExecKind::Run { 0 } else { 1 };
+        let header_rows = if self.kind == ExecKind::Run { 0 } else { 1 };
         let pre_wrap_width = width;
         let out_wrap_width = width.saturating_sub(2);
+        let mut total: u16 = header_rows;
 
         if let Some(agg_pre) = self.aggregated_read_preamble_lines() {
             let pre_rows: u16 = Paragraph::new(Text::from(agg_pre))
@@ -1713,8 +962,9 @@ impl HistoryCell for MergedExecCell {
                 .try_into()
                 .unwrap_or(0);
             total = total.saturating_add(pre_rows);
-            for (_pre_raw, out_raw) in &self.segments {
-                let out = trim_empty_lines(out_raw.clone());
+            for segment in &self.segments {
+                let (_, out_raw) = segment.lines();
+                let out = trim_empty_lines(out_raw);
                 let out_rows: u16 = Paragraph::new(Text::from(out))
                     .wrap(Wrap { trim: false })
                     .line_count(out_wrap_width)
@@ -1726,9 +976,9 @@ impl HistoryCell for MergedExecCell {
         }
 
         let mut added_corner = false;
-        for (pre_raw, out_raw) in &self.segments {
-            // Build preamble like the renderer: trim, drop first header line, ensure prefix
-            let mut pre = trim_empty_lines(pre_raw.clone());
+        for segment in &self.segments {
+            let (pre_raw, out_raw) = segment.lines();
+            let mut pre = trim_empty_lines(pre_raw);
             if self.kind != ExecKind::Run && !pre.is_empty() {
                 pre.remove(0);
             }
@@ -1745,18 +995,15 @@ impl HistoryCell for MergedExecCell {
                             );
                         }
                         added_corner = true;
-                    } else {
-                        // For subsequent segments, ensure no leading corner; use two spaces instead.
-                        if let Some(sp0) = first.spans.get_mut(0) {
-                            if sp0.content.as_ref() == "└ " {
-                                sp0.content = "  ".into();
-                                sp0.style = sp0.style.add_modifier(Modifier::DIM);
-                            }
+                    } else if let Some(sp0) = first.spans.get_mut(0) {
+                        if sp0.content.as_ref() == "└ " {
+                            sp0.content = "  ".into();
+                            sp0.style = sp0.style.add_modifier(Modifier::DIM);
                         }
                     }
                 }
             }
-            let out = trim_empty_lines(out_raw.clone());
+            let out = trim_empty_lines(out_raw);
             let pre_rows: u16 = Paragraph::new(Text::from(pre))
                 .wrap(Wrap { trim: false })
                 .line_count(pre_wrap_width)
@@ -1773,14 +1020,14 @@ impl HistoryCell for MergedExecCell {
         total
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
-        // Fallback textual form: concatenate all preambles + outputs with blank separators.
         let mut out: Vec<Line<'static>> = Vec::new();
-        for (i, (pre, body)) in self.segments.iter().enumerate() {
+        for (i, segment) in self.segments.iter().enumerate() {
+            let (pre_raw, out_raw) = segment.lines();
             if i > 0 {
                 out.push(Line::from(""));
             }
-            out.extend(trim_empty_lines(pre.clone()));
-            out.extend(trim_empty_lines(body.clone()));
+            out.extend(trim_empty_lines(pre_raw));
+            out.extend(trim_empty_lines(out_raw));
         }
         out
     }
@@ -1788,11 +1035,9 @@ impl HistoryCell for MergedExecCell {
         true
     }
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, mut skip_rows: u16) {
-        // Shared header for non-Run kinds (e.g., "Read") then each segment's command + output.
         let bg = Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
-        // Hard clear area first
         fill_rect(buf, area, Some(' '), bg);
 
         // Build one header line based on exec kind
@@ -1839,7 +1084,6 @@ impl HistoryCell for MergedExecCell {
             }
         }
 
-        // Helper: ensure only the very first preamble line across all segments gets the corner
         let mut added_corner: bool = false;
         let mut ensure_prefix = |lines: &mut Vec<Line<'static>>| {
             if self.kind == ExecKind::Run {
@@ -1871,142 +1115,110 @@ impl HistoryCell for MergedExecCell {
 
         // Special aggregated rendering for Read: collapse file ranges
         if self.kind == ExecKind::Read {
-            // Build aggregated preamble once
-            let agg_pre = self.aggregated_read_preamble_lines().unwrap_or_else(|| {
-                // Fallback: concatenate per-segment preambles
-                let mut all: Vec<Line<'static>> = Vec::new();
-                for (i, (pre_raw, _)) in self.segments.iter().enumerate() {
-                    let mut pre = trim_empty_lines(pre_raw.clone());
-                    if !pre.is_empty() {
-                        pre.remove(0);
-                    }
-                    if i == 0 {
-                        // ensure leading corner (legacy for Read aggregation)
-                        if let Some(first) = pre.first_mut() {
-                            let flat: String =
-                                first.spans.iter().map(|s| s.content.as_ref()).collect();
-                            let already = flat.trim_start().starts_with("└ ")
-                                || flat.trim_start().starts_with("  └ ");
-                            if !already {
-                                first.spans.insert(
-                                    0,
-                                    Span::styled(
-                                        "└ ",
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                    all.extend(pre);
-                }
-                all
-            });
-
-            // Header was already handled above (including skip accounting).
-            // Render aggregated preamble next using the current skip_rows.
-            let pre_text = Text::from(agg_pre);
-            let pre_wrap_width = area.width;
-            let pre_total: u16 = Paragraph::new(pre_text.clone())
-                .wrap(Wrap { trim: false })
-                .line_count(pre_wrap_width)
-                .try_into()
-                .unwrap_or(0);
-            if cur_y < end_y {
-                let pre_skip = skip_rows.min(pre_total);
-                let pre_remaining = pre_total.saturating_sub(pre_skip);
-                let pre_height = pre_remaining.min(end_y.saturating_sub(cur_y));
-                if pre_height > 0 {
-                    Paragraph::new(pre_text)
-                        .block(Block::default().style(bg))
-                        .wrap(Wrap { trim: false })
-                        .scroll((pre_skip, 0))
-                        .style(bg)
-                        .render(
-                            Rect {
-                                x: area.x,
-                                y: cur_y,
-                                width: area.width,
-                                height: pre_height,
-                            },
-                            buf,
-                        );
-                    cur_y = cur_y.saturating_add(pre_height);
-                }
-                skip_rows = skip_rows.saturating_sub(pre_skip);
-            }
-
-            // Render each segment's output only
-            let out_wrap_width = area.width.saturating_sub(2);
-            for (_pre_raw, out_raw) in self.segments.iter() {
-                if cur_y >= end_y {
-                    break;
-                }
-                let out = trim_empty_lines(out_raw.clone());
-                let out_text = Text::from(out.clone());
-                let out_total: u16 = Paragraph::new(out_text.clone())
+            if let Some(agg_pre) = self.aggregated_read_preamble_lines() {
+                let pre_text = Text::from(agg_pre);
+                let pre_wrap_width = area.width;
+                let pre_total: u16 = Paragraph::new(pre_text.clone())
                     .wrap(Wrap { trim: false })
-                    .line_count(out_wrap_width)
+                    .line_count(pre_wrap_width)
                     .try_into()
                     .unwrap_or(0);
-                let out_skip = skip_rows.min(out_total);
-                let out_remaining = out_total.saturating_sub(out_skip);
-                let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
-                if out_height > 0 {
-                    let out_area = Rect {
-                        x: area.x,
-                        y: cur_y,
-                        width: area.width,
-                        height: out_height,
-                    };
-                    let block = Block::default()
-                        .borders(Borders::LEFT)
-                        .border_style(
-                            Style::default()
-                                .fg(crate::colors::border_dim())
-                                .bg(crate::colors::background()),
-                        )
-                        .style(Style::default().bg(crate::colors::background()))
-                        .padding(Padding {
-                            left: 1,
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                        });
-                    Paragraph::new(out_text)
-                        .block(block)
-                        .wrap(Wrap { trim: false })
-                        .scroll((out_skip, 0))
-                        .style(
-                            Style::default()
-                                .bg(crate::colors::background())
-                                .fg(crate::colors::text_dim()),
-                        )
-                        .render(out_area, buf);
-                    cur_y = cur_y.saturating_add(out_height);
+                if cur_y < end_y {
+                    let pre_skip = skip_rows.min(pre_total);
+                    let pre_remaining = pre_total.saturating_sub(pre_skip);
+                    let pre_height = pre_remaining.min(end_y.saturating_sub(cur_y));
+                    if pre_height > 0 {
+                        Paragraph::new(pre_text)
+                            .block(Block::default().style(bg))
+                            .wrap(Wrap { trim: false })
+                            .scroll((pre_skip, 0))
+                            .style(bg)
+                            .render(
+                                Rect {
+                                    x: area.x,
+                                    y: cur_y,
+                                    width: area.width,
+                                    height: pre_height,
+                                },
+                                buf,
+                            );
+                        cur_y = cur_y.saturating_add(pre_height);
+                    }
+                    skip_rows = skip_rows.saturating_sub(pre_skip);
                 }
-                skip_rows = skip_rows.saturating_sub(out_skip);
+
+                let out_wrap_width = area.width.saturating_sub(2);
+                for segment in &self.segments {
+                    if cur_y >= end_y {
+                        break;
+                    }
+                    let (_, out_raw) = segment.lines();
+                    let out = trim_empty_lines(out_raw);
+                    let out_text = Text::from(out.clone());
+                    let out_total: u16 = Paragraph::new(out_text.clone())
+                        .wrap(Wrap { trim: false })
+                        .line_count(out_wrap_width)
+                        .try_into()
+                        .unwrap_or(0);
+                    let out_skip = skip_rows.min(out_total);
+                    let out_remaining = out_total.saturating_sub(out_skip);
+                    let out_height = out_remaining.min(end_y.saturating_sub(cur_y));
+                    if out_height > 0 {
+                        let out_area = Rect {
+                            x: area.x,
+                            y: cur_y,
+                            width: area.width,
+                            height: out_height,
+                        };
+                        let block = Block::default()
+                            .borders(Borders::LEFT)
+                            .border_style(
+                                Style::default()
+                                    .fg(crate::colors::border_dim())
+                                    .bg(crate::colors::background()),
+                            )
+                            .style(Style::default().bg(crate::colors::background()))
+                            .padding(Padding {
+                                left: 1,
+                                right: 0,
+                                top: 0,
+                                bottom: 0,
+                            });
+                        Paragraph::new(out_text)
+                            .block(block)
+                            .wrap(Wrap { trim: false })
+                            .scroll((out_skip, 0))
+                            .style(
+                                Style::default()
+                                    .bg(crate::colors::background())
+                                    .fg(crate::colors::text_dim()),
+                            )
+                            .render(out_area, buf);
+                        cur_y = cur_y.saturating_add(out_height);
+                    }
+                    skip_rows = skip_rows.saturating_sub(out_skip);
+                }
+                return;
             }
-            return;
+
+            // Fallback: each segment retains its own preamble and output
         }
 
-        for (pre_raw, out_raw) in self.segments.iter() {
+        for segment in &self.segments {
             if cur_y >= end_y {
                 break;
             }
-            // Drop the per-segment header line (first element)
-            let mut pre = trim_empty_lines(pre_raw.clone());
+            let (pre_raw, out_raw) = segment.lines();
+            let mut pre = trim_empty_lines(pre_raw);
             if self.kind != ExecKind::Run && !pre.is_empty() {
                 pre.remove(0);
             }
-            // Normalize command prefix for generic execs (only on the first segment)
             ensure_prefix(&mut pre);
 
-            let out = trim_empty_lines(out_raw.clone());
-
-            // Measure with same widths as ExecCell
-            let pre_text = Text::from(pre.clone());
+            let out = trim_empty_lines(out_raw);
             let out_text = Text::from(out.clone());
+
+            let pre_text = Text::from(pre.clone());
             let pre_wrap_width = area.width;
             let out_wrap_width = area.width.saturating_sub(2);
             let pre_total: u16 = Paragraph::new(pre_text.clone())
@@ -3312,15 +2524,11 @@ pub(crate) fn new_text_line(line: Line<'static>) -> PlainHistoryCell {
     PlainHistoryCell::new(vec![line], HistoryCellType::Notice)
 }
 
-pub(crate) fn new_streaming_content(lines: Vec<Line<'static>>) -> StreamingContentCell {
-    StreamingContentCell::new(lines)
-}
-
-pub(crate) fn new_streaming_content_with_id(
-    id: Option<String>,
-    lines: Vec<Line<'static>>,
+pub(crate) fn new_streaming_content(
+    state: AssistantStreamState,
+    cfg: &Config,
 ) -> StreamingContentCell {
-    StreamingContentCell::new_with_id(id, lines)
+    StreamingContentCell::from_state(state, cfg)
 }
 
 pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
@@ -3330,65 +2538,6 @@ pub(crate) fn new_animated_welcome() -> AnimatedWelcomeCell {
 #[allow(dead_code)]
 pub(crate) fn new_loading_cell(message: String) -> LoadingCell {
     LoadingCell::new(message)
-}
-
-pub(crate) fn new_active_exec_command(
-    command: Vec<String>,
-    parsed: Vec<ParsedCommand>,
-) -> ExecCell {
-    new_exec_cell(command, parsed, None)
-}
-
-pub(crate) fn new_completed_exec_command(
-    command: Vec<String>,
-    parsed: Vec<ParsedCommand>,
-    output: CommandOutput,
-) -> ExecCell {
-    new_exec_cell(command, parsed, Some(output))
-}
-
-fn command_has_bold_token(command: &[String]) -> bool {
-    let command_escaped = strip_bash_lc_and_escape(command);
-    let normalized = normalize_shell_command_display(&command_escaped);
-    let trimmed = normalized.trim_start();
-    if trimmed.is_empty() {
-        return false;
-    }
-    trimmed.chars().take_while(|ch| !ch.is_whitespace()).count() > 4
-}
-
-fn new_exec_cell(
-    command: Vec<String>,
-    parsed: Vec<ParsedCommand>,
-    output: Option<CommandOutput>,
-) -> ExecCell {
-    let start_time = if output.is_none() {
-        Some(Instant::now())
-    } else {
-        None
-    };
-    let has_bold_command = command_has_bold_token(&command);
-    let parsed_meta = if parsed.is_empty() {
-        None
-    } else {
-        Some(ParsedExecMetadata::from_commands(&parsed))
-    };
-    ExecCell {
-        command,
-        parsed,
-        output,
-        start_time,
-        stream_preview: None,
-        cached_display_lines: std::cell::RefCell::new(None),
-        cached_pre_lines: std::cell::RefCell::new(None),
-        cached_out_lines: std::cell::RefCell::new(None),
-        cached_layout: std::cell::RefCell::new(None),
-        cached_command_lines: std::cell::RefCell::new(None),
-        cached_wait_extras: std::cell::RefCell::new(None),
-        parsed_meta,
-        has_bold_command,
-        wait_state: std::cell::RefCell::new(ExecWaitState::default()),
-    }
 }
 
 fn exec_command_lines(
@@ -6340,6 +5489,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     PlainHistoryCell::new(lines, HistoryCellType::Error)
 }
 
+#[allow(dead_code)]
 pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
     new_diff_cell_from_string(diff_output)
 }
@@ -6899,94 +6049,6 @@ pub(crate) fn trim_empty_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'stati
     }
 
     result
-}
-
-/// Retint a set of pre-rendered lines by mapping colors from the previous
-/// theme palette to the new one. This pragmatically applies a theme change
-/// to already materialized `Line` structures without rebuilding them from
-/// semantic sources.
-pub(crate) fn retint_lines_in_place(
-    lines: &mut Vec<Line<'static>>,
-    old: &crate::theme::Theme,
-    new: &crate::theme::Theme,
-) {
-    use ratatui::style::Color;
-    fn map_color(c: Color, old: &crate::theme::Theme, new: &crate::theme::Theme) -> Color {
-        if c == old.text {
-            return new.text;
-        }
-        if c == old.text_dim {
-            return new.text_dim;
-        }
-        if c == old.text_bright {
-            return new.text_bright;
-        }
-        if c == old.primary {
-            return new.primary;
-        }
-        if c == old.success {
-            return new.success;
-        }
-        if c == old.error {
-            return new.error;
-        }
-        if c == old.info {
-            return new.info;
-        }
-        if c == old.border {
-            return new.border;
-        }
-        if c == old.foreground {
-            return new.foreground;
-        }
-        if c == old.background {
-            return new.background;
-        }
-
-        match c {
-            Color::White => return new.text_bright,
-            Color::Gray | Color::DarkGray => return new.text_dim,
-            Color::Black => return new.text,
-            Color::Red | Color::LightRed => return new.error,
-            Color::Green | Color::LightGreen => return new.success,
-            Color::Yellow | Color::LightYellow => return new.warning,
-            Color::Blue | Color::LightBlue | Color::Cyan | Color::LightCyan => return new.info,
-            Color::Magenta | Color::LightMagenta => return new.primary,
-            _ => {}
-        }
-
-        c
-    }
-
-    for line in lines.iter_mut() {
-        let mut st = line.style;
-        if let Some(fg) = st.fg {
-            st.fg = Some(map_color(fg, old, new));
-        }
-        if let Some(bg) = st.bg {
-            st.bg = Some(map_color(bg, old, new));
-        }
-        if let Some(uc) = st.underline_color {
-            st.underline_color = Some(map_color(uc, old, new));
-        }
-        line.style = st;
-
-        let mut new_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
-        for s in line.spans.drain(..) {
-            let mut st = s.style;
-            if let Some(fg) = st.fg {
-                st.fg = Some(map_color(fg, old, new));
-            }
-            if let Some(bg) = st.bg {
-                st.bg = Some(map_color(bg, old, new));
-            }
-            if let Some(uc) = st.underline_color {
-                st.underline_color = Some(map_color(uc, old, new));
-            }
-            new_spans.push(Span::styled(s.content, st));
-        }
-        line.spans = new_spans;
-    }
 }
 
 fn format_inline_node_for_display(command_escaped: &str) -> Option<String> {
