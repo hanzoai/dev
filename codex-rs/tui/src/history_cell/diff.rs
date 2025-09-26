@@ -189,7 +189,9 @@ pub(crate) fn diff_record_from_string(title: String, diff: &str) -> DiffRecord {
             continue;
         }
 
-        let (kind, content) = if let Some(rest) = raw_line.strip_prefix('+') {
+        let (kind, content) = if raw_line.starts_with("+++") || raw_line.starts_with("---") {
+            (DiffLineKind::Context, raw_line.to_string())
+        } else if let Some(rest) = raw_line.strip_prefix('+') {
             (DiffLineKind::Addition, rest.to_string())
         } else if let Some(rest) = raw_line.strip_prefix('-') {
             (DiffLineKind::Removal, rest.to_string())
