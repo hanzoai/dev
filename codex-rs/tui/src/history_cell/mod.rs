@@ -86,7 +86,7 @@ pub(crate) use exec::{
     ExecCell,
     ParsedExecMetadata,
 };
-pub(crate) use diff::{new_diff_cell_from_string, DiffCell};
+pub(crate) use diff::{diff_record_from_string, new_diff_cell_from_string, DiffCell};
 pub(crate) use explore::{ExploreAggregationCell, ExploreEntryStatus};
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
@@ -5506,6 +5506,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     PlainHistoryCell::new(lines, HistoryCellType::Error)
 }
 
+#[allow(dead_code)]
 pub(crate) fn new_diff_output(diff_output: String) -> DiffCell {
     new_diff_cell_from_string(diff_output)
 }

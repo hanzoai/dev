@@ -216,6 +216,7 @@ use crate::history::state::{
     AssistantStreamDelta,
     AssistantStreamState,
     HistoryId,
+    HistoryRecord,
     HistoryState,
     MessageMetadata,
 };
@@ -4407,6 +4408,19 @@ impl ChatWidget<'_> {
         let key = self.next_internal_key();
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
     }
+
+    fn history_push_diff(&mut self, title: Option<String>, diff_output: String) {
+        let mut record = history_cell::diff_record_from_string(
+            title.unwrap_or_default(),
+            &diff_output,
+        );
+        let id = self
+            .history_state
+            .push(HistoryRecord::Diff(record.clone()));
+        record.id = id;
+        let cell = history_cell::DiffCell::from_record(record);
+        self.history_push(cell);
+    }
     /// Insert a background event near the top of the current request so it appears
     /// before imminent provider output (e.g. Exec begin).
     pub(crate) fn insert_background_event_early(&mut self, message: String) {
@@ -7444,7 +7458,7 @@ impl ChatWidget<'_> {
             }
 
             if let Some(diff) = diff_snippet {
-                self.history_push(history_cell::new_diff_output(diff.to_string()));
+                self.history_push_diff(None, diff.to_string());
             }
 
             if let Some(patch) = patch_change {
@@ -7536,7 +7550,7 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn add_diff_output(&mut self, diff_output: String) {
-        self.history_push(history_cell::new_diff_output(diff_output.clone()));
+        self.history_push_diff(None, diff_output);
     }
 
     pub(crate) fn add_status_output(&mut self) {
@@ -10472,6 +10486,11 @@ impl ChatWidget<'_> {
                 // Fully rebuild from raw to apply new theme + syntax highlight
                 let current = assist.state().clone();
                 assist.update_state(current, &self.config);
+            } else if let Some(diff) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::DiffCell>()
+            {
+                diff.rebuild_with_theme();
             }
         }
 
