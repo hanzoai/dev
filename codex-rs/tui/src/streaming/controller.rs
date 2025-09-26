@@ -106,6 +106,13 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
     self.state_mut(kind).last_sequence_number = seq;
 }
 
+    pub(crate) fn preview_source_for_kind(&self, kind: StreamKind) -> Option<String> {
+        if self.current_stream != Some(kind) {
+            return None;
+        }
+        Some(self.state(kind).collector.full_render_source_preview())
+    }
+
     fn emit_header_if_needed(&mut self, kind: StreamKind, out_lines: &mut Lines) -> bool {
         let emitted = self.header.maybe_emit(kind, out_lines);
         if emitted {

@@ -1,73 +1,65 @@
-use super::semantic::{lines_from_ratatui, lines_to_ratatui, SemanticLine};
+//! Upgrade notice cell built from `UpgradeNoticeState` metadata.
+
 use super::*;
-use crate::theme::current_theme;
+use crate::history::state::UpgradeNoticeState;
 
 const TARGET_WIDTH: u16 = 70;
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct UpgradeNoticeState {
-    pub lines: Vec<SemanticLine>,
-    pub backdrop: ratatui::style::Color,
-    pub border_style: Style,
+pub(crate) struct UpgradeNoticeCell {
+    state: UpgradeNoticeState,
+    backdrop: ratatui::style::Color,
+    border_style: Style,
 }
 
-impl UpgradeNoticeState {
-    pub(crate) fn new(lines: Vec<Line<'static>>, backdrop: ratatui::style::Color, border_style: Style) -> Self {
+impl UpgradeNoticeCell {
+    pub(crate) fn new(state: UpgradeNoticeState) -> Self {
+        let primary = crate::colors::primary();
+        let backdrop = crate::colors::mix_toward(primary, crate::colors::background(), 0.95);
+        let border_style = Style::default().bg(backdrop).fg(primary);
         Self {
-            lines: lines_from_ratatui(lines),
+            state,
             backdrop,
             border_style,
         }
     }
-}
-
-pub(crate) struct UpgradeNoticeCell {
-    state: UpgradeNoticeState,
-}
-
-impl UpgradeNoticeCell {
-    pub(crate) fn new(current_version: String, latest_version: String) -> Self {
-        let current_version = current_version.trim().to_string();
-        let latest_version = latest_version.trim().to_string();
-        let primary = crate::colors::primary();
-        let backdrop = crate::colors::mix_toward(primary, crate::colors::background(), 0.95);
-        let base_style = Style::default().bg(backdrop).fg(crate::colors::text());
-        let title_style = Style::default()
-            .bg(backdrop)
-            .fg(primary)
-            .add_modifier(Modifier::BOLD);
-        let highlight_style = Style::default().bg(backdrop).fg(primary);
-        let dim_style = Style::default().bg(backdrop).fg(crate::colors::text_dim());
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(vec![Span::styled("★ Upgrade Available ★", title_style)]));
-        lines.push(Line::from(vec![
-            Span::styled("Latest release: ", dim_style),
-            Span::styled(format!("{current_version} → {latest_version}"), highlight_style),
-        ]));
-        lines.push(Line::from(vec![Span::styled(String::new(), base_style)]));
-        lines.push(Line::from(vec![
-            Span::styled("Use ", base_style),
-            Span::styled("/upgrade", highlight_style),
-            Span::styled(" to upgrade now or enable auto-update.", base_style),
-        ]));
-
-        Self {
-            state: UpgradeNoticeState::new(
-                lines,
-                backdrop,
-                Style::default().bg(backdrop).fg(primary),
-            ),
-        }
-    }
 
     fn text(&self) -> Text<'static> {
-        let theme = current_theme();
-        Text::from(lines_to_ratatui(&self.state.lines, &theme))
+        Text::from(self.message_lines())
     }
 
     fn inner_width(total_width: u16) -> u16 {
         total_width.saturating_sub(2).max(1)
+    }
+
+    fn styles(&self) -> (Style, Style, Style, Style) {
+        let base = Style::default().bg(self.backdrop).fg(crate::colors::text());
+        let title = Style::default()
+            .bg(self.backdrop)
+            .fg(crate::colors::primary())
+            .add_modifier(Modifier::BOLD);
+        let highlight = Style::default().bg(self.backdrop).fg(crate::colors::primary());
+        let dim = Style::default().bg(self.backdrop).fg(crate::colors::text_dim());
+        (base, title, highlight, dim)
+    }
+
+    fn message_lines(&self) -> Vec<Line<'static>> {
+        let (base_style, title_style, highlight_style, dim_style) = self.styles();
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(vec![Span::styled("★ Upgrade Available ★", title_style)]));
+        lines.push(Line::from(vec![
+            Span::styled("Latest release: ", dim_style),
+            Span::styled(
+                format!("{} → {}", self.state.current_version, self.state.latest_version),
+                highlight_style,
+            ),
+        ]));
+        lines.push(Line::from(vec![Span::styled(String::new(), base_style)]));
+        lines.push(Line::from(format_upgrade_message(
+            &self.state.message,
+            base_style,
+            highlight_style,
+        )));
+        lines
     }
 }
 
@@ -85,8 +77,7 @@ impl HistoryCell for UpgradeNoticeCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
-        let theme = current_theme();
-        lines_to_ratatui(&self.state.lines, &theme)
+        self.message_lines()
     }
 
     fn has_custom_render(&self) -> bool {
@@ -119,15 +110,36 @@ impl HistoryCell for UpgradeNoticeCell {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(self.state.border_style)
-            .style(Style::default().bg(self.state.backdrop));
+            .border_style(self.border_style)
+            .style(Style::default().bg(self.backdrop));
 
         Paragraph::new(self.text())
             .wrap(Wrap { trim: false })
             .alignment(Alignment::Center)
             .scroll((skip_rows, 0))
             .block(block)
-            .style(Style::default().bg(self.state.backdrop).fg(crate::colors::text()))
+            .style(Style::default().bg(self.backdrop).fg(crate::colors::text()))
             .render(render_area, buf);
     }
+}
+
+fn format_upgrade_message(
+    message: &str,
+    base_style: Style,
+    highlight_style: Style,
+) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut remaining = message;
+    const TOKEN: &str = "/upgrade";
+    while let Some(pos) = remaining.find(TOKEN) {
+        if pos > 0 {
+            spans.push(Span::styled(remaining[..pos].to_string(), base_style));
+        }
+        spans.push(Span::styled(TOKEN.to_string(), highlight_style));
+        remaining = &remaining[pos + TOKEN.len()..];
+    }
+    if !remaining.is_empty() {
+        spans.push(Span::styled(remaining.to_string(), base_style));
+    }
+    spans
 }

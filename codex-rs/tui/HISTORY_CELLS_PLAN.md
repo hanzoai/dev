@@ -8,7 +8,7 @@ To do that we're working on refactoring the history cells so that state is separ
 
 
 ## Primary Goals (Plan & Status)
-- [x] **Extract per-cell modules** – core message/tool/plan/upgrade/reasoning/image/loading/animated files live under `history_cell/`; exec/diff/streaming still inline and pending extraction.
+- [x] **Extract per-cell modules** – core message/tool/plan/upgrade/reasoning/image/loading/animated/assistant/stream files live under `history_cell/`; exec remains inline and pending extraction.
 - [ ] **Finish semantic state refactor** – continue replacing ad-hoc `SemanticLine` usage with rich typed structs (`MessageSegment`, `ToolArgument`, etc.) so renderers never infer structure from strings.
 - [~] **Introduce single `HistoryState` vector** – foundational types (`HistoryRecord`, `HistoryState`, `HistoryId`) now live in `history/state.rs`; still need to adopt them in `chatwidget.rs` and event handling.
 - [ ] **Centralize event → state mapping** – funnel all `handle_*` mutations through `HistoryState::apply_event` and a dedicated render adapter.
@@ -49,15 +49,15 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
       result_preview: Option<ToolResultPreview>,
   }
   ```
-- **Status:** ✅ arguments/results now captured as semantic lines; TODO: evolve into explicit `ToolArgument`/`ToolResultPreview` structs.
+- **Status:** ✅ constructors now populate `ToolArgument`/`ToolResultPreview`; follow-up: polish preview truncation + metadata serialization.
 - **External settings:** theme, width.
 
 - **Desired state:** same struct but `arguments: Vec<ToolArgument>` instead of rendered lines.
-- **Status:** ✅ running tool arguments emitted as semantic lines; TODO: convert to structured argument types.
+- **Status:** ✅ running tool state stores `Vec<ToolArgument>` with wait caps/call ids tracked separately.
 - **External settings:** theme, width, current time (for elapsed label).
 
 - **Desired state:** `PlanUpdateState { icon: PlanIcon, items: Vec<PlanLine>, completion: PlanCompletion }`
-- **Status:** ✅ semantic lines in place; TODO: expand to structured plan items.
+- **Status:** ✅ stores `PlanUpdateState` with `PlanProgress`/`PlanStep`; follow-up: richer icons + metadata serialization.
 - **External settings:** theme, width.
 
 - **Desired state:** snapshot rate-limit metrics and legend entries as structured data (percentages, reset times, etc.).
@@ -65,7 +65,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **External settings:** theme, width.
 
 - **Desired state:** `UpgradeNoticeState { current_version: String, latest_version: String, message: UpgradeMessage }`
-- **Status:** ✅ semantic lines in place; TODO: replace with version/message struct.
+- **Status:** ✅ upgrade notices now keep `{ current_version, latest_version, message }`; follow-up: wire optional CTA metadata.
 - **External settings:** theme, width.
 
 - **Status:** ✅ already semantic (metadata only).
@@ -76,7 +76,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **Runtime state:** start time, fade progress, cached height.
 
 - **Desired state:** `ReasoningState { id, sections: Vec<ReasoningSection>, in_progress, hide_when_collapsed }` with sections broken into semantic blocks.
-- **Status:** ✅ semantic lines in place; ⏳ still need structured sections.
+- **Status:** ✅ state maintains `ReasoningSection` blocks; follow-up: richer block typing + metadata.
 - **External settings:** `Ctrl+R` (collapsed vs expanded), theme, width.
 - **Widget state:** collapse flag held outside the serialized state (driven by the global toggle).
 
@@ -116,23 +116,23 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 
 ## Step 1 – Finish Semantic State Refactors *(In Progress)*
 1.1 **Plain messages** – ✅ replaced `SemanticLine` caches with `PlainMessageState` (`plain.rs` now stores `MessageHeader + MessageLine` via shared conversion helpers). Follow-up: enrich headers with structured badges and surface metadata once available.
-1.2 **Tool calls (running & completed)** – Introduce `ToolArgument`, `ArgumentValue`, and `ToolResultPreview`; ensure constructors populate structured args/results instead of emitting prefixed strings. Track wait caps and timestamps explicitly.
-1.3 **Plan updates** – Model progress via `PlanProgress { completed, total }` and `Vec<PlanStep>`; remove reliance on unicode progress bars inside strings (rendered in UI only). Persist chosen `PlanIcon` variant instead of string literal.
-1.4 **Upgrade notice** – Store `{ current_version, latest_version, message }` plus optional CTA metadata; renderers assemble styled lines at draw time.
-1.5 **Reasoning** – Build `ReasoningSection/ReasoningBlock` hierarchy (headings, paragraphs, bullets, code). Collapse behavior becomes a pure view concern driven by global `Ctrl+R` toggle.
-1.6 **Wait status & background notices** – ✅ wait tool output now records `WaitStatusState { header, details }`; background notices still pending.
+1.2 **Tool calls (running & completed)** – ✅ constructors now emit `ToolArgument`/`ToolResultPreview`; remaining work: tighten JSON summaries + result truncation heuristics.
+1.3 **Plan updates** – ✅ `PlanUpdateCell` now renders from `PlanProgress`/`PlanStep` + `PlanIcon`; follow-up: improved summary metadata.
+1.4 **Upgrade notice** – ✅ cell consumes `UpgradeNoticeState` (versions + message), custom render derived at draw time.
+1.5 **Reasoning** – ⏳ sections/blocks stored; next: enrich block types (code/bullets) and attach metadata for collapse summaries.
+1.6 **Wait status & background notices** – ✅ wait tools use `WaitStatusState`; background notices render via `BackgroundEventRecord`.
 1.7 **Documentation** – Update module docs/tests to reflect new structs; ensure all constructors return strongly typed states.
 
 ## Step 2 – Exec / Streaming / Diff Family *(Pending)*
 2.1 **Exec state extraction & module split** – Create `ExecRecord { command, parsed, action, stdout_chunks, stderr_chunks, exit_code, wait_notes }`, move exec rendering/state into `history_cell/exec.rs`, and drop layout caches from the shared module.
-2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. Renderer handles ellipsis and wrapping.
-2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. Move finalized assistant rendering into the streaming module or a dedicated `assistant.rs` while ensuring layout rebuild happens on demand.
+2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. **Status:** renderer now lives in `history_cell/stream.rs`; `HistoryState` records per-stream deltas/preview snapshots; **follow-up:** flow citations/token usage from streaming events, persist provenance metadata, and remove redundant layout caches.
+2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. **Status:** rendering has been split into `history_cell/assistant.rs`; finalized answers now land in `HistoryState`; **follow-up:** carry citation/token metadata through `InsertFinalAnswer`, expose state to resume snapshots, and drop raw `AssistantMarkdownCell` caching once render adapters exist.
 2.4 **Diff module breakout** – Persist diff hunks (`DiffHunk`, `DiffLine`) and patch metadata, move diff rendering into `history_cell/diff.rs`, and have the renderer apply styling based on line kind.
 2.5 **Merged exec views** – Rebuild aggregated exec cells from `Vec<ExecRecord>` snapshots rather than cached text blocks once the exec module exists.
 
 ## Step 3 – HistoryState Manager *(Pending)*
 3.1 **HistoryRecord enum** – ✅ complete: `history/state.rs` defines `HistoryRecord`, per-cell state structs, and `HistoryState` scaffolding with ID management helpers.
-3.2 **ChatWidget incremental adoption** – Introduce `HistoryState`/`HistoryRenderState` alongside the legacy `history_cells` vector, migrate low-risk cell types (plain, loading, wait status) to the new state, then remove the legacy vector once the path is stable.
+3.2 **ChatWidget incremental adoption** – Introduce `HistoryState`/`HistoryRenderState` alongside the legacy `history_cells` vector, migrate low-risk cell types (plain, loading, wait status) to the new state, then remove the legacy vector once the path is stable. **Status:** assistant streaming/final answer flows now write into `HistoryState`; next migrate remaining cell constructors and have render adaptors consume the recorded state.
 3.3 **Apply-event pipeline** – Implement `HistoryState::apply_event(&mut self, event: &EventMsg)` covering all core/TUI event types (exec lifecycle, tool updates, background notices, resume snapshots, undo) and route migrated cells through it.
 3.4 **Undo/resume hooks** – Expose `snapshot`, `restore`, and `truncate_after(id)` to support /undo and resume flows.
 3.5 **ChatWidget full integration** – Delete `history_cells: Vec<Box<dyn HistoryCell>>`, wire all helper methods (`history_push`, `history_replace`, etc.) into `HistoryState`, and treat Step 4 as the follow-up for centralized rendering.
