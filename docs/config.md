@@ -181,6 +181,23 @@ Alternatively, you can have the model run until it is done, and never ask to run
 approval_policy = "never"
 ```
 
+## agents
+
+Use `[[agents]]` blocks to register additional CLI programs that Codex can launch as peers. Each block maps a short `name` (referenced elsewhere in the config) to the command to execute, optional default flags, and environment variables.
+
+```toml
+[[agents]]
+name = "context-collector"
+command = "gemini"
+enabled = true
+read-only = true
+description = "Gemini long-context helper that summarizes large repositories"
+args = ["-y", "--model", "gemini-2.5-pro-exp"]
+env = { GEMINI_API_KEY = "..." }
+```
+
+When `enabled = true`, the agent is surfaced in the TUI picker and any sub-agent commands that reference it. Setting `read-only = true` forces the agent to request approval before modifying files even if the primary session permits writes.
+
 ## profiles
 
 A _profile_ is a collection of configuration values that can be set together. Multiple profiles can be defined in `config.toml` and you can specify the one you
@@ -380,6 +397,21 @@ startup_timeout_sec = 20
 # Optional: override the default 60s per-tool timeout
 tool_timeout_sec = 30
 ```
+
+## subagents
+
+Sub-agents are orchestrated helper workflows you can trigger with slash commands (for example `/plan`, `/solve`, `/code`). Each entry under `[[subagents.commands]]` defines the slash command name, whether spawned agents run in read-only mode, which `agents` to launch, and extra guidance for both the orchestrator (Code) and the individual agents.
+
+```toml
+[[subagents.commands]]
+name = "context"
+read-only = true
+agents = ["context-collector", "codex"]
+orchestrator-instructions = "Coordinate a context sweep before coding. Ask each agent to emit concise, linked summaries of relevant files and tooling the primary task might need."
+agent-instructions = "Summarize the repository areas most relevant to the user's request. List file paths, rationale, and suggested follow-up scripts to run. Keep the reply under 2,000 tokens."
+```
+
+With the example above you can run `/context` inside the TUI to create a summary cell that the main `/code` turn can reference later. Because `context-collector` is an ordinary agent, any command-line static analysis utilities it invokes (such as your blast radius tool) should be described in the `agent-instructions` so the orchestrator launches the right workflow. You can also customise the built-in commands by providing an entry with the same `name` (`plan`, `solve`, or `code`) and pointing their `agents` list at your long-context helper.
 
 ## validation
 
