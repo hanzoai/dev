@@ -243,52 +243,73 @@ impl App<'_> {
                     // back off to reduce CPU when idle.
                     let hot_typing = Instant::now().duration_since(last_key_time) <= Duration::from_millis(250);
                     let poll_timeout = if hot_typing { Duration::from_millis(2) } else { Duration::from_millis(10) };
-                    if let Ok(true) = crossterm::event::poll(poll_timeout) {
-                        if let Ok(event) = crossterm::event::read() {
-                            match event {
-                                crossterm::event::Event::Key(key_event) => {
-                                    // Some Windows terminals (e.g., legacy conhost) only report
-                                    // `Release` events when keyboard enhancement flags are not
-                                    // supported. Preserve those events so onboarding works there.
-                                    if !drop_release_events
-                                        || matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                                    {
-                                        last_key_time = Instant::now();
-                                        app_event_tx.send(AppEvent::KeyEvent(key_event));
+                    match crossterm::event::poll(poll_timeout) {
+                        Ok(true) => match crossterm::event::read() {
+                            Ok(event) => {
+                                match event {
+                                    crossterm::event::Event::Key(key_event) => {
+                                        // Some Windows terminals (e.g., legacy conhost) only report
+                                        // `Release` events when keyboard enhancement flags are not
+                                        // supported. Preserve those events so onboarding works there.
+                                        if !drop_release_events
+                                            || matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                                        {
+                                            last_key_time = Instant::now();
+                                            app_event_tx.send(AppEvent::KeyEvent(key_event));
+                                        }
                                     }
+                                    crossterm::event::Event::Resize(_, _) => {
+                                        app_event_tx.send(AppEvent::RequestRedraw);
+                                    }
+                                    // When the terminal/tab regains focus, issue a redraw.
+                                    // Some terminals clear the alt‑screen buffer on focus switches,
+                                    // which can leave the status bar and inline images blank until
+                                    // the next resize. A focus‑gain repaint fixes this immediately.
+                                    crossterm::event::Event::FocusGained => {
+                                        app_event_tx.send(AppEvent::RequestRedraw);
+                                    }
+                                    crossterm::event::Event::FocusLost => {
+                                        // No action needed; keep state as‑is.
+                                    }
+                                    crossterm::event::Event::Paste(pasted) => {
+                                        // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
+                                        // but tui-textarea expects \n. Normalize CR to LF.
+                                        // [tui-textarea]: https://github.com/rhysd/tui-textarea/blob/4d18622eeac13b309e0ff6a55a46ac6706da68cf/src/textarea.rs#L782-L783
+                                        // [iTerm2]: https://github.com/gnachman/iTerm2/blob/5d0c0d9f68523cbd0494dad5422998964a2ecd8d/sources/iTermPasteHelper.m#L206-L216
+                                        let pasted = pasted.replace("\r", "\n");
+                                        app_event_tx.send(AppEvent::Paste(pasted));
+                                    }
+                                    crossterm::event::Event::Mouse(mouse_event) => {
+                                        app_event_tx.send(AppEvent::MouseEvent(mouse_event));
+                                    }
+                                    // All other event variants are explicitly handled above.
                                 }
-                                crossterm::event::Event::Resize(_, _) => {
-                                    app_event_tx.send(AppEvent::RequestRedraw);
+                            }
+                            Err(err) => {
+                                if err.kind() == std::io::ErrorKind::Interrupted {
+                                    continue;
                                 }
-                                // When the terminal/tab regains focus, issue a redraw.
-                                // Some terminals clear the alt‑screen buffer on focus switches,
-                                // which can leave the status bar and inline images blank until
-                                // the next resize. A focus‑gain repaint fixes this immediately.
-                                crossterm::event::Event::FocusGained => {
-                                    app_event_tx.send(AppEvent::RequestRedraw);
-                                }
-                                crossterm::event::Event::FocusLost => {
-                                    // No action needed; keep state as‑is.
-                                }
-                                crossterm::event::Event::Paste(pasted) => {
-                                    // Many terminals convert newlines to \r when pasting (e.g., iTerm2),
-                                    // but tui-textarea expects \n. Normalize CR to LF.
-                                    // [tui-textarea]: https://github.com/rhysd/tui-textarea/blob/4d18622eeac13b309e0ff6a55a46ac6706da68cf/src/textarea.rs#L782-L783
-                                    // [iTerm2]: https://github.com/gnachman/iTerm2/blob/5d0c0d9f68523cbd0494dad5422998964a2ecd8d/sources/iTermPasteHelper.m#L206-L216
-                                    let pasted = pasted.replace("\r", "\n");
-                                    app_event_tx.send(AppEvent::Paste(pasted));
-                                }
-                                crossterm::event::Event::Mouse(mouse_event) => {
-                                    app_event_tx.send(AppEvent::MouseEvent(mouse_event));
-                                }
-                                // All other event variants are explicitly handled above.
+                                tracing::error!("input thread failed to read event: {err}");
+                                input_running_thread.store(false, Ordering::Release);
+                                app_event_tx.send(AppEvent::ExitRequest);
+                                break;
+                            }
+                        },
+                        Ok(false) => {
+                            // Timeout expired, no `Event` is available. If the user is typing
+                            // keep the loop hot; otherwise sleep briefly to cut idle CPU.
+                            if !hot_typing {
+                                std::thread::sleep(Duration::from_millis(5));
                             }
                         }
-                    } else {
-                        // Timeout expired, no `Event` is available. If the user is typing
-                        // keep the loop hot; otherwise sleep briefly to cut idle CPU.
-                        if !hot_typing {
-                            std::thread::sleep(Duration::from_millis(5));
+                        Err(err) => {
+                            if err.kind() == std::io::ErrorKind::Interrupted {
+                                continue;
+                            }
+                            tracing::error!("input thread failed to poll events: {err}");
+                            input_running_thread.store(false, Ordering::Release);
+                            app_event_tx.send(AppEvent::ExitRequest);
+                            break;
                         }
                     }
                 }
