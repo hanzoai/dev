@@ -322,6 +322,13 @@ fn limits_overlay_renders_snapshot() {
         .iter()
         .position(|line| line.contains("7 Day History"))
         .expect("expected usage header");
+    assert!(
+        strings
+            .get(header_idx.saturating_sub(1))
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false),
+        "expected blank spacer before 7 Day History"
+    );
     let latest_label = Local::now().format("%b %d").to_string();
     let yesterday_label = (Local::now().date_naive() - ChronoDuration::days(1))
         .format("%b %d")
@@ -343,6 +350,13 @@ fn limits_overlay_renders_snapshot() {
         .iter()
         .position(|line| line.contains("6 Month History"))
         .expect("expected monthly usage header");
+    assert!(
+        strings
+            .get(month_header_idx.saturating_sub(1))
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false),
+        "expected blank spacer before 6 Month History"
+    );
     let current_month_label = Local::now().format("%b %Y").to_string();
     let month_line = strings
         .get(month_header_idx + 1)
