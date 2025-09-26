@@ -13,6 +13,8 @@ use ratatui::text::Line;
 use crate::streaming::StreamKind;
 use std::time::Duration;
 
+use codex_git_tooling::{GhostCommit, GitToolingError};
+
 use crate::app::ChatWidgetArgs;
 use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
@@ -85,9 +87,19 @@ pub(crate) enum AppEvent {
     /// Update the terminal title override. `None` restores the default title.
     SetTerminalTitle { title: Option<String> },
 
+    /// Emit a best-effort OSC 9 notification from the terminal.
+    EmitTuiNotification { title: String, body: Option<String> },
+
     /// Schedule a one-shot animation frame roughly after the given duration.
     /// Multiple requests are coalesced by the central frame scheduler.
     ScheduleFrameIn(Duration),
+
+    /// Background ghost snapshot job finished (success or failure).
+    GhostSnapshotFinished {
+        job_id: u64,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    },
 
     /// Internal: flush any pending out-of-order ExecEnd events that did not
     /// receive a matching ExecBegin within a short pairing window. This lets
@@ -140,6 +152,8 @@ pub(crate) enum AppEvent {
 
     /// Update GitHub workflow monitoring toggle
     UpdateGithubWatcher(bool),
+    /// Update the TUI notifications toggle
+    UpdateTuiNotifications(bool),
     /// Enable/disable a specific validation tool
     UpdateValidationTool { name: String, enable: bool },
     /// Enable/disable an entire validation group

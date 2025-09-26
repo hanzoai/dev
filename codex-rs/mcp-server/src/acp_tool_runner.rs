@@ -1,6 +1,5 @@
 //! Asynchronous worker that executes an ACP tool-call inside a spawned Tokio task.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_client_protocol as acp;
@@ -18,20 +17,21 @@ use mcp_types::CallToolResult;
 use mcp_types::ContentBlock;
 use mcp_types::RequestId;
 use mcp_types::TextContent;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotification;
+use crate::session_store::{SessionEntry, SessionMap};
 use serde_json;
 
 pub async fn new_session(
     request_id: RequestId,
     config: CodexConfig,
     outgoing: Arc<OutgoingMessageSender>,
-    session_map: Arc<Mutex<HashMap<Uuid, Arc<CodexConversation>>>>,
+    session_map: SessionMap,
     conversation_manager: Arc<ConversationManager>,
 ) -> Option<Uuid> {
+    let config_for_session = config.clone();
     let NewConversation {
         conversation_id,
         conversation,
@@ -54,12 +54,9 @@ pub async fn new_session(
             return None;
         }
     };
-
     let session_uuid: Uuid = conversation_id.into();
-    session_map
-        .lock()
-        .await
-        .insert(session_uuid, conversation);
+    let entry = SessionEntry::new(conversation.clone(), config_for_session);
+    session_map.lock().await.insert(session_uuid, entry);
 
     Some(session_uuid)
 }
