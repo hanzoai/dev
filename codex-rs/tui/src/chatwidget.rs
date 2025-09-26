@@ -7487,7 +7487,8 @@ impl ChatWidget<'_> {
                                 if enable { "enabled" } else { "disabled" }
                             ));
                         } else {
-                            self.set_tui_notifications(enable);
+                            self.app_event_tx
+                                .send(AppEvent::UpdateTuiNotifications(enable));
                         }
                     }
                     Notifications::Custom(entries) => {
