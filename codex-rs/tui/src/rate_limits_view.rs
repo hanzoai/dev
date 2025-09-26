@@ -13,10 +13,10 @@ const UNUSED_CELL: &str = "░░";
 const BAR_SLOTS: usize = 20;
 const BAR_FILLED: &str = "▰";
 const BAR_EMPTY: &str = "▱";
+const CHART_LINE_PREFIX: &str = "    ";
 struct IndentSpec {
     header: &'static str,
     label_extra: &'static str,
-    chart_extra: &'static str,
     label_target_width: usize,
     label_gap: usize,
 }
@@ -24,7 +24,6 @@ struct IndentSpec {
 const INDENTS: IndentSpec = IndentSpec {
     header: "",
     label_extra: "   ",
-    chart_extra: "  ",
     label_target_width: 7,
     label_gap: 2,
 };
@@ -38,15 +37,15 @@ fn label_indent() -> String {
 }
 
 fn chart_indent() -> String {
-    format!("{}{}", INDENTS.header, INDENTS.chart_extra)
+    CHART_LINE_PREFIX.to_string()
 }
 
 fn chart_indent_width() -> usize {
-    INDENTS.header.len() + INDENTS.chart_extra.len()
+    CHART_LINE_PREFIX.len()
 }
 
 fn content_column_width() -> usize {
-    INDENTS.header.len() + INDENTS.label_target_width + 1 + INDENTS.label_gap
+    CHART_LINE_PREFIX.len()
 }
 
 fn label_text(text: &str) -> String {
