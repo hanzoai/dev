@@ -4,7 +4,7 @@ use codex_core::protocol::InputItem;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UserMessage {
     /// What to show in the chat history (keeps placeholders like "[image: name.png]")
     pub display_text: String,
@@ -39,4 +39,3 @@ pub fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> O
         Some(UserMessage { display_text: text, ordered_items: ordered })
     }
 }
-
