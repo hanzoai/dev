@@ -333,10 +333,14 @@ impl RateLimitWarningState {
     ) -> Vec<RateLimitWarning> {
         let mut warnings = Vec::new();
 
-        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        let mut next_weekly_index = self.weekly_index;
+        while next_weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            next_weekly_index += 1;
+        }
+        if next_weekly_index > self.weekly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Secondary,
                 threshold,
@@ -344,13 +348,17 @@ impl RateLimitWarningState {
                     "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.weekly_index += 1;
+            self.weekly_index = next_weekly_index;
         }
 
-        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        let mut next_hourly_index = self.hourly_index;
+        while next_hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            next_hourly_index += 1;
+        }
+        if next_hourly_index > self.hourly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Primary,
                 threshold,
@@ -358,7 +366,7 @@ impl RateLimitWarningState {
                     "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.hourly_index += 1;
+            self.hourly_index = next_hourly_index;
         }
 
         warnings
@@ -7555,12 +7563,18 @@ impl ChatWidget<'_> {
 
     fn update_rate_limit_resets(&mut self, current: &RateLimitSnapshotEvent) {
         let now = Utc::now();
-        self.rate_limit_primary_next_reset_at = current
-            .primary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
-        self.rate_limit_secondary_next_reset_at = current
-            .secondary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
+        if let Some(secs) = current.primary_reset_after_seconds {
+            self.rate_limit_primary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_primary_next_reset_at = None;
+        }
+        if let Some(secs) = current.secondary_reset_after_seconds {
+            self.rate_limit_secondary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_secondary_next_reset_at = None;
+        }
     }
 
     pub(crate) fn handle_update_command(&mut self) {
@@ -15772,6 +15786,32 @@ mod tests {
                 .closed_reasoning_ids
                 .contains(&StreamId("r-1".into()))
         );
+    }
+
+    #[test]
+    fn rate_limit_warnings_emit_only_highest_threshold() {
+        let mut state = RateLimitWarningState::default();
+
+        // Jump straight past multiple weekly thresholds; emit just the highest crossed one.
+        let weekly = state.take_warnings(80.0, 10.0);
+        assert_eq!(weekly.len(), 1);
+        assert_eq!(weekly[0].threshold, 75.0);
+        assert!(matches!(weekly[0].scope, RateLimitWarningScope::Secondary));
+
+        // Calling again without crossing new thresholds should produce nothing.
+        assert!(state.take_warnings(80.0, 10.0).is_empty());
+
+        // Crossing the final threshold should produce it exactly once.
+        let weekly_final = state.take_warnings(95.0, 10.0);
+        assert_eq!(weekly_final.len(), 1);
+        assert_eq!(weekly_final[0].threshold, 90.0);
+        assert!(matches!(weekly_final[0].scope, RateLimitWarningScope::Secondary));
+
+        // Primary scope follows the same rule.
+        let primary = state.take_warnings(95.0, 80.0);
+        assert_eq!(primary.len(), 1);
+        assert_eq!(primary[0].threshold, 75.0);
+        assert!(matches!(primary[0].scope, RateLimitWarningScope::Primary));
     }
 
     #[tokio::test(flavor = "current_thread")]
