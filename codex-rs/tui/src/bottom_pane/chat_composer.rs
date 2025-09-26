@@ -105,6 +105,7 @@ pub(crate) struct ChatComposer {
     // Tracks a one-off Tab-triggered file search. When set, we will only
     // create/show a popup if the results are non-empty to avoid flicker.
     pending_tab_file_query: Option<String>,
+    file_popup_origin: Option<FilePopupOrigin>,
     pending_pastes: Vec<(String, String)>,
     token_usage_info: Option<TokenUsageInfo>,
     has_focus: bool,
@@ -145,6 +146,11 @@ enum ActivePopup {
     File(FileSearchPopup),
 }
 
+enum FilePopupOrigin {
+    Auto,
+    Manual { token: String },
+}
+
 impl ChatComposer {
     pub fn new(
         has_input_focus: bool,
@@ -165,6 +171,7 @@ impl ChatComposer {
             dismissed_file_popup_token: None,
             current_file_query: None,
             pending_tab_file_query: None,
+            file_popup_origin: None,
             pending_pastes: Vec::new(),
             token_usage_info: None,
             has_focus: has_input_focus,
@@ -694,10 +701,42 @@ impl ChatComposer {
     pub(crate) fn on_file_search_result(&mut self, query: String, matches: Vec<FileMatch>) {
         // Handle one-off Tab-triggered case first: only open if matches exist.
         if self.pending_tab_file_query.as_ref() == Some(&query) {
+            // If the user kept typing while the search was in-flight, resync to the
+            // latest token before applying stale results.
+            if let Some(current_token) = Self::current_generic_token(&self.textarea) {
+                if Self::current_completion_token(&self.textarea).is_some() {
+                    // A new auto-triggerable token (e.g., @ or ./) should be handled by the
+                    // standard auto completion path instead of hijacking the manual popup.
+                    self.pending_tab_file_query = None;
+                    self.file_popup_origin = None;
+                    self.current_file_query = None;
+                    return;
+                }
+                if !current_token.is_empty() && current_token != query {
+                    self.pending_tab_file_query = Some(current_token.clone());
+                    if let ActivePopup::File(popup) = &mut self.active_popup {
+                        popup.set_query(&current_token);
+                    } else {
+                        let mut popup = FileSearchPopup::new();
+                        popup.set_query(&current_token);
+                        self.active_popup = ActivePopup::File(popup);
+                    }
+                    self.current_file_query = Some(current_token.clone());
+                    self.file_popup_origin = Some(FilePopupOrigin::Manual { token: current_token.clone() });
+                    self.app_event_tx
+                        .send(crate::app_event::AppEvent::StartFileSearch(current_token));
+                    return;
+                }
+            }
+
             // Clear pending regardless of result to avoid repeats.
             self.pending_tab_file_query = None;
 
             if matches.is_empty() {
+                if let ActivePopup::File(popup) = &mut self.active_popup {
+                    // Clear the waiting state so the popup shows "no matches" instead of spinning forever.
+                    popup.set_matches(&query, Vec::new());
+                }
                 return; // do not open popup when no matches to avoid flicker
             }
 
@@ -710,8 +749,18 @@ impl ChatComposer {
                     self.active_popup = ActivePopup::File(popup);
                 }
             }
-            self.current_file_query = Some(query);
+            self.current_file_query = Some(query.clone());
+            self.file_popup_origin = Some(FilePopupOrigin::Manual { token: query });
             self.dismissed_file_popup_token = None;
+            return;
+        }
+
+        if matches!(self.file_popup_origin, Some(FilePopupOrigin::Manual { .. }))
+            && self.current_file_query.as_ref() == Some(&query)
+        {
+            if let ActivePopup::File(popup) = &mut self.active_popup {
+                popup.set_matches(&query, matches);
+            }
             return;
         }
 
@@ -751,6 +800,8 @@ impl ChatComposer {
         match self.active_popup {
             ActivePopup::File(_) => {
                 self.active_popup = ActivePopup::None;
+                self.file_popup_origin = None;
+                self.current_file_query = None;
                 true
             }
             _ => false,
@@ -991,6 +1042,8 @@ impl ChatComposer {
                     self.dismissed_file_popup_token = Some(tok.to_string());
                 }
                 self.active_popup = ActivePopup::None;
+                self.file_popup_origin = None;
+                self.current_file_query = None;
                 (InputResult::None, true)
             }
             KeyEvent {
@@ -1006,6 +1059,8 @@ impl ChatComposer {
                     // Drop popup borrow before using self mutably again.
                     self.insert_selected_path(&sel_path);
                     self.active_popup = ActivePopup::None;
+                    self.file_popup_origin = None;
+                    self.current_file_query = None;
                     return (InputResult::None, true);
                 }
                 (InputResult::None, false)
@@ -1556,48 +1611,77 @@ impl ChatComposer {
     /// Note this is only called when self.active_popup is NOT Command.
     fn sync_file_search_popup(&mut self) {
         // Determine if there is a token underneath the cursor worth completing.
-        let query = match Self::current_completion_token(&self.textarea) {
-            Some(token) => token,
+        match Self::current_completion_token(&self.textarea) {
+            Some(query) => {
+                if self.dismissed_file_popup_token.as_ref() == Some(&query) {
+                    return;
+                }
+
+                if query.chars().count() >= 1 {
+                    self.app_event_tx
+                        .send(crate::app_event::AppEvent::StartFileSearch(query.clone()));
+                }
+
+                match &mut self.active_popup {
+                    ActivePopup::File(popup) => {
+                        if query.is_empty() {
+                            popup.set_empty_prompt();
+                        } else {
+                            popup.set_query(&query);
+                        }
+                    }
+                    _ => {
+                        let mut popup = FileSearchPopup::new();
+                        if query.is_empty() {
+                            popup.set_empty_prompt();
+                        } else {
+                            popup.set_query(&query);
+                        }
+                        self.active_popup = ActivePopup::File(popup);
+                    }
+                }
+
+                self.current_file_query = Some(query);
+                self.file_popup_origin = Some(FilePopupOrigin::Auto);
+                self.dismissed_file_popup_token = None;
+            }
             None => {
+                // Allow manually-triggered popups (via Tab) to stay open while the
+                // cursor remains within the same generic token. When the token
+                // changes, trigger a new search; otherwise keep the popup stable.
+                if let Some(FilePopupOrigin::Manual { token }) = &mut self.file_popup_origin {
+                    if let Some(generic) = Self::current_generic_token(&self.textarea) {
+                        if generic.is_empty() {
+                            self.active_popup = ActivePopup::None;
+                            self.dismissed_file_popup_token = None;
+                            self.file_popup_origin = None;
+                            self.current_file_query = None;
+                        } else {
+                            if *token != generic {
+                                *token = generic.clone();
+                                if let ActivePopup::File(popup) = &mut self.active_popup {
+                                    popup.set_query(&generic);
+                                } else {
+                                    let mut popup = FileSearchPopup::new();
+                                    popup.set_query(&generic);
+                                    self.active_popup = ActivePopup::File(popup);
+                                }
+                                self.current_file_query = Some(generic.clone());
+                                self.app_event_tx
+                                    .send(crate::app_event::AppEvent::StartFileSearch(generic));
+                            }
+                            // Keep popup visible while token is still active.
+                        }
+                        return;
+                    }
+                }
+
                 self.active_popup = ActivePopup::None;
                 self.dismissed_file_popup_token = None;
-                return;
-            }
-        };
-
-        // If user dismissed popup for this exact query, don't reopen until text changes.
-        if self.dismissed_file_popup_token.as_ref() == Some(&query) {
-            return;
-        }
-
-        // Trigger file search as soon as at least 1 character is typed.
-        // The popup shows an idle hint for an empty query handled above.
-        if query.chars().count() >= 1 {
-            self.app_event_tx
-                .send(crate::app_event::AppEvent::StartFileSearch(query.clone()));
-        }
-
-        match &mut self.active_popup {
-            ActivePopup::File(popup) => {
-                if query.is_empty() {
-                    popup.set_empty_prompt();
-                } else {
-                    popup.set_query(&query);
-                }
-            }
-            _ => {
-                let mut popup = FileSearchPopup::new();
-                if query.is_empty() {
-                    popup.set_empty_prompt();
-                } else {
-                    popup.set_query(&query);
-                }
-                self.active_popup = ActivePopup::File(popup);
+                self.file_popup_origin = None;
+                self.current_file_query = None;
             }
         }
-
-        self.current_file_query = Some(query);
-        self.dismissed_file_popup_token = None;
     }
 
     pub(crate) fn set_has_focus(&mut self, has_focus: bool) {
