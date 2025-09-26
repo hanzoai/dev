@@ -690,7 +690,7 @@ pub(super) fn handle_exec_end_now(
             stderr,
         },
     ));
-    if let Some(ref cell) = completed_opt {
+    if let Some(cell) = completed_opt.as_mut() {
         cell.set_wait_total(wait_total);
         cell.set_wait_notes(&wait_notes);
         cell.set_waiting(false);
