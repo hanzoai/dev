@@ -173,11 +173,6 @@ pub enum Op {
         text: String,
     },
 
-    /// Toggle or query Pro Mode state.
-    Pro {
-        action: ProAction,
-    },
-
     /// Execute a project-scoped custom command defined in configuration.
     RunProjectCommand {
         name: String,
@@ -200,20 +195,6 @@ pub enum Op {
     Review { review_request: ReviewRequest },
     /// Request to shut down codex instance.
     Shutdown,
-}
-
-/// Action for Pro Mode control submissions.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum ProAction {
-    Toggle,
-    On,
-    Off,
-    Status,
-    AutoToggle,
-    AutoOn,
-    AutoOff,
-    AutoStatus,
 }
 
 /// Determines the conditions under which the user is consulted to approve
@@ -784,9 +765,6 @@ pub enum EventMsg {
     /// Used after resuming from a rollout file so the user sees the full
     /// history for that session without re-executing any actions.
     ReplayHistory(ReplayHistoryEvent),
-
-    /// Pro Mode related events (ignored by clients that do not understand them).
-    Pro(ProEvent),
 }
 
 // Individual event payload types matching each `EventMsg` variant.
@@ -808,80 +786,6 @@ pub struct TokenUsage {
     pub output_tokens: u64,
     pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
-}
-
-// ==================== Pro Mode (Protocol) ====================
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ProEvent {
-    /// Toggled Pro Mode state
-    Toggled {
-        enabled: bool,
-    },
-    /// Periodic status tick
-    Status {
-        phase: ProPhase,
-        stats: ProStats,
-    },
-    /// A helper agent was spawned
-    AgentSpawned {
-        id: String,
-        category: ProCategory,
-        budget_ms: u64,
-    },
-    /// Result from a helper agent
-    AgentResult {
-        id: String,
-        category: ProCategory,
-        ok: bool,
-        note: Option<String>,
-        #[serde(default)]
-        artifacts: Vec<ProArtifact>,
-    },
-    /// Aggregated developer note for the current checkpoint
-    DeveloperNote {
-        turn_id: String,
-        note: String,
-        #[serde(default)]
-        artifacts: Vec<ProArtifact>,
-    },
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProPhase {
-    Idle,
-    Planning,
-    Research,
-    Debug,
-    Review,
-    Background,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProCategory {
-    Planning,
-    Research,
-    Debugging,
-    Review,
-    Background,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct ProStats {
-    pub active: u32,
-    pub completed: u32,
-    pub spawned: u32,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct ProArtifact {
-    pub kind: String,
-    pub summary: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
 }
 
 impl TokenUsage {
