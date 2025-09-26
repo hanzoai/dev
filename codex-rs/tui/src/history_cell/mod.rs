@@ -14,10 +14,15 @@ use crate::history::state::{
     ExecRecord,
     ExecStatus,
     HistoryId,
+    RunningToolState,
+    PatchEventType as HistoryPatchEventType,
+    PatchRecord,
     PlanIcon,
     PlanProgress,
     PlanStep,
     PlanUpdateState,
+    ToolCallState,
+    ToolStatus as HistoryToolStatus,
     UpgradeNoticeState,
 };
 use crate::history::state::{ArgumentValue, ToolArgument, ToolResultPreview};
@@ -53,7 +58,6 @@ use shlex::Shlex;
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -74,6 +78,7 @@ mod reasoning;
 mod tool;
 mod wait_status;
 mod plan_update;
+mod rate_limits;
 mod plain;
 mod upgrade;
 mod semantic;
@@ -90,17 +95,13 @@ pub(crate) use exec::{
     ParsedExecMetadata,
 };
 pub(crate) use diff::{diff_record_from_string, new_diff_cell_from_string, DiffCell};
-pub(crate) use explore::{ExploreAggregationCell, ExploreEntryStatus};
+pub(crate) use explore::ExploreAggregationCell;
+pub(crate) use rate_limits::RateLimitsCell;
+pub(crate) use crate::history::state::ExploreEntryStatus;
 pub(crate) use image::ImageOutputCell;
 pub(crate) use loading::LoadingCell;
 pub(crate) use reasoning::CollapsibleReasoningCell;
-pub(crate) use tool::{
-    RunningToolCallCell,
-    RunningToolCallState,
-    ToolCallCell,
-    ToolCallCellState,
-    ToolCallStatus,
-};
+pub(crate) use tool::{RunningToolCallCell, ToolCallCell};
 pub(crate) use wait_status::WaitStatusCell;
 pub(crate) use plan_update::PlanUpdateCell;
 pub(crate) use plain::PlainHistoryCell;
@@ -120,6 +121,8 @@ pub(crate) struct CommandOutput {
 pub(crate) enum PatchEventType {
     ApprovalRequest,
     ApplyBegin { auto_approved: bool },
+    ApplySuccess,
+    ApplyFailure,
 }
 
 // ==================== HistoryCellType ====================
@@ -132,7 +135,7 @@ pub(crate) enum HistoryCellType {
     Reasoning,
     Error,
     Exec { kind: ExecKind, status: ExecStatus },
-    Tool { status: ToolStatus },
+    Tool { status: ToolCellStatus },
     Patch { kind: PatchKind },
     PlanUpdate,
     BackgroundEvent,
@@ -168,10 +171,20 @@ pub(crate) fn action_enum_from_parsed(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolStatus {
+pub(crate) enum ToolCellStatus {
     Running,
     Success,
     Failed,
+}
+
+impl From<HistoryToolStatus> for ToolCellStatus {
+    fn from(status: HistoryToolStatus) -> Self {
+        match status {
+            HistoryToolStatus::Running => ToolCellStatus::Running,
+            HistoryToolStatus::Success => ToolCellStatus::Success,
+            HistoryToolStatus::Failed => ToolCellStatus::Failed,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,9 +315,9 @@ pub(crate) trait HistoryCell {
             HistoryCellType::Reasoning => None,
             HistoryCellType::Error => Some("✖"),
             HistoryCellType::Tool { status } => Some(match status {
-                ToolStatus::Running => "⚙",
-                ToolStatus::Success => "✔",
-                ToolStatus::Failed => "✖",
+                ToolCellStatus::Running => "⚙",
+                ToolCellStatus::Success => "✔",
+                ToolCellStatus::Failed => "✖",
             }),
             HistoryCellType::Exec { kind, status } => {
                 // Show ❯ only for Run executions; hide for read/search/list summaries
@@ -4332,17 +4345,18 @@ fn new_exec_command_generic(
 pub(crate) fn new_active_mcp_tool_call(invocation: McpInvocation) -> ToolCallCell {
     let invocation_line = format_mcp_invocation(invocation);
     let invocation_text = line_to_plain_text(&invocation_line);
-    let state = ToolCallCellState::new(
-        "Working".to_string(),
-        ToolCallStatus::Running,
-        None,
-        vec![ToolArgument {
+    let state = ToolCallState {
+        id: HistoryId::ZERO,
+        status: HistoryToolStatus::Running,
+        title: "Working".to_string(),
+        duration: None,
+        arguments: vec![ToolArgument {
             name: "invocation".to_string(),
             value: ArgumentValue::Text(invocation_text),
         }],
-        None,
-        None,
-    );
+        result_preview: None,
+        error_message: None,
+    };
     ToolCallCell::new(state)
 }
 
@@ -4353,17 +4367,18 @@ pub(crate) fn new_active_custom_tool_call(tool_name: String, args: Option<String
     } else {
         format!("{}()", tool_name)
     };
-    let state = ToolCallCellState::new(
-        "Working".to_string(),
-        ToolCallStatus::Running,
-        None,
-        vec![ToolArgument {
+    let state = ToolCallState {
+        id: HistoryId::ZERO,
+        status: HistoryToolStatus::Running,
+        title: "Working".to_string(),
+        duration: None,
+        arguments: vec![ToolArgument {
             name: "invocation".to_string(),
             value: ArgumentValue::Text(invocation_str),
         }],
-        None,
-        None,
-    );
+        result_preview: None,
+        error_message: None,
+    };
     ToolCallCell::new(state)
 }
 
@@ -4447,14 +4462,16 @@ pub(crate) fn new_running_browser_tool_call(
             arguments.append(&mut kv_args);
         }
     }
-    RunningToolCallCell::new(RunningToolCallState::new(
-        browser_running_title(&tool_name).to_string(),
-        SystemTime::now(),
+    let state = RunningToolState {
+        id: HistoryId::ZERO,
+        title: browser_running_title(&tool_name).to_string(),
+        started_at: SystemTime::now(),
         arguments,
-        false,
-        false,
-        None,
-    ))
+        wait_has_target: false,
+        wait_has_call_id: false,
+        wait_cap_ms: None,
+    };
+    RunningToolCallCell::new(state)
 }
 
 fn custom_tool_running_title(tool_name: &str) -> String {
@@ -4534,14 +4551,16 @@ pub(crate) fn new_running_custom_tool_call(
             }
         }
     }
-    RunningToolCallCell::new(RunningToolCallState::new(
-        custom_tool_running_title(&tool_name),
-        SystemTime::now(),
+    let state = RunningToolState {
+        id: HistoryId::ZERO,
+        title: custom_tool_running_title(&tool_name),
+        started_at: SystemTime::now(),
         arguments,
         wait_has_target,
         wait_has_call_id,
         wait_cap_ms,
-    ))
+    };
+    RunningToolCallCell::new(state)
 }
 
 /// Running web search call (native Responses web_search)
@@ -4553,31 +4572,35 @@ pub(crate) fn new_running_web_search(query: Option<String>) -> RunningToolCallCe
             value: ArgumentValue::Text(q),
         });
     }
-    RunningToolCallCell::new(RunningToolCallState::new(
-        "Web Search...".to_string(),
-        SystemTime::now(),
+    let state = RunningToolState {
+        id: HistoryId::ZERO,
+        title: "Web Search...".to_string(),
+        started_at: SystemTime::now(),
         arguments,
-        false,
-        false,
-        None,
-    ))
+        wait_has_target: false,
+        wait_has_call_id: false,
+        wait_cap_ms: None,
+    };
+    RunningToolCallCell::new(state)
 }
 
 pub(crate) fn new_running_mcp_tool_call(invocation: McpInvocation) -> RunningToolCallCell {
     // Represent as provider.tool(...) on one dim line beneath a generic running header with timer
     let line = format_mcp_invocation(invocation);
     let invocation_text = line_to_plain_text(&line);
-    RunningToolCallCell::new(RunningToolCallState::new(
-        "Working...".to_string(),
-        SystemTime::now(),
-        vec![ToolArgument {
+    let state = RunningToolState {
+        id: HistoryId::ZERO,
+        title: "Working...".to_string(),
+        started_at: SystemTime::now(),
+        arguments: vec![ToolArgument {
             name: "invocation".to_string(),
             value: ArgumentValue::Text(invocation_text),
         }],
-        false,
-        false,
-        None,
-    ))
+        wait_has_target: false,
+        wait_has_call_id: false,
+        wait_cap_ms: None,
+    };
+    RunningToolCallCell::new(state)
 }
 
 pub(crate) fn new_completed_custom_tool_call(
@@ -4596,9 +4619,9 @@ pub(crate) fn new_completed_custom_tool_call(
         return new_completed_agent_tool_call(tool_name, args, duration, success, result);
     }
     let status = if success {
-        ToolCallStatus::Success
+        HistoryToolStatus::Success
     } else {
-        ToolCallStatus::Failed
+        HistoryToolStatus::Failed
     };
     let status_title = if success { "Complete" } else { "Error" };
     let invocation_str = if let Some(args) = args.clone() {
@@ -4643,14 +4666,15 @@ pub(crate) fn new_completed_custom_tool_call(
         })
     };
 
-    let state = ToolCallCellState::new(
-        status_title.to_string(),
+    let state = ToolCallState {
+        id: HistoryId::ZERO,
         status,
-        Some(duration),
+        title: status_title.to_string(),
+        duration: Some(duration),
         arguments,
         result_preview,
-        None,
-    );
+        error_message: None,
+    };
     ToolCallCell::new(state)
 }
 
@@ -4730,9 +4754,9 @@ pub(crate) fn new_completed_web_fetch_tool_call(
         pre_lines,
         body_lines,
         state: if success {
-            ToolCallStatus::Success
+            ToolCellStatus::Success
         } else {
-            ToolCallStatus::Failed
+            ToolCellStatus::Failed
         },
     }
 }
@@ -4817,7 +4841,7 @@ fn select_preview_from_plain_text(text: &str, head: usize, tail: usize) -> Vec<L
 pub(crate) struct WebFetchToolCell {
     pre_lines: Vec<Line<'static>>,  // header/invocation
     body_lines: Vec<Line<'static>>, // bordered, dim preview
-    state: ToolCallStatus,
+    state: ToolCellStatus,
 }
 
 impl HistoryCell for WebFetchToolCell {
@@ -4828,13 +4852,7 @@ impl HistoryCell for WebFetchToolCell {
         self
     }
     fn kind(&self) -> HistoryCellType {
-        HistoryCellType::Tool {
-            status: match self.state {
-                ToolCallStatus::Running => ToolStatus::Running,
-                ToolCallStatus::Success => ToolStatus::Success,
-                ToolCallStatus::Failed => ToolStatus::Failed,
-            },
-        }
+        HistoryCellType::Tool { status: self.state }
     }
     fn display_lines(&self) -> Vec<Line<'static>> {
         // Fallback textual representation used only for measurement outside custom render
@@ -5213,9 +5231,9 @@ fn new_completed_browser_tool_call(
     result: String,
 ) -> ToolCallCell {
     let status = if success {
-        ToolCallStatus::Success
+        HistoryToolStatus::Success
     } else {
-        ToolCallStatus::Failed
+        HistoryToolStatus::Failed
     };
     let mut arguments: Vec<ToolArgument> = Vec::new();
     if let Some(args_str) = args {
@@ -5253,14 +5271,15 @@ fn new_completed_browser_tool_call(
         })
     };
 
-    let state = ToolCallCellState::new(
-        browser_tool_title(&tool_name).to_string(),
+    let state = ToolCallState {
+        id: HistoryId::ZERO,
         status,
-        Some(duration),
+        title: browser_tool_title(&tool_name).to_string(),
+        duration: Some(duration),
         arguments,
         result_preview,
-        None,
-    );
+        error_message: None,
+    };
     ToolCallCell::new(state)
 }
 
@@ -5304,9 +5323,9 @@ fn new_completed_agent_tool_call(
     result: String,
 ) -> ToolCallCell {
     let status = if success {
-        ToolCallStatus::Success
+        HistoryToolStatus::Success
     } else {
-        ToolCallStatus::Failed
+        HistoryToolStatus::Failed
     };
     let mut arguments: Vec<ToolArgument> = Vec::new();
     if let Some(args_str) = args {
@@ -5335,14 +5354,15 @@ fn new_completed_agent_tool_call(
         })
     };
 
-    let state = ToolCallCellState::new(
-        agent_tool_title(&tool_name),
+    let state = ToolCallState {
+        id: HistoryId::ZERO,
         status,
-        Some(duration),
+        title: agent_tool_title(&tool_name),
+        duration: Some(duration),
         arguments,
         result_preview,
-        None,
-    );
+        error_message: None,
+    };
     ToolCallCell::new(state)
 }
 
@@ -5397,9 +5417,9 @@ pub(crate) fn new_completed_mcp_tool_call(
     }
 
     let status = if success {
-        ToolCallStatus::Success
+        HistoryToolStatus::Success
     } else {
-        ToolCallStatus::Failed
+        HistoryToolStatus::Failed
     };
 
     let invocation_line = format_mcp_invocation(invocation);
@@ -5459,14 +5479,15 @@ pub(crate) fn new_completed_mcp_tool_call(
         })
     };
 
-    let state = ToolCallCellState::new(
-        if success { "Complete" } else { "Error" }.to_string(),
+    let state = ToolCallState {
+        id: HistoryId::ZERO,
         status,
-        Some(duration),
+        title: if success { "Complete" } else { "Error" }.to_string(),
+        duration: Some(duration),
         arguments,
         result_preview,
         error_message,
-    );
+    };
 
     Box::new(ToolCallCell::new(state))
 }
@@ -5826,16 +5847,31 @@ pub(crate) fn new_patch_event(
     let title = match event_type {
         PatchEventType::ApprovalRequest => "proposed patch".to_string(),
         PatchEventType::ApplyBegin { .. } => "Updated".to_string(),
+        PatchEventType::ApplySuccess => "Patch applied".to_string(),
+        PatchEventType::ApplyFailure => "Patch failed".to_string(),
     };
     let kind = match event_type {
         PatchEventType::ApprovalRequest => PatchKind::Proposed,
         PatchEventType::ApplyBegin { .. } => PatchKind::ApplyBegin,
+        PatchEventType::ApplySuccess => PatchKind::ApplySuccess,
+        PatchEventType::ApplyFailure => PatchKind::ApplyFailure,
+    };
+    let record = PatchRecord {
+        id: HistoryId::ZERO,
+        patch_type: match event_type {
+            PatchEventType::ApprovalRequest => HistoryPatchEventType::ApprovalRequest,
+            PatchEventType::ApplyBegin { auto_approved } => {
+                HistoryPatchEventType::ApplyBegin { auto_approved }
+            }
+            PatchEventType::ApplySuccess => HistoryPatchEventType::ApplySuccess,
+            PatchEventType::ApplyFailure => HistoryPatchEventType::ApplyFailure,
+        },
+        changes,
     };
     PatchSummaryCell {
         title,
-        changes,
-        event_type,
         kind,
+        record,
         cached: std::cell::RefCell::new(None),
     }
 }
@@ -5879,9 +5915,8 @@ pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
 
 pub(crate) struct PatchSummaryCell {
     pub(crate) title: String,
-    pub(crate) changes: HashMap<PathBuf, FileChange>,
-    pub(crate) event_type: PatchEventType,
     pub(crate) kind: PatchKind,
+    pub(crate) record: PatchRecord,
     // Cache width-specific rendered lines to avoid repeated filesystem reads
     // and pre-wrapping work inside create_diff_summary_with_width.
     cached: std::cell::RefCell<Option<PatchLayoutCache>>,
@@ -5894,6 +5929,25 @@ struct PatchLayoutCache {
 }
 
 impl PatchSummaryCell {
+    fn ui_event_type(&self) -> PatchEventType {
+        match self.record.patch_type {
+            HistoryPatchEventType::ApprovalRequest => PatchEventType::ApprovalRequest,
+            HistoryPatchEventType::ApplyBegin { auto_approved } => {
+                PatchEventType::ApplyBegin { auto_approved }
+            }
+            HistoryPatchEventType::ApplySuccess => PatchEventType::ApplySuccess,
+            HistoryPatchEventType::ApplyFailure => PatchEventType::ApplyFailure,
+        }
+    }
+
+    pub(crate) fn record(&self) -> &PatchRecord {
+        &self.record
+    }
+
+    pub(crate) fn record_mut(&mut self) -> &mut PatchRecord {
+        &mut self.record
+    }
+
     fn ensure_lines(&self, width: u16) -> Vec<Line<'static>> {
         if let Some(c) = self.cached.borrow().as_ref() {
             if c.width == width {
@@ -5902,8 +5956,8 @@ impl PatchSummaryCell {
         }
         let lines: Vec<Line<'static>> = create_diff_summary_with_width(
             &self.title,
-            &self.changes,
-            self.event_type,
+            &self.record.changes,
+            self.ui_event_type(),
             Some(width as usize),
         )
         .into_iter()

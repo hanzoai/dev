@@ -15,6 +15,19 @@ impl WaitStatusCell {
     }
 
     pub(crate) fn retint(&mut self, _old: &crate::theme::Theme, _new: &crate::theme::Theme) {}
+
+    #[allow(dead_code)]
+    pub(crate) fn from_state(state: WaitStatusState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn state(&self) -> &WaitStatusState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut WaitStatusState {
+        &mut self.state
+    }
 }
 
 impl HistoryCell for WaitStatusCell {
