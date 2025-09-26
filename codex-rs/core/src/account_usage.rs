@@ -394,13 +394,10 @@ fn record_threshold_log(
             _ => false,
         };
 
-        let logged_after_prev_reset = previous_reset
-            .and_then(|prev| {
-                previous_logged.map(|logged| {
-                    logged + RESET_PASSED_TOLERANCE >= prev
-                })
-            })
-            .unwrap_or(false);
+        let logged_after_prev_reset = match (previous_logged, previous_reset) {
+            (Some(logged), Some(prev)) => logged >= prev,
+            _ => false,
+        };
 
         let prev_reset_elapsed = previous_reset
             .map(|prev| observed_at + RESET_PASSED_TOLERANCE >= prev)
@@ -688,6 +685,41 @@ mod tests {
         )
         .expect("third record succeeds");
         assert!(!third, "duplicate logging inside the same window should stay muted");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_reset_even_if_logged_just_before() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let reset_at = now + Duration::minutes(1);
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at),
+            reset_at - Duration::seconds(3),
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // After the reset passes, with a new window scheduled further out, we should relog.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at + Duration::hours(1)),
+            reset_at + Duration::seconds(45),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(second, "post-reset poll should emit again even if prior log was moments before reset");
     }
 
     #[test]
