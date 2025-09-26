@@ -7439,7 +7439,7 @@ impl ChatWidget<'_> {
 
         let mode = match &self.config.tui.notifications {
             Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
-            Notifications::Custom(command) => NotificationsMode::Custom { command: command.clone() },
+            Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
         };
 
         let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
@@ -19397,7 +19397,7 @@ impl ChatWidget<'_> {
     }
 
     fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
-        if !matches!(self.config.tui.notifications, Notifications::Enabled(true)) {
+        if !self.tui_notifications_allow("agent-turn-complete") {
             return;
         }
 
@@ -19410,6 +19410,15 @@ impl ChatWidget<'_> {
             title: "Code".to_string(),
             body: snippet,
         });
+    }
+
+    fn tui_notifications_allow(&self, event: &str) -> bool {
+        match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => *enabled,
+            Notifications::Custom(entries) => entries
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case(event)),
+        }
     }
 
     fn notification_snippet(input: &str) -> String {

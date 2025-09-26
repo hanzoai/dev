@@ -14,7 +14,7 @@ use super::BottomPane;
 #[derive(Clone)]
 pub(crate) enum NotificationsMode {
     Toggle { enabled: bool },
-    Custom { command: Vec<String> },
+    Custom { entries: Vec<String> },
 }
 
 pub(crate) struct NotificationsSettingsView {
@@ -41,9 +41,18 @@ impl NotificationsSettingsView {
                 self.app_event_tx
                     .send(AppEvent::UpdateTuiNotifications(*enabled));
             }
-            NotificationsMode::Custom { .. } => {
+            NotificationsMode::Custom { entries } => {
+                let filters = if entries.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    entries.join(", ")
+                };
+                self.app_event_tx.send_background_event(format!(
+                    "TUI notifications are filtered in config: [{}]",
+                    filters
+                ));
                 self.app_event_tx.send_background_event(
-                    "TUI notifications use a custom command. Edit ~/.code/config.toml to change this.",
+                    "Edit ~/.code/config.toml [tui].notifications to change filters.".to_string(),
                 );
             }
         }
@@ -63,17 +72,17 @@ impl NotificationsSettingsView {
                     Span::styled(status, Style::default().fg(color).add_modifier(Modifier::BOLD)),
                 ])
             }
-            NotificationsMode::Custom { command } => {
-                let command_display = if command.is_empty() {
-                    "<empty>".to_string()
+            NotificationsMode::Custom { entries } => {
+                let filters = if entries.is_empty() {
+                    "<none>".to_string()
                 } else {
-                    command.join(" ")
+                    entries.join(", ")
                 };
                 Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(crate::colors::text_dim())),
-                    Span::styled("Custom command", Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD)),
+                    Span::styled("Custom filter", Style::default().fg(crate::colors::info()).add_modifier(Modifier::BOLD)),
                     Span::raw("  "),
-                    Span::styled(command_display, Style::default().fg(crate::colors::dim())),
+                    Span::styled(filters, Style::default().fg(crate::colors::dim())),
                 ])
             }
         }
@@ -199,7 +208,7 @@ impl<'a> BottomPaneView<'a> for NotificationsSettingsView {
             NotificationsMode::Custom { .. } => Line::from(vec![
                 Span::styled("Edit ", Style::default().fg(crate::colors::text_dim())),
                 Span::styled("[tui].notifications", Style::default().fg(crate::colors::info())),
-                Span::styled(" in ~/.code/config.toml to change this setting.", Style::default().fg(crate::colors::text_dim())),
+                Span::styled(" in ~/.code/config.toml to adjust filters.", Style::default().fg(crate::colors::text_dim())),
             ]),
         };
         lines.push(footer);
