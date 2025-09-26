@@ -80,7 +80,7 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 
 ### ✅ Reasoning – `CollapsibleReasoningCell`
 - **Desired state:** `ReasoningState { id, sections: Vec<ReasoningSection>, in_progress, hide_when_collapsed }` with sections broken into semantic blocks.
-- **Status:** ✅ state maintains `ReasoningSection` blocks; follow-up: richer block typing + metadata.
+- **Status:** ✅ state maintains `ReasoningSection` blocks with persisted summaries and typed bullet markers (2025-09-26 follow-up complete).
 - **External settings:** `Ctrl+R` (collapsed vs expanded), theme, width.
 - **Widget state:** collapse flag held outside the serialized state (driven by the global toggle).
 
@@ -137,16 +137,16 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 1.2 **Tool calls (running & completed)** – ✅ constructors now emit `ToolArgument`/`ToolResultPreview`; remaining work: tighten JSON summaries + result truncation heuristics.
 1.3 **Plan updates** – ✅ `PlanUpdateCell` now renders from `PlanProgress`/`PlanStep` + `PlanIcon`; follow-up: improved summary metadata.
 1.4 **Upgrade notice** – ✅ cell consumes `UpgradeNoticeState` (versions + message), custom render derived at draw time.
-1.5 **Reasoning** – ⏳ sections/blocks stored; next: enrich block types (code/bullets) and attach metadata for collapse summaries.
+1.5 **Reasoning** – ✅ sections/blocks stored; block metadata now includes typed bullets and per-section summaries for collapse previews (2025-09-26).
 1.6 **Wait status & background notices** – ✅ wait tools use `WaitStatusState`; background notices render via `BackgroundEventRecord`.
-1.7 **Documentation** – Update module docs/tests to reflect new structs; ensure all constructors return strongly typed states.
+1.7 **Documentation** – ✅ inline docs now cover reasoning summaries/bullets; audit of constructors confirmed strongly typed state (2025-09-26).
 
 ## Step 2 – Exec / Streaming / Diff Family *(Pending)*
-2.1 **Exec state extraction & module split** – `ExecRecord` already lives in `history/state.rs`; migrate the inline `ExecCell` into `history_cell/exec.rs`, adapt it to consume the record, and relocate per-width layout caches out of the state layer.
-2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. **Status:** renderer now lives in `history_cell/stream.rs`; `HistoryState` records per-stream deltas/preview snapshots; **follow-up:** flow citations/token usage from streaming events, persist provenance metadata, and remove redundant layout caches.
-2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. **Status:** rendering has been split into `history_cell/assistant.rs`; finalized answers now land in `HistoryState`; **follow-up:** carry citation/token metadata through `InsertFinalAnswer`, expose state to resume snapshots, and drop raw `AssistantMarkdownCell` caching once render adapters exist.
-2.4 **Diff module breakout** – Persist diff hunks (`DiffHunk`, `DiffLine`) and patch metadata, move diff rendering into `history_cell/diff.rs`, and have the renderer apply styling based on line kind.
-2.5 **Merged exec views** – Rebuild aggregated exec cells from `Vec<ExecRecord>` snapshots rather than cached text blocks once the exec module exists.
+2.1 **Exec state extraction & module split** – ✅ `ExecCell` now lives in `history_cell/exec.rs`, builds from `ExecRecord` (including wait notes/stream chunks), and keeps layout caches strictly in the renderer layer (2025-09-26).
+2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. **Status:** ✅ streaming renderer now rebuilds cells directly from `AssistantStreamState`, token usage metadata is upserted alongside deltas, and redundant layout caches were removed (2025-09-26).
+2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. **Status:** ✅ assistant markdown cells now rebuild directly from `AssistantMessageState`, `InsertFinalAnswer` carries stream metadata (citations/token usage) into history state, and redundant raw caching has been removed in favor of state-driven rebuilds (2025-09-26).
+2.4 **Diff module breakout** – ✅ diff cells now rebuild from `DiffRecord` state with per-width layouts, ChatWidget persists diff snapshots in `HistoryState`, and the renderer applies line-kind styling with dedicated marker columns (2025-09-26).
+2.5 **Merged exec views** – ✅ merged exec cells now clone `ExecRecord` snapshots for each segment, rebuild layouts on demand (theme-aware caches), and ChatWidget merges/retints using the recorded exec state instead of legacy line buffers (2025-09-26).
 
 ## Step 3 – HistoryState Manager *(Pending)*
 3.1 **HistoryRecord enum** – ✅ complete: `history/state.rs` defines `HistoryRecord`, per-cell state structs, and `HistoryState` scaffolding with ID management helpers.

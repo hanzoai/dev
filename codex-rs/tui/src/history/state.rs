@@ -260,14 +260,23 @@ pub enum ReasoningEffortLevel {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasoningSection {
+    /// Optional heading rendered in bold at the top of the section.
     pub heading: Option<String>,
+    /// Single-line preview used for collapsed summaries; derived from the first
+    /// meaningful block (heading, bullet, paragraph, etc.).
+    pub summary: Option<Vec<InlineSpan>>,
+    /// Rich collection of blocks that fully describe the reasoning content.
     pub blocks: Vec<ReasoningBlock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReasoningBlock {
     Paragraph(Vec<InlineSpan>),
-    Bullet { indent: u8, spans: Vec<InlineSpan> },
+    Bullet {
+        indent: u8,
+        marker: BulletMarker,
+        spans: Vec<InlineSpan>,
+    },
     Code { language: Option<String>, content: String },
     Quote(Vec<InlineSpan>),
     Separator,
@@ -287,7 +296,6 @@ pub struct ExecRecord {
     pub started_at: SystemTime,
     pub completed_at: Option<SystemTime>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecAction {
     Read,
@@ -530,7 +538,7 @@ impl HistoryState {
         markdown: String,
         metadata: Option<&MessageMetadata>,
         token_usage: Option<&TokenUsage>,
-    ) -> HistoryId {
+    ) -> AssistantMessageState {
         let mut carried_citations: Vec<String> = Vec::new();
         let mut carried_metadata: Option<MessageMetadata> = None;
         if let Some(stream_id) = stream_id {
@@ -553,17 +561,31 @@ impl HistoryState {
             .map(|meta| meta.citations.clone())
             .unwrap_or(carried_citations);
         let metadata = metadata.cloned().or(carried_metadata);
+        let token_usage = token_usage
+            .cloned()
+            .or_else(|| metadata.as_ref().and_then(|meta| meta.token_usage.clone()));
 
-        let state = AssistantMessageState {
-            id: HistoryId(0),
+        let mut state = AssistantMessageState {
+            id: HistoryId::ZERO,
             stream_id: stream_id.map(|s| s.to_string()),
             markdown,
             citations,
             metadata,
-            token_usage: token_usage.cloned(),
+            token_usage,
             created_at: SystemTime::now(),
         };
-        self.push(HistoryRecord::AssistantMessage(state))
+        let id = self.next_history_id();
+        state.id = id;
+        self.records
+            .push(HistoryRecord::AssistantMessage(state.clone()));
+        state
+    }
+
+    pub fn assistant_stream_state(&self, stream_id: &str) -> Option<&AssistantStreamState> {
+        self.records.iter().find_map(|record| match record {
+            HistoryRecord::AssistantStream(state) if state.stream_id == stream_id => Some(state),
+            _ => None,
+        })
     }
 
     pub fn insert(&mut self, index: usize, record: HistoryRecord) -> HistoryId {
