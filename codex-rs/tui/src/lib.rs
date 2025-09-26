@@ -403,12 +403,58 @@ fn print_timing_summary(summary: &str) {
 
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 fn cleanup_session_worktrees_and_print() {
-    use std::process::Command;
     let pid = std::process::id();
     let home = match std::env::var_os("HOME") { Some(h) => std::path::PathBuf::from(h), None => return };
     let session_dir = home.join(".code").join("working").join("_session");
+    cleanup_stale_session_files(&session_dir, pid);
     let file = session_dir.join(format!("pid-{}.txt", pid));
-    let Ok(data) = std::fs::read_to_string(&file) else { return };
+    reclaim_worktrees_from_file(&file, "current session");
+}
+
+fn cleanup_stale_session_files(session_dir: &std::path::Path, current_pid: u32) {
+    let Ok(entries) = std::fs::read_dir(session_dir) else { return; };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+        let filename = match entry.file_name().into_string() {
+            Ok(name) => name,
+            Err(_) => continue,
+        };
+        let Some(pid_str) = filename.strip_prefix("pid-").and_then(|s| s.strip_suffix(".txt")) else { continue; };
+        let Ok(pid) = pid_str.parse::<u32>() else { continue; };
+        if pid == current_pid { continue; }
+
+        #[cfg(unix)]
+        let still_running = unsafe {
+            if libc::kill(pid as libc::pid_t, 0) == 0 {
+                true
+            } else {
+                matches!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(code) if code != libc::ESRCH
+                )
+            }
+        };
+
+        #[cfg(not(unix))]
+        let still_running = true;
+
+        if still_running {
+            continue;
+        }
+
+        reclaim_worktrees_from_file(&path, &format!("stale pid {pid}"));
+    }
+}
+
+fn reclaim_worktrees_from_file(path: &std::path::Path, label: &str) {
+    use std::process::Command;
+
+    let Ok(data) = std::fs::read_to_string(path) else {
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+
     let mut entries: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
     for line in data.lines() {
         if line.trim().is_empty() { continue; }
@@ -416,22 +462,25 @@ fn cleanup_session_worktrees_and_print() {
             entries.push((std::path::PathBuf::from(root_s), std::path::PathBuf::from(path_s)));
         }
     }
-    // Deduplicate paths in case of retries
+
     use std::collections::HashSet;
     let mut seen = HashSet::new();
     entries.retain(|(_, p)| seen.insert(p.clone()));
-    if entries.is_empty() { let _ = std::fs::remove_file(&file); return; }
+    if entries.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
 
-    eprintln!("Cleaning remaining worktrees ({}).", entries.len());
+    eprintln!("Cleaning remaining worktrees for {} ({}).", label, entries.len());
     for (git_root, worktree) in entries {
-        let wt_str = match worktree.to_str() { Some(s) => s, None => continue };
+        let Some(wt_str) = worktree.to_str() else { continue };
         let _ = Command::new("git")
             .current_dir(&git_root)
             .args(["worktree", "remove", wt_str, "--force"])
             .output();
         let _ = std::fs::remove_dir_all(&worktree);
     }
-    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(path);
 }
 
 fn maybe_apply_terminal_theme_detection(config: &mut Config, theme_configured_explicitly: bool) {
