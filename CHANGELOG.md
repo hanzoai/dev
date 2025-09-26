@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.168] - 2025-09-26
+
+- TUI/Limits: restore the 6 month history view with expanded layout, spacing, and weekday labels. (840998b, 7c956be, 2f6b506, 395e2ba)
+- TUI/History: persist assistant stream records so prior reasoning stays available after reloads. (fbe7528)
+- TUI/Worktrees: stop deleting other PID checkouts and clean up stale directories after EINTR interruptions. (4971783, da2840b)
+- TUI/Chat: keep manual file search queries synced for repeat lookups. (883b8f2)
+- CLI: adopt the pre-main hardening hook to align with tighter runtime protections. (47b7de3)
+
 ## [0.2.167] - 2025-09-26
 
 - TUI/Terminal: allow blank dollar prompt to open a shell instantly. (e8ed566)
