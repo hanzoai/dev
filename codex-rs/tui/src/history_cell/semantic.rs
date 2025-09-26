@@ -1,5 +1,5 @@
 use crate::theme::{current_theme, Theme};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,25 +47,6 @@ impl SemanticSpan {
         }
     }
 
-    fn to_span(&self, theme: &Theme) -> Span<'static> {
-        let mut style = Style::default().fg(self.tone.to_color(theme));
-        if self.emphasis.bold {
-            style = style.add_modifier(Modifier::BOLD);
-        }
-        if self.emphasis.italic {
-            style = style.add_modifier(Modifier::ITALIC);
-        }
-        if self.emphasis.dim {
-            style = style.add_modifier(Modifier::DIM);
-        }
-        if self.emphasis.underline {
-            style = style.add_modifier(Modifier::UNDERLINED);
-        }
-        if self.emphasis.strike {
-            style = style.add_modifier(Modifier::CROSSED_OUT);
-        }
-        Span::styled(self.text.clone(), style)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,30 +72,6 @@ impl SemanticLine {
                 .collect()
         };
         Self { spans, tone }
-    }
-
-    pub(crate) fn to_line(&self, theme: &Theme) -> Line<'static> {
-        let style = Style::default().fg(self.tone.to_color(theme));
-        let spans: Vec<Span<'static>> = self
-            .spans
-            .iter()
-            .map(|span| span.to_span(theme))
-            .collect();
-        Line::from(spans).style(style)
-    }
-}
-
-impl Tone {
-    fn to_color(self, theme: &Theme) -> Color {
-        match self {
-            Tone::Default => theme.text,
-            Tone::Dim => theme.text_dim,
-            Tone::Primary => theme.primary,
-            Tone::Success => theme.success,
-            Tone::Error => theme.error,
-            Tone::Info => theme.info,
-            Tone::Warning => theme.warning,
-        }
     }
 }
 
@@ -147,8 +104,4 @@ fn tone_from_style(style: Style, theme: &Theme) -> Tone {
 
 pub(crate) fn lines_from_ratatui(source: Vec<Line<'static>>) -> Vec<SemanticLine> {
     source.into_iter().map(SemanticLine::from_line).collect()
-}
-
-pub(crate) fn lines_to_ratatui(lines: &[SemanticLine], theme: &Theme) -> Vec<Line<'static>> {
-    lines.iter().map(|line| line.to_line(theme)).collect()
 }
