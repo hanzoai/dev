@@ -296,7 +296,6 @@ pub struct ExecRecord {
     pub started_at: SystemTime,
     pub completed_at: Option<SystemTime>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecAction {
     Read,

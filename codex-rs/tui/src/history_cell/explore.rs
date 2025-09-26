@@ -1,4 +1,5 @@
 use super::*;
+use crate::history::state::ExecAction;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ExploreEntryStatus {

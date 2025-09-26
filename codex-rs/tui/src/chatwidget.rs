@@ -1564,7 +1564,7 @@ impl ChatWidget<'_> {
     }
     fn perf_label_for_item(&self, item: &dyn HistoryCell) -> String {
         use crate::history_cell::ExecKind;
-        use crate::history_cell::ExecStatus;
+        use crate::history::state::ExecStatus;
         use crate::history_cell::HistoryCellType;
         use crate::history_cell::PatchKind;
         use crate::history_cell::ToolStatus;
@@ -10486,6 +10486,11 @@ impl ChatWidget<'_> {
                 // Fully rebuild from raw to apply new theme + syntax highlight
                 let current = assist.state().clone();
                 assist.update_state(current, &self.config);
+            } else if let Some(merged) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::MergedExecCell>()
+            {
+                merged.rebuild_with_theme();
             } else if let Some(diff) = cell
                 .as_any_mut()
                 .downcast_mut::<history_cell::DiffCell>()
@@ -18458,11 +18463,11 @@ impl WidgetRef for &ChatWidget<'_> {
                             match item.kind() {
                                 crate::history_cell::HistoryCellType::Exec {
                                     kind: crate::history_cell::ExecKind::Run,
-                                    status: crate::history_cell::ExecStatus::Success,
+                                    status: crate::history::state::ExecStatus::Success,
                                 } => crate::colors::text(),
                                 crate::history_cell::HistoryCellType::Exec {
                                     kind: crate::history_cell::ExecKind::Run,
-                                    status: crate::history_cell::ExecStatus::Error,
+                                    status: crate::history::state::ExecStatus::Error,
                                 } => crate::colors::error(),
                                 crate::history_cell::HistoryCellType::Exec { .. } => {
                                     crate::colors::text()
