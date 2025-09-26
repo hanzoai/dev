@@ -12,7 +12,7 @@ use crate::protocol::TokenUsage;
 
 const USAGE_VERSION: u32 = 1;
 const USAGE_SUBDIR: &str = "usage";
-const HOURLY_HISTORY_DAYS: i64 = 7;
+const HOURLY_HISTORY_DAYS: i64 = 183; // retain ~6 months of hourly usage for history views
 const UNKNOWN_RESET_RELOG_INTERVAL: Duration = Duration::hours(24);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
