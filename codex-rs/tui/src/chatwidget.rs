@@ -24,6 +24,7 @@ use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
+use codex_core::config_types::Notifications;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
@@ -410,6 +411,11 @@ pub(crate) struct GhostState {
     snapshots: Vec<GhostSnapshot>,
     disabled: bool,
     disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active: Option<(u64, GhostSnapshotRequest)>,
+    next_id: u64,
+    pending_dispatches: VecDeque<PendingSnapshotDispatch>,
+    queued_user_messages: VecDeque<UserMessage>,
 }
 
 struct UndoSnapshotPreview {
@@ -609,6 +615,7 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    replay_history_depth: usize,
 }
 
 struct PendingJumpBack {
@@ -704,6 +711,7 @@ enum GhostSnapshotJobHandle {
     Skipped,
 }
 
+#[derive(Clone)]
 enum PendingSnapshotDispatch {
     Direct { job_id: u64, batch: Vec<UserMessage> },
     Queued { job_id: u64, message: UserMessage },
@@ -2795,6 +2803,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3030,6 +3039,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3473,7 +3483,7 @@ impl ChatWidget<'_> {
 
         let codex_home = self.config.codex_home.clone();
         let accounts = auth_accounts::list_accounts(&codex_home).unwrap_or_default();
-        let mut account_map: HashMap<String, StoredAccount> = accounts
+        let account_map: HashMap<String, StoredAccount> = accounts
             .into_iter()
             .map(|account| (account.id.clone(), account))
             .collect();
@@ -3485,19 +3495,22 @@ impl ChatWidget<'_> {
         let usage_records = account_usage::list_rate_limit_snapshots(&codex_home).unwrap_or_default();
         let mut snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
             .into_iter()
+            .filter(|record| account_map.contains_key(&record.account_id))
             .map(|record| (record.account_id.clone(), record))
             .collect();
 
-        let mut summary_ids: HashSet<String> = account_map.keys().cloned().collect();
-        summary_ids.extend(snapshot_map.keys().cloned());
-        if let Some(id) = active_id.as_ref() {
-            summary_ids.insert(id.clone());
+        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
+        for id in account_map.keys() {
+            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, id) {
+                usage_summary_map.insert(id.clone(), summary);
+            }
         }
 
-        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
-        for id in summary_ids {
-            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, &id) {
-                usage_summary_map.insert(id, summary);
+        if let Some(active_id) = active_id.as_ref() {
+            if !usage_summary_map.contains_key(active_id) {
+                if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, active_id) {
+                    usage_summary_map.insert(active_id.clone(), summary);
+                }
             }
         }
 
@@ -3523,25 +3536,21 @@ impl ChatWidget<'_> {
             let extra = Self::usage_history_lines(summary_ref);
             let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG);
             tabs.push(LimitsTab::view(title, header, view, extra));
-            if let Some(id) = active_id.as_ref() {
-                seen_ids.insert(id.clone());
-                account_map.remove(id);
-                snapshot_map.remove(id);
-                usage_summary_map.remove(id);
+
+            if let Some(active_id) = active_id.as_ref() {
+                if account_map.contains_key(active_id) {
+                    seen_ids.insert(active_id.clone());
+                    snapshot_map.remove(active_id);
+                    usage_summary_map.remove(active_id);
+                }
             }
         }
 
-        let mut remaining_ids: Vec<String> = Vec::new();
-        for id in account_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
-        for id in snapshot_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
+        let mut remaining_ids: Vec<String> = account_map
+            .keys()
+            .filter(|id| !seen_ids.contains(*id))
+            .cloned()
+            .collect();
         remaining_ids.sort_by(|a, b| {
             let a_label = account_map
                 .get(a)
@@ -3551,9 +3560,14 @@ impl ChatWidget<'_> {
                 .get(b)
                 .map(Self::account_label)
                 .unwrap_or_else(|| b.clone());
-            a_label
-                .to_ascii_lowercase()
-                .cmp(&b_label.to_ascii_lowercase())
+            let a_cmp = a_label.to_ascii_lowercase();
+            let b_cmp = b_label.to_ascii_lowercase();
+            let order = a_cmp.cmp(&b_cmp);
+            if order == std::cmp::Ordering::Equal {
+                a_label.cmp(&b_label)
+            } else {
+                order
+            }
         });
 
         for id in remaining_ids {
@@ -5258,6 +5272,11 @@ impl ChatWidget<'_> {
             snapshots: self.ghost_snapshots.clone(),
             disabled: self.ghost_snapshots_disabled,
             disabled_reason: self.ghost_snapshots_disabled_reason.clone(),
+            queue: self.ghost_snapshot_queue.clone(),
+            active: self.active_ghost_snapshot.clone(),
+            next_id: self.next_ghost_snapshot_id,
+            pending_dispatches: self.pending_snapshot_dispatches.clone(),
+            queued_user_messages: self.queued_user_messages.clone(),
         }
     }
 
@@ -5269,6 +5288,13 @@ impl ChatWidget<'_> {
         }
         self.ghost_snapshots_disabled = state.disabled;
         self.ghost_snapshots_disabled_reason = state.disabled_reason;
+        self.ghost_snapshot_queue = state.queue;
+        self.active_ghost_snapshot = state.active;
+        self.next_ghost_snapshot_id = state.next_id;
+        self.pending_snapshot_dispatches = state.pending_dispatches;
+        self.queued_user_messages = state.queued_user_messages;
+        self.refresh_queued_user_messages();
+        self.spawn_next_ghost_snapshot();
     }
 
     fn snapshot_preview(&self, index: usize) -> Option<UndoSnapshotPreview> {
@@ -5864,6 +5890,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
+                self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let mut max_req = self.last_seen_request_index;
                 if events.is_empty() {
                     for item in &items {
@@ -5896,6 +5923,7 @@ impl ChatWidget<'_> {
                     self.current_request_index = self.last_seen_request_index;
                 }
                 self.request_redraw();
+                self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
                 tools::web_search_complete(self, ev.call_id, ev.query)
@@ -6072,9 +6100,7 @@ impl ChatWidget<'_> {
 
                 self.mark_needs_redraw();
             }
-            EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: _,
-            }) => {
+            EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 // Finalize any active streams
                 if self.stream.is_write_cycle_active() {
                     // Finalize both streams via streaming facade
@@ -6155,6 +6181,7 @@ impl ChatWidget<'_> {
                 self.stream_state.current_kind = None;
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
+                self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -7682,6 +7709,79 @@ impl ChatWidget<'_> {
             "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                 to_string(),
         );
+    }
+
+    pub(crate) fn handle_notifications_command(&mut self, args: String) {
+        use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
+
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            let mode = match &self.config.tui.notifications {
+                Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+                Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
+            };
+
+            let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+            self.bottom_pane.show_notifications_settings(view);
+            return;
+        }
+
+        let keyword = trimmed.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        match keyword.as_str() {
+            "status" => {
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(true) => {
+                        self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+                    }
+                    Notifications::Enabled(false) => {
+                        self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "🔔 TUI notifications use custom filters: [{}]",
+                            filters
+                        ));
+                    }
+                }
+            }
+            "on" | "off" => {
+                let enable = keyword == "on";
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(current) => {
+                        if *current == enable {
+                            self.push_background_tail(format!(
+                                "TUI notifications already {}.",
+                                if enable { "enabled" } else { "disabled" }
+                            ));
+                        } else {
+                            self.app_event_tx
+                                .send(AppEvent::UpdateTuiNotifications(enable));
+                        }
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
+                            filters
+                        ));
+                    }
+                }
+            }
+            _ => {
+                self.push_background_tail(
+                    "Usage: /notifications [status|on|off]".to_string(),
+                );
+            }
+        }
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -14390,8 +14490,8 @@ impl ChatWidget<'_> {
         let mut items: Vec<SelectionItem> = Vec::new();
 
         items.push(SelectionItem {
-            name: "Review current workspace changes".to_string(),
-            description: Some("Include staged, unstaged, and untracked files".to_string()),
+            name: "Review /branch changes".to_string(),
+            description: Some("Compare your worktree branch against its merge target".to_string()),
             is_current: false,
             actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
                 tx.send(crate::app_event::AppEvent::RunReviewCommand(String::new()));
@@ -14610,7 +14710,7 @@ impl ChatWidget<'_> {
 
             let prompt = if let Some(current) = current_trimmed.as_ref() {
                 format!(
-                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                 )
             } else {
                 format!(
@@ -14683,6 +14783,62 @@ impl ChatWidget<'_> {
 
         let trimmed = args.trim();
         if trimmed.is_empty() {
+            if Self::is_branch_worktree_path(&self.config.cwd) {
+                if let Some(git_root) =
+                    codex_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+                {
+                    let worktree_cwd = self.config.cwd.clone();
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let default_branch = codex_core::git_worktree::detect_default_branch(&git_root)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+                        let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+
+                        if let (Some(base_branch), Some(current_branch)) =
+                            (default_branch, current_branch)
+                        {
+                            if base_branch != current_branch {
+                                let prompt = format!(
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                                );
+                                let hint = format!("against {base_branch}");
+                                let preparation_label =
+                                    Some(format!("Preparing code review against {base_branch}"));
+                                let metadata = Some(ReviewContextMetadata {
+                                    scope: Some("branch_diff".to_string()),
+                                    base_branch: Some(base_branch.clone()),
+                                    current_branch: Some(current_branch.clone()),
+                                    ..Default::default()
+                                });
+                                tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                                    prompt,
+                                    hint,
+                                    preparation_label,
+                                    metadata,
+                                });
+                                return;
+                            }
+                        }
+
+                        tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                            prompt: "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
+                            hint: "current workspace changes".to_string(),
+                            preparation_label: Some("Preparing code review request...".to_string()),
+                            metadata: Some(ReviewContextMetadata {
+                                scope: Some("workspace".to_string()),
+                                ..Default::default()
+                            }),
+                        });
+                    });
+                    return;
+                }
+            }
+
             let metadata = ReviewContextMetadata {
                 scope: Some("workspace".to_string()),
                 ..Default::default()
@@ -19628,6 +19784,96 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+    }
+
+    pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
+        let new_state = Notifications::Enabled(enabled);
+        self.config.tui.notifications = new_state.clone();
+        self.config.tui_notifications = new_state.clone();
+
+        match find_codex_home() {
+            Ok(home) => {
+                match codex_core::config::set_tui_notifications(&home, new_state) {
+                    Ok(()) => {
+                        let msg = format!(
+                            "✅ {} TUI notifications",
+                            if enabled { "Enabled" } else { "Disabled" }
+                        );
+                        self.push_background_tail(msg);
+                    }
+                    Err(err) => {
+                        let msg = format!(
+                            "⚠️ Failed to persist TUI notifications setting: {}",
+                            err
+                        );
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            Err(_) => {
+                let msg = format!(
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    if enabled { "Enabled" } else { "Disabled" }
+                );
+                self.push_background_tail(msg);
+            }
+        }
+    }
+
+    fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
+        if !self.should_emit_tui_notification("agent-turn-complete") {
+            return;
+        }
+
+        let snippet = last_agent_message
+            .as_deref()
+            .map(Self::notification_snippet)
+            .filter(|text| !text.is_empty());
+
+        self.app_event_tx.send(AppEvent::EmitTuiNotification {
+            title: "Code".to_string(),
+            body: snippet,
+        });
+    }
+
+    fn should_emit_tui_notification(&self, event: &str) -> bool {
+        if self.replay_history_depth > 0 {
+            return false;
+        }
+        self.tui_notification_filter_allows(event)
+    }
+
+    fn tui_notification_filter_allows(&self, event: &str) -> bool {
+        match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => *enabled,
+            Notifications::Custom(entries) => entries
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case(event)),
+        }
+    }
+
+    fn notification_snippet(input: &str) -> String {
+        let collapsed = input
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        const LIMIT: usize = 120;
+        if collapsed.chars().count() <= LIMIT {
+            return collapsed;
+        }
+
+        let mut truncated = String::new();
+        let mut count = 0usize;
+        for ch in collapsed.chars() {
+            if count >= LIMIT.saturating_sub(3) {
+                break;
+            }
+            truncated.push(ch);
+            count += 1;
+        }
+        truncated.push_str("...");
+        truncated
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
