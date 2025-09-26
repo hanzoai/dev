@@ -597,6 +597,7 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    replay_history_depth: usize,
 }
 
 struct PendingJumpBack {
@@ -2742,6 +2743,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -2973,6 +2975,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -5621,6 +5624,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
+                self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let mut max_req = self.last_seen_request_index;
                 if events.is_empty() {
                     for item in &items {
@@ -5653,6 +5657,7 @@ impl ChatWidget<'_> {
                     self.current_request_index = self.last_seen_request_index;
                 }
                 self.request_redraw();
+                self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
                 tools::web_search_complete(self, ev.call_id, ev.query)
@@ -7434,16 +7439,76 @@ impl ChatWidget<'_> {
         );
     }
 
-    pub(crate) fn handle_notifications_command(&mut self) {
+    pub(crate) fn handle_notifications_command(&mut self, args: String) {
         use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
 
-        let mode = match &self.config.tui.notifications {
-            Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
-            Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
-        };
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            let mode = match &self.config.tui.notifications {
+                Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+                Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
+            };
 
-        let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
-        self.bottom_pane.show_notifications_settings(view);
+            let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+            self.bottom_pane.show_notifications_settings(view);
+            return;
+        }
+
+        let keyword = trimmed.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        match keyword.as_str() {
+            "status" => {
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(true) => {
+                        self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+                    }
+                    Notifications::Enabled(false) => {
+                        self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "🔔 TUI notifications use custom filters: [{}]",
+                            filters
+                        ));
+                    }
+                }
+            }
+            "on" | "off" => {
+                let enable = keyword == "on";
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(current) => {
+                        if *current == enable {
+                            self.push_background_tail(format!(
+                                "TUI notifications already {}.",
+                                if enable { "enabled" } else { "disabled" }
+                            ));
+                        } else {
+                            self.set_tui_notifications(enable);
+                        }
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
+                            filters
+                        ));
+                    }
+                }
+            }
+            _ => {
+                self.push_background_tail(
+                    "Usage: /notifications [status|on|off]".to_string(),
+                );
+            }
+        }
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -19397,7 +19462,7 @@ impl ChatWidget<'_> {
     }
 
     fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
-        if !self.tui_notifications_allow("agent-turn-complete") {
+        if !self.should_emit_tui_notification("agent-turn-complete") {
             return;
         }
 
@@ -19412,7 +19477,14 @@ impl ChatWidget<'_> {
         });
     }
 
-    fn tui_notifications_allow(&self, event: &str) -> bool {
+    fn should_emit_tui_notification(&self, event: &str) -> bool {
+        if self.replay_history_depth > 0 {
+            return false;
+        }
+        self.tui_notification_filter_allows(event)
+    }
+
+    fn tui_notification_filter_allows(&self, event: &str) -> bool {
         match &self.config.tui.notifications {
             Notifications::Enabled(enabled) => *enabled,
             Notifications::Custom(entries) => entries
