@@ -260,14 +260,23 @@ pub enum ReasoningEffortLevel {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasoningSection {
+    /// Optional heading rendered in bold at the top of the section.
     pub heading: Option<String>,
+    /// Single-line preview used for collapsed summaries; derived from the first
+    /// meaningful block (heading, bullet, paragraph, etc.).
+    pub summary: Option<Vec<InlineSpan>>,
+    /// Rich collection of blocks that fully describe the reasoning content.
     pub blocks: Vec<ReasoningBlock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReasoningBlock {
     Paragraph(Vec<InlineSpan>),
-    Bullet { indent: u8, spans: Vec<InlineSpan> },
+    Bullet {
+        indent: u8,
+        marker: BulletMarker,
+        spans: Vec<InlineSpan>,
+    },
     Code { language: Option<String>, content: String },
     Quote(Vec<InlineSpan>),
     Separator,
