@@ -23,6 +23,7 @@ use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
+use codex_core::config_types::Notifications;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
@@ -5828,9 +5829,7 @@ impl ChatWidget<'_> {
 
                 self.mark_needs_redraw();
             }
-            EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: _,
-            }) => {
+            EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 // Finalize any active streams
                 if self.stream.is_write_cycle_active() {
                     // Finalize both streams via streaming facade
@@ -5911,6 +5910,7 @@ impl ChatWidget<'_> {
                 self.stream_state.current_kind = None;
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
+                self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -7432,6 +7432,18 @@ impl ChatWidget<'_> {
             "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                 to_string(),
         );
+    }
+
+    pub(crate) fn handle_notifications_command(&mut self) {
+        use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
+
+        let mode = match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+            Notifications::Custom(command) => NotificationsMode::Custom { command: command.clone() },
+        };
+
+        let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+        self.bottom_pane.show_notifications_settings(view);
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -19348,6 +19360,80 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+    }
+
+    pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
+        let new_state = Notifications::Enabled(enabled);
+        self.config.tui.notifications = new_state.clone();
+        self.config.tui_notifications = new_state.clone();
+
+        match find_codex_home() {
+            Ok(home) => {
+                match codex_core::config::set_tui_notifications(&home, new_state) {
+                    Ok(()) => {
+                        let msg = format!(
+                            "✅ {} TUI notifications",
+                            if enabled { "Enabled" } else { "Disabled" }
+                        );
+                        self.push_background_tail(msg);
+                    }
+                    Err(err) => {
+                        let msg = format!(
+                            "⚠️ Failed to persist TUI notifications setting: {}",
+                            err
+                        );
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            Err(_) => {
+                let msg = format!(
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    if enabled { "Enabled" } else { "Disabled" }
+                );
+                self.push_background_tail(msg);
+            }
+        }
+    }
+
+    fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
+        if !matches!(self.config.tui.notifications, Notifications::Enabled(true)) {
+            return;
+        }
+
+        let snippet = last_agent_message
+            .as_deref()
+            .map(Self::notification_snippet)
+            .filter(|text| !text.is_empty());
+
+        self.app_event_tx.send(AppEvent::EmitTuiNotification {
+            title: "Code".to_string(),
+            body: snippet,
+        });
+    }
+
+    fn notification_snippet(input: &str) -> String {
+        let collapsed = input
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        const LIMIT: usize = 120;
+        if collapsed.chars().count() <= LIMIT {
+            return collapsed;
+        }
+
+        let mut truncated = String::new();
+        let mut count = 0usize;
+        for ch in collapsed.chars() {
+            if count >= LIMIT.saturating_sub(3) {
+                break;
+            }
+            truncated.push(ch);
+            count += 1;
+        }
+        truncated.push_str("...");
+        truncated
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {
