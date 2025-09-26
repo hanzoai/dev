@@ -13,10 +13,10 @@ const UNUSED_CELL: &str = "░░";
 const BAR_SLOTS: usize = 20;
 const BAR_FILLED: &str = "▰";
 const BAR_EMPTY: &str = "▱";
+const CHART_LINE_PREFIX: &str = "    ";
 struct IndentSpec {
     header: &'static str,
     label_extra: &'static str,
-    chart_extra: &'static str,
     label_target_width: usize,
     label_gap: usize,
 }
@@ -24,7 +24,6 @@ struct IndentSpec {
 const INDENTS: IndentSpec = IndentSpec {
     header: "",
     label_extra: "   ",
-    chart_extra: "  ",
     label_target_width: 7,
     label_gap: 2,
 };
@@ -38,11 +37,15 @@ fn label_indent() -> String {
 }
 
 fn chart_indent() -> String {
-    format!("{}{}", INDENTS.header, INDENTS.chart_extra)
+    CHART_LINE_PREFIX.to_string()
 }
 
 fn chart_indent_width() -> usize {
-    INDENTS.header.len() + INDENTS.chart_extra.len()
+    CHART_LINE_PREFIX.len()
+}
+
+fn content_column_width() -> usize {
+    CHART_LINE_PREFIX.len()
 }
 
 fn label_text(text: &str) -> String {
@@ -208,7 +211,6 @@ fn build_summary_lines(
 
     lines.push("".into());
     lines.push(section_header("Chart"));
-    lines.push("".into());
     lines
 }
 
@@ -951,22 +953,27 @@ impl GridLayout {
     fn render(&self, state: GridState) -> Vec<Line<'static>> {
         let counts = self.cell_counts(state);
         let mut lines = Vec::new();
-        let mut cell_index = 0isize;
+        let total_cells = (self.size * self.size) as isize;
         let indent = chart_indent();
-        for _ in 0..self.size {
+        let desired_width = content_column_width();
+        for row in 0..self.size {
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::raw(indent.clone()));
+            let padding = desired_width.saturating_sub(indent.len());
+            spans.push(Span::raw(" ".repeat(padding)));
 
             for col in 0..self.size {
                 if col > 0 {
                     spans.push(" ".into());
                 }
-                let span = if cell_index < counts.dark_cells {
+                let linear_index = (self.size * row) + col;
+                let slot = total_cells - 1 - linear_index as isize;
+                let span = if slot < counts.dark_cells {
                     Span::styled(
                         WEEKLY_CELL.to_string(),
                         Style::default().fg(colors::text()),
                     )
-                } else if cell_index < counts.dark_cells + counts.green_cells {
+                } else if slot < counts.dark_cells + counts.green_cells {
                     Span::styled(
                         HOURLY_CELL.to_string(),
                         Style::default().fg(colors::primary()),
@@ -978,7 +985,6 @@ impl GridLayout {
                     )
                 };
                 spans.push(span);
-                cell_index += 1;
             }
             lines.push(Line::from(spans));
         }

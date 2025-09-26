@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::app_event_sender::AppEventSender;
+use crate::history::state::{HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -98,6 +99,63 @@ fn final_answer_without_newline_is_flushed_immediately() {
         found_final,
         "expected final answer text to be flushed to history"
     );
+}
+
+#[test]
+fn assistant_history_state_tracks_stream_and_final() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Hello world\n".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let stream_records: Vec<_> = chat
+        .history_state()
+        .records
+        .iter()
+        .filter_map(|rec| match rec {
+            HistoryRecord::AssistantStream(state) => Some(state.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stream_records.len(), 1, "expected single assistant stream state");
+    let stream_state = &stream_records[0];
+    assert_eq!(stream_state.stream_id, "turn-1");
+    assert!(stream_state.in_progress);
+    assert_eq!(stream_state.deltas.len(), 1);
+    assert_eq!(stream_state.deltas[0].delta, "Hello world\n");
+
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello world\n".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let mut has_stream = false;
+    let mut has_final = false;
+    for record in &chat.history_state().records {
+        match record {
+            HistoryRecord::AssistantStream(state) if state.stream_id == "turn-1" => {
+                has_stream = true;
+            }
+            HistoryRecord::AssistantMessage(state)
+                if state.stream_id.as_deref() == Some("turn-1")
+                    && state.markdown.contains("Hello world") =>
+            {
+                has_final = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(has_final, "expected finalized assistant message state");
+    assert!(!has_stream, "stream state should be removed after finalization");
 }
 
 fn cell_texts(chat: &ChatWidget<'_>) -> Vec<String> {
@@ -229,13 +287,48 @@ fn limits_overlay_renders_snapshot() {
     assert!(joined.contains(" Total: "));
     assert!(joined.contains("Chart"));
     assert!(joined.contains("7 Day History"));
+    assert!(joined.contains("6 Month History"));
     assert!(!joined.contains("/limits"));
     assert!(!joined.contains("Within current limits"));
+
+    let tokens_line = strings
+        .iter()
+        .find(|line| line.contains("cached"))
+        .expect("expected cached tokens line");
+    assert!(
+        tokens_line.starts_with("             "),
+        "expected tokens line to begin with 13 spaces: {tokens_line}"
+    );
+
+    let chart_row = strings
+        .iter()
+        .find(|line| line.contains("▇▇") && line.contains("▓▓"))
+        .expect("expected chart grid row");
+    assert!(
+        chart_row.starts_with("    "),
+        "expected chart grid row to start with four spaces: {chart_row}"
+    );
+
+    let legend_line = strings
+        .iter()
+        .find(|line| line.contains("weekly usage"))
+        .expect("expected legend line");
+    assert!(
+        legend_line.starts_with("    "),
+        "expected legend line to start with four spaces: {legend_line}"
+    );
 
     let header_idx = strings
         .iter()
         .position(|line| line.contains("7 Day History"))
         .expect("expected usage header");
+    assert!(
+        strings
+            .get(header_idx.saturating_sub(1))
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false),
+        "expected blank spacer before 7 Day History"
+    );
     let latest_label = Local::now().format("%b %d").to_string();
     let yesterday_label = (Local::now().date_naive() - ChronoDuration::days(1))
         .format("%b %d")
@@ -246,8 +339,36 @@ fn limits_overlay_renders_snapshot() {
     let second_line = strings
         .get(header_idx + 2)
         .expect("expected second usage line");
+    assert!(
+        latest_line.starts_with("    "),
+        "expected daily usage line to start with four spaces: {latest_line}"
+    );
     assert!(latest_line.contains(&latest_label));
     assert!(second_line.contains(&yesterday_label));
+
+    let month_header_idx = strings
+        .iter()
+        .position(|line| line.contains("6 Month History"))
+        .expect("expected monthly usage header");
+    assert!(
+        strings
+            .get(month_header_idx.saturating_sub(1))
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false),
+        "expected blank spacer before 6 Month History"
+    );
+    let current_month_label = Local::now().format("%b %Y").to_string();
+    let month_line = strings
+        .get(month_header_idx + 1)
+        .expect("expected latest monthly usage line");
+    assert!(
+        month_line.starts_with("    "),
+        "expected monthly usage line to start with four spaces: {month_line}"
+    );
+    assert!(
+        month_line.contains(&current_month_label),
+        "expected month label to contain {current_month_label}, got {month_line}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -293,6 +414,7 @@ fn make_chatwidget_manual() -> (
         app_event_tx,
         codex_op_tx: op_tx,
         bottom_pane: bottom,
+        history_state: HistoryState::new(),
         active_exec_cell: None,
         config: cfg.clone(),
         latest_upgrade_version: None,
@@ -354,6 +476,21 @@ fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
         s.push('\n');
     }
     s
+}
+
+fn flush_stream_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::InsertHistory(lines) => chat.insert_history_lines(lines),
+            AppEvent::InsertHistoryWithKind { id, kind, lines } => {
+                chat.insert_history_lines_with_kind(kind, id, lines);
+            }
+            AppEvent::InsertFinalAnswer { id, lines, source } => {
+                chat.insert_final_answer_with_id(id, lines, source);
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

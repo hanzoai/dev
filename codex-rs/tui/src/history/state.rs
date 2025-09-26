@@ -317,20 +317,33 @@ pub struct ExecWaitNote {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssistantStreamDelta {
+    pub delta: String,
+    pub sequence: Option<u64>,
+    pub received_at: SystemTime,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssistantStreamState {
     pub id: HistoryId,
     pub stream_id: String,
-    pub markdown: String,
+    pub preview_markdown: String,
+    pub deltas: Vec<AssistantStreamDelta>,
     pub citations: Vec<String>,
+    pub metadata: Option<MessageMetadata>,
     pub in_progress: bool,
+    pub last_updated_at: SystemTime,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssistantMessageState {
     pub id: HistoryId,
+    pub stream_id: Option<String>,
     pub markdown: String,
     pub citations: Vec<String>,
     pub metadata: Option<MessageMetadata>,
+    pub token_usage: Option<TokenUsage>,
+    pub created_at: SystemTime,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -459,6 +472,98 @@ impl HistoryState {
         let id = self.next_history_id();
         self.records.push(record.with_id(id));
         id
+    }
+
+    pub fn upsert_assistant_stream_state(
+        &mut self,
+        stream_id: &str,
+        preview_markdown: String,
+        delta: Option<AssistantStreamDelta>,
+        metadata: Option<&MessageMetadata>,
+    ) -> HistoryId {
+        let now = SystemTime::now();
+        if let Some(idx) = self
+            .records
+            .iter()
+            .position(|record| matches!(record,
+                HistoryRecord::AssistantStream(state) if state.stream_id == stream_id))
+        {
+            if let Some(HistoryRecord::AssistantStream(state)) = self.records.get_mut(idx) {
+                if let Some(delta) = delta {
+                    state.deltas.push(delta);
+                }
+                state.preview_markdown = preview_markdown;
+                if let Some(meta) = metadata {
+                    state.citations = meta.citations.clone();
+                    state.metadata = Some(meta.clone());
+                }
+                state.in_progress = true;
+                state.last_updated_at = now;
+                return state.id;
+            }
+        }
+
+        let mut deltas = Vec::new();
+        if let Some(delta) = delta {
+            deltas.push(delta);
+        }
+        let citations = metadata
+            .map(|meta| meta.citations.clone())
+            .unwrap_or_default();
+        let metadata = metadata.cloned();
+        let state = AssistantStreamState {
+            id: HistoryId(0),
+            stream_id: stream_id.to_string(),
+            preview_markdown,
+            deltas,
+            citations,
+            metadata,
+            in_progress: true,
+            last_updated_at: now,
+        };
+        self.push(HistoryRecord::AssistantStream(state))
+    }
+
+    pub fn finalize_assistant_stream_state(
+        &mut self,
+        stream_id: Option<&str>,
+        markdown: String,
+        metadata: Option<&MessageMetadata>,
+        token_usage: Option<&TokenUsage>,
+    ) -> HistoryId {
+        let mut carried_citations: Vec<String> = Vec::new();
+        let mut carried_metadata: Option<MessageMetadata> = None;
+        if let Some(stream_id) = stream_id {
+            if let Some(idx) = self.records.iter().position(|record| match record {
+                HistoryRecord::AssistantStream(state) => state.stream_id == stream_id,
+                _ => false,
+            }) {
+                if let Some(HistoryRecord::AssistantStream(state)) = self.remove(idx) {
+                    if !state.citations.is_empty() {
+                        carried_citations = state.citations;
+                    }
+                    if carried_metadata.is_none() {
+                        carried_metadata = state.metadata;
+                    }
+                }
+            }
+        }
+
+        let citations = metadata
+            .map(|meta| meta.citations.clone())
+            .unwrap_or(carried_citations);
+        let metadata = metadata.cloned().or(carried_metadata);
+
+        let state = AssistantMessageState {
+            id: HistoryId(0),
+            stream_id: stream_id.map(|s| s.to_string()),
+            markdown,
+            citations,
+            metadata,
+            token_usage: token_usage.cloned(),
+            created_at: SystemTime::now(),
+        };
+        self.push(HistoryRecord::AssistantMessage(state))
     }
 
     pub fn insert(&mut self, index: usize, record: HistoryRecord) -> HistoryId {
