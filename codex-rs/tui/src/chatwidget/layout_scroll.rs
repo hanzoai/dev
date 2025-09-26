@@ -152,22 +152,8 @@ pub(super) fn toggle_browser_hud(chat: &mut ChatWidget<'_>) {
     chat.layout.browser_hud_expanded = new_state;
     if new_state {
         chat.layout.agents_hud_expanded = false;
-        chat.layout.pro_hud_expanded = false;
     }
     chat.height_manager.borrow_mut().record_event(HeightEvent::HudToggle(true));
-    chat.request_redraw();
-}
-
-pub(super) fn toggle_pro_hud(chat: &mut ChatWidget<'_>) {
-    let new_state = !chat.layout.pro_hud_expanded;
-    chat.layout.pro_hud_expanded = new_state;
-    if new_state {
-        chat.layout.browser_hud_expanded = false;
-        chat.layout.agents_hud_expanded = false;
-    }
-    chat.height_manager
-        .borrow_mut()
-        .record_event(HeightEvent::HudToggle(true));
     chat.request_redraw();
 }
 
@@ -178,12 +164,11 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         .map(|lock| lock.is_some())
         .unwrap_or(false);
     let has_active_agents = !chat.active_agents.is_empty() || chat.agents_ready_to_start;
-    let has_pro_panel = chat.pro_surface_present();
     // In standard terminal mode, suppress HUD entirely.
     let hud_present = if chat.standard_terminal_mode {
         false
     } else {
-        has_browser_screenshot || has_active_agents || has_pro_panel
+        has_browser_screenshot || has_active_agents
     };
 
     let bottom_desired = chat.bottom_pane.desired_height(area.width);
@@ -198,8 +183,7 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
 
     let collapsed_unit: u16 = 3;
     let present_count: u16 = (has_active_agents as u16)
-        + (has_browser_screenshot as u16)
-        + (has_pro_panel as u16);
+        + (has_browser_screenshot as u16);
     let hud_target: Option<u16> = if !hud_present || present_count == 0 {
         None
     } else {
@@ -210,8 +194,7 @@ pub(super) fn layout_areas(chat: &ChatWidget<'_>, area: Rect) -> Vec<Rect> {
         let mut expanded = if thirty < 25 { 25.min(sixty) } else { thirty };
         expanded = expanded.max(collapsed_unit.saturating_add(2));
         let any_expanded = (chat.layout.browser_hud_expanded && has_browser_screenshot)
-            || (chat.layout.agents_hud_expanded && has_active_agents)
-            || (chat.layout.pro_hud_expanded && has_pro_panel);
+            || (chat.layout.agents_hud_expanded && has_active_agents);
         let target = if any_expanded {
             base_collapsed.saturating_add(expanded)
         } else {

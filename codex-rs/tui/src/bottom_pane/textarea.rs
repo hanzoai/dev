@@ -244,6 +244,10 @@ impl TextArea {
             }
             KeyEvent {
                 code: KeyCode::Char(c),
+                ..
+            } if matches!(c, '\n' | '\r') => self.insert_str("\n"),
+            KeyEvent {
+                code: KeyCode::Char(c),
                 // Insert plain characters (and Shift-modified). Do NOT insert when ALT is held,
                 // because many terminals map Option/Meta combos to ALT+<char> (e.g. ESC f/ESC b)
                 // for word navigation. Those are handled explicitly below.
@@ -317,6 +321,13 @@ impl TextArea {
             KeyEvent {
                 code: KeyCode::Char('z'),
                 modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                self.undo();
+            }
+            KeyEvent {
+                code: KeyCode::Char('z'),
+                modifiers: KeyModifiers::SUPER,
                 ..
             } => {
                 self.undo();
@@ -1273,6 +1284,17 @@ mod tests {
         t.input(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
         assert_eq!(t.text(), "ello");
         assert_eq!(t.cursor(), 0);
+    }
+
+    #[test]
+    fn alt_enter_inserts_newline() {
+        let mut t = TextArea::new();
+        t.input(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
+        assert_eq!(t.text(), "\n");
+
+        let mut t = TextArea::new();
+        t.input(KeyEvent::new(KeyCode::Char('\n'), KeyModifiers::ALT));
+        assert_eq!(t.text(), "\n");
     }
 
     #[test]
