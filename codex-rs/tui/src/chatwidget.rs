@@ -212,6 +212,7 @@ use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
 use crate::history::state::{
+    AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
     HistoryId,
@@ -7408,8 +7409,17 @@ impl ChatWidget<'_> {
             let streaming_preview = history_cell::new_streaming_content(state, &self.config);
             self.history_push(streaming_preview);
 
+            let assistant_state = AssistantMessageState {
+                id: HistoryId::ZERO,
+                stream_id: None,
+                markdown: (*assistant_body).to_string(),
+                citations: Vec::new(),
+                metadata: None,
+                token_usage: None,
+                created_at: SystemTime::now(),
+            };
             let assistant_cell =
-                history_cell::AssistantMarkdownCell::new((*assistant_body).to_string(), &self.config);
+                history_cell::AssistantMarkdownCell::from_state(assistant_state, &self.config);
             self.history_push(assistant_cell);
 
             for (command_tokens, stdout) in execs {
@@ -10460,7 +10470,8 @@ impl ChatWidget<'_> {
                 .downcast_mut::<history_cell::AssistantMarkdownCell>()
             {
                 // Fully rebuild from raw to apply new theme + syntax highlight
-                assist.rebuild(&self.config);
+                let current = assist.state().clone();
+                assist.update_state(current, &self.config);
             }
         }
 
@@ -11074,13 +11085,44 @@ impl ChatWidget<'_> {
             .upsert_assistant_stream_state(stream_id, preview, delta, None);
     }
 
-    fn finalize_answer_stream_state(&mut self, stream_id: Option<&str>, source: &str) {
-        self.history_state.finalize_assistant_stream_state(
+    fn finalize_answer_stream_state(
+        &mut self,
+        stream_id: Option<&str>,
+        source: &str,
+    ) -> AssistantMessageState {
+        let mut metadata = stream_id.and_then(|sid| {
+            self.history_state
+                .assistant_stream_state(sid)
+                .and_then(|state| state.metadata.clone())
+        });
+
+        let should_attach_token_usage = self.last_token_usage.total_tokens > 0;
+        if should_attach_token_usage {
+            if let Some(meta) = metadata.as_mut() {
+                if meta.token_usage.is_none() {
+                    meta.token_usage = Some(self.last_token_usage.clone());
+                }
+            } else {
+                metadata = Some(MessageMetadata {
+                    citations: Vec::new(),
+                    token_usage: Some(self.last_token_usage.clone()),
+                });
+            }
+        }
+
+        let token_usage = if should_attach_token_usage {
+            Some(self.last_token_usage.clone())
+        } else {
+            None
+        };
+
+        let state = self.history_state.finalize_assistant_stream_state(
             stream_id,
             source.to_string(),
-            None,
-            None,
+            metadata.as_ref(),
+            token_usage.as_ref(),
         );
+        state
     }
 
     #[cfg(test)]
@@ -11126,7 +11168,7 @@ impl ChatWidget<'_> {
                 self.history_remove_at(idx);
             }
             self.last_assistant_message = Some(final_source.clone());
-            self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let _ = self.finalize_answer_stream_state(id.as_deref(), &final_source);
             return;
         }
         // Debug: list last few history cell kinds so we can see what's present
@@ -11186,14 +11228,14 @@ impl ChatWidget<'_> {
                 if let Some(existing_idx) = self.history_cells.iter().rposition(|c| {
                     c.as_any()
                         .downcast_ref::<history_cell::AssistantMarkdownCell>()
-                        .map(|amc| amc.id.as_ref() == Some(want))
+                        .map(|amc| amc.stream_id() == Some(want.as_str()))
                         .unwrap_or(false)
                 }) {
                     if let Some(amc) = self.history_cells[existing_idx]
                         .as_any()
                         .downcast_ref::<history_cell::AssistantMarkdownCell>()
                     {
-                        let prev = Self::normalize_text(&amc.raw);
+                        let prev = Self::normalize_text(amc.markdown());
                         let newn = Self::normalize_text(&source);
                         if prev == newn {
                             tracing::debug!(
@@ -11246,18 +11288,14 @@ impl ChatWidget<'_> {
                 "final-answer: replacing StreamingContentCell at idx={} by id match",
                 idx
             );
-            // Replace the matching streaming cell in-place, preserving the id
-            let cell =
-                history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
+            let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
             self.history_replace_at(idx, Box::new(cell));
-            // Mark this Answer stream id as closed for the rest of the turn so
-            // any late AgentMessageDelta for the same id is ignored.
             if let Some(ref want) = id {
                 self.stream_state
                     .closed_answer_ids
                     .insert(StreamId(want.clone()));
             }
-            self.finalize_answer_stream_state(id.as_deref(), &final_source);
             self.autoscroll_if_near_bottom();
             return;
         }
@@ -11271,7 +11309,7 @@ impl ChatWidget<'_> {
                     .as_any()
                     .downcast_ref::<history_cell::AssistantMarkdownCell>()
                 {
-                    amc.id.as_ref() == Some(want)
+                    amc.stream_id() == Some(want.as_str())
                 } else {
                     false
                 }
@@ -11280,18 +11318,13 @@ impl ChatWidget<'_> {
                     "final-answer: replacing existing AssistantMarkdownCell at idx={} by id match",
                     idx
                 );
-                let cell = history_cell::AssistantMarkdownCell::new_with_id(
-                    source,
-                    id.clone(),
-                    &self.config,
-                );
+                let state =
+                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
                 self.history_replace_at(idx, Box::new(cell));
-                if let Some(ref want) = id {
-                    self.stream_state
-                        .closed_answer_ids
-                        .insert(StreamId(want.clone()));
-                }
-                self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                self.stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()));
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -11314,7 +11347,7 @@ impl ChatWidget<'_> {
                 .as_any()
                 .downcast_ref::<history_cell::AssistantMarkdownCell>()
                 .map(|amc| {
-                    let prev = Self::normalize_text(&amc.raw);
+                    let prev = Self::normalize_text(amc.markdown());
                     let newn = Self::normalize_text(&source);
                     let identical = prev == newn;
                     let is_superset = !identical && newn.contains(&prev);
@@ -11332,13 +11365,10 @@ impl ChatWidget<'_> {
                 tracing::debug!(
                     "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/superset"
                 );
-                let cell = history_cell::AssistantMarkdownCell::new_with_id(
-                    source,
-                    id.clone(),
-                    &self.config,
-                );
+                let state =
+                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
                 self.history_replace_at(idx, Box::new(cell));
-                self.finalize_answer_stream_state(id.as_deref(), &final_source);
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -11369,15 +11399,14 @@ impl ChatWidget<'_> {
             id,
             Self::debug_fmt_order_key(key)
         );
-        let cell =
-            history_cell::AssistantMarkdownCell::new_with_id(source, id.clone(), &self.config);
+        let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+        let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
         let _ = self.history_insert_with_key_global(Box::new(cell), key);
         if let Some(ref want) = id {
             self.stream_state
                 .closed_answer_ids
                 .insert(StreamId(want.clone()));
         }
-        self.finalize_answer_stream_state(id.as_deref(), &final_source);
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
@@ -14728,7 +14757,16 @@ impl ChatWidget<'_> {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        history_cell::AssistantMarkdownCell::new(markdown, &self.config)
+        let state = AssistantMessageState {
+            id: HistoryId::ZERO,
+            stream_id: None,
+            markdown,
+            citations: Vec::new(),
+            metadata: None,
+            token_usage: None,
+            created_at: SystemTime::now(),
+        };
+        history_cell::AssistantMarkdownCell::from_state(state, &self.config)
     }
 
     /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,

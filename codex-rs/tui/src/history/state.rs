@@ -539,7 +539,7 @@ impl HistoryState {
         markdown: String,
         metadata: Option<&MessageMetadata>,
         token_usage: Option<&TokenUsage>,
-    ) -> HistoryId {
+    ) -> AssistantMessageState {
         let mut carried_citations: Vec<String> = Vec::new();
         let mut carried_metadata: Option<MessageMetadata> = None;
         if let Some(stream_id) = stream_id {
@@ -562,17 +562,24 @@ impl HistoryState {
             .map(|meta| meta.citations.clone())
             .unwrap_or(carried_citations);
         let metadata = metadata.cloned().or(carried_metadata);
+        let token_usage = token_usage
+            .cloned()
+            .or_else(|| metadata.as_ref().and_then(|meta| meta.token_usage.clone()));
 
-        let state = AssistantMessageState {
-            id: HistoryId(0),
+        let mut state = AssistantMessageState {
+            id: HistoryId::ZERO,
             stream_id: stream_id.map(|s| s.to_string()),
             markdown,
             citations,
             metadata,
-            token_usage: token_usage.cloned(),
+            token_usage,
             created_at: SystemTime::now(),
         };
-        self.push(HistoryRecord::AssistantMessage(state))
+        let id = self.next_history_id();
+        state.id = id;
+        self.records
+            .push(HistoryRecord::AssistantMessage(state.clone()));
+        state
     }
 
     pub fn assistant_stream_state(&self, stream_id: &str) -> Option<&AssistantStreamState> {
