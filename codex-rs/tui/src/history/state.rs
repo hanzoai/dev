@@ -393,22 +393,45 @@ pub struct ImageRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExploreRecord {
     pub id: HistoryId,
-    pub title: String,
     pub entries: Vec<ExploreEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExploreEntry {
-    pub label: String,
+    pub action: ExecAction,
+    pub summary: ExploreSummary,
     pub status: ExploreEntryStatus,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExploreSummary {
+    Search {
+        query: Option<String>,
+        path: Option<String>,
+    },
+    List {
+        path: Option<String>,
+    },
+    Read {
+        display_path: String,
+        annotation: Option<String>,
+        range: Option<(u32, u32)>,
+    },
+    Command {
+        display: String,
+        annotation: Option<String>,
+    },
+    Fallback {
+        text: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExploreEntryStatus {
-    Pending,
     Running,
     Success,
-    Failed,
+    NotFound,
+    Error { exit_code: Option<i32> },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
