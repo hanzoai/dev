@@ -176,6 +176,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::history::state::{AssistantStreamDelta, HistoryState};
 use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
@@ -366,6 +367,7 @@ pub(crate) struct ChatWidget<'a> {
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
     history_render: HistoryRenderState,
+    history_state: HistoryState,
     config: Config,
     latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
@@ -2632,6 +2634,7 @@ impl ChatWidget<'_> {
             agents_terminal: AgentsTerminalState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
+            history_state: HistoryState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2863,6 +2866,7 @@ impl ChatWidget<'_> {
             agents_terminal: AgentsTerminalState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
+            history_state: HistoryState::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -10467,6 +10471,9 @@ impl ChatWidget<'_> {
                 );
                 // Any incoming Answer means reasoning is no longer bottom-most
                 self.clear_reasoning_in_progress();
+                if let Some(ref want) = id {
+                    self.ensure_answer_stream_state(want);
+                }
                 // Keep a single StreamingContentCell and append to it
                 if let Some(last) = self.history_cells.last_mut() {
                     if let Some(stream_cell) = last
@@ -10642,6 +10649,48 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
+    fn ensure_answer_stream_state(&mut self, stream_id: &str) {
+        let preview = self
+            .stream
+            .preview_source_for_kind(StreamKind::Answer)
+            .unwrap_or_default();
+        self.history_state
+            .upsert_assistant_stream_state(stream_id, preview, None, None);
+    }
+
+    fn track_answer_stream_delta(&mut self, stream_id: &str, delta: &str, seq: Option<u64>) {
+        let preview = self
+            .stream
+            .preview_source_for_kind(StreamKind::Answer)
+            .unwrap_or_default();
+        let delta = if delta.is_empty() {
+            None
+        } else {
+            Some(AssistantStreamDelta {
+                delta: delta.to_string(),
+                sequence: seq,
+                received_at: SystemTime::now(),
+            })
+        };
+        self
+            .history_state
+            .upsert_assistant_stream_state(stream_id, preview, delta, None);
+    }
+
+    fn finalize_answer_stream_state(&mut self, stream_id: Option<&str>, source: &str) {
+        self.history_state.finalize_assistant_stream_state(
+            stream_id,
+            source.to_string(),
+            None,
+            None,
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn history_state(&self) -> &HistoryState {
+        &self.history_state
+    }
+
     /// Replace the in-progress streaming assistant cell with a final markdown cell that
     /// stores raw markdown for future re-rendering.
     pub(crate) fn insert_final_answer_with_id(
@@ -10657,6 +10706,7 @@ impl ChatWidget<'_> {
             lines.len()
         );
         tracing::info!("[order] final Answer id={:?}", id);
+        let final_source = source.clone();
         if self.is_review_flow_active() {
             if let Some(ref want) = id {
                 if let Some(idx) = self.history_cells.iter().rposition(|c| {
@@ -10678,7 +10728,8 @@ impl ChatWidget<'_> {
             }) {
                 self.history_remove_at(idx);
             }
-            self.last_assistant_message = Some(source);
+            self.last_assistant_message = Some(final_source.clone());
+            self.finalize_answer_stream_state(id.as_deref(), &final_source);
             return;
         }
         // Debug: list last few history cell kinds so we can see what's present
@@ -10809,6 +10860,7 @@ impl ChatWidget<'_> {
                     .closed_answer_ids
                     .insert(StreamId(want.clone()));
             }
+            self.finalize_answer_stream_state(id.as_deref(), &final_source);
             self.autoscroll_if_near_bottom();
             return;
         }
@@ -10842,6 +10894,7 @@ impl ChatWidget<'_> {
                         .closed_answer_ids
                         .insert(StreamId(want.clone()));
                 }
+                self.finalize_answer_stream_state(id.as_deref(), &final_source);
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -10888,6 +10941,7 @@ impl ChatWidget<'_> {
                     &self.config,
                 );
                 self.history_replace_at(idx, Box::new(cell));
+                self.finalize_answer_stream_state(id.as_deref(), &final_source);
                 self.autoscroll_if_near_bottom();
                 return;
             }
@@ -10926,6 +10980,7 @@ impl ChatWidget<'_> {
                 .closed_answer_ids
                 .insert(StreamId(want.clone()));
         }
+        self.finalize_answer_stream_state(id.as_deref(), &final_source);
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
