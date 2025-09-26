@@ -64,6 +64,7 @@ pub enum SlashCommand {
     Limits,
     #[strum(serialize = "update", serialize = "upgrade")]
     Update,
+    Notifications,
     Theme,
     Model,
     Reasoning,
@@ -113,6 +114,7 @@ impl SlashCommand {
             SlashCommand::Status => "show current session configuration and token usage",
             SlashCommand::Limits => "visualize weekly and hourly rate limits",
             SlashCommand::Update => "check for updates and optionally upgrade",
+            SlashCommand::Notifications => "toggle TUI notifications (status/on/off)",
             SlashCommand::Theme => "switch between color themes",
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Model => "choose model & reasoning effort",
