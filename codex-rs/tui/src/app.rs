@@ -1710,20 +1710,6 @@ impl App<'_> {
                                 widget.handle_agents_command(command_args);
                             }
                         }
-                        SlashCommand::Pro => {
-                            if let AppState::Chat { widget } = &mut self.app_state {
-                                match widget.parse_pro_action(&command_args) {
-                                    Ok(action) => {
-                                        let _ = self
-                                            .app_event_tx
-                                            .send(AppEvent::CodexOp(Op::Pro { action }));
-                                    }
-                                    Err(err) => {
-                                        widget.history_push(history_cell::new_error_event(err));
-                                    }
-                                }
-                            }
-                        }
                         SlashCommand::Github => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_github_command(command_args);

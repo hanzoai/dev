@@ -27,7 +27,6 @@ use codex_core::protocol::FileChange;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
-use codex_core::protocol::ProAction;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use crossterm::event::KeyCode;
@@ -890,27 +889,6 @@ fn undo_options_view_shows_toggles() {
         lower.contains("restore conversation"),
         "expected conversation toggle\n{plain}"
     );
-}
-
-#[test]
-fn parse_pro_action_supports_core_variants() {
-    let (chat, _rx, _op_rx) = make_chatwidget_manual();
-
-    assert_eq!(chat.parse_pro_action(""), Ok(ProAction::Status));
-    assert_eq!(chat.parse_pro_action("toggle"), Ok(ProAction::Toggle));
-    assert_eq!(chat.parse_pro_action("on"), Ok(ProAction::On));
-    assert_eq!(chat.parse_pro_action("off"), Ok(ProAction::Off));
-    assert_eq!(chat.parse_pro_action("status"), Ok(ProAction::Status));
-    assert_eq!(chat.parse_pro_action("auto"), Ok(ProAction::AutoToggle));
-    assert_eq!(chat.parse_pro_action("auto on"), Ok(ProAction::AutoOn));
-    assert_eq!(chat.parse_pro_action("auto off"), Ok(ProAction::AutoOff));
-    assert_eq!(
-        chat.parse_pro_action("auto status"),
-        Ok(ProAction::AutoStatus)
-    );
-
-    let err = chat.parse_pro_action("auto maybe").unwrap_err();
-    assert!(err.contains("Unknown /pro auto option"));
 }
 
 #[test]

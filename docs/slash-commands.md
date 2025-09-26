@@ -61,7 +61,6 @@ Notes
 
 - `/perf (on|off|show|reset)`: performance tracing controls.
 - `/agents`: list agents (running and availability).
-- `/pro [on|off|toggle|status|auto (on|off|toggle|status)]`: manage Pro mode,
   including autonomous follow-ups and observer status (available in dev,
   dev-fast, and pref builds).
 
