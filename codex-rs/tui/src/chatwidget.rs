@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::io;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -555,6 +556,9 @@ pub(crate) struct ChatWidget<'a> {
     ghost_snapshots: Vec<GhostSnapshot>,
     ghost_snapshots_disabled: bool,
     ghost_snapshots_disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    ghost_snapshot_queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active_ghost_snapshot: Option<(u64, GhostSnapshotRequest)>,
+    next_ghost_snapshot_id: u64,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -665,6 +669,23 @@ impl GhostSnapshot {
 
     fn age_from(&self, now: DateTime<Local>) -> Option<std::time::Duration> {
         now.signed_duration_since(self.captured_at).to_std().ok()
+    }
+}
+
+#[derive(Clone)]
+struct GhostSnapshotRequest {
+    summary: Option<String>,
+    conversation: ConversationSnapshot,
+    started_at: Instant,
+}
+
+impl GhostSnapshotRequest {
+    fn new(summary: Option<String>, conversation: ConversationSnapshot) -> Self {
+        Self {
+            summary,
+            conversation,
+            started_at: Instant::now(),
+        }
     }
 }
 
@@ -2721,6 +2742,9 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2952,6 +2976,9 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -4937,17 +4964,104 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let conversation = self.current_conversation_snapshot();
-        let options = CreateGhostCommitOptions::new(&self.config.cwd);
-        match create_ghost_commit(&options) {
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        self.enqueue_ghost_snapshot(request);
+    }
+
+    fn capture_ghost_snapshot_blocking(&mut self, summary: Option<String>) -> Option<GhostSnapshot> {
+        if self.ghost_snapshots_disabled {
+            return None;
+        }
+
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        let repo_path = self.config.cwd.clone();
+        let started_at = request.started_at;
+        let result = create_ghost_commit(&CreateGhostCommitOptions::new(repo_path.as_path()));
+        let elapsed = started_at.elapsed();
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        snapshot
+    }
+
+    fn enqueue_ghost_snapshot(&mut self, request: GhostSnapshotRequest) {
+        let job_id = self.next_ghost_snapshot_id;
+        self.next_ghost_snapshot_id = self.next_ghost_snapshot_id.wrapping_add(1);
+        self.ghost_snapshot_queue.push_back((job_id, request));
+        self.spawn_next_ghost_snapshot();
+    }
+
+    fn spawn_next_ghost_snapshot(&mut self) {
+        if self.ghost_snapshots_disabled {
+            self.ghost_snapshot_queue.clear();
+            return;
+        }
+        if self.active_ghost_snapshot.is_some() {
+            return;
+        }
+        let Some((job_id, request)) = self.ghost_snapshot_queue.pop_front() else {
+            return;
+        };
+
+        let repo_path = self.config.cwd.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        let started_at = request.started_at;
+        self.active_ghost_snapshot = Some((job_id, request));
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let options = CreateGhostCommitOptions::new(repo_path.as_path());
+                create_ghost_commit(&options)
+            })
+            .await;
+            let elapsed = started_at.elapsed();
+            let event = match result {
+                Ok(Ok(commit)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Ok(commit),
+                    elapsed,
+                },
+                Ok(Err(err)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Err(err),
+                    elapsed,
+                },
+                Err(join_err) => {
+                    let err = GitToolingError::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("ghost snapshot task failed: {join_err}"),
+                    ));
+                    AppEvent::GhostSnapshotFinished {
+                        job_id,
+                        result: Err(err),
+                        elapsed,
+                    }
+                }
+            };
+            app_event_tx.send(event);
+        });
+    }
+
+    fn finalize_ghost_snapshot(
+        &mut self,
+        request: GhostSnapshotRequest,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) -> Option<GhostSnapshot> {
+        match result {
             Ok(commit) => {
                 self.ghost_snapshots_disabled = false;
                 self.ghost_snapshots_disabled_reason = None;
-                self.ghost_snapshots
-                    .push(GhostSnapshot::new(commit, summary, conversation));
+                let snapshot = GhostSnapshot::new(commit, request.summary, request.conversation);
+                self.ghost_snapshots.push(snapshot.clone());
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
                 }
+                if elapsed >= Duration::from_secs(2) {
+                    self.push_background_tail(format!(
+                        "Workspace snapshot captured in {}.",
+                        format_duration(elapsed)
+                    ));
+                }
+                Some(snapshot)
             }
             Err(err) => {
                 self.ghost_snapshots_disabled = true;
@@ -4972,8 +5086,33 @@ impl ChatWidget<'_> {
                     self.push_background_tail(hint);
                 }
                 tracing::warn!("failed to create ghost snapshot: {err}");
+                self.ghost_snapshot_queue.clear();
+                None
             }
         }
+    }
+
+    pub(crate) fn handle_ghost_snapshot_finished(
+        &mut self,
+        job_id: u64,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) {
+        let Some((active_id, request)) = self.active_ghost_snapshot.take() else {
+            tracing::warn!("ghost snapshot finished without active job (id={job_id})");
+            return;
+        };
+
+        if active_id != job_id {
+            tracing::warn!(
+                "ghost snapshot job id mismatch: expected {active_id}, got {job_id}"
+            );
+            self.active_ghost_snapshot = Some((active_id, request));
+            return;
+        }
+
+        self.finalize_ghost_snapshot(request, result, elapsed);
+        self.spawn_next_ghost_snapshot();
     }
 
     fn current_conversation_snapshot(&self) -> ConversationSnapshot {
@@ -5281,9 +5420,10 @@ impl ChatWidget<'_> {
         if restore_files {
             let previous_len = self.ghost_snapshots.len();
             let pre_summary = Some("Pre-undo checkpoint".to_string());
-            self.capture_ghost_snapshot(pre_summary);
-            if self.ghost_snapshots.len() > previous_len {
-                pre_restore_snapshot = self.ghost_snapshots.last().cloned();
+            let captured_snapshot = self.capture_ghost_snapshot_blocking(pre_summary);
+            let added_snapshot = self.ghost_snapshots.len() > previous_len;
+            if let Some(snapshot) = captured_snapshot {
+                pre_restore_snapshot = Some(snapshot);
             }
 
             match restore_ghost_commit(&self.config.cwd, snapshot.commit()) {
@@ -5298,7 +5438,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 Err(err) => {
-                    if self.ghost_snapshots.len() > previous_len {
+                    if added_snapshot && !self.ghost_snapshots.is_empty() {
                         self.ghost_snapshots.pop();
                     }
                     errors.push(format!("Failed to restore workspace files: {err}"));
