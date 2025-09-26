@@ -1,5 +1,6 @@
 # Config
 
+<!-- markdownlint-disable MD012 MD013 MD028 MD033 -->
 
 Codex supports several mechanisms for setting config values:
 
@@ -132,7 +133,7 @@ How long Codex will wait for activity on a streaming response before treating th
 
 ## model_provider
 
-Identifies which provider to use from the `model_providers` map. Defaults to `"openai"`. You can override the `base_url` for the built-in `openai` provider via the `OPENAI_BASE_URL` environment variable.
+Identifies which provider to use from the `model_providers` map. Defaults to `"openai"`. You can override the `base_url` for the built-in `openai` provider via the `OPENAI_BASE_URL` environment variable and force the wire protocol (`"responses"` or `"chat"`) with `OPENAI_WIRE_API`.
 
 Note that if you override `model_provider`, then you likely want to override
 `model`, as well. For example, if you are running ollama with Mistral locally,
@@ -383,13 +384,14 @@ tool_timeout_sec = 30
 ## validation
 
 Controls the quick validation harness that runs before applying patches. The
-master toggle lives under `[validation]` with per-tool overrides in the nested
-`[validation.tools]` table. The harness is disabled by default—enable it via the
-config file or `/validation` when needed:
+harness now activates automatically whenever at least one validation group is
+enabled. Use `[validation.groups]` for high-level toggles and the nested
+`[validation.tools]` table for per-tool overrides:
 
 ```toml
-[validation]
-patch_harness = false
+[validation.groups]
+functional = true
+stylistic = false
 
 [validation.tools]
 shellcheck = true
@@ -397,9 +399,33 @@ markdownlint = true
 hadolint = true
 yamllint = true
 cargo-check = true
+tsc = true
+eslint = true
+mypy = true
+pyright = true
+phpstan = true
+psalm = true
+golangci-lint = true
 shfmt = true
 prettier = true
 ```
+
+Functional checks stay enabled by default to catch regressions in the touched
+code, while stylistic linters default to off so teams can opt in when they want
+formatting feedback.
+
+With functional checks enabled, Codex automatically detects the languages
+affected by a patch and schedules the appropriate tools:
+
+- `cargo-check` for Rust workspaces (scoped to touched manifests)
+- `tsc --noEmit` and `eslint --max-warnings=0` for TypeScript/JavaScript files
+- `mypy` and `pyright` for Python modules
+- `phpstan`/`psalm` for PHP projects with matching config or Composer entries
+- `golangci-lint run ./...` for Go modules alongside the existing JSON/TOML/YAML
+  syntax checks
+
+Each entry under `[validation.tools]` can be toggled to disable a specific tool
+or to opt particular checks back in after disabling the entire group.
 
 When enabled, Codex can also run `actionlint` against modified workflows. This
 is configured under `[github]`:
@@ -768,3 +794,5 @@ Project commands appear in the TUI via `/cmd <name>` and run through the standar
 | `responses_originator_header_internal_override` | string | Override `originator` header value. |
 | `tools.web_search` | boolean | Enable web search tool (alias: `web_search_request`) (default: false). |
 | `tools.web_search_allowed_domains` | array<string> | Optional allow-list for web search (filters.allowed_domains). |
+
+<!-- markdownlint-enable MD012 MD013 MD028 MD033 -->

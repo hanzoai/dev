@@ -1,6 +1,7 @@
 # codex-git-tooling
 
-Helpers for interacting with git.
+Helpers for interacting with git, primarily used by Code to capture and restore
+workspace snapshots.
 
 ```rust,no_run
 use std::path::Path;

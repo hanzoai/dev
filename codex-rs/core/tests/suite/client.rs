@@ -6,6 +6,8 @@ use codex_core::LocalShellExecAction;
 use codex_core::LocalShellStatus;
 use codex_core::ModelClient;
 use codex_core::ModelProviderInfo;
+use codex_core::OpenRouterConfig;
+use codex_core::OpenRouterProviderConfig;
 use codex_core::NewConversation;
 use codex_core::Prompt;
 use codex_core::ReasoningItemContent;
@@ -23,9 +25,12 @@ use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id;
 use core_test_support::non_sandbox_test;
 use core_test_support::responses;
+use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
 use serde_json::json;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::sync::Arc;
@@ -750,6 +755,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         stream_max_retries: Some(0),
         stream_idle_timeout_ms: Some(5_000),
         requires_openai_auth: false,
+        openrouter: None,
     };
 
     let codex_home = TempDir::new().unwrap();
@@ -861,9 +867,10 @@ async fn token_count_includes_rate_limits_snapshot() {
         .insert_header("content-type", "text/event-stream")
         .insert_header("x-codex-primary-used-percent", "12.5")
         .insert_header("x-codex-secondary-used-percent", "40.0")
-        .insert_header("x-codex-primary-over-secondary-limit-percent", "75.0")
         .insert_header("x-codex-primary-window-minutes", "10")
         .insert_header("x-codex-secondary-window-minutes", "60")
+        .insert_header("x-codex-primary-reset-after-seconds", "1800")
+        .insert_header("x-codex-secondary-reset-after-seconds", "7200")
         .set_body_raw(sse_body, "text/event-stream");
 
     Mock::given(method("POST"))
@@ -896,7 +903,38 @@ async fn token_count_includes_rate_limits_snapshot() {
         .await
         .unwrap();
 
-    let token_event = wait_for_event(&codex, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
+    let first_token_event =
+        wait_for_event(&codex, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
+    let rate_limit_only = match first_token_event {
+        EventMsg::TokenCount(ev) => ev,
+        _ => unreachable!(),
+    };
+
+    let rate_limit_json = serde_json::to_value(&rate_limit_only).unwrap();
+    pretty_assertions::assert_eq!(
+        rate_limit_json,
+        json!({
+            "info": null,
+            "rate_limits": {
+                "primary": {
+                    "used_percent": 12.5,
+                    "window_minutes": 10,
+                    "resets_in_seconds": 1800
+                },
+                "secondary": {
+                    "used_percent": 40.0,
+                    "window_minutes": 60,
+                    "resets_in_seconds": 7200
+                }
+            }
+        })
+    );
+
+    let token_event = wait_for_event(
+        &codex,
+        |msg| matches!(msg, EventMsg::TokenCount(ev) if ev.info.is_some()),
+    )
+    .await;
     let final_payload = match token_event {
         EventMsg::TokenCount(ev) => ev,
         _ => unreachable!(),
@@ -925,11 +963,16 @@ async fn token_count_includes_rate_limits_snapshot() {
                 "model_context_window": 272000
             },
             "rate_limits": {
-                "primary_used_percent": 12.5,
-                "secondary_used_percent": 40.0,
-                "primary_to_secondary_ratio_percent": 75.0,
-                "primary_window_minutes": 10,
-                "secondary_window_minutes": 60
+                "primary": {
+                    "used_percent": 12.5,
+                    "window_minutes": 10,
+                    "resets_in_seconds": 1800
+                },
+                "secondary": {
+                    "used_percent": 40.0,
+                    "window_minutes": 60,
+                    "resets_in_seconds": 7200
+                }
             }
         })
     );
@@ -940,9 +983,101 @@ async fn token_count_includes_rate_limits_snapshot() {
     let final_snapshot = final_payload
         .rate_limits
         .expect("latest rate limit snapshot should be retained");
-    assert_eq!(final_snapshot.primary_used_percent, 12.5);
+    assert_eq!(
+        final_snapshot
+            .primary
+            .as_ref()
+            .map(|window| window.used_percent),
+        Some(12.5)
+    );
+    assert_eq!(
+        final_snapshot
+            .primary
+            .as_ref()
+            .and_then(|window| window.resets_in_seconds),
+        Some(1800)
+    );
 
     wait_for_event(&codex, |msg| matches!(msg, EventMsg::TaskComplete(_))).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+
+    let response = ResponseTemplate::new(429)
+        .insert_header("x-codex-primary-used-percent", "100.0")
+        .insert_header("x-codex-secondary-used-percent", "87.5")
+        .insert_header("x-codex-primary-over-secondary-limit-percent", "95.0")
+        .insert_header("x-codex-primary-window-minutes", "15")
+        .insert_header("x-codex-secondary-window-minutes", "60")
+        .set_body_json(json!({
+            "error": {
+                "type": "usage_limit_reached",
+                "message": "limit reached",
+                "resets_in_seconds": 42,
+                "plan_type": "pro"
+            }
+        }));
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(response)
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut builder = test_codex();
+    let codex_fixture = builder.build(&server).await?;
+    let codex = codex_fixture.codex.clone();
+
+    let expected_limits = json!({
+        "primary": {
+            "used_percent": 100.0,
+            "window_minutes": 15,
+            "resets_in_seconds": null
+        },
+        "secondary": {
+            "used_percent": 87.5,
+            "window_minutes": 60,
+            "resets_in_seconds": null
+        }
+    });
+
+    let submission_id = codex
+        .submit(Op::UserInput {
+            items: vec![InputItem::Text {
+                text: "hello".into(),
+            }],
+        })
+        .await
+        .expect("submission should succeed while emitting usage limit error events");
+
+    let token_event = wait_for_event(&codex, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
+    let EventMsg::TokenCount(event) = token_event else {
+        unreachable!();
+    };
+
+    let event_json = serde_json::to_value(&event).expect("serialize token count event");
+    pretty_assertions::assert_eq!(
+        event_json,
+        json!({
+            "info": null,
+            "rate_limits": expected_limits
+        })
+    );
+
+    let error_event = wait_for_event(&codex, |msg| matches!(msg, EventMsg::Error(_))).await;
+    let EventMsg::Error(error_event) = error_event else {
+        unreachable!();
+    };
+    assert!(
+        error_event.message.to_lowercase().contains("usage limit"),
+        "unexpected error message for submission {submission_id}: {}",
+        error_event.message
+    );
+
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -995,6 +1130,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         requires_openai_auth: false,
+        openrouter: None,
     };
 
     // Init session
@@ -1071,6 +1207,7 @@ async fn env_var_overrides_loaded_auth() {
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         requires_openai_auth: false,
+        openrouter: None,
     };
 
     // Init session
@@ -1237,4 +1374,98 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
         r3_tail_expected,
         "request 3 tail mismatch",
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openrouter_metadata_is_forwarded_in_responses_payload() {
+    non_sandbox_test!();
+
+    let server = MockServer::start().await;
+    let template = ResponseTemplate::new(200)
+        .insert_header("content-type", "text/event-stream")
+        .set_body_raw(
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp1\"}}\n\n",
+            "text/event-stream",
+        );
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(template)
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut extra = BTreeMap::new();
+    extra.insert("dry_run".to_string(), Value::Bool(true));
+
+    let mut provider = ModelProviderInfo {
+        name: "openrouter".into(),
+        base_url: Some(format!("{}/v1", server.uri())),
+        env_key: None,
+        env_key_instructions: None,
+        wire_api: WireApi::Responses,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: Some(0),
+        stream_max_retries: Some(0),
+        stream_idle_timeout_ms: Some(5_000),
+        requires_openai_auth: false,
+        openrouter: Some(OpenRouterConfig {
+            provider: Some(OpenRouterProviderConfig {
+                order: Some(vec!["openai/gpt-4o-mini".to_string()]),
+                allow_fallbacks: Some(true),
+                ..OpenRouterProviderConfig::default()
+            }),
+            route: Some(json!({ "strategy": "balanced" })),
+            extra,
+        }),
+    };
+
+    let codex_home = TempDir::new().unwrap();
+    let mut config = load_default_config_for_test(&codex_home);
+    config.model_provider_id = provider.name.clone();
+    config.model_provider = provider.clone();
+    let effort = config.model_reasoning_effort;
+    let summary = config.model_reasoning_summary;
+    let config = Arc::new(config);
+
+    let client = ModelClient::new(
+        Arc::clone(&config),
+        None,
+        provider,
+        effort,
+        summary,
+        ConversationId::new(),
+    );
+
+    let mut prompt = Prompt::default();
+    prompt.input.push(ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText {
+            text: "hello".to_string(),
+        }],
+    });
+
+    let mut stream = client.stream(&prompt).await.expect("stream responses");
+    while let Some(event) = stream.next().await {
+        event.expect("stream event");
+    }
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("request captured");
+    let request_body = requests[0]
+        .body_json::<serde_json::Value>()
+        .expect("request body json");
+
+    assert_eq!(
+        request_body["provider"]["order"],
+        json!(["openai/gpt-4o-mini"])
+    );
+    assert_eq!(request_body["provider"]["allow_fallbacks"], Value::Bool(true));
+    assert_eq!(request_body["route"], json!({ "strategy": "balanced" }));
+    assert_eq!(request_body["dry_run"], Value::Bool(true));
 }
