@@ -14,6 +14,14 @@ impl BackgroundEventCell {
         Self { state }
     }
 
+    pub(crate) fn state(&self) -> &BackgroundEventRecord {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut BackgroundEventRecord {
+        &mut self.state
+    }
+
     fn lines(&self) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         let dim_style = Style::default().fg(crate::colors::text_dim());
