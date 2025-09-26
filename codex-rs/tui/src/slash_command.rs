@@ -38,37 +38,6 @@ fn demo_command_enabled() -> bool {
     })
 }
 
-fn pro_command_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        let profile_matches = |
-            profile: &str
-        | {
-            let normalized = profile.trim().to_ascii_lowercase();
-            normalized.starts_with("dev") || normalized == "pref" || normalized == "perf"
-        };
-
-        if let Some(profile) = BUILD_PROFILE.or(option_env!("PROFILE")) {
-            if profile_matches(profile) {
-                return true;
-            }
-        }
-
-        if let Ok(exe_path) = std::env::current_exe() {
-            let path = exe_path.to_string_lossy().to_ascii_lowercase();
-            if path.contains("target/dev-fast/")
-                || path.contains("target/dev/")
-                || path.contains("target/pref/")
-                || path.contains("target/perf/")
-            {
-                return true;
-            }
-        }
-
-        false
-    })
-}
-
 /// Commands that can be invoked by starting a message with a leading slash.
 ///
 /// IMPORTANT: When adding or changing slash commands, also update
@@ -103,7 +72,6 @@ pub enum SlashCommand {
     Perf,
     Demo,
     Agents,
-    Pro,
     Branch,
     Merge,
     Github,
@@ -149,7 +117,6 @@ impl SlashCommand {
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Model => "choose model & reasoning effort",
             SlashCommand::Agents => "create and configure agents",
-            SlashCommand::Pro => "manage Pro mode (toggle/status/auto)",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }
@@ -190,7 +157,6 @@ impl SlashCommand {
 
     pub fn is_available(self) -> bool {
         match self {
-            SlashCommand::Pro => pro_command_enabled(),
             SlashCommand::Demo => demo_command_enabled(),
             _ => true,
         }
@@ -268,9 +234,6 @@ pub fn process_slash_command_message(message: &str) -> ProcessedCommand {
         if !command.is_available() {
             let command_name = command.command();
             let message = match command {
-                SlashCommand::Pro => {
-                    "Error: /pro is only available in dev, dev-fast, or pref builds.".to_string()
-                }
                 SlashCommand::Demo => {
                     format!("Error: /{command_name} is only available in dev or perf builds.")
                 }
