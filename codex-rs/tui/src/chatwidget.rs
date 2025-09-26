@@ -14779,6 +14779,62 @@ impl ChatWidget<'_> {
 
         let trimmed = args.trim();
         if trimmed.is_empty() {
+            if Self::is_branch_worktree_path(&self.config.cwd) {
+                if let Some(git_root) =
+                    codex_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+                {
+                    let worktree_cwd = self.config.cwd.clone();
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let default_branch = codex_core::git_worktree::detect_default_branch(&git_root)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+                        let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+
+                        if let (Some(base_branch), Some(current_branch)) =
+                            (default_branch, current_branch)
+                        {
+                            if base_branch != current_branch {
+                                let prompt = format!(
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                                );
+                                let hint = format!("against {base_branch}");
+                                let preparation_label =
+                                    Some(format!("Preparing code review against {base_branch}"));
+                                let metadata = Some(ReviewContextMetadata {
+                                    scope: Some("branch_diff".to_string()),
+                                    base_branch: Some(base_branch.clone()),
+                                    current_branch: Some(current_branch.clone()),
+                                    ..Default::default()
+                                });
+                                tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                                    prompt,
+                                    hint,
+                                    preparation_label,
+                                    metadata,
+                                });
+                                return;
+                            }
+                        }
+
+                        tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                            prompt: "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
+                            hint: "current workspace changes".to_string(),
+                            preparation_label: Some("Preparing code review request...".to_string()),
+                            metadata: Some(ReviewContextMetadata {
+                                scope: Some("workspace".to_string()),
+                                ..Default::default()
+                            }),
+                        });
+                    });
+                    return;
+                }
+            }
+
             let metadata = ReviewContextMetadata {
                 scope: Some("workspace".to_string()),
                 ..Default::default()
