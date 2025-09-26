@@ -4,29 +4,32 @@ use std::path::PathBuf;
 use crate::codex_message_processor::CodexMessageProcessor;
 use crate::codex_tool_config::create_tool_for_acp_new_session;
 use crate::codex_tool_config::create_tool_for_acp_prompt;
+use crate::codex_tool_config::create_tool_for_acp_set_model;
 use crate::codex_tool_config::create_tool_for_codex_tool_call_param;
 use crate::codex_tool_config::create_tool_for_codex_tool_call_reply_param;
 use crate::codex_tool_config::AcpNewSessionToolArgs;
 use crate::codex_tool_config::AcpPromptToolArgs;
+use crate::codex_tool_config::AcpSetModelToolArgs;
 use crate::codex_tool_config::CodexToolCallParam;
 use crate::codex_tool_config::CodexToolCallReplyParam;
 use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::error_code::INTERNAL_ERROR_CODE;
-use crate::outgoing_message::OutgoingMessageSender;
+use crate::outgoing_message::{OutgoingMessageSender, OutgoingNotification};
+use crate::session_store::SessionMap;
 use agent_client_protocol as acp;
 use anyhow::anyhow;
 use anyhow::Context as _;
 use codex_protocol::mcp_protocol::ClientRequest;
 use codex_protocol::mcp_protocol::ConversationId;
 
+use codex_common::model_presets::{builtin_model_presets, ModelPreset};
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
-use codex_core::config_types::McpServerConfig;
-use codex_core::config_types::ClientTools;
+use codex_core::config_types::{ClientTools, McpServerConfig, ReasoningEffort};
 use codex_core::config::Config;
 use codex_core::default_client::USER_AGENT_SUFFIX;
 use codex_core::default_client::get_codex_user_agent_default;
-use codex_core::CodexConversation;
+use codex_core::model_family::{derive_default_model_family, find_family_for_model};
 use codex_core::protocol::Submission;
 use codex_core::protocol::Op;
 use codex_protocol::mcp_protocol::AuthMode;
@@ -56,7 +59,7 @@ pub(crate) struct MessageProcessor {
     initialized: bool,
     codex_linux_sandbox_exe: Option<PathBuf>,
     conversation_manager: Arc<ConversationManager>,
-    session_map: Arc<Mutex<HashMap<Uuid, Arc<CodexConversation>>>>,
+    session_map: SessionMap,
     running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
     base_config: Arc<Config>,
 }
@@ -84,13 +87,14 @@ impl MessageProcessor {
             codex_linux_sandbox_exe.clone(),
             config_for_processor,
         );
+        let session_map: SessionMap = Arc::new(Mutex::new(HashMap::new()));
         Self {
             codex_message_processor,
             outgoing,
             initialized: false,
             codex_linux_sandbox_exe,
             conversation_manager,
-            session_map: Arc::new(Mutex::new(HashMap::new())),
+            session_map,
             running_requests_id_to_codex_uuid: Arc::new(Mutex::new(HashMap::new())),
             base_config: config,
         }
@@ -163,6 +167,35 @@ impl MessageProcessor {
                 let error = JSONRPCErrorError {
                     code: INVALID_REQUEST_ERROR_CODE,
                     message: "session/prompt requires params".to_string(),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+            }
+            return;
+        }
+
+        if request.method == acp::AGENT_METHOD_NAMES.model_select {
+            tracing::info!("handling session/set_model via ACP shim");
+            if let Some(params) = request.params.clone() {
+                match serde_json::from_value::<acp::SetSessionModelRequest>(params) {
+                    Ok(model_params) => {
+                        self.handle_session_set_model(request_id, model_params)
+                            .await;
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to parse session/set_model params: {err}");
+                        let error = JSONRPCErrorError {
+                            code: INVALID_REQUEST_ERROR_CODE,
+                            message: format!("invalid session/set_model params: {err}"),
+                            data: None,
+                        };
+                        self.outgoing.send_error(request_id, error).await;
+                    }
+                }
+            } else {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "session/set_model requires params".to_string(),
                     data: None,
                 };
                 self.outgoing.send_error(request_id, error).await;
@@ -481,6 +514,7 @@ impl MessageProcessor {
                 create_tool_for_codex_tool_call_reply_param(),
                 create_tool_for_acp_new_session(),
                 create_tool_for_acp_prompt(),
+                create_tool_for_acp_set_model(),
             ],
             next_cursor: None,
         };
@@ -508,6 +542,9 @@ impl MessageProcessor {
             }
             _ if name == acp::AGENT_METHOD_NAMES.session_prompt => {
                 self.handle_tool_call_acp_prompt(id, arguments).await
+            }
+            _ if name == acp::AGENT_METHOD_NAMES.model_select => {
+                self.handle_tool_call_acp_set_model(id, arguments).await
             }
             _ => {
                 let result = CallToolResult {
@@ -673,7 +710,8 @@ impl MessageProcessor {
         tokio::spawn(async move {
             let codex = {
                 let map = session_map.lock().await;
-                map.get(&session_id).cloned()
+                map.get(&session_id)
+                    .map(|entry| entry.conversation.clone())
             };
 
             let Some(codex) = codex else {
@@ -746,8 +784,8 @@ impl MessageProcessor {
         tracing::info!("session_id: {session_id}");
 
         // Obtain the Codex conversation from the session map, falling back to the conversation manager.
-        let codex_arc = if let Some(conv) = self.session_map.lock().await.get(&session_id).cloned() {
-            conv
+        let codex_arc = if let Some(entry) = self.session_map.lock().await.get(&session_id) {
+            entry.conversation.clone()
         } else {
             match self
                 .conversation_manager
@@ -823,6 +861,7 @@ impl MessageProcessor {
         let outgoing = self.outgoing.clone();
         let session_map = self.session_map.clone();
         let conversation_manager = self.conversation_manager.clone();
+        let models_state = session_models_from_config(&config);
 
         task::spawn(async move {
             let Some(session_id) = crate::acp_tool_runner::new_session(
@@ -841,6 +880,7 @@ impl MessageProcessor {
             let response_struct = acp::NewSessionResponse {
                 session_id: acp::SessionId(Arc::from(session_id_str.clone())),
                 modes: Some(default_session_modes()),
+                models: models_state.clone(),
                 meta: None,
             };
 
@@ -889,6 +929,7 @@ impl MessageProcessor {
         let outgoing = self.outgoing.clone();
         let session_map = self.session_map.clone();
         let conversation_manager = self.conversation_manager.clone();
+        let models_state = session_models_from_config(&config);
 
         task::spawn(async move {
             let Some(session_id) = crate::acp_tool_runner::new_session(
@@ -906,6 +947,7 @@ impl MessageProcessor {
             let response = acp::NewSessionResponse {
                 session_id: acp::SessionId(Arc::from(session_id.to_string())),
                 modes: Some(default_session_modes()),
+                models: models_state.clone(),
                 meta: None,
             };
 
@@ -959,12 +1001,12 @@ impl MessageProcessor {
             }
         };
 
-        let session = {
+        let session_entry = {
             let map = self.session_map.lock().await;
             map.get(&session_uuid).cloned()
         };
 
-        let Some(session) = session else {
+        let Some(session_entry) = session_entry else {
             let error = JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
                 message: format!("unknown session id: {}", acp_session_id),
@@ -973,6 +1015,8 @@ impl MessageProcessor {
             self.outgoing.send_error(request_id, error).await;
             return;
         };
+
+        let session = session_entry.conversation.clone();
 
         let outgoing = self.outgoing.clone();
         let requests_codex_map = self.running_requests_id_to_codex_uuid.clone();
@@ -1016,6 +1060,120 @@ impl MessageProcessor {
         });
     }
 
+    async fn handle_session_set_model(
+        &self,
+        request_id: RequestId,
+        params: acp::SetSessionModelRequest,
+    ) {
+        let session_string = params.session_id.to_string();
+        let session_uuid = match Uuid::parse_str(&session_string) {
+            Ok(id) => id,
+            Err(err) => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: format!("invalid session id: {err}"),
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        match self
+            .update_session_model_meta(session_uuid, params.session_id, params.model_id)
+            .await
+        {
+            Ok(meta) => {
+                let response = acp::SetSessionModelResponse { meta };
+                self.outgoing.send_response(request_id, response).await;
+            }
+            Err(err) => {
+                self.outgoing.send_error(request_id, err).await;
+            }
+        }
+    }
+
+    async fn update_session_model_meta(
+        &self,
+        session_uuid: Uuid,
+        session_id: acp::SessionId,
+        model_id: acp::ModelId,
+    ) -> Result<Option<serde_json::Value>, JSONRPCErrorError> {
+        let entry = {
+            let map = self.session_map.lock().await;
+            map.get(&session_uuid).cloned()
+        };
+
+        let Some(entry) = entry else {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("unknown session id: {}", session_id),
+                data: None,
+            });
+        };
+
+        let mut config_guard = entry.config.lock().await;
+        let selection = match resolve_model_selection(&model_id, &config_guard) {
+            Some(selection) => selection,
+            None => {
+                let message = format!("unknown model id: {}", model_id.to_string());
+                return Err(JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message,
+                    data: None,
+                });
+            }
+        };
+
+        let changed = apply_model_selection(&mut config_guard, &selection.model, selection.effort);
+        let models_state = session_models_from_config(&config_guard);
+        let models_meta_value = models_state
+            .as_ref()
+            .and_then(|state| serde_json::to_value(state).ok());
+        let response_meta = models_meta_value
+            .clone()
+            .map(|value| json!({ "models": value }));
+        let configure_op = if changed {
+            Some(configure_session_op_from_config(&config_guard))
+        } else {
+            None
+        };
+        let model_name = selection.model.clone();
+
+        drop(config_guard);
+
+        if let Some(op) = configure_op {
+            if let Err(err) = entry.conversation.submit(op).await {
+                return Err(JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: err.to_string(),
+                    data: None,
+                });
+            }
+        }
+
+        if let Some(models_meta) = models_meta_value {
+            let notification = acp::SessionNotification {
+                session_id: session_id.clone(),
+                update: acp::SessionUpdate::AgentMessageChunk {
+                    content: acp::ContentBlock::from(format!("Model set to {model_name}")),
+                },
+                meta: Some(json!({ "models": models_meta })),
+            };
+
+            if let Ok(params_value) = serde_json::to_value(notification) {
+                self.outgoing
+                    .send_notification(OutgoingNotification {
+                        method: acp::CLIENT_METHOD_NAMES.session_update.to_string(),
+                        params: Some(params_value),
+                    })
+                    .await;
+            }
+        }
+
+        Ok(response_meta)
+    }
+
     async fn handle_tool_call_acp_prompt(
         &self,
         request_id: RequestId,
@@ -1041,7 +1199,8 @@ impl MessageProcessor {
 
         let session = {
             let map = self.session_map.lock().await;
-            map.get(&session_id).cloned()
+            map.get(&session_id)
+                .map(|entry| entry.conversation.clone())
         };
 
         let Some(session) = session else {
@@ -1101,6 +1260,80 @@ impl MessageProcessor {
         });
     }
 
+    async fn handle_tool_call_acp_set_model(
+        &self,
+        request_id: RequestId,
+        arguments: Option<serde_json::Value>,
+    ) {
+        let args = match arguments
+            .context("arguments required")
+            .and_then(|args| serde_json::from_value::<AcpSetModelToolArgs>(args).context("invalid arguments"))
+        {
+            Ok(args) => args,
+            Err(err) => {
+                tracing::warn!("Failed to parse arguments: {err}");
+                let result = CallToolResult {
+                    content: vec![ContentBlock::TextContent(TextContent {
+                        r#type: "text".to_owned(),
+                        text: format!("Failed to parse arguments: {err}"),
+                        annotations: None,
+                    })],
+                    is_error: Some(true),
+                    structured_content: None,
+                };
+                self.outgoing.send_response(request_id, result).await;
+                return;
+            }
+        };
+
+        let session_uuid = match Uuid::parse_str(&args.session_id.to_string()) {
+            Ok(id) => id,
+            Err(err) => {
+                let result = CallToolResult {
+                    content: vec![ContentBlock::TextContent(TextContent {
+                        r#type: "text".to_owned(),
+                        text: format!("Invalid session id: {err}"),
+                        annotations: None,
+                    })],
+                    is_error: Some(true),
+                    structured_content: None,
+                };
+                self.outgoing.send_response(request_id, result).await;
+                return;
+            }
+        };
+
+        match self
+            .update_session_model_meta(session_uuid, args.session_id.clone(), args.model_id.clone())
+            .await
+        {
+            Ok(meta) => {
+                let structured = serde_json::to_value(acp::SetSessionModelResponse { meta })
+                    .unwrap_or_else(|_| json!({}));
+                let result = CallToolResult {
+                    content: vec![],
+                    is_error: Some(false),
+                    structured_content: Some(structured),
+                };
+                self.outgoing.send_response(request_id, result).await;
+            }
+            Err(err) => {
+                let result = CallToolResult {
+                    content: vec![ContentBlock::TextContent(TextContent {
+                        r#type: "text".to_owned(),
+                        text: err.message.clone(),
+                        annotations: None,
+                    })],
+                    is_error: Some(true),
+                    structured_content: None,
+                };
+                self.outgoing
+                    .send_response(request_id, result)
+                    .await;
+            }
+        }
+    }
+
     fn acp_prompt_arguments(
         arguments: Option<serde_json::Value>,
     ) -> anyhow::Result<(Uuid, acp::SessionId, Vec<acp::ContentBlock>)> {
@@ -1136,7 +1369,8 @@ impl MessageProcessor {
 
         let conversation = {
             let map = self.session_map.lock().await;
-            map.get(&session_uuid).cloned()
+            map.get(&session_uuid)
+                .map(|entry| entry.conversation.clone())
         };
 
         let Some(conversation) = conversation else {
@@ -1236,6 +1470,154 @@ fn convert_mcp_servers(
     }
 
     Ok(map)
+}
+
+#[derive(Clone)]
+struct ModelSelection {
+    model: String,
+    effort: ReasoningEffort,
+}
+
+fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState> {
+    let presets = builtin_model_presets(None);
+    let mut available_models = Vec::new();
+    let mut current_model_id: Option<acp::ModelId> = None;
+
+    for preset in presets.iter() {
+        let id = acp::ModelId(Arc::from(preset.id));
+        let description = if preset.description.is_empty() {
+            None
+        } else {
+            Some(preset.description.to_string())
+        };
+        available_models.push(acp::ModelInfo {
+            model_id: id.clone(),
+            name: preset.label.to_string(),
+            description,
+            meta: None,
+        });
+
+        if preset.model.eq_ignore_ascii_case(&config.model) {
+            let preset_effort = preset_effort(preset);
+            if current_model_id.is_none() || preset_effort == config.model_reasoning_effort {
+                current_model_id = Some(id.clone());
+            }
+        }
+    }
+
+    if available_models.is_empty() {
+        let model_lower = config.model.to_ascii_lowercase();
+        let id = acp::ModelId(Arc::from(format!("custom::{model_lower}")));
+        available_models.push(acp::ModelInfo {
+            model_id: id.clone(),
+            name: config.model.clone(),
+            description: Some("Configured via CODEX_HOME/config.toml".to_string()),
+            meta: None,
+        });
+        return Some(acp::SessionModelState {
+            current_model_id: id,
+            available_models,
+            meta: None,
+        });
+    }
+
+    if current_model_id.is_none() {
+        let model_lower = config.model.to_ascii_lowercase();
+        let id = acp::ModelId(Arc::from(format!("custom::{model_lower}")));
+        available_models.push(acp::ModelInfo {
+            model_id: id.clone(),
+            name: config.model.clone(),
+            description: Some("Configured via CODEX_HOME/config.toml".to_string()),
+            meta: None,
+        });
+        current_model_id = Some(id);
+    }
+
+    Some(acp::SessionModelState {
+        current_model_id: current_model_id.expect("current model id set"),
+        available_models,
+        meta: None,
+    })
+}
+
+fn preset_effort(preset: &ModelPreset) -> ReasoningEffort {
+    preset
+        .effort
+        .map(ReasoningEffort::from)
+        .unwrap_or(ReasoningEffort::Medium)
+}
+
+fn resolve_model_selection(model_id: &acp::ModelId, config: &Config) -> Option<ModelSelection> {
+    let requested = model_id.to_string();
+    let requested_lower = requested.to_ascii_lowercase();
+
+    for preset in builtin_model_presets(None).iter() {
+        if preset.id.eq_ignore_ascii_case(&requested)
+            || preset.label.eq_ignore_ascii_case(&requested)
+            || preset.model.eq_ignore_ascii_case(&requested)
+        {
+            return Some(ModelSelection {
+                model: preset.model.to_string(),
+                effort: preset_effort(preset),
+            });
+        }
+    }
+
+    if let Some(stripped) = requested_lower.strip_prefix("custom::") {
+        let effort = if stripped.eq_ignore_ascii_case(&config.model) {
+            config.model_reasoning_effort
+        } else {
+            ReasoningEffort::Medium
+        };
+        return Some(ModelSelection {
+            model: stripped.to_string(),
+            effort,
+        });
+    }
+
+    if requested_lower == config.model.to_ascii_lowercase() {
+        return Some(ModelSelection {
+            model: config.model.clone(),
+            effort: config.model_reasoning_effort,
+        });
+    }
+
+    None
+}
+
+fn apply_model_selection(config: &mut Config, model: &str, effort: ReasoningEffort) -> bool {
+    let mut updated = false;
+    if !config.model.eq_ignore_ascii_case(model) {
+        config.model = model.to_string();
+        config.model_family = find_family_for_model(&config.model)
+            .unwrap_or_else(|| derive_default_model_family(&config.model));
+        updated = true;
+    }
+
+    if config.model_reasoning_effort != effort {
+        config.model_reasoning_effort = effort;
+        updated = true;
+    }
+
+    updated
+}
+
+fn configure_session_op_from_config(config: &Config) -> Op {
+    Op::ConfigureSession {
+        provider: config.model_provider.clone(),
+        model: config.model.clone(),
+        model_reasoning_effort: config.model_reasoning_effort,
+        model_reasoning_summary: config.model_reasoning_summary,
+        model_text_verbosity: config.model_text_verbosity,
+        user_instructions: config.user_instructions.clone(),
+        base_instructions: config.base_instructions.clone(),
+        approval_policy: config.approval_policy.clone(),
+        sandbox_policy: config.sandbox_policy.clone(),
+        disable_response_storage: config.disable_response_storage,
+        notify: config.notify.clone(),
+        cwd: config.cwd.clone(),
+        resume_path: None,
+    }
 }
 
 fn default_session_modes() -> acp::SessionModeState {
