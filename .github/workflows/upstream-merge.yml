@@ -451,12 +451,10 @@ jobs:
             git checkout -B upstream-merge origin/upstream-merge
             # Merge the latest default into upstream-merge to rebase the carry-forward state
             git merge --no-ff --no-edit -X ours "origin/${DEFAULT_BRANCH}" || true
-            # Ensure the branch exists remotely (fast-forward or merge commit)
-            git push origin HEAD:upstream-merge
+            # Do not push yet; wait for the agent's merge so we do not clobber prior upstream commits on failure.
           else
-            # First run: create the branch from the current default
+            # First run: create the branch from the current default; agent step will publish it after a successful merge.
             git checkout -B upstream-merge "origin/${DEFAULT_BRANCH}"
-            git push --set-upstream origin HEAD:upstream-merge || git push origin HEAD:upstream-merge
           fi
 
       - name: Close accidental PRs targeting upstream-merge (we mirror default)
