@@ -4,7 +4,7 @@ use super::ChatWidget;
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
 use crate::history::state::{
-    ExecAction, ExecRecord, ExecStatus, HistoryDomainRecord,
+    ExecAction, ExecRecord, ExecStatus, ExploreRecord, HistoryDomainRecord, HistoryId,
 };
 use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
@@ -51,6 +51,8 @@ fn exec_record_from_begin(ev: &ExecCommandBeginEvent) -> ExecRecord {
         stdout_chunks: Vec::new(),
         stderr_chunks: Vec::new(),
         exit_code: None,
+        wait_total: None,
+        wait_active: false,
         wait_notes: Vec::new(),
         started_at: std::time::SystemTime::now(),
         completed_at: None,
@@ -95,6 +97,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
         .iter()
         .map(|(k, v)| (k.clone(), v.history_index, v.explore_entry))
         .collect();
+    let mut agg_was_updated = false;
     for (call_id, maybe_idx, explore_entry) in &running {
         if let Some(idx) = maybe_idx {
             finalize_exec_cell_at(
@@ -116,17 +119,20 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
                         *entry_idx,
                         history_cell::ExploreEntryStatus::Error { exit_code: None },
                     );
-                    let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+                    let mut cell = history_cell::ExploreAggregationCell::from_record(record.clone());
                     cell.set_trailing(existing.is_trailing());
-                    chat.history_replace_at(*agg_idx, Box::new(cell));
+                    chat.history_replace_with_record(
+                        *agg_idx,
+                        Box::new(cell),
+                        HistoryDomainRecord::Explore(record),
+                    );
                     chat.autoscroll_if_near_bottom();
-                    chat.request_redraw();
+                    agg_was_updated = true;
                 }
             }
         }
         chat.canceled_exec_call_ids.insert(call_id.clone());
     }
-    let agg_was_updated = running.iter().any(|(_, _, entry)| entry.is_some());
     chat.exec.running_commands.clear();
     if agg_was_updated {
         chat.exec.running_explore_agg_index = None;
@@ -263,11 +269,14 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
                 {
                     let mut record = existing.record().clone();
                     record.update_status(*entry_idx, history_cell::ExploreEntryStatus::Success);
-                    let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+                    let mut cell = history_cell::ExploreAggregationCell::from_record(record.clone());
                     cell.set_trailing(existing.is_trailing());
-                    chat.history_replace_at(*agg_idx, Box::new(cell));
+                    chat.history_replace_with_record(
+                        *agg_idx,
+                        Box::new(cell),
+                        HistoryDomainRecord::Explore(record),
+                    );
                     chat.autoscroll_if_near_bottom();
-                    chat.request_redraw();
                     agg_was_updated = true;
                 }
             }
@@ -514,9 +523,15 @@ pub(super) fn handle_exec_begin_now(
 
         if agg_idx.is_none() {
             let key = ChatWidget::order_key_from_order_meta(order);
-            let idx = chat.history_insert_with_key_global(
-                Box::new(history_cell::ExploreAggregationCell::new()),
+            let record = ExploreRecord {
+                id: HistoryId::ZERO,
+                entries: Vec::new(),
+            };
+            let idx = chat.history_insert_with_key_global_tagged(
+                Box::new(history_cell::ExploreAggregationCell::from_record(record.clone())),
                 key,
+                "explore",
+                Some(HistoryDomainRecord::Explore(record)),
             );
             created_new = true;
             agg_idx = Some(idx);
@@ -535,11 +550,14 @@ pub(super) fn handle_exec_begin_now(
                     &chat.config.cwd,
                     &ev.command,
                 ) {
-                    let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+                    let mut cell = history_cell::ExploreAggregationCell::from_record(record.clone());
                     cell.set_trailing(trailing);
-                    chat.history_replace_at(idx, Box::new(cell));
+                    chat.history_replace_with_record(
+                        idx,
+                        Box::new(cell),
+                        HistoryDomainRecord::Explore(record),
+                    );
                     chat.autoscroll_if_near_bottom();
-                    chat.request_redraw();
                     chat.exec.running_explore_agg_index = Some(idx);
                     chat.exec.running_commands.insert(
                         super::ExecCallId(ev.call_id.clone()),
@@ -682,11 +700,14 @@ pub(super) fn handle_exec_end_now(
                 .map(|existing| (existing.record().clone(), existing.is_trailing()))
         }) {
             record.update_status(entry_idx, status.clone());
-            let mut cell = history_cell::ExploreAggregationCell::from_record(record);
+            let mut cell = history_cell::ExploreAggregationCell::from_record(record.clone());
             cell.set_trailing(trailing);
-            chat.history_replace_at(agg_idx, Box::new(cell));
+            chat.history_replace_with_record(
+                agg_idx,
+                Box::new(cell),
+                HistoryDomainRecord::Explore(record),
+            );
             chat.autoscroll_if_near_bottom();
-            chat.request_redraw();
         }
         if !chat
             .exec
