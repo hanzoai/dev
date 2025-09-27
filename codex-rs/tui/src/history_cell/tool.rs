@@ -1,54 +1,39 @@
 //! Tool call history cells driven by structured argument/result state.
 
 use super::*;
-use crate::history::state::{ArgumentValue, ToolArgument, ToolResultPreview};
+use crate::history::state::{
+    ArgumentValue,
+    HistoryId,
+    RunningToolState,
+    ToolArgument,
+    ToolCallState,
+    ToolStatus as HistoryToolStatus,
+};
 use crate::text_formatting::format_json_compact;
 use std::time::{Duration, Instant, SystemTime};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolCallStatus {
-    Running,
-    Success,
-    Failed,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ToolCallCellState {
-    pub title: String,
-    pub status: ToolCallStatus,
-    pub duration: Option<Duration>,
-    pub arguments: Vec<ToolArgument>,
-    pub result_preview: Option<ToolResultPreview>,
-    pub error_message: Option<String>,
-}
-
-impl ToolCallCellState {
-    pub(crate) fn new(
-        title: String,
-        status: ToolCallStatus,
-        duration: Option<Duration>,
-        arguments: Vec<ToolArgument>,
-        result_preview: Option<ToolResultPreview>,
-        error_message: Option<String>,
-    ) -> Self {
-        Self {
-            title,
-            status,
-            duration,
-            arguments,
-            result_preview,
-            error_message,
-        }
-    }
-}
-
 pub(crate) struct ToolCallCell {
-    state: ToolCallCellState,
+    state: ToolCallState,
 }
 
 impl ToolCallCell {
-    pub(crate) fn new(state: ToolCallCellState) -> Self {
+    pub(crate) fn new(state: ToolCallState) -> Self {
+        let mut state = state;
+        state.id = HistoryId::ZERO;
         Self { state }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_state(state: ToolCallState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn state(&self) -> &ToolCallState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut ToolCallState {
+        &mut self.state
     }
 
     pub(crate) fn retint(&mut self, _old: &crate::theme::Theme, _new: &crate::theme::Theme) {}
@@ -57,9 +42,9 @@ impl ToolCallCell {
         let mut spans: Vec<Span<'static>> = Vec::new();
         let mut style = Style::default().add_modifier(Modifier::BOLD);
         style = match self.state.status {
-            ToolCallStatus::Running => style.fg(crate::colors::info()),
-            ToolCallStatus::Success => style.fg(crate::colors::success()),
-            ToolCallStatus::Failed => style.fg(crate::colors::error()),
+            HistoryToolStatus::Running => style.fg(crate::colors::info()),
+            HistoryToolStatus::Success => style.fg(crate::colors::success()),
+            HistoryToolStatus::Failed => style.fg(crate::colors::error()),
         };
         spans.push(Span::styled(self.state.title.clone(), style));
         if let Some(duration) = self.state.duration {
@@ -83,11 +68,7 @@ impl HistoryCell for ToolCallCell {
 
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Tool {
-            status: match self.state.status {
-                ToolCallStatus::Running => ToolStatus::Running,
-                ToolCallStatus::Success => ToolStatus::Success,
-                ToolCallStatus::Failed => ToolStatus::Failed,
-            },
+            status: super::ToolCellStatus::from(self.state.status),
         }
     }
 
@@ -129,47 +110,35 @@ impl HistoryCell for ToolCallCell {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct RunningToolCallState {
-    pub title: String,
-    pub started_at: SystemTime,
-    pub arguments: Vec<ToolArgument>,
-    pub wait_has_target: bool,
-    pub wait_has_call_id: bool,
-    pub wait_cap_ms: Option<u64>,
-}
-
-impl RunningToolCallState {
-    pub(crate) fn new(
-        title: String,
-        started_at: SystemTime,
-        arguments: Vec<ToolArgument>,
-        wait_has_target: bool,
-        wait_has_call_id: bool,
-        wait_cap_ms: Option<u64>,
-    ) -> Self {
-        Self {
-            title,
-            started_at,
-            arguments,
-            wait_has_target,
-            wait_has_call_id,
-            wait_cap_ms,
-        }
-    }
-}
-
 pub(crate) struct RunningToolCallCell {
-    state: RunningToolCallState,
+    state: RunningToolState,
     start_clock: Instant,
 }
 
 impl RunningToolCallCell {
-    pub(crate) fn new(state: RunningToolCallState) -> Self {
+    pub(crate) fn new(state: RunningToolState) -> Self {
+        let mut state = state;
+        state.id = HistoryId::ZERO;
         Self {
             state,
             start_clock: Instant::now(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_state(state: RunningToolState) -> Self {
+        Self {
+            state,
+            start_clock: Instant::now(),
+        }
+    }
+
+    pub(crate) fn state(&self) -> &RunningToolState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut RunningToolState {
+        &mut self.state
     }
 
     fn strip_zero_seconds_suffix(mut duration: String) -> String {
@@ -203,22 +172,23 @@ impl RunningToolCallCell {
             });
         }
         let status = if success {
-            ToolCallStatus::Success
+            HistoryToolStatus::Success
         } else {
-            ToolCallStatus::Failed
+            HistoryToolStatus::Failed
         };
-        let state = ToolCallCellState::new(
-            if success {
+        let state = ToolCallState {
+            id: HistoryId::ZERO,
+            status,
+            title: if success {
                 "Web Search".to_string()
             } else {
                 "Web Search (failed)".to_string()
             },
-            status,
-            Some(duration),
+            duration: Some(duration),
             arguments,
-            None,
-            None,
-        );
+            result_preview: None,
+            error_message: None,
+        };
         ToolCallCell::new(state)
     }
 
@@ -240,7 +210,7 @@ impl HistoryCell for RunningToolCallCell {
 
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Tool {
-            status: ToolStatus::Running,
+            status: super::ToolCellStatus::Running,
         }
     }
 

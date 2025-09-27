@@ -49,6 +49,7 @@ Notes
 - `/limits`: visualize current hourly and weekly rate-limit usage.
 - `/update`: check the installed version, detect available upgrades, and run the
   appropriate installer when possible.
+- `/notifications`: inspect and toggle TUI notifications.
 - `/mcp`: manage MCP servers (status/on/off/add).
 - `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
   harness settings.

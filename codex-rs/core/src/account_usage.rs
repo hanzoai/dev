@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use crate::protocol::RateLimitSnapshotEvent;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ const USAGE_VERSION: u32 = 1;
 const USAGE_SUBDIR: &str = "usage";
 const HOURLY_HISTORY_DAYS: i64 = 183; // retain ~6 months of hourly usage for history views
 const UNKNOWN_RESET_RELOG_INTERVAL: Duration = Duration::hours(24);
+const RESET_PASSED_TOLERANCE: Duration = Duration::seconds(5);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RateLimitWarningScope {
@@ -83,6 +85,12 @@ struct TokenWindowEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AggregatedUsageEntry {
+    period_start: DateTime<Utc>,
+    tokens: TokenTotals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RateLimitInfo {
     #[serde(default)]
     snapshot: Option<RateLimitSnapshotEvent>,
@@ -113,6 +121,12 @@ struct AccountUsageData {
     #[serde(default)]
     hourly_entries: Vec<TokenWindowEntry>,
     #[serde(default)]
+    hourly_buckets: Vec<AggregatedUsageEntry>,
+    #[serde(default)]
+    daily_buckets: Vec<AggregatedUsageEntry>,
+    #[serde(default)]
+    monthly_buckets: Vec<AggregatedUsageEntry>,
+    #[serde(default)]
     tokens_last_hour: TokenTotals,
     #[serde(default)]
     rate_limit: Option<RateLimitInfo>,
@@ -127,6 +141,9 @@ impl AccountUsageData {
             last_updated: Utc::now(),
             totals: TokenTotals::default(),
             hourly_entries: Vec::new(),
+            hourly_buckets: Vec::new(),
+            daily_buckets: Vec::new(),
+            monthly_buckets: Vec::new(),
             tokens_last_hour: TokenTotals::default(),
             rate_limit: None,
         }
@@ -141,6 +158,7 @@ impl AccountUsageData {
     }
 
     fn update_last_hour(&mut self, now: DateTime<Utc>) {
+        self.compact_usage(now);
         let hourly_cutoff = now - Duration::hours(1);
         let history_cutoff = now - Duration::days(HOURLY_HISTORY_DAYS);
         self.hourly_entries
@@ -155,6 +173,137 @@ impl AccountUsageData {
         }
         self.tokens_last_hour = totals;
     }
+
+    fn compact_usage(&mut self, now: DateTime<Utc>) {
+        let recent_cutoff = now - Duration::hours(1);
+        let mut rollover: BTreeMap<DateTime<Utc>, TokenTotals> = BTreeMap::new();
+        let mut recent: Vec<TokenWindowEntry> = Vec::new();
+
+        for entry in self.hourly_entries.drain(..) {
+            if entry.timestamp >= recent_cutoff {
+                recent.push(entry);
+            } else {
+                let bucket = truncate_to_hour(entry.timestamp);
+                rollover
+                    .entry(bucket)
+                    .or_insert_with(TokenTotals::default)
+                    .add_totals(&entry.tokens);
+            }
+        }
+
+        self.hourly_entries = recent;
+
+        for (period_start, tokens) in rollover {
+            add_to_bucket(&mut self.hourly_buckets, period_start, tokens);
+        }
+
+        self.compact_hourly_buckets(now);
+        self.compact_daily_buckets(now);
+    }
+
+    fn compact_hourly_buckets(&mut self, now: DateTime<Utc>) {
+        if self.hourly_buckets.is_empty() {
+            return;
+        }
+
+        let current_hour = truncate_to_hour(now);
+        let cutoff = current_hour - Duration::hours(24);
+        let mut remaining: Vec<AggregatedUsageEntry> = Vec::new();
+        let mut daily_rollover: BTreeMap<DateTime<Utc>, TokenTotals> = BTreeMap::new();
+
+        for entry in self.hourly_buckets.drain(..) {
+            if entry.period_start < cutoff {
+                let day_key = truncate_to_day(entry.period_start);
+                daily_rollover
+                    .entry(day_key)
+                    .or_insert_with(TokenTotals::default)
+                    .add_totals(&entry.tokens);
+            } else {
+                remaining.push(entry);
+            }
+        }
+
+        remaining.sort_by_key(|item| item.period_start);
+        self.hourly_buckets = remaining;
+
+        for (period_start, tokens) in daily_rollover {
+            add_to_bucket(&mut self.daily_buckets, period_start, tokens);
+        }
+    }
+
+    fn compact_daily_buckets(&mut self, now: DateTime<Utc>) {
+        if self.daily_buckets.is_empty() {
+            return;
+        }
+
+        let today = truncate_to_day(now);
+        let cutoff = today - Duration::days(30);
+        let mut remaining: Vec<AggregatedUsageEntry> = Vec::new();
+        let mut monthly_rollover: BTreeMap<DateTime<Utc>, TokenTotals> = BTreeMap::new();
+
+        for entry in self.daily_buckets.drain(..) {
+            if entry.period_start < cutoff {
+                let month_key = truncate_to_month(entry.period_start);
+                monthly_rollover
+                    .entry(month_key)
+                    .or_insert_with(TokenTotals::default)
+                    .add_totals(&entry.tokens);
+            } else {
+                remaining.push(entry);
+            }
+        }
+
+        remaining.sort_by_key(|item| item.period_start);
+        self.daily_buckets = remaining;
+
+        for (period_start, tokens) in monthly_rollover {
+            add_to_bucket(&mut self.monthly_buckets, period_start, tokens);
+        }
+    }
+}
+
+fn add_to_bucket(
+    buckets: &mut Vec<AggregatedUsageEntry>,
+    period_start: DateTime<Utc>,
+    tokens: TokenTotals,
+) {
+    match buckets.binary_search_by(|entry| entry.period_start.cmp(&period_start)) {
+        Ok(idx) => buckets[idx].tokens.add_totals(&tokens),
+        Err(idx) => {
+            buckets.insert(
+                idx,
+                AggregatedUsageEntry {
+                    period_start,
+                    tokens,
+                },
+            );
+        }
+    }
+}
+
+fn truncate_to_hour(ts: DateTime<Utc>) -> DateTime<Utc> {
+    let naive = ts.naive_utc();
+    let trimmed = naive
+        .with_minute(0)
+        .and_then(|dt| dt.with_second(0))
+        .and_then(|dt| dt.with_nanosecond(0))
+        .expect("valid hour truncation");
+    Utc.from_utc_datetime(&trimmed)
+}
+
+fn truncate_to_day(ts: DateTime<Utc>) -> DateTime<Utc> {
+    let date = ts.date_naive();
+    let start = date.and_hms_opt(0, 0, 0).expect("valid day truncation");
+    Utc.from_utc_datetime(&start)
+}
+
+fn truncate_to_month(ts: DateTime<Utc>) -> DateTime<Utc> {
+    let date = ts.date_naive();
+    let month_start = NaiveDate::from_ymd_opt(date.year(), date.month(), 1)
+        .expect("valid month truncation")
+        .and_hms_opt(0, 0, 0)
+        .expect("valid month start time");
+    Utc.from_utc_datetime(&month_start)
 }
 
 #[derive(Debug, Clone)]
@@ -175,12 +324,21 @@ pub struct StoredUsageEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoredUsageBucket {
+    pub period_start: DateTime<Utc>,
+    pub tokens: TokenTotals,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoredUsageSummary {
     pub account_id: String,
     pub plan: Option<String>,
     pub totals: TokenTotals,
     pub last_updated: DateTime<Utc>,
     pub hourly_entries: Vec<StoredUsageEntry>,
+    pub hourly_buckets: Vec<StoredUsageBucket>,
+    pub daily_buckets: Vec<StoredUsageBucket>,
+    pub monthly_buckets: Vec<StoredUsageBucket>,
 }
 
 fn usage_dir(codex_home: &Path) -> PathBuf {
@@ -241,10 +399,21 @@ where
     update(&mut data);
 
     let json = serde_json::to_string_pretty(&data)?;
-    file.seek(SeekFrom::Start(0))?;
-    file.set_len(0)?;
-    file.write_all(json.as_bytes())?;
-    file.flush()?;
+    let tmp_path = usage_dir.join(format!("{account_id}.json.tmp"));
+    {
+        let mut tmp = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
+        tmp.write_all(json.as_bytes())?;
+        tmp.sync_all()?;
+    }
+    if let Err(err) = fs::rename(&tmp_path, &path) {
+        let _ = fs::remove_file(&tmp_path);
+        file.unlock()?;
+        return Err(err);
+    }
     file.unlock()?;
     Ok(())
 }
@@ -375,18 +544,6 @@ pub fn record_usage_limit_hint(
     })
 }
 
-fn reset_changed(prev: Option<DateTime<Utc>>, next: Option<DateTime<Utc>>) -> bool {
-    match (prev, next) {
-        (Some(a), Some(b)) => a
-            .signed_duration_since(b)
-            .num_seconds()
-            .abs()
-            > 5,
-        (None, None) => false,
-        _ => true,
-    }
-}
-
 fn record_threshold_log(
     logs: &mut Vec<RateLimitWarningRecord>,
     threshold: f64,
@@ -396,20 +553,49 @@ fn record_threshold_log(
     if let Some(existing) = logs.iter_mut().find(|entry| {
         (entry.threshold - threshold).abs() < f64::EPSILON
     }) {
-        if reset_changed(existing.reset_at, reset_at) {
-            existing.logged_at = None;
-        } else if reset_at.is_none()
-            && existing
-                .logged_at
-                .is_some_and(|logged| observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL)
-        {
+        let previous_reset = existing.reset_at;
+        let previous_logged = existing.logged_at;
+        let new_reset = reset_at;
+
+        let reset_moved_earlier = match (previous_reset, new_reset) {
+            (Some(prev), Some(next)) => next + RESET_PASSED_TOLERANCE < prev,
+            _ => false,
+        };
+
+        let logged_after_prev_reset = match (previous_logged, previous_reset) {
+            (Some(logged), Some(prev)) => logged >= prev,
+            _ => false,
+        };
+
+        let prev_reset_elapsed = previous_reset
+            .map(|prev| observed_at + RESET_PASSED_TOLERANCE >= prev)
+            .unwrap_or(false);
+
+        let unknown_reset_elapsed = (previous_reset.is_none() || new_reset.is_none())
+            && previous_logged
+                .is_some_and(|logged| observed_at.signed_duration_since(logged) >= UNKNOWN_RESET_RELOG_INTERVAL);
+
+        let mut should_clear = false;
+
+        if reset_moved_earlier {
+            should_clear = true;
+        } else if prev_reset_elapsed && !logged_after_prev_reset {
+            should_clear = true;
+        } else if unknown_reset_elapsed {
+            should_clear = true;
+        }
+
+        existing.reset_at = new_reset;
+
+        if should_clear {
             existing.logged_at = None;
         }
-        existing.reset_at = reset_at;
+
         if existing.logged_at.is_none() {
             existing.logged_at = Some(observed_at);
             return true;
         }
+
         return false;
     }
 
@@ -526,17 +712,66 @@ pub fn load_account_usage(
         })
         .collect();
 
+    let hourly_buckets = data
+        .hourly_buckets
+        .into_iter()
+        .map(|entry| StoredUsageBucket {
+            period_start: entry.period_start,
+            tokens: entry.tokens,
+        })
+        .collect();
+
+    let daily_buckets = data
+        .daily_buckets
+        .into_iter()
+        .map(|entry| StoredUsageBucket {
+            period_start: entry.period_start,
+            tokens: entry.tokens,
+        })
+        .collect();
+
+    let monthly_buckets = data
+        .monthly_buckets
+        .into_iter()
+        .map(|entry| StoredUsageBucket {
+            period_start: entry.period_start,
+            tokens: entry.tokens,
+        })
+        .collect();
+
     Ok(Some(StoredUsageSummary {
         account_id: data.account_id,
         plan: data.plan,
         totals: data.totals,
         last_updated: data.last_updated,
         hourly_entries,
+        hourly_buckets,
+        daily_buckets,
+        monthly_buckets,
     }))
 }
 
 #[cfg(test)]
 mod tests {
+    //! Regression coverage for rate-limit warning relogging.
+    //!
+    //! These cases enforce the desired behaviour:
+    //! - **No duplicate within a window**: once a threshold logs, subsequent polls before
+    //!   the stored reset timestamp must remain silent even if the backend repeats or
+    //!   extends the reset time.
+    //! - **Relog after reset passes**: the first poll at or after the recorded reset may
+    //!   emit again, regardless of whether the backend has already advanced the window.
+    //! - **Relog on earlier reset**: if the backend moves the reset earlier (window
+    //!   shrinks), we allow an immediate relog even before the previously stored reset.
+    //! - **Unknown reset fallback**: when reset metadata disappears, we rely on the
+    //!   24-hour `UNKNOWN_RESET_RELOG_INTERVAL` to unblock further warnings. When the
+    //!   backend begins reporting timestamps again, we should also allow a relog provided
+    //!   the fallback window has elapsed.
+    //! - **Missing metadata alone is not enough**: before the fallback timer elapses we
+    //!   must keep warnings muted even if new snapshots omit reset times.
+    //!
+    //! The helper tests below construct scenarios targeting each rule so the state
+    //! machine in `record_threshold_log` can be refactored confidently.
     use super::*;
     use std::fs::File;
     use crate::protocol::TokenUsage;
@@ -550,6 +785,233 @@ mod tests {
             reasoning_output_tokens: 10,
             total_tokens: 210,
         }
+    }
+
+    #[test]
+    fn rate_limit_warning_only_logs_once_per_reset() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let reset_at = now + Duration::days(7);
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at),
+            now,
+            "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.",
+        )
+        .expect("first record succeeds");
+
+        assert!(first, "first logging should emit");
+
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::days(7) + Duration::hours(6)),
+            now + Duration::hours(6),
+            "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.",
+        )
+        .expect("second record succeeds");
+
+        assert!(!second, "duplicate logging before reset should be suppressed");
+
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::days(15)),
+            now + Duration::days(8),
+            "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.",
+        )
+        .expect("third record succeeds");
+
+        assert!(third, "after reset passes we should emit again");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_reset_with_new_timestamp() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(1)),
+            now,
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // Backend extends reset window beyond the old reset time; we should re-emit now that
+        // the prior window has expired and a new one started.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(2)),
+            now + Duration::minutes(65),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(second, "after reset we should log again even if next window is later");
+
+        // Subsequent updates inside the new window should remain suppressed until that reset passes.
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(2)),
+            now + Duration::minutes(70),
+            msg,
+        )
+        .expect("third record succeeds");
+        assert!(!third, "duplicate logging inside the same window should stay muted");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_reset_even_if_logged_just_before() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let reset_at = now + Duration::minutes(1);
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at),
+            reset_at - Duration::seconds(3),
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // After the reset passes, with a new window scheduled further out, we should relog.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(reset_at + Duration::hours(1)),
+            reset_at + Duration::seconds(45),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(second, "post-reset poll should emit again even if prior log was moments before reset");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_after_unknown_reset_interval() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(1)),
+            now,
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        // Backend stops providing reset info — still within backoff window.
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            None,
+            now + Duration::minutes(20),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(!second, "dropping reset info should keep warning muted initially");
+
+        // After the unknown interval we should allow another log.
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            None,
+            now + Duration::hours(25),
+            msg,
+        )
+        .expect("third record succeeds");
+        assert!(third, "after backoff expires we should re-emit");
+    }
+
+    #[test]
+    fn rate_limit_warning_relogs_when_reset_info_returns() {
+        let home = TempDir::new().expect("tempdir");
+        let now = Utc::now();
+        let msg = "Secondary usage exceeded 75% of the limit. Run /limits for detailed usage.";
+
+        let first = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(1)),
+            now,
+            msg,
+        )
+        .expect("first record succeeds");
+        assert!(first);
+
+        let second = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            None,
+            now + Duration::minutes(20),
+            msg,
+        )
+        .expect("second record succeeds");
+        assert!(!second);
+
+        let third = record_rate_limit_warning(
+            home.path(),
+            "acct-1",
+            Some("Team"),
+            RateLimitWarningScope::Secondary,
+            75.0,
+            Some(now + Duration::hours(30)),
+            now + Duration::hours(25),
+            msg,
+        )
+        .expect("third record succeeds");
+        assert!(third, "restored reset metadata after fallback window should re-log");
     }
 
     #[test]

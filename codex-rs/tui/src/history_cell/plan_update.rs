@@ -1,7 +1,7 @@
 //! Rendering for structured plan update history cells built from `PlanUpdateState`.
 
 use super::*;
-use crate::history::state::{PlanIcon, PlanProgress, PlanStep, PlanUpdateState};
+use crate::history::state::{HistoryId, PlanIcon, PlanProgress, PlanStep, PlanUpdateState};
 use codex_core::plan_tool::StepStatus;
 
 pub(crate) struct PlanUpdateCell {
@@ -10,12 +10,27 @@ pub(crate) struct PlanUpdateCell {
 
 impl PlanUpdateCell {
     pub(crate) fn new(state: PlanUpdateState) -> Self {
+        let mut state = state;
+        state.id = HistoryId::ZERO;
         Self { state }
     }
 
     pub(crate) fn is_complete(&self) -> bool {
         let progress = &self.state.progress;
         progress.total > 0 && progress.completed >= progress.total
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_state(state: PlanUpdateState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn state(&self) -> &PlanUpdateState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut PlanUpdateState {
+        &mut self.state
     }
 
     fn header_line(&self) -> Line<'static> {
