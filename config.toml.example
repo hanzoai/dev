@@ -67,6 +67,17 @@ description = "Codex AI assistant (self-referential)"
 args = ["-s", "workspace-write", "-a", "never"]
 
 [[agents]]
+name = "context-collector"
+command = "gemini"
+enabled = true
+read-only = true
+description = "Gemini 2.5 long-context helper for repository sweeps"
+# Supply the long-context model and default yes flag
+args = ["-y", "--model", "gemini-2.5-pro-exp"]
+# Optional: pass API key overrides or helper tool environment
+# env = { GEMINI_API_KEY = "your-key", STATIC_ANALYZER = "scripts/blast-radius" }
+
+[[agents]]
 name = "gpt-4"
 command = "gpt"
 enabled = false
@@ -153,6 +164,13 @@ read-only = false
 agents = ["claude", "gemini", "qwen", "codex"]
 orchestrator-instructions = "Coordinate implementations across agents; surface worktree locations and branches."
 agent-instructions = "Write minimal, focused changes with clear rationale. Include test or validation steps."
+
+[[subagents.commands]]
+name = "context"
+read-only = true
+agents = ["context-collector", "codex"]
+orchestrator-instructions = "Launch a context sweep before coding. Aggregate file summaries and tooling hints for the main agent."
+agent-instructions = "Summarize high-signal files, why they matter, and recommended analysis commands. Keep replies concise."
 
 # Custom example
 [[subagents.commands]]
