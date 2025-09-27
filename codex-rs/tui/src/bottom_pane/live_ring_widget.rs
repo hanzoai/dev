@@ -11,14 +11,15 @@ pub(crate) struct LiveRingWidget {
 }
 
 impl LiveRingWidget {
-    #[cfg(all(test, feature = "legacy_tests"))]
-    pub fn new(max_rows: usize, rows: Vec<Line<'static>>) -> Self {
-        Self {
-            max_rows: max_rows as u16,
-            rows,
-        }
+    pub(crate) fn new(max_rows: u16, rows: Vec<Line<'static>>) -> Self {
+        Self { max_rows, rows }
     }
-    
+
+    #[cfg(all(test, feature = "legacy_tests"))]
+    pub fn test_new(max_rows: usize, rows: Vec<Line<'static>>) -> Self {
+        Self::new(max_rows as u16, rows)
+    }
+
     pub fn desired_height(&self, _width: u16) -> u16 {
         let len = self.rows.len() as u16;
         len.min(self.max_rows)
