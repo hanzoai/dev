@@ -38,6 +38,17 @@ pub enum HistoryDomainEvent {
         index: usize,
         record: HistoryDomainRecord,
     },
+    UpdateExecStream {
+        index: usize,
+        stdout_chunk: Option<ExecStreamChunk>,
+        stderr_chunk: Option<ExecStreamChunk>,
+    },
+    UpsertAssistantStream {
+        stream_id: String,
+        preview_markdown: String,
+        delta: Option<AssistantStreamDelta>,
+        metadata: Option<MessageMetadata>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +58,8 @@ pub enum HistoryDomainRecord {
     Loading(LoadingState),
     BackgroundEvent(BackgroundEventRecord),
     RateLimits(RateLimitsRecord),
+    Exec(ExecRecord),
+    AssistantStream(AssistantStreamState),
 }
 
 impl From<PlainMessageState> for HistoryDomainRecord {
@@ -79,6 +92,18 @@ impl From<RateLimitsRecord> for HistoryDomainRecord {
     }
 }
 
+impl From<ExecRecord> for HistoryDomainRecord {
+    fn from(state: ExecRecord) -> Self {
+        HistoryDomainRecord::Exec(state)
+    }
+}
+
+impl From<AssistantStreamState> for HistoryDomainRecord {
+    fn from(state: AssistantStreamState) -> Self {
+        HistoryDomainRecord::AssistantStream(state)
+    }
+}
+
 impl HistoryDomainRecord {
     fn into_history_record(self) -> HistoryRecord {
         match self {
@@ -101,6 +126,14 @@ impl HistoryDomainRecord {
             HistoryDomainRecord::RateLimits(mut state) => {
                 state.id = HistoryId::ZERO;
                 HistoryRecord::RateLimits(state)
+            }
+            HistoryDomainRecord::Exec(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Exec(state)
+            }
+            HistoryDomainRecord::AssistantStream(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::AssistantStream(state)
             }
         }
     }
@@ -590,47 +623,17 @@ impl HistoryState {
         delta: Option<AssistantStreamDelta>,
         metadata: Option<&MessageMetadata>,
     ) -> HistoryId {
-        let now = SystemTime::now();
-        if let Some(idx) = self
-            .records
-            .iter()
-            .position(|record| matches!(record,
-                HistoryRecord::AssistantStream(state) if state.stream_id == stream_id))
-        {
-            if let Some(HistoryRecord::AssistantStream(state)) = self.records.get_mut(idx) {
-                if let Some(delta) = delta {
-                    state.deltas.push(delta);
-                }
-                state.preview_markdown = preview_markdown;
-                if let Some(meta) = metadata {
-                    state.citations = meta.citations.clone();
-                    state.metadata = Some(meta.clone());
-                }
-                state.in_progress = true;
-                state.last_updated_at = now;
-                return state.id;
-            }
-        }
-
-        let mut deltas = Vec::new();
-        if let Some(delta) = delta {
-            deltas.push(delta);
-        }
-        let citations = metadata
-            .map(|meta| meta.citations.clone())
-            .unwrap_or_default();
-        let metadata = metadata.cloned();
-        let state = AssistantStreamState {
-            id: HistoryId(0),
+        let event = HistoryDomainEvent::UpsertAssistantStream {
             stream_id: stream_id.to_string(),
             preview_markdown,
-            deltas,
-            citations,
-            metadata,
-            in_progress: true,
-            last_updated_at: now,
+            delta,
+            metadata: metadata.cloned(),
         };
-        self.push(HistoryRecord::AssistantStream(state))
+        match self.apply_domain_event(event) {
+            HistoryMutation::Inserted { id, .. }
+            | HistoryMutation::Replaced { id, .. } => id,
+            _ => HistoryId::ZERO,
+        }
     }
 
     pub fn finalize_assistant_stream_state(
@@ -765,6 +768,83 @@ impl HistoryState {
             HistoryDomainEvent::Replace { index, record } => {
                 let record = record.into_history_record();
                 self.apply_event(HistoryEvent::Replace { index, record })
+            }
+            HistoryDomainEvent::UpdateExecStream {
+                index,
+                stdout_chunk,
+                stderr_chunk,
+            } => {
+                if let Some(HistoryRecord::Exec(existing)) = self.records.get(index).cloned() {
+                    let mut updated = existing;
+                    if let Some(chunk) = stdout_chunk {
+                        updated.stdout_chunks.push(chunk);
+                    }
+                    if let Some(chunk) = stderr_chunk {
+                        updated.stderr_chunks.push(chunk);
+                    }
+                    self.apply_event(HistoryEvent::Replace {
+                        index,
+                        record: HistoryRecord::Exec(updated),
+                    })
+                } else {
+                    HistoryMutation::Noop
+                }
+            }
+            HistoryDomainEvent::UpsertAssistantStream {
+                stream_id,
+                preview_markdown,
+                delta,
+                metadata,
+            } => {
+                let now = SystemTime::now();
+                if let Some(idx) = self.records.iter().position(|record| {
+                    matches!(record,
+                        HistoryRecord::AssistantStream(state) if state.stream_id == stream_id)
+                }) {
+                    if let Some(HistoryRecord::AssistantStream(existing)) =
+                        self.records.get(idx).cloned()
+                    {
+                        let mut updated = existing;
+                        if let Some(delta) = delta {
+                            updated.deltas.push(delta);
+                        }
+                        updated.preview_markdown = preview_markdown;
+                        if let Some(meta) = metadata.clone() {
+                            updated.citations = meta.citations.clone();
+                            updated.metadata = Some(meta);
+                        }
+                        updated.in_progress = true;
+                        updated.last_updated_at = now;
+                        return self.apply_event(HistoryEvent::Replace {
+                            index: idx,
+                            record: HistoryRecord::AssistantStream(updated),
+                        });
+                    }
+                }
+
+                let mut deltas = Vec::new();
+                if let Some(delta) = delta {
+                    deltas.push(delta);
+                }
+                let citations = metadata
+                    .as_ref()
+                    .map(|meta| meta.citations.clone())
+                    .unwrap_or_default();
+                let assistant_state = AssistantStreamState {
+                    id: HistoryId::ZERO,
+                    stream_id,
+                    preview_markdown,
+                    deltas,
+                    citations,
+                    metadata,
+                    in_progress: true,
+                    last_updated_at: now,
+                };
+                let record = HistoryRecord::AssistantStream(assistant_state);
+                self.apply_event(HistoryEvent::Insert {
+                    index: self.records.len(),
+                    record,
+                })
             }
         }
     }
