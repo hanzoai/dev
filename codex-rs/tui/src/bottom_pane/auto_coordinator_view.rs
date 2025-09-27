@@ -325,7 +325,6 @@ impl AutoCoordinatorView {
             }
 
             if let Some(hint_line) = self.manual_hint_line(ctx) {
-                lines.push(Line::default());
                 lines.push(hint_line);
             }
 
