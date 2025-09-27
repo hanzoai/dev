@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::io;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::git_info::CommitLogEntry;
 use codex_core::config_types::AgentConfig;
+use codex_core::config_types::Notifications;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::config_types::TextVerbosity;
 use codex_core::plan_tool::{PlanItemArg, StepStatus, UpdatePlanArgs};
@@ -205,14 +207,22 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
+    HistoryDomainEvent,
+    HistoryDomainRecord,
     AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
+    HistoryEvent,
     HistoryId,
+    HistoryMutation,
     HistoryRecord,
     HistoryState,
     MessageMetadata,
+    RateLimitLegendEntry,
+    RateLimitsRecord,
+    TextTone,
 };
 use crate::slash_command::SlashCommand;
 use crate::live_wrap::RowBuilder;
@@ -242,7 +252,7 @@ use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::ValidationGroup;
 use crate::rate_limits_view::{build_limits_view, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use codex_core::review_format::format_review_findings_block;
-use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -332,10 +342,14 @@ impl RateLimitWarningState {
     ) -> Vec<RateLimitWarning> {
         let mut warnings = Vec::new();
 
-        while self.weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index]
+        let mut next_weekly_index = self.weekly_index;
+        while next_weekly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && secondary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.weekly_index];
+            next_weekly_index += 1;
+        }
+        if next_weekly_index > self.weekly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_weekly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Secondary,
                 threshold,
@@ -343,13 +357,17 @@ impl RateLimitWarningState {
                     "Secondary usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.weekly_index += 1;
+            self.weekly_index = next_weekly_index;
         }
 
-        while self.hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
-            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index]
+        let mut next_hourly_index = self.hourly_index;
+        while next_hourly_index < RATE_LIMIT_WARNING_THRESHOLDS.len()
+            && primary_used_percent >= RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index]
         {
-            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[self.hourly_index];
+            next_hourly_index += 1;
+        }
+        if next_hourly_index > self.hourly_index {
+            let threshold = RATE_LIMIT_WARNING_THRESHOLDS[next_hourly_index - 1];
             warnings.push(RateLimitWarning {
                 scope: RateLimitWarningScope::Primary,
                 threshold,
@@ -357,7 +375,7 @@ impl RateLimitWarningState {
                     "Hourly usage exceeded {threshold:.0}% of the limit. Run /limits for detailed usage."
                 ),
             });
-            self.hourly_index += 1;
+            self.hourly_index = next_hourly_index;
         }
 
         warnings
@@ -401,6 +419,11 @@ pub(crate) struct GhostState {
     snapshots: Vec<GhostSnapshot>,
     disabled: bool,
     disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active: Option<(u64, GhostSnapshotRequest)>,
+    next_id: u64,
+    pending_dispatches: VecDeque<PendingSnapshotDispatch>,
+    queued_user_messages: VecDeque<UserMessage>,
 }
 
 struct UndoSnapshotPreview {
@@ -422,6 +445,7 @@ pub(crate) struct ChatWidget<'a> {
     login_add_view_state: Option<Weak<RefCell<LoginAddAccountState>>>,
     active_exec_cell: Option<ExecCell>,
     history_cells: Vec<Box<dyn HistoryCell>>, // Store all history in memory
+    history_cell_ids: Vec<Option<HistoryId>>,
     history_render: HistoryRenderState,
     history_state: HistoryState,
     config: Config,
@@ -555,6 +579,10 @@ pub(crate) struct ChatWidget<'a> {
     ghost_snapshots: Vec<GhostSnapshot>,
     ghost_snapshots_disabled: bool,
     ghost_snapshots_disabled_reason: Option<GhostSnapshotsDisabledReason>,
+    ghost_snapshot_queue: VecDeque<(u64, GhostSnapshotRequest)>,
+    active_ghost_snapshot: Option<(u64, GhostSnapshotRequest)>,
+    next_ghost_snapshot_id: u64,
+    pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -596,6 +624,7 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    replay_history_depth: usize,
 }
 
 struct PendingJumpBack {
@@ -665,6 +694,44 @@ impl GhostSnapshot {
 
     fn age_from(&self, now: DateTime<Local>) -> Option<std::time::Duration> {
         now.signed_duration_since(self.captured_at).to_std().ok()
+    }
+}
+
+#[derive(Clone)]
+struct GhostSnapshotRequest {
+    summary: Option<String>,
+    conversation: ConversationSnapshot,
+    started_at: Instant,
+}
+
+impl GhostSnapshotRequest {
+    fn new(summary: Option<String>, conversation: ConversationSnapshot) -> Self {
+        Self {
+            summary,
+            conversation,
+            started_at: Instant::now(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GhostSnapshotJobHandle {
+    Scheduled(u64),
+    Skipped,
+}
+
+#[derive(Clone)]
+enum PendingSnapshotDispatch {
+    Direct { job_id: u64, batch: Vec<UserMessage> },
+    Queued { job_id: u64, message: UserMessage },
+}
+
+impl PendingSnapshotDispatch {
+    fn job_id(&self) -> u64 {
+        match self {
+            PendingSnapshotDispatch::Direct { job_id, .. } |
+            PendingSnapshotDispatch::Queued { job_id, .. } => *job_id,
+        }
     }
 }
 
@@ -1190,20 +1257,25 @@ impl ChatWidget<'_> {
     /// If `id_for_replace` is provided and we have a prior index for it, replace in place.
     fn push_system_cell(
         &mut self,
-        cell: impl HistoryCell + 'static,
+        cell: Box<dyn HistoryCell>,
         placement: SystemPlacement,
         id_for_replace: Option<String>,
         order: Option<&codex_core::protocol::OrderMeta>,
         tag: &'static str,
+        record: Option<HistoryDomainRecord>,
     ) {
         if let Some(id) = id_for_replace.as_ref() {
             if let Some(&idx) = self.system_cell_by_id.get(id) {
-                self.history_replace_at(idx, Box::new(cell));
+                if let Some(record) = record.clone() {
+                    self.history_replace_with_record(idx, cell, record);
+                } else {
+                    self.history_replace_at(idx, cell);
+                }
                 return;
             }
         }
         let key = self.system_order_key(placement, order);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag);
+        let pos = self.history_insert_with_key_global_tagged(cell, key, tag, record);
         if let Some(id) = id_for_replace {
             self.system_cell_by_id.insert(id, pos);
         }
@@ -1560,7 +1632,7 @@ impl ChatWidget<'_> {
         use crate::history::state::ExecStatus;
         use crate::history_cell::HistoryCellType;
         use crate::history_cell::PatchKind;
-        use crate::history_cell::ToolStatus;
+        use crate::history_cell::ToolCellStatus;
         match item.kind() {
             HistoryCellType::Plain => "Plain".to_string(),
             HistoryCellType::User => "User".to_string(),
@@ -1583,9 +1655,9 @@ impl ChatWidget<'_> {
             }
             HistoryCellType::Tool { status } => {
                 let s = match status {
-                    ToolStatus::Running => "Running",
-                    ToolStatus::Success => "Success",
-                    ToolStatus::Failed => "Failed",
+                    ToolCellStatus::Running => "Running",
+                    ToolCellStatus::Success => "Success",
+                    ToolCellStatus::Failed => "Failed",
                 };
                 format!("Tool:{}", s)
             }
@@ -1731,9 +1803,10 @@ impl ChatWidget<'_> {
                     let mut lines = Vec::new();
                     crate::markdown::append_markdown(text, &mut lines, &self.config);
                     let key = self.next_internal_key();
-                    let _ = self.history_insert_with_key_global(
-                        Box::new(PlainHistoryCell::new(lines, HistoryCellType::Assistant)),
+                    let _ = self.history_insert_plain_cell_with_key(
+                        PlainHistoryCell::new(lines, HistoryCellType::Assistant),
                         key,
+                        "epilogue",
                     );
                 }
             }
@@ -1754,6 +1827,7 @@ impl ChatWidget<'_> {
                     Box::new(crate::history_cell::new_background_event(message)),
                     key,
                     "background",
+                    None,
                 );
             }
             ResponseItem::Reasoning { summary, .. } => {
@@ -1817,6 +1891,7 @@ impl ChatWidget<'_> {
                     Box::new(crate::history_cell::new_background_event(message)),
                     key,
                     "background",
+                    None,
                 );
             }
             _ => {
@@ -2026,9 +2101,32 @@ impl ChatWidget<'_> {
         // invalidate the height cache since indices shift and our cache is
         // keyed by (idx,width).
         let before_len = self.history_cells.len();
-        self.history_cells.retain(|cell| !cell.should_remove());
-        if self.history_cells.len() != before_len {
-            self.invalidate_height_cache();
+        if before_len > 0 {
+            let old_cells = std::mem::take(&mut self.history_cells);
+            let old_ids = std::mem::take(&mut self.history_cell_ids);
+            debug_assert_eq!(
+                old_cells.len(),
+                old_ids.len(),
+                "history ids out of sync with cells"
+            );
+            let mut removed_any = false;
+            let mut kept_cells = Vec::with_capacity(old_cells.len());
+            let mut kept_ids = Vec::with_capacity(old_ids.len());
+            for (cell, id) in old_cells.into_iter().zip(old_ids.into_iter()) {
+                if cell.should_remove() {
+                    removed_any = true;
+                    continue;
+                }
+                kept_ids.push(id);
+                kept_cells.push(cell);
+            }
+            self.history_cells = kept_cells;
+            self.history_cell_ids = kept_ids;
+            if removed_any {
+                self.invalidate_height_cache();
+            }
+        } else if !self.history_cell_ids.is_empty() {
+            self.history_cell_ids.clear();
         }
 
         // Send a redraw event to trigger UI update
@@ -2148,11 +2246,9 @@ impl ChatWidget<'_> {
     /// Handle patch apply end immediately
     fn handle_patch_apply_end_now(&mut self, ev: PatchApplyEndEvent) {
         if ev.success {
-            // Update the most recent patch cell header from "Updating..." to "Updated"
-            // without creating a new history section.
-            if let Some(last) = self.history_cells.iter_mut().rev().find(|c| {
+            if let Some(idx) = self.history_cells.iter().rposition(|cell| {
                 matches!(
-                    c.kind(),
+                    cell.kind(),
                     crate::history_cell::HistoryCellType::Patch {
                         kind: crate::history_cell::PatchKind::ApplyBegin
                     } | crate::history_cell::HistoryCellType::Patch {
@@ -2160,58 +2256,93 @@ impl ChatWidget<'_> {
                     }
                 )
             }) {
-                // Case 1: Patch summary cell – update title/kind in-place
-                if let Some(summary) = last
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::PatchSummaryCell>()
+                if let Some(summary) = self.history_cells[idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::PatchSummaryCell>()
                 {
-                    summary.title = "Updated".to_string();
-                    summary.kind = history_cell::PatchKind::ApplySuccess;
-                    self.request_redraw();
+                    let mut updated = history_cell::new_patch_event(
+                        PatchEventType::ApplySuccess,
+                        summary.record().changes.clone(),
+                    );
+                    updated.title = "Updated".to_string();
+                    updated.kind = history_cell::PatchKind::ApplySuccess;
+                    updated.record_mut().patch_type = HistoryPatchEventType::ApplySuccess;
+                    self.history_replace_at(idx, Box::new(updated));
                     return;
                 }
-                // Case 2: Plain history cell fallback – adjust first span and kind
-                if let Some(plain) = last
-                    .as_any_mut()
-                    .downcast_mut::<history_cell::PlainHistoryCell>()
-                {
-                    let state = plain.state_mut();
-                    if let Some(header) = state.header.as_mut() {
-                        header.label = "Updated".to_string();
-                    }
-                    if let Some(first_line) = state.lines.first_mut() {
-                        if first_line.spans.is_empty() {
-                            first_line.kind = crate::history::MessageLineKind::Paragraph;
-                            first_line.spans.push(crate::history::InlineSpan {
-                                text: "Updated".to_string(),
-                                tone: crate::history::TextTone::Success,
-                                emphasis: crate::history::TextEmphasis {
-                                    bold: true,
-                                    italic: false,
-                                    dim: false,
-                                    strike: false,
-                                    underline: false,
-                                },
-                                entity: None,
-                            });
-                        } else {
-                            for span in &mut first_line.spans {
-                                span.tone = crate::history::TextTone::Success;
-                                span.emphasis.bold = true;
-                                span.emphasis.dim = false;
-                            }
-                            first_line.spans[0].text = "Updated".to_string();
+
+                if let Some(cell) = self.history_cells.get_mut(idx) {
+                    if let Some(plain) = cell
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::PlainHistoryCell>()
+                    {
+                        let state = plain.state_mut();
+                        if let Some(header) = state.header.as_mut() {
+                            header.label = "Updated".to_string();
                         }
+                        if let Some(first_line) = state.lines.first_mut() {
+                            if first_line.spans.is_empty() {
+                                first_line.kind = crate::history::MessageLineKind::Paragraph;
+                                first_line.spans.push(crate::history::InlineSpan {
+                                    text: "Updated".to_string(),
+                                    tone: crate::history::TextTone::Success,
+                                    emphasis: crate::history::TextEmphasis {
+                                        bold: true,
+                                        italic: false,
+                                        dim: false,
+                                        strike: false,
+                                        underline: false,
+                                    },
+                                    entity: None,
+                                });
+                            } else {
+                                for span in &mut first_line.spans {
+                                    span.tone = crate::history::TextTone::Success;
+                                    span.emphasis.bold = true;
+                                    span.emphasis.dim = false;
+                                }
+                                first_line.spans[0].text = "Updated".to_string();
+                            }
+                        }
+                        plain.set_kind(history_cell::HistoryCellType::Patch {
+                            kind: history_cell::PatchKind::ApplySuccess,
+                        });
+                        plain.invalidate_layout_cache();
                     }
-                    plain.set_kind(history_cell::HistoryCellType::Patch {
-                        kind: history_cell::PatchKind::ApplySuccess,
-                    });
-                    plain.invalidate_layout_cache();
-                    self.request_redraw();
-                    return;
                 }
+
+                let record = self.history_record_from_cell(self.history_cells[idx].as_ref());
+                if let Some(record) = record {
+                    if let Some(record_index) = self.record_index_for_cell(idx) {
+                        if let HistoryMutation::Replaced { id, .. } = self
+                            .history_state
+                            .apply_event(HistoryEvent::Replace { index: record_index, record })
+                        {
+                            if let Some(cell) = self.history_cells.get_mut(idx) {
+                                if let Some(plain_cell) = cell
+                                    .as_any_mut()
+                                    .downcast_mut::<history_cell::PlainHistoryCell>()
+                                {
+                                    let state = plain_cell.state_mut();
+                                    state.id = id;
+                                }
+                            }
+                            if idx < self.history_cell_ids.len() {
+                                self.history_cell_ids[idx] = Some(id);
+                            }
+                        }
+                    } else {
+                        tracing::warn!(
+                            "history-state mismatch: no persisted index for patch cell {}",
+                            idx
+                        );
+                    }
+                }
+
+                self.request_redraw();
+                return;
             }
-            // Fallback: if no prior cell found, do nothing (avoid extra section)
+            // If nothing to update, fall through without inserting a duplicate cell.
         } else {
             let key = self.next_internal_key();
             let _ = self.history_insert_with_key_global(
@@ -2691,6 +2822,7 @@ impl ChatWidget<'_> {
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             history_state: HistoryState::new(),
+            history_cell_ids: Vec::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2721,6 +2853,10 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
+            pending_snapshot_dispatches: VecDeque::new(),
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -2741,6 +2877,7 @@ impl ChatWidget<'_> {
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
             standard_terminal_mode: !config.tui.alternate_screen,
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -2922,6 +3059,7 @@ impl ChatWidget<'_> {
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             history_state: HistoryState::new(),
+            history_cell_ids: Vec::new(),
             height_manager: RefCell::new(HeightManager::new(
                 crate::height_manager::HeightManagerConfig::default(),
             )),
@@ -2952,6 +3090,10 @@ impl ChatWidget<'_> {
             ghost_snapshots: Vec::new(),
             ghost_snapshots_disabled: false,
             ghost_snapshots_disabled_reason: None,
+            ghost_snapshot_queue: VecDeque::new(),
+            active_ghost_snapshot: None,
+            next_ghost_snapshot_id: 0,
+            pending_snapshot_dispatches: VecDeque::new(),
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -2972,6 +3114,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            replay_history_depth: 0,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3415,7 +3558,7 @@ impl ChatWidget<'_> {
 
         let codex_home = self.config.codex_home.clone();
         let accounts = auth_accounts::list_accounts(&codex_home).unwrap_or_default();
-        let mut account_map: HashMap<String, StoredAccount> = accounts
+        let account_map: HashMap<String, StoredAccount> = accounts
             .into_iter()
             .map(|account| (account.id.clone(), account))
             .collect();
@@ -3427,19 +3570,22 @@ impl ChatWidget<'_> {
         let usage_records = account_usage::list_rate_limit_snapshots(&codex_home).unwrap_or_default();
         let mut snapshot_map: HashMap<String, StoredRateLimitSnapshot> = usage_records
             .into_iter()
+            .filter(|record| account_map.contains_key(&record.account_id))
             .map(|record| (record.account_id.clone(), record))
             .collect();
 
-        let mut summary_ids: HashSet<String> = account_map.keys().cloned().collect();
-        summary_ids.extend(snapshot_map.keys().cloned());
-        if let Some(id) = active_id.as_ref() {
-            summary_ids.insert(id.clone());
+        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
+        for id in account_map.keys() {
+            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, id) {
+                usage_summary_map.insert(id.clone(), summary);
+            }
         }
 
-        let mut usage_summary_map: HashMap<String, StoredUsageSummary> = HashMap::new();
-        for id in summary_ids {
-            if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, &id) {
-                usage_summary_map.insert(id, summary);
+        if let Some(active_id) = active_id.as_ref() {
+            if !usage_summary_map.contains_key(active_id) {
+                if let Ok(Some(summary)) = account_usage::load_account_usage(&codex_home, active_id) {
+                    usage_summary_map.insert(active_id.clone(), summary);
+                }
             }
         }
 
@@ -3465,25 +3611,21 @@ impl ChatWidget<'_> {
             let extra = Self::usage_history_lines(summary_ref);
             let view = build_limits_view(&snapshot, current_reset, DEFAULT_GRID_CONFIG);
             tabs.push(LimitsTab::view(title, header, view, extra));
-            if let Some(id) = active_id.as_ref() {
-                seen_ids.insert(id.clone());
-                account_map.remove(id);
-                snapshot_map.remove(id);
-                usage_summary_map.remove(id);
+
+            if let Some(active_id) = active_id.as_ref() {
+                if account_map.contains_key(active_id) {
+                    seen_ids.insert(active_id.clone());
+                    snapshot_map.remove(active_id);
+                    usage_summary_map.remove(active_id);
+                }
             }
         }
 
-        let mut remaining_ids: Vec<String> = Vec::new();
-        for id in account_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
-        for id in snapshot_map.keys() {
-            if seen_ids.insert(id.clone()) {
-                remaining_ids.push(id.clone());
-            }
-        }
+        let mut remaining_ids: Vec<String> = account_map
+            .keys()
+            .filter(|id| !seen_ids.contains(*id))
+            .cloned()
+            .collect();
         remaining_ids.sort_by(|a, b| {
             let a_label = account_map
                 .get(a)
@@ -3493,9 +3635,14 @@ impl ChatWidget<'_> {
                 .get(b)
                 .map(Self::account_label)
                 .unwrap_or_else(|| b.clone());
-            a_label
-                .to_ascii_lowercase()
-                .cmp(&b_label.to_ascii_lowercase())
+            let a_cmp = a_label.to_ascii_lowercase();
+            let b_cmp = b_label.to_ascii_lowercase();
+            let order = a_cmp.cmp(&b_cmp);
+            if order == std::cmp::Ordering::Equal {
+                a_label.cmp(&b_label)
+            } else {
+                order
+            }
         });
 
         for id in remaining_ids {
@@ -3711,35 +3858,20 @@ impl ChatWidget<'_> {
             - ChronoDuration::seconds(now.second() as i64)
             - ChronoDuration::nanoseconds(now.nanosecond() as i64);
 
-        let mut hours: Vec<(DateTime<Local>, TokenTotals)> = (0..12)
-            .map(|offset| {
-                (
-                    anchor - ChronoDuration::hours(offset as i64),
-                    TokenTotals::default(),
-                )
+        let hourly_totals = Self::aggregate_hourly_totals(summary);
+        let series: Vec<(DateTime<Local>, TokenTotals)> = (0..12)
+            .map(|offset| anchor - ChronoDuration::hours(offset as i64))
+            .map(|dt| {
+                let utc_key = Self::truncate_utc_hour(dt.with_timezone(&Utc));
+                let totals = hourly_totals
+                    .get(&utc_key)
+                    .cloned()
+                    .unwrap_or_default();
+                (dt, totals)
             })
             .collect();
 
-        let mut lookup: HashMap<i64, usize> = HashMap::new();
-        for (idx, (dt, _)) in hours.iter().enumerate() {
-            lookup.insert(dt.timestamp(), idx);
-        }
-
-        if let Some(summary) = summary {
-            for entry in &summary.hourly_entries {
-                let local_time = entry.timestamp.with_timezone(&Local);
-                let truncated = local_time
-                    - ChronoDuration::minutes(local_time.minute() as i64)
-                    - ChronoDuration::seconds(local_time.second() as i64)
-                    - ChronoDuration::nanoseconds(local_time.nanosecond() as i64);
-                if let Some(&pos) = lookup.get(&truncated.timestamp()) {
-                    let (_, totals) = &mut hours[pos];
-                    Self::accumulate_token_totals(totals, &entry.tokens);
-                }
-            }
-        }
-
-        let max_total = hours
+        let max_total = series
             .iter()
             .map(|(_, totals)| totals.total_tokens)
             .max()
@@ -3752,12 +3884,12 @@ impl ChatWidget<'_> {
         )]));
 
         let prefix = status_content_prefix();
-        let tokens_width = hours
+        let tokens_width = series
             .iter()
             .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
             .max()
             .unwrap_or(0);
-        for (dt, totals) in hours.iter() {
+        for (dt, totals) in series.iter() {
             let label = Self::format_hour_label(*dt);
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
             let tokens = format_with_separators(totals.total_tokens);
@@ -3786,26 +3918,14 @@ impl ChatWidget<'_> {
     fn daily_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
         const WIDTH: usize = 14;
         let today = Local::now().date_naive();
-        let mut daily: Vec<(chrono::NaiveDate, TokenTotals)> = (0..7)
-            .map(|offset| {
-                (
-                    today - ChronoDuration::days(offset as i64),
-                    TokenTotals::default(),
-                )
+        let day_totals = Self::aggregate_daily_totals(summary);
+        let daily: Vec<(chrono::NaiveDate, TokenTotals)> = (0..7)
+            .map(|offset| today - ChronoDuration::days(offset as i64))
+            .map(|day| {
+                let totals = day_totals.get(&day).cloned().unwrap_or_default();
+                (day, totals)
             })
             .collect();
-
-        if let Some(summary) = summary {
-            for entry in &summary.hourly_entries {
-                let entry_date = entry.timestamp.with_timezone(&Local).date_naive();
-                let diff = today.signed_duration_since(entry_date).num_days();
-                if (0..=6).contains(&diff) {
-                    let idx = diff as usize;
-                    let (_, totals) = &mut daily[idx];
-                    Self::accumulate_token_totals(totals, &entry.tokens);
-                }
-            }
-        }
 
         let max_total = daily
             .iter()
@@ -3889,32 +4009,22 @@ impl ChatWidget<'_> {
         let mut year = today.year();
         let mut month = today.month();
 
+        let month_totals = Self::aggregate_monthly_totals(summary);
         let mut months: Vec<(chrono::NaiveDate, TokenTotals)> = Vec::with_capacity(MONTHS);
         for _ in 0..MONTHS {
             let start = chrono::NaiveDate::from_ymd_opt(year, month, 1)
                 .expect("valid month start");
-            months.push((start, TokenTotals::default()));
+            let key = (start.year(), start.month());
+            let totals = month_totals
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
+            months.push((start, totals));
             if month == 1 {
                 month = 12;
                 year -= 1;
             } else {
                 month -= 1;
-            }
-        }
-
-        let mut lookup: HashMap<(i32, u32), usize> = HashMap::new();
-        for (idx, (start, _)) in months.iter().enumerate() {
-            lookup.insert((start.year(), start.month()), idx);
-        }
-
-        if let Some(summary) = summary {
-            for entry in &summary.hourly_entries {
-                let local_time = entry.timestamp.with_timezone(&Local);
-                let date = local_time.date_naive();
-                if let Some(&pos) = lookup.get(&(date.year(), date.month())) {
-                    let (_, totals) = &mut months[pos];
-                    Self::accumulate_token_totals(totals, &entry.tokens);
-                }
             }
         }
 
@@ -3985,6 +4095,88 @@ impl ChatWidget<'_> {
             text.into(),
             Style::default().fg(crate::colors::text_dim()),
         )])
+    }
+
+    fn truncate_utc_hour(ts: DateTime<Utc>) -> DateTime<Utc> {
+        let naive = ts.naive_utc();
+        let trimmed = naive
+            .with_minute(0)
+            .and_then(|dt| dt.with_second(0))
+            .and_then(|dt| dt.with_nanosecond(0))
+            .expect("valid hour truncation");
+        Utc.from_utc_datetime(&trimmed)
+    }
+
+    fn aggregate_hourly_totals(
+        summary: Option<&StoredUsageSummary>,
+    ) -> HashMap<DateTime<Utc>, TokenTotals> {
+        let mut totals = HashMap::new();
+        if let Some(summary) = summary {
+            for entry in &summary.hourly_entries {
+                let key = Self::truncate_utc_hour(entry.timestamp);
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &entry.tokens);
+            }
+            for bucket in &summary.hourly_buckets {
+                let slot = totals
+                    .entry(bucket.period_start)
+                    .or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &bucket.tokens);
+            }
+        }
+        totals
+    }
+
+    fn aggregate_daily_totals(
+        summary: Option<&StoredUsageSummary>,
+    ) -> HashMap<chrono::NaiveDate, TokenTotals> {
+        let mut totals = HashMap::new();
+        if let Some(summary) = summary {
+            for bucket in &summary.daily_buckets {
+                let key = bucket.period_start.date_naive();
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &bucket.tokens);
+            }
+            for bucket in &summary.hourly_buckets {
+                let key = bucket.period_start.date_naive();
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &bucket.tokens);
+            }
+            for entry in &summary.hourly_entries {
+                let key = entry.timestamp.date_naive();
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &entry.tokens);
+            }
+        }
+        totals
+    }
+
+    fn aggregate_monthly_totals(
+        summary: Option<&StoredUsageSummary>,
+    ) -> HashMap<(i32, u32), TokenTotals> {
+        let mut totals = HashMap::new();
+        if let Some(summary) = summary {
+            let mut accumulate = |dt: DateTime<Utc>, tokens: &TokenTotals| {
+                let date = dt.date_naive();
+                let key = (date.year(), date.month());
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, tokens);
+            };
+
+            for bucket in &summary.monthly_buckets {
+                accumulate(bucket.period_start, &bucket.tokens);
+            }
+            for bucket in &summary.daily_buckets {
+                accumulate(bucket.period_start, &bucket.tokens);
+            }
+            for bucket in &summary.hourly_buckets {
+                accumulate(bucket.period_start, &bucket.tokens);
+            }
+            for entry in &summary.hourly_entries {
+                accumulate(entry.timestamp, &entry.tokens);
+            }
+        }
+        totals
     }
 
     // dispatch_command() removed — command routing is handled at the App layer via AppEvent::DispatchCommand
@@ -4097,7 +4289,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         key: OrderKey,
     ) -> usize {
-        self.history_insert_with_key_global_tagged(cell, key, "untagged")
+        self.history_insert_with_key_global_tagged(cell, key, "untagged", None)
     }
 
     // Internal: same as above but with a short tag for debug overlays.
@@ -4106,6 +4298,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         key: OrderKey,
         tag: &'static str,
+        record: Option<HistoryDomainRecord>,
     ) -> usize {
         #[cfg(debug_assertions)]
         {
@@ -4213,7 +4406,41 @@ impl ChatWidget<'_> {
             None
         };
 
+        let mut cell = cell;
+
+        let maybe_id = if let Some(domain_record) = record {
+            let record_index = self.record_index_for_position(pos);
+            match self.history_state.apply_domain_event(HistoryDomainEvent::Insert {
+                index: record_index,
+                record: domain_record,
+            }) {
+                HistoryMutation::Inserted { id, .. } => {
+                    self.assign_history_id(&mut cell, id);
+                    Some(id)
+                }
+                _ => None,
+            }
+        } else if let Some(record) = self.history_record_from_cell(cell.as_ref()) {
+            let record_index = self.record_index_for_position(pos);
+            match self
+                .history_state
+                .apply_event(HistoryEvent::Insert {
+                    index: record_index,
+                    record,
+                })
+            {
+                HistoryMutation::Inserted { id, .. } => {
+                    self.assign_history_id(&mut cell, id);
+                    Some(id)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         self.history_cells.insert(pos, cell);
+        self.history_cell_ids.insert(pos, maybe_id);
         // In terminal mode, App mirrors history lines into the native buffer.
         // Ensure order vector is also long enough for position after cell insert
         if self.cell_order_seq.len() < pos {
@@ -4269,6 +4496,201 @@ impl ChatWidget<'_> {
         pos
     }
 
+    fn assign_history_id(&self, cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
+        if let Some(plain) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PlainHistoryCell>()
+        {
+            plain.state_mut().id = id;
+        } else if let Some(wait) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::WaitStatusCell>()
+        {
+            wait.state_mut().id = id;
+        } else if let Some(loading) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::LoadingCell>()
+        {
+            loading.state_mut().id = id;
+        } else if let Some(background) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::BackgroundEventCell>()
+        {
+            background.state_mut().id = id;
+        } else if let Some(tool_call) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ToolCallCell>()
+        {
+            tool_call.state_mut().id = id;
+        } else if let Some(running_tool) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::RunningToolCallCell>()
+        {
+            running_tool.state_mut().id = id;
+        } else if let Some(plan) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PlanUpdateCell>()
+        {
+            plan.state_mut().id = id;
+        } else if let Some(upgrade) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::UpgradeNoticeCell>()
+        {
+            upgrade.state_mut().id = id;
+        } else if let Some(reasoning) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::CollapsibleReasoningCell>()
+        {
+            reasoning.set_history_id(id);
+        } else if let Some(exec) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ExecCell>()
+        {
+            exec.record.id = id;
+        } else if let Some(stream) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::StreamingContentCell>()
+        {
+            stream.state_mut().id = id;
+        } else if let Some(assistant) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::AssistantMarkdownCell>()
+        {
+            assistant.state_mut().id = id;
+        } else if let Some(diff) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::DiffCell>()
+        {
+            diff.record_mut().id = id;
+        } else if let Some(image) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ImageOutputCell>()
+        {
+            image.record_mut().id = id;
+        } else if let Some(patch) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PatchSummaryCell>()
+        {
+            patch.record_mut().id = id;
+        } else if let Some(explore) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::ExploreAggregationCell>()
+        {
+            explore.record_mut().id = id;
+        } else if let Some(rate_limits) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::RateLimitsCell>()
+        {
+            rate_limits.record_mut().id = id;
+        }
+    }
+
+    fn history_record_from_cell(&self, cell: &dyn HistoryCell) -> Option<HistoryRecord> {
+        if let Some(plain) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::PlainHistoryCell>()
+        {
+            return Some(HistoryRecord::PlainMessage(plain.state().clone()));
+        }
+        if let Some(wait) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::WaitStatusCell>()
+        {
+            return Some(HistoryRecord::WaitStatus(wait.state().clone()));
+        }
+        if let Some(loading) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::LoadingCell>()
+        {
+            return Some(HistoryRecord::Loading(loading.state().clone()));
+        }
+        if let Some(background) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::BackgroundEventCell>()
+        {
+            return Some(HistoryRecord::BackgroundEvent(background.state().clone()));
+        }
+        if let Some(tool_call) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ToolCallCell>()
+        {
+            return Some(HistoryRecord::ToolCall(tool_call.state().clone()));
+        }
+        if let Some(running_tool) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
+        {
+            return Some(HistoryRecord::RunningTool(running_tool.state().clone()));
+        }
+        if let Some(plan) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::PlanUpdateCell>()
+        {
+            return Some(HistoryRecord::PlanUpdate(plan.state().clone()));
+        }
+        if let Some(upgrade) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::UpgradeNoticeCell>()
+        {
+            return Some(HistoryRecord::UpgradeNotice(upgrade.state().clone()));
+        }
+        if let Some(reasoning) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+        {
+            return Some(HistoryRecord::Reasoning(reasoning.reasoning_state()));
+        }
+        if let Some(exec) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ExecCell>()
+        {
+            return Some(HistoryRecord::Exec(exec.record.clone()));
+        }
+        if let Some(stream) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::StreamingContentCell>()
+        {
+            return Some(HistoryRecord::AssistantStream(stream.state().clone()));
+        }
+        if let Some(assistant) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+        {
+            return Some(HistoryRecord::AssistantMessage(assistant.state().clone()));
+        }
+        if let Some(diff) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::DiffCell>()
+        {
+            return Some(HistoryRecord::Diff(diff.record().clone()));
+        }
+        if let Some(image) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ImageOutputCell>()
+        {
+            return Some(HistoryRecord::Image(image.record().clone()));
+        }
+        if let Some(patch) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::PatchSummaryCell>()
+        {
+            return Some(HistoryRecord::Patch(patch.record().clone()));
+        }
+        if let Some(explore) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ExploreAggregationCell>()
+        {
+            return Some(HistoryRecord::Explore(explore.record().clone()));
+        }
+        if let Some(rate_limits) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::RateLimitsCell>()
+        {
+            return Some(HistoryRecord::RateLimits(rate_limits.record().clone()));
+        }
+        None
+    }
+
     /// Push a cell using a synthetic global order key at the bottom of the current request.
     pub(crate) fn history_push(&mut self, cell: impl HistoryCell + 'static) {
         #[cfg(debug_assertions)]
@@ -4279,18 +4701,29 @@ impl ChatWidget<'_> {
             );
         }
         let key = self.next_internal_key();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue");
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "epilogue", None);
+    }
+
+    fn history_insert_plain_cell_with_key(
+        &mut self,
+        cell: crate::history_cell::PlainHistoryCell,
+        key: OrderKey,
+        tag: &'static str,
+    ) -> usize {
+        let record = HistoryDomainRecord::Plain(cell.state().clone());
+        self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, Some(record))
+    }
+
+    fn history_push_plain_cell(&mut self, cell: crate::history_cell::PlainHistoryCell) {
+        let key = self.next_internal_key();
+        let _ = self.history_insert_plain_cell_with_key(cell, key, "epilogue");
     }
 
     fn history_push_diff(&mut self, title: Option<String>, diff_output: String) {
-        let mut record = history_cell::diff_record_from_string(
+        let record = history_cell::diff_record_from_string(
             title.unwrap_or_default(),
             &diff_output,
         );
-        let id = self
-            .history_state
-            .push(HistoryRecord::Diff(record.clone()));
-        record.id = id;
         let cell = history_cell::DiffCell::from_record(record);
         self.history_push(cell);
     }
@@ -4318,12 +4751,15 @@ impl ChatWidget<'_> {
                 }
             }
         };
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             system_placement,
             None,
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -4341,22 +4777,100 @@ impl ChatWidget<'_> {
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude");
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prelude", None);
     }
     /// Push a user prompt so it appears right under banners and above model output for the next request.
     fn history_push_prompt_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_prompt();
-        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt");
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt", None);
     }
 
-    fn history_replace_at(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
-        if idx < self.history_cells.len() {
-            self.history_cells[idx] = cell;
-            self.invalidate_height_cache();
-            self.request_redraw();
-            self.refresh_explore_trailing_flags();
-            // Keep debug info for this cell index as-is.
+    fn history_replace_with_record(
+        &mut self,
+        idx: usize,
+        mut cell: Box<dyn HistoryCell>,
+        record: HistoryDomainRecord,
+    ) {
+        if idx >= self.history_cells.len() {
+            return;
         }
+
+        let record_idx = self
+            .record_index_for_cell(idx)
+            .unwrap_or_else(|| self.record_index_for_position(idx));
+
+        let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::Replace {
+            index: record_idx,
+            record,
+        });
+
+        if let Some(id) = match mutation {
+            HistoryMutation::Replaced { id, .. } => Some(id),
+            HistoryMutation::Inserted { id, .. } => Some(id),
+            _ => None,
+        } {
+            self.assign_history_id(&mut cell, id);
+            if idx < self.history_cell_ids.len() {
+                self.history_cell_ids[idx] = Some(id);
+            }
+        }
+
+        self.history_cells[idx] = cell;
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
+    }
+
+    fn history_replace_at(&mut self, idx: usize, mut cell: Box<dyn HistoryCell>) {
+        if idx >= self.history_cells.len() {
+            return;
+        }
+
+        let record = self.history_record_from_cell(cell.as_ref());
+        let mut maybe_id = None;
+
+        match (record, self.record_index_for_cell(idx)) {
+            (Some(record), Some(record_idx)) => {
+                if let HistoryMutation::Replaced { id, .. } = self
+                    .history_state
+                    .apply_event(HistoryEvent::Replace {
+                        index: record_idx,
+                        record,
+                    })
+                {
+                    self.assign_history_id(&mut cell, id);
+                    maybe_id = Some(id);
+                }
+            }
+            (Some(record), None) => {
+                let record_idx = self.record_index_for_position(idx);
+                if let HistoryMutation::Inserted { id, .. } = self
+                    .history_state
+                    .apply_event(HistoryEvent::Insert {
+                        index: record_idx,
+                        record,
+                    })
+                {
+                    self.assign_history_id(&mut cell, id);
+                    maybe_id = Some(id);
+                }
+            }
+            (None, Some(record_idx)) => {
+                let _ = self
+                    .history_state
+                    .apply_event(HistoryEvent::Remove { index: record_idx });
+            }
+            (None, None) => {}
+        }
+
+        self.history_cells[idx] = cell;
+        if idx < self.history_cell_ids.len() {
+            self.history_cell_ids[idx] = maybe_id;
+        }
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
+        // Keep debug info for this cell index as-is.
     }
 
     fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
@@ -4374,18 +4888,29 @@ impl ChatWidget<'_> {
     }
 
     fn history_remove_at(&mut self, idx: usize) {
-        if idx < self.history_cells.len() {
-            self.history_cells.remove(idx);
-            if idx < self.cell_order_seq.len() {
-                self.cell_order_seq.remove(idx);
-            }
-            if idx < self.cell_order_dbg.len() {
-                self.cell_order_dbg.remove(idx);
-            }
-            self.invalidate_height_cache();
-            self.request_redraw();
-            self.refresh_explore_trailing_flags();
+        if idx >= self.history_cells.len() {
+            return;
         }
+
+        if let Some(record_idx) = self.record_index_for_cell(idx) {
+            let _ = self
+                .history_state
+                .apply_event(HistoryEvent::Remove { index: record_idx });
+        }
+
+        self.history_cells.remove(idx);
+        if idx < self.history_cell_ids.len() {
+            self.history_cell_ids.remove(idx);
+        }
+        if idx < self.cell_order_seq.len() {
+            self.cell_order_seq.remove(idx);
+        }
+        if idx < self.cell_order_dbg.len() {
+            self.cell_order_dbg.remove(idx);
+        }
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
     }
 
     fn history_replace_and_maybe_merge(&mut self, idx: usize, cell: Box<dyn HistoryCell>) {
@@ -4457,6 +4982,20 @@ impl ChatWidget<'_> {
             )),
         );
         self.history_remove_at(idx);
+    }
+
+    fn record_index_for_position(&self, ui_index: usize) -> usize {
+        self.history_cell_ids
+            .iter()
+            .take(ui_index)
+            .filter(|entry| entry.is_some())
+            .count()
+    }
+
+    fn record_index_for_cell(&self, idx: usize) -> Option<usize> {
+        self.history_cell_ids
+            .get(idx)
+            .and_then(|entry| entry.map(|_| self.record_index_for_position(idx)))
     }
 
     /// Clean up faded-out animation cells
@@ -4635,7 +5174,7 @@ impl ChatWidget<'_> {
                         "command: {}",
                         original_text.trim()
                     )));
-                    self.history_push(crate::history_cell::PlainHistoryCell::new(
+                    self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
                         ack,
                         crate::history_cell::HistoryCellType::Notice,
                     ));
@@ -4690,7 +5229,7 @@ impl ChatWidget<'_> {
                         }
                     )));
                     lines.push(Line::from(format!("command: {}", original_text.trim())));
-                    self.history_push(crate::history_cell::PlainHistoryCell::new(
+                    self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
                         lines,
                         crate::history_cell::HistoryCellType::Notice,
                     ));
@@ -4883,13 +5422,6 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let prompt_summary = if message.display_text.trim().is_empty() {
-            None
-        } else {
-            Some(message.display_text.clone())
-        };
-        self.capture_ghost_snapshot(prompt_summary);
-
         let turn_active = self.is_task_running()
             || !self.active_task_ids.is_empty()
             || self.stream.is_write_cycle_active()
@@ -4900,54 +5432,216 @@ impl ChatWidget<'_> {
                 "Queuing user input while turn is active (queued: {})",
                 self.queued_user_messages.len() + 1
             );
-            self.queued_user_messages.push_back(message);
+            let queued_clone = message.clone();
+            self.queued_user_messages.push_back(queued_clone);
             self.refresh_queued_user_messages();
 
-            let queue_items = self
-                .queued_user_messages
-                .back()
-                .map(|msg| msg.ordered_items.clone())
-                .unwrap_or_default();
+            let prompt_summary = if message.display_text.trim().is_empty() {
+                None
+            } else {
+                Some(message.display_text.clone())
+            };
 
-            match self.codex_op_tx.send(Op::QueueUserInput { items: queue_items }) {
-                Ok(()) => {
-                    if let Some(sent_message) = self.queued_user_messages.pop_back() {
-                        self.refresh_queued_user_messages();
-                        self.finalize_sent_user_message(sent_message);
-                    }
+            match self.capture_ghost_snapshot(prompt_summary) {
+                GhostSnapshotJobHandle::Scheduled(job_id) => {
+                    self.pending_snapshot_dispatches
+                        .push_back(PendingSnapshotDispatch::Queued { job_id, message });
                 }
-                Err(e) => {
-                    tracing::error!("failed to send QueueUserInput op: {e}");
+                GhostSnapshotJobHandle::Skipped => {
+                    self.dispatch_queued_user_message_now(message);
                 }
             }
-
             return;
         }
 
         let mut batch: Vec<UserMessage> = self.queued_user_messages.drain(..).collect();
         batch.push(message);
         self.refresh_queued_user_messages();
-        self.send_user_messages_to_agent(batch);
+        let summary = batch
+            .last()
+            .and_then(|msg| {
+                let trimmed = msg.display_text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(msg.display_text.clone())
+                }
+            });
+
+        match self.capture_ghost_snapshot(summary) {
+            GhostSnapshotJobHandle::Scheduled(job_id) => {
+                self.pending_snapshot_dispatches
+                    .push_back(PendingSnapshotDispatch::Direct { job_id, batch });
+            }
+            GhostSnapshotJobHandle::Skipped => {
+                self.send_user_messages_to_agent(batch);
+            }
+        }
 
         // (debug watchdog removed)
     }
 
-    fn capture_ghost_snapshot(&mut self, summary: Option<String>) {
+    fn capture_ghost_snapshot(&mut self, summary: Option<String>) -> GhostSnapshotJobHandle {
         if self.ghost_snapshots_disabled {
-            return;
+            return GhostSnapshotJobHandle::Skipped;
         }
 
-        let conversation = self.current_conversation_snapshot();
-        let options = CreateGhostCommitOptions::new(&self.config.cwd);
-        match create_ghost_commit(&options) {
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        self.enqueue_ghost_snapshot(request)
+    }
+
+    fn capture_ghost_snapshot_blocking(&mut self, summary: Option<String>) -> Option<GhostSnapshot> {
+        if self.ghost_snapshots_disabled {
+            return None;
+        }
+
+        let request = GhostSnapshotRequest::new(summary, self.current_conversation_snapshot());
+        let repo_path = self.config.cwd.clone();
+        let started_at = request.started_at;
+        let result = create_ghost_commit(&CreateGhostCommitOptions::new(repo_path.as_path()));
+        let elapsed = started_at.elapsed();
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        snapshot
+    }
+
+    fn dispatch_pending_snapshot(&mut self, job_id: u64) {
+        let Some(position) = self
+            .pending_snapshot_dispatches
+            .iter()
+            .position(|pending| pending.job_id() == job_id)
+        else {
+            return;
+        };
+
+        let Some(pending) = self.pending_snapshot_dispatches.remove(position) else {
+            return;
+        };
+        self.process_snapshot_dispatch(pending);
+    }
+
+    fn flush_pending_snapshot_dispatches(&mut self) {
+        while let Some(pending) = self.pending_snapshot_dispatches.pop_front() {
+            self.process_snapshot_dispatch(pending);
+        }
+    }
+
+    fn process_snapshot_dispatch(&mut self, pending: PendingSnapshotDispatch) {
+        match pending {
+            PendingSnapshotDispatch::Direct { batch, .. } => {
+                self.send_user_messages_to_agent(batch);
+            }
+            PendingSnapshotDispatch::Queued { message, .. } => {
+                self.dispatch_queued_user_message_now(message);
+            }
+        }
+    }
+
+    fn dispatch_queued_user_message_now(&mut self, message: UserMessage) {
+        let message = self.take_queued_user_message(&message).unwrap_or(message);
+        let items = message.ordered_items.clone();
+        match self.codex_op_tx.send(Op::QueueUserInput { items }) {
+            Ok(()) => {
+                self.finalize_sent_user_message(message);
+            }
+            Err(err) => {
+                tracing::error!("failed to send QueueUserInput op: {err}");
+                self.queued_user_messages.push_front(message);
+                self.refresh_queued_user_messages();
+            }
+        }
+    }
+
+    fn take_queued_user_message(&mut self, target: &UserMessage) -> Option<UserMessage> {
+        let position = self
+            .queued_user_messages
+            .iter()
+            .position(|message| message == target)?;
+        let removed = self.queued_user_messages.remove(position)?;
+        self.refresh_queued_user_messages();
+        Some(removed)
+    }
+
+    fn enqueue_ghost_snapshot(&mut self, request: GhostSnapshotRequest) -> GhostSnapshotJobHandle {
+        let job_id = self.next_ghost_snapshot_id;
+        self.next_ghost_snapshot_id = self.next_ghost_snapshot_id.wrapping_add(1);
+        self.ghost_snapshot_queue.push_back((job_id, request));
+        self.spawn_next_ghost_snapshot();
+        GhostSnapshotJobHandle::Scheduled(job_id)
+    }
+
+    fn spawn_next_ghost_snapshot(&mut self) {
+        if self.ghost_snapshots_disabled {
+            self.ghost_snapshot_queue.clear();
+            return;
+        }
+        if self.active_ghost_snapshot.is_some() {
+            return;
+        }
+        let Some((job_id, request)) = self.ghost_snapshot_queue.pop_front() else {
+            return;
+        };
+
+        let repo_path = self.config.cwd.clone();
+        let app_event_tx = self.app_event_tx.clone();
+        let started_at = request.started_at;
+        self.active_ghost_snapshot = Some((job_id, request));
+
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let options = CreateGhostCommitOptions::new(repo_path.as_path());
+                create_ghost_commit(&options)
+            })
+            .await;
+            let elapsed = started_at.elapsed();
+            let event = match result {
+                Ok(Ok(commit)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Ok(commit),
+                    elapsed,
+                },
+                Ok(Err(err)) => AppEvent::GhostSnapshotFinished {
+                    job_id,
+                    result: Err(err),
+                    elapsed,
+                },
+                Err(join_err) => {
+                    let err = GitToolingError::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("ghost snapshot task failed: {join_err}"),
+                    ));
+                    AppEvent::GhostSnapshotFinished {
+                        job_id,
+                        result: Err(err),
+                        elapsed,
+                    }
+                }
+            };
+            app_event_tx.send(event);
+        });
+    }
+
+    fn finalize_ghost_snapshot(
+        &mut self,
+        request: GhostSnapshotRequest,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) -> Option<GhostSnapshot> {
+        match result {
             Ok(commit) => {
                 self.ghost_snapshots_disabled = false;
                 self.ghost_snapshots_disabled_reason = None;
-                self.ghost_snapshots
-                    .push(GhostSnapshot::new(commit, summary, conversation));
+                let snapshot = GhostSnapshot::new(commit, request.summary, request.conversation);
+                self.ghost_snapshots.push(snapshot.clone());
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
                 }
+                if elapsed >= Duration::from_secs(2) {
+                    self.push_background_tail(format!(
+                        "Workspace snapshot captured in {}.",
+                        format_duration(elapsed)
+                    ));
+                }
+                Some(snapshot)
             }
             Err(err) => {
                 self.ghost_snapshots_disabled = true;
@@ -4972,8 +5666,38 @@ impl ChatWidget<'_> {
                     self.push_background_tail(hint);
                 }
                 tracing::warn!("failed to create ghost snapshot: {err}");
+                self.ghost_snapshot_queue.clear();
+                None
             }
         }
+    }
+
+    pub(crate) fn handle_ghost_snapshot_finished(
+        &mut self,
+        job_id: u64,
+        result: Result<GhostCommit, GitToolingError>,
+        elapsed: Duration,
+    ) {
+        let Some((active_id, request)) = self.active_ghost_snapshot.take() else {
+            tracing::warn!("ghost snapshot finished without active job (id={job_id})");
+            return;
+        };
+
+        if active_id != job_id {
+            tracing::warn!(
+                "ghost snapshot job id mismatch: expected {active_id}, got {job_id}"
+            );
+            self.active_ghost_snapshot = Some((active_id, request));
+            return;
+        }
+
+        let snapshot = self.finalize_ghost_snapshot(request, result, elapsed);
+        self.request_redraw();
+        self.dispatch_pending_snapshot(job_id);
+        if snapshot.is_none() {
+            self.flush_pending_snapshot_dispatches();
+        }
+        self.spawn_next_ghost_snapshot();
     }
 
     fn current_conversation_snapshot(&self) -> ConversationSnapshot {
@@ -5015,6 +5739,11 @@ impl ChatWidget<'_> {
             snapshots: self.ghost_snapshots.clone(),
             disabled: self.ghost_snapshots_disabled,
             disabled_reason: self.ghost_snapshots_disabled_reason.clone(),
+            queue: self.ghost_snapshot_queue.clone(),
+            active: self.active_ghost_snapshot.clone(),
+            next_id: self.next_ghost_snapshot_id,
+            pending_dispatches: self.pending_snapshot_dispatches.clone(),
+            queued_user_messages: self.queued_user_messages.clone(),
         }
     }
 
@@ -5026,6 +5755,13 @@ impl ChatWidget<'_> {
         }
         self.ghost_snapshots_disabled = state.disabled;
         self.ghost_snapshots_disabled_reason = state.disabled_reason;
+        self.ghost_snapshot_queue = state.queue;
+        self.active_ghost_snapshot = state.active;
+        self.next_ghost_snapshot_id = state.next_id;
+        self.pending_snapshot_dispatches = state.pending_dispatches;
+        self.queued_user_messages = state.queued_user_messages;
+        self.refresh_queued_user_messages();
+        self.spawn_next_ghost_snapshot();
     }
 
     fn snapshot_preview(&self, index: usize) -> Option<UndoSnapshotPreview> {
@@ -5281,9 +6017,10 @@ impl ChatWidget<'_> {
         if restore_files {
             let previous_len = self.ghost_snapshots.len();
             let pre_summary = Some("Pre-undo checkpoint".to_string());
-            self.capture_ghost_snapshot(pre_summary);
-            if self.ghost_snapshots.len() > previous_len {
-                pre_restore_snapshot = self.ghost_snapshots.last().cloned();
+            let captured_snapshot = self.capture_ghost_snapshot_blocking(pre_summary);
+            let added_snapshot = self.ghost_snapshots.len() > previous_len;
+            if let Some(snapshot) = captured_snapshot {
+                pre_restore_snapshot = Some(snapshot);
             }
 
             match restore_ghost_commit(&self.config.cwd, snapshot.commit()) {
@@ -5298,7 +6035,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 Err(err) => {
-                    if self.ghost_snapshots.len() > previous_len {
+                    if added_snapshot && !self.ghost_snapshots.is_empty() {
                         self.ghost_snapshots.pop();
                     }
                     errors.push(format!("Failed to restore workspace files: {err}"));
@@ -5620,6 +6357,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
+                self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let mut max_req = self.last_seen_request_index;
                 if events.is_empty() {
                     for item in &items {
@@ -5652,6 +6390,7 @@ impl ChatWidget<'_> {
                     self.current_request_index = self.last_seen_request_index;
                 }
                 self.request_redraw();
+                self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
                 tools::web_search_complete(self, ev.call_id, ev.query)
@@ -5828,9 +6567,7 @@ impl ChatWidget<'_> {
 
                 self.mark_needs_redraw();
             }
-            EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: _,
-            }) => {
+            EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 // Finalize any active streams
                 if self.stream.is_write_cycle_active() {
                     // Finalize both streams via streaming facade
@@ -5911,6 +6648,7 @@ impl ChatWidget<'_> {
                 self.stream_state.current_kind = None;
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
+                self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -6012,16 +6750,38 @@ impl ChatWidget<'_> {
                     let warnings = self
                         .rate_limit_warnings
                         .take_warnings(snapshot.secondary_used_percent, snapshot.primary_used_percent);
-                    let mut displayed_warning = false;
+                    let mut legend_entries: Vec<RateLimitLegendEntry> = Vec::new();
                     for warning in warnings {
                         if self.log_and_should_display_warning(&warning) {
-                            self.history_push(history_cell::new_warning_event(
-                                warning.message.clone(),
-                            ));
-                            displayed_warning = true;
+                            let label = match warning.scope {
+                                RateLimitWarningScope::Primary => {
+                                    format!("Hourly usage ≥ {:.0}%", warning.threshold)
+                                }
+                                RateLimitWarningScope::Secondary => {
+                                    format!("Weekly usage ≥ {:.0}%", warning.threshold)
+                                }
+                            };
+                            legend_entries.push(RateLimitLegendEntry {
+                                label,
+                                description: warning.message.clone(),
+                                tone: TextTone::Warning,
+                            });
                         }
                     }
-                    if displayed_warning {
+                    if !legend_entries.is_empty() {
+                        let record = RateLimitsRecord {
+                            id: HistoryId::ZERO,
+                            snapshot: snapshot.clone(),
+                            legend: legend_entries,
+                        };
+                        let cell = history_cell::RateLimitsCell::from_record(record.clone());
+                        let key = self.next_internal_key();
+                        let _ = self.history_insert_with_key_global_tagged(
+                            Box::new(cell),
+                            key,
+                            "rate-limits",
+                            Some(HistoryDomainRecord::RateLimits(record)),
+                        );
                         self.request_redraw();
                     }
 
@@ -6627,9 +7387,10 @@ impl ChatWidget<'_> {
                     if let Some(idx) = resolved_idx {
                         self.history_replace_at(idx, Box::new(wait_cancelled_cell));
                     } else {
-                        let _ = self.history_insert_with_key_global(
-                            Box::new(wait_cancelled_cell),
+                        let _ = self.history_insert_plain_cell_with_key(
+                            wait_cancelled_cell,
                             ok,
+                            "untagged",
                         );
                     }
 
@@ -6730,12 +7491,15 @@ impl ChatWidget<'_> {
                 };
                 let id_for_replace = Some(id.clone());
                 let message_clone = message.clone();
+                let cell = history_cell::new_background_event(message_clone);
+                let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
                 self.push_system_cell(
-                    history_cell::new_background_event(message_clone),
+                    Box::new(cell),
                     placement,
                     id_for_replace,
                     event.order.as_ref(),
                     "background",
+                    Some(record),
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
@@ -6923,7 +7687,7 @@ impl ChatWidget<'_> {
                     for line in prompt_text.lines() {
                         lines.push(Line::from(line.to_string()));
                     }
-                    self.history_push(history_cell::PlainHistoryCell::new(
+                    self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
                         lines,
                         history_cell::HistoryCellType::Notice,
                     ));
@@ -7296,7 +8060,7 @@ impl ChatWidget<'_> {
         for l in text.lines() {
             lines.push(ratatui::text::Line::from(l.to_string()))
         }
-        self.history_push(crate::history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
             lines,
             crate::history_cell::HistoryCellType::Notice,
         ));
@@ -7414,12 +8178,18 @@ impl ChatWidget<'_> {
 
     fn update_rate_limit_resets(&mut self, current: &RateLimitSnapshotEvent) {
         let now = Utc::now();
-        self.rate_limit_primary_next_reset_at = current
-            .primary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
-        self.rate_limit_secondary_next_reset_at = current
-            .secondary_reset_after_seconds
-            .map(|secs| now + ChronoDuration::seconds(secs as i64));
+        if let Some(secs) = current.primary_reset_after_seconds {
+            self.rate_limit_primary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_primary_next_reset_at = None;
+        }
+        if let Some(secs) = current.secondary_reset_after_seconds {
+            self.rate_limit_secondary_next_reset_at =
+                Some(now + ChronoDuration::seconds(secs as i64));
+        } else {
+            self.rate_limit_secondary_next_reset_at = None;
+        }
     }
 
     pub(crate) fn handle_update_command(&mut self) {
@@ -7432,6 +8202,79 @@ impl ChatWidget<'_> {
             "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                 to_string(),
         );
+    }
+
+    pub(crate) fn handle_notifications_command(&mut self, args: String) {
+        use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
+
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            let mode = match &self.config.tui.notifications {
+                Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+                Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
+            };
+
+            let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+            self.bottom_pane.show_notifications_settings(view);
+            return;
+        }
+
+        let keyword = trimmed.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+        match keyword.as_str() {
+            "status" => {
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(true) => {
+                        self.push_background_tail("🔔 TUI notifications are enabled.".to_string());
+                    }
+                    Notifications::Enabled(false) => {
+                        self.push_background_tail("🔕 TUI notifications are disabled.".to_string());
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "🔔 TUI notifications use custom filters: [{}]",
+                            filters
+                        ));
+                    }
+                }
+            }
+            "on" | "off" => {
+                let enable = keyword == "on";
+                match &self.config.tui.notifications {
+                    Notifications::Enabled(current) => {
+                        if *current == enable {
+                            self.push_background_tail(format!(
+                                "TUI notifications already {}.",
+                                if enable { "enabled" } else { "disabled" }
+                            ));
+                        } else {
+                            self.app_event_tx
+                                .send(AppEvent::UpdateTuiNotifications(enable));
+                        }
+                    }
+                    Notifications::Custom(entries) => {
+                        let filters = if entries.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            entries.join(", ")
+                        };
+                        self.push_background_tail(format!(
+                            "TUI notifications use custom filters ([{}]); edit ~/.code/config.toml to change them.",
+                            filters
+                        ));
+                    }
+                }
+            }
+            _ => {
+                self.push_background_tail(
+                    "Usage: /notifications [status|on|off]".to_string(),
+                );
+            }
+        }
     }
 
     pub(crate) fn add_prompts_output(&mut self) {
@@ -7602,7 +8445,7 @@ impl ChatWidget<'_> {
             }
         }
 
-        self.history_push(crate::history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(crate::history_cell::PlainHistoryCell::new(
             lines,
             crate::history_cell::HistoryCellType::Notice,
         ));
@@ -9590,12 +10433,14 @@ impl ChatWidget<'_> {
         }
 
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort);
         self.push_system_cell(
-            history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort),
+            Box::new(cell),
             placement,
             Some("ui:model".to_string()),
             None,
             "system",
+            None,
         );
 
         self.request_redraw();
@@ -9830,12 +10675,14 @@ impl ChatWidget<'_> {
 
         // Add status message to history (replaceable system notice)
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_reasoning_output(&new_effort);
         self.push_system_cell(
-            history_cell::new_reasoning_output(&new_effort),
+            Box::new(cell),
             placement,
             Some("ui:reasoning".to_string()),
             None,
             "system",
+            None,
         );
     }
 
@@ -10011,12 +10858,15 @@ impl ChatWidget<'_> {
         };
         let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             placement,
             Some("ui:theme".to_string()),
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -10037,12 +10887,15 @@ impl ChatWidget<'_> {
         // Confirmation message (replaceable system notice)
         let message = format!("Spinner changed to {}", spinner_name);
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             placement,
             Some("ui:spinner".to_string()),
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -10195,7 +11048,7 @@ impl ChatWidget<'_> {
         }
         // Insert new status near the top of this request window
         let key = self.near_time_key(None);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background");
+        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background", None);
         self.access_status_idx = Some(pos);
     }
 
@@ -10425,7 +11278,10 @@ impl ChatWidget<'_> {
     pub(crate) fn undo_jump_back(&mut self) {
         if let Some(mut st) = self.pending_jump_back.take() {
             // Restore removed cells in original order
-            self.history_cells.extend(st.removed_cells.drain(..));
+            for cell in st.removed_cells.drain(..) {
+                self.history_cell_ids.push(None);
+                self.history_cells.push(cell);
+            }
             // Clear composer (no reliable way to restore prior text)
             self.insert_str("");
             self.request_redraw();
@@ -11452,7 +12308,7 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
             vec![Line::from("✅ Chrome launched with user profile")],
             history_cell::HistoryCellType::BackgroundEvent,
         ));
@@ -12077,7 +12933,7 @@ impl ChatWidget<'_> {
         }
 
         // Add status message
-        self.history_push(history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
             vec![Line::from(format!(
                 "✅ Chrome launched with temporary profile at {}",
                 profile_dir.display()
@@ -12186,7 +13042,7 @@ impl ChatWidget<'_> {
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
-                self.history_push(history_cell::PlainHistoryCell::new(
+                self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
                     vec![Line::from(status_msg)],
                     history_cell::HistoryCellType::BackgroundEvent,
                 ));
@@ -12584,7 +13440,7 @@ impl ChatWidget<'_> {
             .lines()
             .map(|line| Line::from(line.to_string()))
             .collect();
-        self.history_push(history_cell::PlainHistoryCell::new(
+        self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
             lines,
             history_cell::HistoryCellType::BackgroundEvent,
         ));
@@ -13380,7 +14236,7 @@ impl ChatWidget<'_> {
                 .lines()
                 .map(|line| Line::from(line.to_string()))
                 .collect();
-            self.history_push(history_cell::PlainHistoryCell::new(
+            self.history_push_plain_cell(history_cell::PlainHistoryCell::new(
                 lines,
                 history_cell::HistoryCellType::BackgroundEvent,
             ));
@@ -13547,6 +14403,10 @@ impl ChatWidget<'_> {
 
     pub(crate) fn token_usage(&self) -> &TokenUsage {
         &self.total_token_usage
+    }
+
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        self.session_id
     }
 
     pub(crate) fn clear_token_usage(&mut self) {
@@ -14136,8 +14996,8 @@ impl ChatWidget<'_> {
         let mut items: Vec<SelectionItem> = Vec::new();
 
         items.push(SelectionItem {
-            name: "Review current workspace changes".to_string(),
-            description: Some("Include staged, unstaged, and untracked files".to_string()),
+            name: "Review /branch changes".to_string(),
+            description: Some("Compare your worktree branch against its merge target".to_string()),
             is_current: false,
             actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
                 tx.send(crate::app_event::AppEvent::RunReviewCommand(String::new()));
@@ -14356,7 +15216,7 @@ impl ChatWidget<'_> {
 
             let prompt = if let Some(current) = current_trimmed.as_ref() {
                 format!(
-                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify bugs, regressions, risky patterns, and missing tests before merging."
+                    "Review the code changes between the current branch '{current}' and '{branch_trimmed}'. Identify the intent of the changes in '{current}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
                 )
             } else {
                 format!(
@@ -14429,6 +15289,62 @@ impl ChatWidget<'_> {
 
         let trimmed = args.trim();
         if trimmed.is_empty() {
+            if Self::is_branch_worktree_path(&self.config.cwd) {
+                if let Some(git_root) =
+                    codex_core::git_info::resolve_root_git_project_for_trust(&self.config.cwd)
+                {
+                    let worktree_cwd = self.config.cwd.clone();
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let default_branch = codex_core::git_worktree::detect_default_branch(&git_root)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+                        let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
+                            .await
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty());
+
+                        if let (Some(base_branch), Some(current_branch)) =
+                            (default_branch, current_branch)
+                        {
+                            if base_branch != current_branch {
+                                let prompt = format!(
+                                    "Review the code changes between the current branch '{current_branch}' and '{base_branch}'. Identify the intent of the changes in '{current_branch}' and ensure no obvious gaps remain. Find all geniune bugs or regressions which need to be addressed before merging. Return ALL issues which need to be addressed, not just the first one you find."
+                                );
+                                let hint = format!("against {base_branch}");
+                                let preparation_label =
+                                    Some(format!("Preparing code review against {base_branch}"));
+                                let metadata = Some(ReviewContextMetadata {
+                                    scope: Some("branch_diff".to_string()),
+                                    base_branch: Some(base_branch.clone()),
+                                    current_branch: Some(current_branch.clone()),
+                                    ..Default::default()
+                                });
+                                tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                                    prompt,
+                                    hint,
+                                    preparation_label,
+                                    metadata,
+                                });
+                                return;
+                            }
+                        }
+
+                        tx.send(crate::app_event::AppEvent::RunReviewWithScope {
+                            prompt: "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string(),
+                            hint: "current workspace changes".to_string(),
+                            preparation_label: Some("Preparing code review request...".to_string()),
+                            metadata: Some(ReviewContextMetadata {
+                                scope: Some("workspace".to_string()),
+                                ..Default::default()
+                            }),
+                        });
+                    });
+                    return;
+                }
+            }
+
             let metadata = ReviewContextMetadata {
                 scope: Some("workspace".to_string()),
                 ..Default::default()
@@ -15631,6 +16547,32 @@ mod tests {
                 .closed_reasoning_ids
                 .contains(&StreamId("r-1".into()))
         );
+    }
+
+    #[test]
+    fn rate_limit_warnings_emit_only_highest_threshold() {
+        let mut state = RateLimitWarningState::default();
+
+        // Jump straight past multiple weekly thresholds; emit just the highest crossed one.
+        let weekly = state.take_warnings(80.0, 10.0);
+        assert_eq!(weekly.len(), 1);
+        assert_eq!(weekly[0].threshold, 75.0);
+        assert!(matches!(weekly[0].scope, RateLimitWarningScope::Secondary));
+
+        // Calling again without crossing new thresholds should produce nothing.
+        assert!(state.take_warnings(80.0, 10.0).is_empty());
+
+        // Crossing the final threshold should produce it exactly once.
+        let weekly_final = state.take_warnings(95.0, 10.0);
+        assert_eq!(weekly_final.len(), 1);
+        assert_eq!(weekly_final[0].threshold, 90.0);
+        assert!(matches!(weekly_final[0].scope, RateLimitWarningScope::Secondary));
+
+        // Primary scope follows the same rule.
+        let primary = state.take_warnings(95.0, 80.0);
+        assert_eq!(primary.len(), 1);
+        assert_eq!(primary[0].threshold, 75.0);
+        assert!(matches!(primary[0].scope, RateLimitWarningScope::Primary));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -19348,6 +20290,96 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+    }
+
+    pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
+        let new_state = Notifications::Enabled(enabled);
+        self.config.tui.notifications = new_state.clone();
+        self.config.tui_notifications = new_state.clone();
+
+        match find_codex_home() {
+            Ok(home) => {
+                match codex_core::config::set_tui_notifications(&home, new_state) {
+                    Ok(()) => {
+                        let msg = format!(
+                            "✅ {} TUI notifications",
+                            if enabled { "Enabled" } else { "Disabled" }
+                        );
+                        self.push_background_tail(msg);
+                    }
+                    Err(err) => {
+                        let msg = format!(
+                            "⚠️ Failed to persist TUI notifications setting: {}",
+                            err
+                        );
+                        self.history_push(history_cell::new_error_event(msg));
+                    }
+                }
+            }
+            Err(_) => {
+                let msg = format!(
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    if enabled { "Enabled" } else { "Disabled" }
+                );
+                self.push_background_tail(msg);
+            }
+        }
+    }
+
+    fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
+        if !self.should_emit_tui_notification("agent-turn-complete") {
+            return;
+        }
+
+        let snippet = last_agent_message
+            .as_deref()
+            .map(Self::notification_snippet)
+            .filter(|text| !text.is_empty());
+
+        self.app_event_tx.send(AppEvent::EmitTuiNotification {
+            title: "Code".to_string(),
+            body: snippet,
+        });
+    }
+
+    fn should_emit_tui_notification(&self, event: &str) -> bool {
+        if self.replay_history_depth > 0 {
+            return false;
+        }
+        self.tui_notification_filter_allows(event)
+    }
+
+    fn tui_notification_filter_allows(&self, event: &str) -> bool {
+        match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => *enabled,
+            Notifications::Custom(entries) => entries
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case(event)),
+        }
+    }
+
+    fn notification_snippet(input: &str) -> String {
+        let collapsed = input
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        const LIMIT: usize = 120;
+        if collapsed.chars().count() <= LIMIT {
+            return collapsed;
+        }
+
+        let mut truncated = String::new();
+        let mut count = 0usize;
+        for ch in collapsed.chars() {
+            if count >= LIMIT.saturating_sub(3) {
+                break;
+            }
+            truncated.push(ch);
+            count += 1;
+        }
+        truncated.push_str("...");
+        truncated
     }
 
     pub(crate) fn toggle_mcp_server(&mut self, name: &str, enable: bool) {

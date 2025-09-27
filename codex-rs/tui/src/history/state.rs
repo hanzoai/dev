@@ -28,6 +28,84 @@ pub enum HistoryRecord {
     Notice(NoticeRecord),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryDomainEvent {
+    Insert {
+        index: usize,
+        record: HistoryDomainRecord,
+    },
+    Replace {
+        index: usize,
+        record: HistoryDomainRecord,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryDomainRecord {
+    Plain(PlainMessageState),
+    WaitStatus(WaitStatusState),
+    Loading(LoadingState),
+    BackgroundEvent(BackgroundEventRecord),
+    RateLimits(RateLimitsRecord),
+}
+
+impl From<PlainMessageState> for HistoryDomainRecord {
+    fn from(state: PlainMessageState) -> Self {
+        HistoryDomainRecord::Plain(state)
+    }
+}
+
+impl From<WaitStatusState> for HistoryDomainRecord {
+    fn from(state: WaitStatusState) -> Self {
+        HistoryDomainRecord::WaitStatus(state)
+    }
+}
+
+impl From<LoadingState> for HistoryDomainRecord {
+    fn from(state: LoadingState) -> Self {
+        HistoryDomainRecord::Loading(state)
+    }
+}
+
+impl From<BackgroundEventRecord> for HistoryDomainRecord {
+    fn from(state: BackgroundEventRecord) -> Self {
+        HistoryDomainRecord::BackgroundEvent(state)
+    }
+}
+
+impl From<RateLimitsRecord> for HistoryDomainRecord {
+    fn from(state: RateLimitsRecord) -> Self {
+        HistoryDomainRecord::RateLimits(state)
+    }
+}
+
+impl HistoryDomainRecord {
+    fn into_history_record(self) -> HistoryRecord {
+        match self {
+            HistoryDomainRecord::Plain(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::PlainMessage(state)
+            }
+            HistoryDomainRecord::WaitStatus(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::WaitStatus(state)
+            }
+            HistoryDomainRecord::Loading(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Loading(state)
+            }
+            HistoryDomainRecord::BackgroundEvent(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::BackgroundEvent(state)
+            }
+            HistoryDomainRecord::RateLimits(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::RateLimits(state)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlainMessageState {
     pub id: HistoryId,
@@ -393,22 +471,45 @@ pub struct ImageRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExploreRecord {
     pub id: HistoryId,
-    pub title: String,
     pub entries: Vec<ExploreEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExploreEntry {
-    pub label: String,
+    pub action: ExecAction,
+    pub summary: ExploreSummary,
     pub status: ExploreEntryStatus,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExploreSummary {
+    Search {
+        query: Option<String>,
+        path: Option<String>,
+    },
+    List {
+        path: Option<String>,
+    },
+    Read {
+        display_path: String,
+        annotation: Option<String>,
+        range: Option<(u32, u32)>,
+    },
+    Command {
+        display: String,
+        annotation: Option<String>,
+    },
+    Fallback {
+        text: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExploreEntryStatus {
-    Pending,
     Running,
     Success,
-    Failed,
+    NotFound,
+    Error { exit_code: Option<i32> },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -623,6 +724,50 @@ impl HistoryState {
         self.next_id = self.next_id.saturating_add(1);
         id
     }
+
+    pub fn apply_event(&mut self, event: HistoryEvent) -> HistoryMutation {
+        match event {
+            HistoryEvent::Insert { index, record } => {
+                let id = self.next_history_id();
+                let record = record.with_id(id);
+                let idx = index.min(self.records.len());
+                self.records.insert(idx, record.clone());
+                HistoryMutation::Inserted { index: idx, id, record }
+            }
+            HistoryEvent::Replace { index, record } => {
+                if let Some(existing) = self.records.get(index) {
+                    let id = existing.id();
+                    let record = record.with_id(id);
+                    self.records[index] = record.clone();
+                    HistoryMutation::Replaced { index, id, record }
+                } else {
+                    HistoryMutation::Noop
+                }
+            }
+            HistoryEvent::Remove { index } => {
+                if index < self.records.len() {
+                    let record = self.records.remove(index);
+                    let id = record.id();
+                    HistoryMutation::Removed { index, id, record }
+                } else {
+                    HistoryMutation::Noop
+                }
+            }
+        }
+    }
+
+    pub fn apply_domain_event(&mut self, event: HistoryDomainEvent) -> HistoryMutation {
+        match event {
+            HistoryDomainEvent::Insert { index, record } => {
+                let record = record.into_history_record();
+                self.apply_event(HistoryEvent::Insert { index, record })
+            }
+            HistoryDomainEvent::Replace { index, record } => {
+                let record = record.into_history_record();
+                self.apply_event(HistoryEvent::Replace { index, record })
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -707,4 +852,46 @@ impl WithId for HistoryRecord {
             }
         }
     }
+}
+
+impl HistoryRecord {
+    pub fn id(&self) -> HistoryId {
+        match self {
+            HistoryRecord::PlainMessage(state) => state.id,
+            HistoryRecord::WaitStatus(state) => state.id,
+            HistoryRecord::Loading(state) => state.id,
+            HistoryRecord::RunningTool(state) => state.id,
+            HistoryRecord::ToolCall(state) => state.id,
+            HistoryRecord::PlanUpdate(state) => state.id,
+            HistoryRecord::UpgradeNotice(state) => state.id,
+            HistoryRecord::Reasoning(state) => state.id,
+            HistoryRecord::Exec(state) => state.id,
+            HistoryRecord::AssistantStream(state) => state.id,
+            HistoryRecord::AssistantMessage(state) => state.id,
+            HistoryRecord::Diff(state) => state.id,
+            HistoryRecord::Image(state) => state.id,
+            HistoryRecord::Explore(state) => state.id,
+            HistoryRecord::RateLimits(state) => state.id,
+            HistoryRecord::Patch(state) => state.id,
+            HistoryRecord::BackgroundEvent(state) => state.id,
+            HistoryRecord::Notice(state) => state.id,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum HistoryEvent {
+    Insert { index: usize, record: HistoryRecord },
+    Replace { index: usize, record: HistoryRecord },
+    Remove { index: usize },
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum HistoryMutation {
+    Inserted { index: usize, id: HistoryId, record: HistoryRecord },
+    Replaced { index: usize, id: HistoryId, record: HistoryRecord },
+    Removed { index: usize, id: HistoryId, record: HistoryRecord },
+    Noop,
 }

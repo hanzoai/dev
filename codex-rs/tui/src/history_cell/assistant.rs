@@ -66,6 +66,10 @@ impl AssistantMarkdownCell {
         &self.state
     }
 
+    pub(crate) fn state_mut(&mut self) -> &mut AssistantMessageState {
+        &mut self.state
+    }
+
     fn rebuild(&mut self, cfg: &codex_core::config::Config) {
         let mut out: Vec<Line<'static>> = Vec::new();
         out.push(Line::from("codex"));
