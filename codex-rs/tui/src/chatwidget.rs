@@ -17,6 +17,7 @@ use std::time::{Duration, Instant, SystemTime};
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use crate::header_wave::HeaderWaveEffect;
+use crate::auto_drive_strings;
 
 use codex_common::elapsed::format_duration;
 use codex_common::model_presets::ModelPreset;
@@ -9422,7 +9423,7 @@ impl ChatWidget<'_> {
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state
                     .current_thoughts
-                    .replace("Starting Drive...".to_string());
+                    .replace(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.header_wave.set_enabled(true, Instant::now());
                 self.auto_rebuild_live_ring();
@@ -9650,14 +9651,14 @@ impl ChatWidget<'_> {
         {
             self.auto_state
                 .current_thoughts
-                .replace("Starting Drive...".to_string());
+                .replace(auto_drive_strings::next_auto_drive_phrase().to_string());
         }
 
         let base_text = self
             .auto_state
             .current_thoughts
             .clone()
-            .unwrap_or_else(|| "Starting Drive...".to_string());
+            .unwrap_or_else(|| auto_drive_strings::next_auto_drive_phrase().to_string());
 
         let mut status_lines: Vec<String> = base_text
             .lines()
@@ -9785,6 +9786,9 @@ impl ChatWidget<'_> {
             return;
         }
 
+        if let Some(first_line) = joined.lines().next().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+            self.push_background_tail(format!("Auto Drive: {first_line}"));
+        }
         self.auto_state.current_thoughts = Some(joined);
         self.auto_rebuild_live_ring();
         self.request_redraw();
