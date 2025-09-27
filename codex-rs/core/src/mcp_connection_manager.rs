@@ -320,13 +320,14 @@ impl McpConnectionManager {
         server: &str,
         tool: &str,
         arguments: Option<serde_json::Value>,
+        timeout_override: Option<Duration>,
     ) -> Result<mcp_types::CallToolResult> {
         let managed = self
             .clients
             .get(server)
             .ok_or_else(|| anyhow!("unknown MCP server '{server}'"))?;
         let client = managed.client.clone();
-        let timeout = managed.tool_timeout;
+        let timeout = timeout_override.or(managed.tool_timeout);
 
         client
             .call_tool(tool.to_string(), arguments, timeout)

@@ -2389,9 +2389,10 @@ impl Session {
         server: &str,
         tool: &str,
         arguments: Option<serde_json::Value>,
+        timeout: Option<Duration>,
     ) -> anyhow::Result<CallToolResult> {
         self.mcp_connection_manager
-            .call_tool(server, tool, arguments)
+            .call_tool(server, tool, arguments, timeout)
             .await
     }
 
