@@ -3188,7 +3188,10 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let content = ContentItem::InputText { text };
+                    let prefixed = format!("CLI: {text}");
+                    let content = ContentItem::InputText {
+                        text: prefixed.clone(),
+                    };
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
@@ -3207,10 +3210,14 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let prefixed = format!("Coordinator: {text}");
+                    let content = ContentItem::InputText {
+                        text: prefixed.clone(),
+                    };
                     items.push(ResponseItem::Message {
                         id: None,
-                        role: "assistant".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        role: "user".to_string(),
+                        content: vec![content],
                     });
                 }
                 _ => {}

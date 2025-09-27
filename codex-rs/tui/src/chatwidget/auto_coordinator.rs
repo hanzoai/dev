@@ -236,7 +236,8 @@ fn request_coordinator_decision(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("model response missing prompt for continue"))?;
-            Some(prompt_text.to_string())
+            let cleaned = strip_role_prefix(prompt_text);
+            Some(cleaned.to_string())
         }
         _ => None,
     };
@@ -342,4 +343,17 @@ fn make_message(role: &str, text: String) -> ResponseItem {
         role: role.to_string(),
         content: vec![content],
     }
+}
+
+fn strip_role_prefix(input: &str) -> &str {
+    let trimmed = input.trim_start();
+    const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
+    for prefix in PREFIXES {
+        if trimmed.len() >= prefix.len()
+            && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix)
+        {
+            return trimmed[prefix.len()..].trim_start();
+        }
+    }
+    trimmed
 }
