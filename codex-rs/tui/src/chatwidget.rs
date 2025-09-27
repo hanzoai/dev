@@ -3183,7 +3183,7 @@ impl ChatWidget<'_> {
         let completed = state.progress.completed;
         let total = state.progress.total;
 
-        let mut header = if total > 0 {
+        let header = if total > 0 {
             match name.is_empty() {
                 true => format!("Updated Plan: ({completed}/{total})"),
                 false => format!("Updated Plan: {name} ({completed}/{total})"),
