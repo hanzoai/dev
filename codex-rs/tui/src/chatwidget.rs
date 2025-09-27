@@ -3188,10 +3188,11 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let content = ContentItem::InputText { text };
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![ContentItem::InputText { text }],
+                        content: vec![content],
                     });
                 }
                 crate::history_cell::HistoryCellType::Assistant => {
@@ -3209,7 +3210,7 @@ impl ChatWidget<'_> {
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "assistant".to_string(),
-                        content: vec![ContentItem::InputText { text }],
+                        content: vec![ContentItem::OutputText { text }],
                     });
                 }
                 _ => {}
