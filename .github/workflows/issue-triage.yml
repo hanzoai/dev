@@ -43,7 +43,8 @@ jobs:
         (github.event.action == 'created' || github.event.action == 'edited') &&
         github.event.issue.state == 'open' &&
         contains(toJson(github.event.issue.assignees), 'just-every-code') &&
-        github.actor != 'just-every-code')
+        github.actor != 'just-every-code' &&
+        github.actor != 'zemaj')
       ||
       (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -152,7 +153,7 @@ jobs:
           script: |
             const actor = context.actor;
             const pat = process.env.BOT_LOGIN || '';
-            const bots = new Set([pat, 'github-actions', 'github-actions[bot]', 'just-every-code']);
+            const bots = new Set([pat, 'github-actions', 'github-actions[bot]', 'just-every-code', 'zemaj']);
             const ok = !bots.has(actor);
             core.notice(`actor=${actor} bot=${pat} -> proceed=${ok}`);
             core.setOutput('ok', ok ? 'true' : 'false');
@@ -214,9 +215,35 @@ jobs:
             const events = (await github.rest.issues.listEvents({ owner, repo, issue_number, per_page: 100 })).data;
             const q = `repo:${owner}/${repo} is:pr ${issue_number}`; // catch references like #123
             const prs = (await github.rest.search.issuesAndPullRequests({ q, per_page: 50 })).data.items;
+            const triggerComment = (context.eventName === 'issue_comment' && context.payload && context.payload.comment)
+              ? context.payload.comment
+              : null;
+            const triggerIndex = triggerComment
+              ? comments.findIndex(c => c.id === triggerComment.id)
+              : -1;
             let out = [];
             out.push(`# Issue #${issue.number}: ${issue.title}`);
             out.push(`State: ${issue.state}  |  Created: ${issue.created_at}`);
+            out.push('\n## Automation context');
+            out.push(`- Environment: GitHub Actions workflow \'Issue Triage\' running on ${owner}/${repo}.`);
+            out.push(`- Trigger event: ${context.eventName} (action=${context.payload?.action || 'n/a'}) by @${context.actor}.`);
+            out.push(`- Total comments (including bot): ${comments.length}.`);
+            out.push('- The workflow runs for every new or edited comment while the issue stays open and assigned to @just-every-code.');
+            if (triggerComment) {
+              const author = triggerComment.user?.login || 'unknown';
+              const created = triggerComment.created_at || 'unknown time';
+              const ordinal = triggerIndex >= 0 ? `comment #${triggerIndex + 1}` : 'latest comment';
+              out.push(`- Current run triggered by ${ordinal} from @${author} on ${created}.`);
+            }
+            if (triggerComment) {
+              const author = triggerComment.user?.login || 'unknown';
+              const created = triggerComment.created_at || 'unknown time';
+              const body = String(triggerComment.body || '').trim();
+              out.push('\n## Trigger comment (latest activity)');
+              out.push(`@${author} on ${created}`);
+              out.push('');
+              out.push(body || '(empty comment)');
+            }
             out.push('\n## History (newest first)');
             for (const c of comments.slice().reverse()) {
               out.push(`- [${c.user.login}] ${c.created_at}: ${c.body?.slice(0,500) || ''}`);
@@ -318,6 +345,37 @@ jobs:
                 const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
 
                 const input = [];
+
+                const totalComments = comments.length;
+                const triggerComment = (context.eventName === 'issue_comment' && context.payload && context.payload.comment)
+                  ? context.payload.comment
+                  : null;
+                const triggerIndex = triggerComment
+                  ? comments.findIndex(c => c.id === triggerComment.id)
+                  : -1;
+                const automationLines = [];
+                automationLines.push(`Repository: ${owner}/${repo}`);
+                automationLines.push('Workflow: Issue Triage (GitHub Actions)');
+                automationLines.push(`Event: ${context.eventName} (action=${context.payload?.action || 'n/a'})`);
+                automationLines.push(`Triggered by: @${context.actor}`);
+                automationLines.push(`Total comments so far: ${totalComments}`);
+                automationLines.push('The workflow runs on each new or edited comment while the issue is open and assigned to the bot.');
+                if (triggerComment) {
+                  const ord = triggerIndex >= 0 ? `comment #${triggerIndex + 1}` : 'latest comment';
+                  const author = triggerComment.user?.login || 'unknown';
+                  const created = triggerComment.created_at || 'unknown time';
+                  automationLines.push(`Current run triggered by ${ord} from @${author} on ${created}.`);
+                }
+
+                input.push({
+                  type: 'message',
+                  role: 'user',
+                  content: [
+                    { type: 'input_text', text: 'Automation context' },
+                    { type: 'input_text', text: automationLines.join('\n') }
+                  ]
+                });
+
                 // Message 1: Issue body (as the first user message)
                 const title = `Issue #${issue.number}: ${issue.title || ''}`;
                 const body = issue.body || '';
