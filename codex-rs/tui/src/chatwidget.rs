@@ -15174,14 +15174,31 @@ impl ChatWidget<'_> {
                     let worktree_cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
                     tokio::spawn(async move {
-                        let default_branch = codex_core::git_worktree::detect_default_branch(&git_root)
+                    let branch_metadata =
+                        codex_core::git_worktree::load_branch_metadata(&worktree_cwd);
+                    let metadata_base = branch_metadata.as_ref().and_then(|meta| {
+                        meta.remote_ref.clone().or_else(|| {
+                            if let (Some(remote_name), Some(base_branch)) =
+                                (meta.remote_name.clone(), meta.base_branch.clone())
+                            {
+                                Some(format!("{}/{}", remote_name, base_branch))
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| meta.base_branch.clone())
+                    });
+                    let default_branch = match metadata_base {
+                        Some(value) => Some(value),
+                        None => codex_core::git_worktree::detect_default_branch(&git_root)
                             .await
                             .map(|name| name.trim().to_string())
-                            .filter(|name| !name.is_empty());
-                        let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
-                            .await
-                            .map(|name| name.trim().to_string())
-                            .filter(|name| !name.is_empty());
+                            .filter(|name| !name.is_empty()),
+                    };
+                    let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
+                        .await
+                        .map(|name| name.trim().to_string())
+                        .filter(|name| !name.is_empty());
 
                         if let (Some(base_branch), Some(current_branch)) =
                             (default_branch, current_branch)
@@ -15379,6 +15396,17 @@ impl ChatWidget<'_> {
                     return;
                 }
             };
+            let current_base_branch = Command::new("git")
+                .current_dir(&git_root)
+                .args(["branch", "--show-current"])
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if name.is_empty() { None } else { Some(name) }
+                });
             // Determine branch name
             let task_opt = if args.trim().is_empty() {
                 None
@@ -15413,6 +15441,33 @@ impl ChatWidget<'_> {
                         0
                     }
                 };
+
+            let mut branch_metadata: Option<codex_core::git_worktree::BranchMetadata> = None;
+            match codex_core::git_worktree::ensure_local_default_remote(
+                &git_root,
+                current_base_branch.as_deref(),
+            )
+            .await
+            {
+                Ok(meta_option) => {
+                    if let Some(meta) = meta_option.clone() {
+                        if let Err(e) = codex_core::git_worktree::write_branch_metadata(&worktree, &meta).await
+                        {
+                            tx.send_background_event(format!(
+                                "`/branch` — failed to record branch metadata: {}",
+                                e
+                            ));
+                        }
+                        branch_metadata = meta_option;
+                    }
+                }
+                Err(err) => {
+                    tx.send_background_event(format!(
+                        "`/branch` — failed to configure local-default remote: {}",
+                        err
+                    ));
+                }
+            }
 
             // Attempt to set upstream for the new branch to match the source branch's upstream,
             // falling back to origin/<default> when available. Also ensure origin/HEAD is set.
@@ -15465,20 +15520,38 @@ impl ChatWidget<'_> {
             }
 
             // Build clean multi-line output as a BackgroundEvent (not streaming Answer)
+            let base_summary = branch_metadata
+                .as_ref()
+                .and_then(|meta| {
+                    if let Some(remote_ref) = meta.remote_ref.as_ref() {
+                        Some(format!("\n  Base: {remote_ref}"))
+                    } else if let (Some(remote_name), Some(base_branch)) =
+                        (meta.remote_name.as_ref(), meta.base_branch.as_ref())
+                    {
+                        Some(format!("\n  Base: {remote_name}/{base_branch}"))
+                    } else if let Some(remote_name) = meta.remote_name.as_ref() {
+                        Some(format!("\n  Base remote: {remote_name}"))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
             let msg = if let Some(task_text) = task_opt {
                 format!(
-                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Task: {task}\n  Starting task...",
+                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files{base}\n  Task: {task}\n  Starting task...",
                     used = used_branch,
                     path = worktree.display(),
                     copied = copied,
-                    task = task_text
+                    task = task_text,
+                    base = base_summary
                 )
             } else {
                 format!(
-                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Type your task when ready.",
+                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files{base}\n  Type your task when ready.",
                     used = used_branch,
                     path = worktree.display(),
-                    copied = copied
+                    copied = copied,
+                    base = base_summary
                 )
             };
             {
@@ -15569,13 +15642,59 @@ impl ChatWidget<'_> {
             .and_then(|n| n.to_str())
             .map(|name| format!(" (worktree: {})", name))
             .unwrap_or_default();
-        let branch_note = format!(
+        let default_branch_note = format!(
             "System: Working directory changed from {} to {}{}. Use {} for subsequent commands.",
             previous_cwd.display(),
             new_cwd.display(),
             worktree_hint,
             new_cwd.display()
         );
+        let branch_note = if Self::is_branch_worktree_path(&new_cwd) {
+            if let Some(meta) = codex_core::git_worktree::load_branch_metadata(&new_cwd) {
+                let branch_name = new_cwd
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| new_cwd.display().to_string());
+                let base_descriptor = meta
+                    .remote_ref
+                    .clone()
+                    .or_else(|| {
+                        if let (Some(remote_name), Some(base_branch)) =
+                            (meta.remote_name.clone(), meta.base_branch.clone())
+                        {
+                            Some(format!("{}/{}", remote_name, base_branch))
+                        } else {
+                            None
+                        }
+                    })
+                    .or(meta.base_branch.clone())
+                    .unwrap_or_else(|| codex_core::git_worktree::LOCAL_DEFAULT_REMOTE.to_string());
+                let mut note = format!(
+                    "System: Working directory changed from {} to {}{}. You are now working on branch '{}' checked out at {}. Compare against '{}' for the parent branch and run all commands from this directory.",
+                    previous_cwd.display(),
+                    new_cwd.display(),
+                    worktree_hint,
+                    branch_name,
+                    new_cwd.display(),
+                    base_descriptor
+                );
+                if let (Some(remote_name), Some(remote_url)) =
+                    (meta.remote_name.as_ref(), meta.remote_url.as_ref())
+                {
+                    note.push_str(&format!(
+                        " The remote '{}' points to {}.",
+                        remote_name,
+                        remote_url
+                    ));
+                }
+                note
+            } else {
+                default_branch_note.clone()
+            }
+        } else {
+            default_branch_note.clone()
+        };
         self.queue_agent_note(branch_note);
 
         let op = Op::ConfigureSession {
