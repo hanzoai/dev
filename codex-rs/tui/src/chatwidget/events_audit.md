@@ -30,9 +30,12 @@ Line numbers reference `codex-rs/tui/src/chatwidget.rs` as of 2025-09-27.
   - final message hydration           (`chatwidget.rs:11782-11860`)
   - review-flow variants              (`chatwidget.rs:11660-11747`)
   These still rely on cell-owned caches and in-place mutation.
-- **Exec lifecycle** – exec merge/update logic holds an active `ExecCell` in
-  `active_exec_cell` and downcasts cells when updates arrive
-  (`chatwidget.rs:7159-7184`, `7233-7242`).
+- **Exec lifecycle** –
+  - ✅ Streaming deltas now flow through `HistoryDomainEvent::UpdateExecStream`
+    (`chatwidget.rs:6996-7034`), and the returned record hydrates the cached
+    `ExecCell` state.
+  - 🔲 End/update: merge logic still downcasts and mutates cells directly
+    (`chatwidget.rs:7159-7184`, `7233-7242`).
 - **Background/system notices** – `push_system_cell` (`chatwidget.rs:1254`) now
   uses `HistoryDomainRecord::BackgroundEvent` for inserts/replacements, so these
   paths no longer reconstruct records from existing cells (migrated 2025-09-27).

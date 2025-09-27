@@ -32,6 +32,25 @@
 - Notes added to `events_audit.md` marking the executive/assistant entries as
   completed or updated with any residual technical debt.
 
+## Status (2025-09-27)
+- Infrastructure: `HistoryDomainEvent` enums + hydration helpers now exist and
+  wave 1 (plain/loading/wait/background) paths are migrated.
+- Exec/streaming handlers still mutate `history_cells` and downcast cells in
+  place; caches must remain until the Step 6 renderer cache lands.
+- No automated coverage yet exercises the domain events for these flows.
+- ✅ Exec streaming deltas now emit `HistoryDomainEvent::UpdateExecStream`, and
+  the resulting `HistoryRecord::Exec` is used to hydrate the running `ExecCell`.
+
+## Next Steps for Agent
+- Sketch domain-event variants for exec lifecycle and assistant streaming while
+  preserving the interim caches (do not remove them until the shared renderer
+  cache is live).
+- Convert one representative exec path (e.g., command begin → output chunk →
+  completion) and one assistant stream path to use the new domain events.
+- Add focused regression tests via `run_script` covering the converted paths.
+- Document remaining mutation spots in `events_audit.md` and update this file
+  with progress notes or follow-up TODOs.
+
 ## References
 - `codex-rs/tui/HISTORY_CELLS_PLAN.md` – Step 2 bridge & Step 3 Phase C wave 2.
 - `codex-rs/tui/src/chatwidget/events_audit.md` – exec/stream mutation list.
