@@ -200,49 +200,94 @@ fn request_coordinator_decision(
     schema: &Value,
     mut conversation: Vec<ResponseItem>,
 ) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
-    let mut prompt = Prompt::default();
-    prompt.store = true;
-    prompt.input.push(make_message("developer", developer_intro.to_string()));
-    prompt.input.append(&mut conversation);
-    prompt.text_format = Some(TextFormat {
-        r#type: "json_schema".to_string(),
-        name: Some(SCHEMA_NAME.to_string()),
-        strict: Some(true),
-        schema: Some(schema.clone()),
-    });
-    prompt.model_override = Some(MODEL_SLUG.to_string());
-    let family = find_family_for_model(MODEL_SLUG)
-        .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
-    prompt.model_family_override = Some(family);
+    const MAX_ATTEMPTS: usize = 5;
+    for attempt in 0..MAX_ATTEMPTS {
+        let mut prompt = Prompt::default();
+        prompt.store = true;
+        prompt
+            .input
+            .push(make_message("developer", developer_intro.to_string()));
+        let mut convo_clone = conversation.clone();
+        prompt.input.append(&mut convo_clone);
+        prompt.text_format = Some(TextFormat {
+            r#type: "json_schema".to_string(),
+            name: Some(SCHEMA_NAME.to_string()),
+            strict: Some(true),
+            schema: Some(schema.clone()),
+        });
+        prompt.model_override = Some(MODEL_SLUG.to_string());
+        let family = find_family_for_model(MODEL_SLUG)
+            .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
+        prompt.model_family_override = Some(family);
 
-    let raw = request_decision(runtime, client, &prompt)?;
-    let (decision, value) = parse_decision(&raw)?;
-    debug!("[Auto coordinator] model decision: {:?}", value);
+        let raw = match request_decision(runtime, client, &prompt) {
+            Ok(value) => value,
+            Err(err) => {
+                if attempt + 1 == MAX_ATTEMPTS {
+                    return Err(err);
+                }
+                debug!(
+                    "[Auto coordinator] decision attempt {}/{} failed: {err:?} — retrying",
+                    attempt + 1,
+                    MAX_ATTEMPTS
+                );
+                continue;
+            }
+        };
 
-    let status = match decision.finish_status.as_str() {
-        "continue" => AutoCoordinatorStatus::Continue,
-        "finish_success" => AutoCoordinatorStatus::Success,
-        "finish_failed" => AutoCoordinatorStatus::Failed,
-        other => {
-            return Err(anyhow!("unexpected finish_status '{other}'"));
-        }
-    };
+        let (decision, value) = match parse_decision(&raw) {
+            Ok(res) => res,
+            Err(err) => {
+                if attempt + 1 == MAX_ATTEMPTS {
+                    return Err(err);
+                }
+                debug!(
+                    "[Auto coordinator] parse attempt {}/{} failed: {err:?} — retrying",
+                    attempt + 1,
+                    MAX_ATTEMPTS
+                );
+                continue;
+            }
+        };
+        debug!("[Auto coordinator] model decision: {:?}", value);
 
-    let prompt_opt = match status {
-        AutoCoordinatorStatus::Continue => {
-            let prompt_text = decision
-                .prompt
-                .as_ref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("model response missing prompt for continue"))?;
-            let cleaned = strip_role_prefix(prompt_text);
-            Some(cleaned.to_string())
-        }
-        _ => None,
-    };
+        let status = match decision.finish_status.as_str() {
+            "continue" => AutoCoordinatorStatus::Continue,
+            "finish_success" => AutoCoordinatorStatus::Success,
+            "finish_failed" => AutoCoordinatorStatus::Failed,
+            other => {
+                return Err(anyhow!("unexpected finish_status '{other}'"));
+            }
+        };
 
-    Ok((status, decision.thoughts.trim().to_string(), prompt_opt))
+        let prompt_opt = match status {
+            AutoCoordinatorStatus::Continue => {
+                let prompt_source = decision
+                    .prompt
+                    .as_ref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+                let Some(prompt_text) = prompt_source else {
+                    if attempt + 1 == MAX_ATTEMPTS {
+                        return Err(anyhow!("model response missing prompt for continue"));
+                    }
+                    debug!(
+                        "[Auto coordinator] missing prompt on attempt {}/{} — retrying",
+                        attempt + 1,
+                        MAX_ATTEMPTS
+                    );
+                    continue;
+                };
+                let cleaned = strip_role_prefix(prompt_text);
+                Some(cleaned.to_string())
+            }
+            _ => None,
+        };
+
+        return Ok((status, decision.thoughts.trim().to_string(), prompt_opt));
+    }
+
+    Err(anyhow!("coordinator decision attempts exceeded"))
 }
 
 fn request_decision(
@@ -252,25 +297,40 @@ fn request_decision(
 ) -> Result<String> {
     runtime.block_on(async {
         let mut stream = client.stream(prompt).await?;
-        let mut out = String::new();
+        let mut current = String::new();
+        let mut last = String::new();
         while let Some(ev) = stream.next().await {
             match ev {
-                Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
+                Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
+                    current.push_str(&delta);
+                    last = current.clone();
+                }
                 Ok(ResponseEvent::OutputItemDone { item, .. }) => {
                     if let ResponseItem::Message { content, .. } = item {
+                        let mut text = String::new();
                         for c in content {
-                            if let ContentItem::OutputText { text } = c {
-                                out.push_str(&text);
+                            if let ContentItem::OutputText { text: t } = c {
+                                if !text.is_empty() {
+                                    text.push('\n');
+                                }
+                                text.push_str(&t);
                             }
                         }
+                        if !text.is_empty() {
+                            last = text;
+                        }
                     }
+                    current.clear();
                 }
                 Ok(ResponseEvent::Completed { .. }) => break,
                 Err(err) => return Err(anyhow!("model stream error: {err}")),
                 _ => {}
             }
         }
-        Ok(out)
+        if last.is_empty() {
+            last = current;
+        }
+        Ok(last)
     })
 }
 
