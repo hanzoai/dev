@@ -45,6 +45,7 @@ mod exec_command;
 mod file_search;
 mod get_git_diff;
 mod glitch_animation;
+mod auto_drive_strings;
 mod header_wave;
 mod history_cell;
 mod history;

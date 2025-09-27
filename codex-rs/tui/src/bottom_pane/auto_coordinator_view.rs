@@ -1,6 +1,7 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::colors;
+use crate::auto_drive_strings;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -120,7 +121,7 @@ impl AutoCoordinatorView {
 
         if entries.is_empty() {
             entries.push((
-                "Starting Drive...".to_string(),
+                auto_drive_strings::next_auto_drive_phrase().to_string(),
                 Style::default().fg(colors::text_dim()),
             ));
         }
