@@ -3112,56 +3112,92 @@ impl ChatWidget<'_> {
         use codex_protocol::models::ContentItem;
         use codex_protocol::models::ResponseItem;
         let mut items = Vec::new();
+        let mut last_plan_update: Option<String> = None;
+
         for cell in &self.history_cells {
             match cell.kind() {
                 crate::history_cell::HistoryCellType::User => {
-                    let text = cell
-                        .display_lines()
-                        .iter()
-                        .map(|l| {
-                            l.spans
-                                .iter()
-                                .map(|s| s.content.to_string())
-                                .collect::<String>()
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let prefixed = format!("Coordinator: {text}");
-                    let content = ContentItem::InputText {
-                        text: prefixed.clone(),
-                    };
+                    let text = Self::history_lines_to_string(cell.display_lines());
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let prefixed = format!("Coordinator: {trimmed}");
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![content],
+                        content: vec![ContentItem::InputText { text: prefixed }],
                     });
                 }
                 crate::history_cell::HistoryCellType::Assistant => {
-                    let text = cell
-                        .display_lines()
-                        .iter()
-                        .map(|l| {
-                            l.spans
-                                .iter()
-                                .map(|s| s.content.to_string())
-                                .collect::<String>()
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let prefixed = format!("CLI: {text}");
-                    let content = ContentItem::InputText {
-                        text: prefixed.clone(),
-                    };
+                    let text = Self::history_lines_to_string(cell.display_lines());
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let prefixed = format!("CLI: {trimmed}");
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![content],
+                        content: vec![ContentItem::InputText { text: prefixed }],
                     });
+                }
+                crate::history_cell::HistoryCellType::PlanUpdate => {
+                    let text = Self::history_lines_to_string(cell.display_lines());
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        last_plan_update = Some(format!("CLI: {trimmed}"));
+                    }
                 }
                 _ => {}
             }
         }
+
+        if let Some(plan_text) = last_plan_update {
+            let plan_item = ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText { text: plan_text.clone() }],
+            };
+            if let Some(idx) = items
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(idx, item)| match item {
+                    ResponseItem::Message { role, content, .. } if role == "user" => {
+                        if let Some(ContentItem::InputText { text }) = content.first() {
+                            if text.starts_with("CLI:") {
+                                Some(idx)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                })
+            {
+                items.insert(idx, plan_item);
+            } else {
+                items.push(plan_item);
+            }
+        }
+
         items
+    }
+
+    fn history_lines_to_string(lines: Vec<Line<'static>>) -> String {
+        lines
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub(crate) fn config_ref(&self) -> &Config {
