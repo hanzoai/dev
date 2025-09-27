@@ -2858,6 +2858,8 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_state: AutoCoordinatorUiState::default(),
+            auto_tx: None,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3095,6 +3097,8 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_state: AutoCoordinatorUiState::default(),
+            auto_tx: None,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3155,7 +3159,7 @@ impl ChatWidget<'_> {
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        content: vec![ContentItem::InputText { text }],
                     });
                 }
                 crate::history_cell::HistoryCellType::Assistant => {
@@ -3173,7 +3177,7 @@ impl ChatWidget<'_> {
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "assistant".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        content: vec![ContentItem::InputText { text }],
                     });
                 }
                 _ => {}
@@ -3268,6 +3272,17 @@ impl ChatWidget<'_> {
         }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
+        }
+
+        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            && matches!(key_event.code, crossterm::event::KeyCode::Esc)
+            && self.auto_state.active
+        {
+            if self.auto_state.countdown_active() {
+                self.auto_pause_for_manual_edit();
+                return;
+            }
+            self.auto_stop(Some("Coordinator stopped by user.".to_string()));
         }
 
         // Global HUD toggles (avoid conflicting with common editor keys):
@@ -6218,6 +6233,15 @@ impl ChatWidget<'_> {
             }
         }
 
+        if self.auto_state.active && self.auto_state.resume_after_manual_submit {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.resume_after_manual_submit = false;
+            self.auto_state.paused_for_manual_edit = false;
+            self.auto_state.awaiting_submission = false;
+            self.auto_state.seconds_remaining = 0;
+            self.auto_rebuild_live_ring();
+        }
+
         self.request_redraw();
     }
 
@@ -6423,6 +6447,7 @@ impl ChatWidget<'_> {
                 // the status spinner can hide promptly when nothing else is running.
                 self.active_task_ids.remove(&id);
                 self.maybe_hide_spinner();
+                self.auto_on_assistant_final();
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
@@ -9260,6 +9285,272 @@ impl ChatWidget<'_> {
             controller_rx,
             self.config.debug,
         );
+    }
+
+    pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
+        let provided = goal.unwrap_or_default();
+        let trimmed = provided.trim();
+        let goal_text = if trimmed.is_empty() {
+            AUTO_DEFAULT_GOAL.to_string()
+        } else {
+            trimmed.to_string()
+        };
+
+        if self.auto_state.active {
+            self.auto_stop(None);
+        }
+
+        let conversation = self.export_response_items();
+        match start_auto_coordinator(
+            self.app_event_tx.clone(),
+            goal_text.clone(),
+            conversation,
+            self.config.debug,
+        ) {
+            Ok(handle) => {
+                self.auto_tx = Some(handle.tx);
+                self.auto_state.reset();
+                self.auto_state.active = true;
+                self.auto_state.goal = Some(goal_text.clone());
+                self.auto_state.current_thoughts = Some("Analyzing conversation…".to_string());
+                self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_rebuild_live_ring();
+                self.push_background_tail(format!("Coordinator started: {goal_text}"));
+                self.request_redraw();
+            }
+            Err(err) => {
+                self.push_background_tail(format!("Coordinator failed to start: {err}"));
+            }
+        }
+    }
+
+    fn auto_send_conversation(&mut self) {
+        if !self.auto_state.active || self.auto_state.waiting_for_response {
+            return;
+        }
+        let Some(tx) = self.auto_tx.as_ref() else {
+            return;
+        };
+        let conversation = self.export_response_items();
+        if tx
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+            .is_err()
+        {
+            self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+        }
+    }
+
+    pub(crate) fn auto_handle_decision(
+        &mut self,
+        status: AutoCoordinatorStatus,
+        thoughts: String,
+        prompt: Option<String>,
+    ) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        self.auto_state.current_thoughts = Some(thoughts.clone());
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.waiting_for_response = false;
+
+        match status {
+            AutoCoordinatorStatus::Continue => {
+                let Some(prompt_text) = prompt else {
+                    self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
+                    return;
+                };
+                self.auto_state.current_prompt = Some(prompt_text.clone());
+                self.auto_state.awaiting_submission = true;
+                self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+                let countdown_id = self.auto_state.countdown_id;
+                self.auto_rebuild_live_ring();
+                self.request_redraw();
+                self.auto_start_countdown(countdown_id);
+            }
+            AutoCoordinatorStatus::Success => {
+                let lower = thoughts.to_ascii_lowercase();
+                let message = if lower.starts_with("coordinator success:") {
+                    thoughts
+                } else {
+                    format!("Coordinator success: {thoughts}")
+                };
+                self.auto_stop(Some(message));
+                return;
+            }
+            AutoCoordinatorStatus::Failed => {
+                let lower = thoughts.to_ascii_lowercase();
+                let message = if lower.starts_with("coordinator error:") {
+                    thoughts
+                } else {
+                    format!("Coordinator error: {thoughts}")
+                };
+                self.auto_stop(Some(message));
+                return;
+            }
+        }
+    }
+
+    fn auto_start_countdown(&self, countdown_id: u64) {
+        if AUTO_COUNTDOWN_SECONDS == 0 {
+            let _ = self.app_event_tx.send(AppEvent::AutoCoordinatorCountdown {
+                countdown_id,
+                seconds_left: 0,
+            });
+            return;
+        }
+
+        let tx = self.app_event_tx.clone();
+        std::thread::spawn(move || {
+            let mut remaining = AUTO_COUNTDOWN_SECONDS;
+            while remaining > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                remaining -= 1;
+                if tx
+                    .send(AppEvent::AutoCoordinatorCountdown {
+                        countdown_id,
+                        seconds_left: remaining,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
+
+    pub(crate) fn auto_handle_countdown(&mut self, countdown_id: u64, seconds_left: u8) {
+        if !self.auto_state.active
+            || countdown_id != self.auto_state.countdown_id
+            || !self.auto_state.awaiting_submission
+            || self.auto_state.paused_for_manual_edit
+        {
+            return;
+        }
+
+        self.auto_state.seconds_remaining = seconds_left;
+        if seconds_left == 0 {
+            self.auto_submit_prompt();
+        } else {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    fn auto_submit_prompt(&mut self) {
+        if !self.auto_state.active {
+            return;
+        }
+        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+            self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
+            return;
+        };
+        if prompt.trim().is_empty() {
+            self.auto_stop(Some("Coordinator produced an empty prompt.".to_string()));
+            return;
+        }
+
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.waiting_for_response = true;
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.seconds_remaining = 0;
+        self.submit_text_message(prompt);
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    fn auto_pause_for_manual_edit(&mut self) {
+        if !self.auto_state.active || !self.auto_state.awaiting_submission {
+            return;
+        }
+        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+            return;
+        };
+
+        self.auto_state.paused_for_manual_edit = true;
+        self.auto_state.resume_after_manual_submit = true;
+        self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+        self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+        self.clear_composer();
+        self.insert_str(&prompt);
+        self.bottom_pane.ensure_input_focus();
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    fn auto_stop(&mut self, message: Option<String>) {
+        if let Some(tx) = self.auto_tx.take() {
+            let _ = tx.send(AutoCoordinatorCommand::Stop);
+        }
+        if let Some(msg) = message {
+            self.push_background_tail(msg);
+        }
+        self.auto_state.reset();
+        self.bottom_pane.clear_live_ring();
+        self.request_redraw();
+    }
+
+    fn auto_on_assistant_final(&mut self) {
+        if !self.auto_state.active || !self.auto_state.waiting_for_response {
+            return;
+        }
+        self.auto_state.waiting_for_response = false;
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+        self.auto_state.current_thoughts = Some("Analyzing CLI response…".to_string());
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+        self.auto_send_conversation();
+    }
+
+    fn auto_rebuild_live_ring(&mut self) {
+        if !self.auto_state.active {
+            self.bottom_pane.clear_live_ring();
+            return;
+        }
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let label_style = Style::default()
+            .fg(crate::colors::text_dim())
+            .add_modifier(Modifier::BOLD);
+        let value_style = Style::default().fg(crate::colors::text());
+
+        let thoughts = self
+            .auto_state
+            .current_thoughts
+            .clone()
+            .unwrap_or_else(|| "Coordinator is preparing…".to_string());
+        lines.push(Line::from(vec![
+            Span::styled("Coordinator message: ", label_style),
+            Span::styled(thoughts, value_style),
+        ]));
+
+        if let Some(prompt) = &self.auto_state.current_prompt {
+            lines.push(Line::from(vec![
+                Span::styled("Coordinator prompt: ", label_style),
+                Span::styled(prompt.clone(), value_style),
+            ]));
+        }
+
+        let status_text = if self.auto_state.paused_for_manual_edit {
+            "[Edit prompt, then send manually]".to_string()
+        } else if self.auto_state.countdown_active() {
+            format!("[Continue ({}s)]", self.auto_state.seconds_remaining)
+        } else if self.auto_state.waiting_for_response {
+            "[Waiting for CLI response…]".to_string()
+        } else {
+            "[Preparing next suggestion…]".to_string()
+        };
+        lines.push(Line::from(vec![Span::styled(status_text, value_style)]));
+
+        self.bottom_pane
+            .set_live_ring_rows(lines.len() as u16, lines);
     }
 
     fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
