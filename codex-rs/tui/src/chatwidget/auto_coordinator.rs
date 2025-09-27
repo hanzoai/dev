@@ -349,11 +349,21 @@ fn strip_role_prefix(input: &str) -> &str {
     let trimmed = input.trim_start();
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
-        if trimmed.len() >= prefix.len()
-            && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix)
-        {
+        if starts_with_ignore_ascii_case(trimmed, prefix) {
             return trimmed[prefix.len()..].trim_start();
         }
     }
     trimmed
+}
+
+fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let hay_bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    if hay_bytes.len() < needle_bytes.len() {
+        return false;
+    }
+    hay_bytes[..needle_bytes.len()]
+        .iter()
+        .zip(needle_bytes.iter())
+        .all(|(&h, &n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
 }
