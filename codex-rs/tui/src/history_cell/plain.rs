@@ -4,6 +4,8 @@ use crate::history::state::{
     HistoryId,
     MessageHeader,
     MessageLine,
+    NoticeRecord,
+    PlainMessageKind,
     PlainMessageRole,
     PlainMessageState,
 };
@@ -29,7 +31,8 @@ pub(crate) struct PlainCellState {
 
 impl PlainCellState {
     fn new(lines: Vec<Line<'static>>, kind: HistoryCellType) -> Self {
-        let message = PlainMessageStateBuilder::from_lines(lines, kind);
+        let mut message = PlainMessageStateBuilder::from_lines(lines, kind);
+        message.kind = plain_message_kind_from_cell_kind(kind);
         Self { message, kind }
     }
 
@@ -59,6 +62,33 @@ impl PlainHistoryCell {
         }
     }
 
+    pub(crate) fn from_state(state: PlainMessageState) -> Self {
+        let kind = history_cell_kind_from_plain(state.kind);
+        Self {
+            state: PlainCellState {
+                message: state,
+                kind,
+            },
+            cached_layout: std::cell::RefCell::new(None),
+        }
+    }
+
+    pub(crate) fn from_notice_record(record: NoticeRecord) -> Self {
+        let header = record
+            .title
+            .filter(|title| !title.trim().is_empty())
+            .map(|label| MessageHeader { label, badge: None });
+        let state = PlainMessageState {
+            id: record.id,
+            role: PlainMessageRole::System,
+            kind: PlainMessageKind::Notice,
+            header,
+            lines: record.body,
+            metadata: None,
+        };
+        Self::from_state(state)
+    }
+
     pub(crate) fn state(&self) -> &PlainMessageState {
         &self.state.message
     }
@@ -66,13 +96,6 @@ impl PlainHistoryCell {
     pub(crate) fn state_mut(&mut self) -> &mut PlainMessageState {
         self.invalidate_layout_cache();
         &mut self.state.message
-    }
-
-    pub(crate) fn set_kind(&mut self, kind: HistoryCellType) {
-        if self.state.kind != kind {
-            self.state.kind = kind;
-            self.invalidate_layout_cache();
-        }
     }
 
     pub(crate) fn invalidate_layout_cache(&self) {
@@ -307,6 +330,7 @@ impl PlainMessageStateBuilder {
         PlainMessageState {
             id: HistoryId::ZERO,
             role,
+            kind: plain_message_kind_from_cell_kind(kind),
             header,
             lines: message_lines,
             metadata: None,
@@ -323,6 +347,32 @@ fn plain_role_from_kind(kind: HistoryCellType) -> PlainMessageRole {
         HistoryCellType::BackgroundEvent => PlainMessageRole::BackgroundEvent,
         HistoryCellType::Notice => PlainMessageRole::System,
         _ => PlainMessageRole::System,
+    }
+}
+
+fn plain_message_kind_from_cell_kind(kind: HistoryCellType) -> PlainMessageKind {
+    match kind {
+        HistoryCellType::User => PlainMessageKind::User,
+        HistoryCellType::Assistant => PlainMessageKind::Assistant,
+        HistoryCellType::Tool { .. } => PlainMessageKind::Tool,
+        HistoryCellType::Error => PlainMessageKind::Error,
+        HistoryCellType::BackgroundEvent => PlainMessageKind::Background,
+        HistoryCellType::Notice => PlainMessageKind::Notice,
+        _ => PlainMessageKind::Plain,
+    }
+}
+
+fn history_cell_kind_from_plain(kind: PlainMessageKind) -> HistoryCellType {
+    match kind {
+        PlainMessageKind::User => HistoryCellType::User,
+        PlainMessageKind::Assistant => HistoryCellType::Assistant,
+        PlainMessageKind::Tool => HistoryCellType::Tool {
+            status: super::ToolCellStatus::Success,
+        },
+        PlainMessageKind::Error => HistoryCellType::Error,
+        PlainMessageKind::Background => HistoryCellType::BackgroundEvent,
+        PlainMessageKind::Notice => HistoryCellType::Notice,
+        PlainMessageKind::Plain => HistoryCellType::Plain,
     }
 }
 
