@@ -4414,8 +4414,10 @@ impl ChatWidget<'_> {
                 index: record_index,
                 record: domain_record,
             }) {
-                HistoryMutation::Inserted { id, .. } => {
-                    self.assign_history_id(&mut cell, id);
+                HistoryMutation::Inserted { id, record, .. } => {
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     Some(id)
                 }
                 _ => None,
@@ -4429,8 +4431,10 @@ impl ChatWidget<'_> {
                     record,
                 })
             {
-                HistoryMutation::Inserted { id, .. } => {
-                    self.assign_history_id(&mut cell, id);
+                HistoryMutation::Inserted { id, record, .. } => {
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     Some(id)
                 }
                 _ => None,
@@ -4496,28 +4500,64 @@ impl ChatWidget<'_> {
         pos
     }
 
+    fn hydrate_cell_from_record(
+        &self,
+        cell: &mut Box<dyn HistoryCell>,
+        record: &HistoryRecord,
+    ) -> bool {
+        match record {
+            HistoryRecord::PlainMessage(state) => {
+                if let Some(plain) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::PlainHistoryCell>()
+                {
+                    *plain.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::WaitStatus(state) => {
+                if let Some(wait) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::WaitStatusCell>()
+                {
+                    *wait.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::Loading(state) => {
+                if let Some(loading) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::LoadingCell>()
+                {
+                    *loading.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::BackgroundEvent(state) => {
+                if let Some(background) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::BackgroundEventCell>()
+                {
+                    *background.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::RateLimits(state) => {
+                if let Some(rate_limits) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::RateLimitsCell>()
+                {
+                    *rate_limits.record_mut() = state.clone();
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     fn assign_history_id(&self, cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
-        if let Some(plain) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::PlainHistoryCell>()
-        {
-            plain.state_mut().id = id;
-        } else if let Some(wait) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::WaitStatusCell>()
-        {
-            wait.state_mut().id = id;
-        } else if let Some(loading) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::LoadingCell>()
-        {
-            loading.state_mut().id = id;
-        } else if let Some(background) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::BackgroundEventCell>()
-        {
-            background.state_mut().id = id;
-        } else if let Some(tool_call) = cell
+        if let Some(tool_call) = cell
             .as_any_mut()
             .downcast_mut::<crate::history_cell::ToolCallCell>()
         {
@@ -4805,11 +4845,20 @@ impl ChatWidget<'_> {
         });
 
         if let Some(id) = match mutation {
-            HistoryMutation::Replaced { id, .. } => Some(id),
-            HistoryMutation::Inserted { id, .. } => Some(id),
+            HistoryMutation::Replaced { id, record, .. } => {
+                if !self.hydrate_cell_from_record(&mut cell, &record) {
+                    self.assign_history_id(&mut cell, id);
+                }
+                Some(id)
+            }
+            HistoryMutation::Inserted { id, record, .. } => {
+                if !self.hydrate_cell_from_record(&mut cell, &record) {
+                    self.assign_history_id(&mut cell, id);
+                }
+                Some(id)
+            }
             _ => None,
         } {
-            self.assign_history_id(&mut cell, id);
             if idx < self.history_cell_ids.len() {
                 self.history_cell_ids[idx] = Some(id);
             }
@@ -4831,27 +4880,31 @@ impl ChatWidget<'_> {
 
         match (record, self.record_index_for_cell(idx)) {
             (Some(record), Some(record_idx)) => {
-                if let HistoryMutation::Replaced { id, .. } = self
+                if let HistoryMutation::Replaced { id, record, .. } = self
                     .history_state
                     .apply_event(HistoryEvent::Replace {
                         index: record_idx,
                         record,
                     })
                 {
-                    self.assign_history_id(&mut cell, id);
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     maybe_id = Some(id);
                 }
             }
             (Some(record), None) => {
                 let record_idx = self.record_index_for_position(idx);
-                if let HistoryMutation::Inserted { id, .. } = self
+                if let HistoryMutation::Inserted { id, record, .. } = self
                     .history_state
                     .apply_event(HistoryEvent::Insert {
                         index: record_idx,
                         record,
                     })
                 {
-                    self.assign_history_id(&mut cell, id);
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     maybe_id = Some(id);
                 }
             }
@@ -7359,12 +7412,19 @@ impl ChatWidget<'_> {
                 if tool_name == "wait" && success {
                     let target = wait_target_from_params(params_string.as_ref(), &call_id);
                     let wait_cell = history_cell::new_completed_wait_tool_call(target, duration);
+                    let wait_state = wait_cell.state().clone();
                     if let Some(idx) = resolved_idx {
-                        self.history_replace_at(idx, Box::new(wait_cell));
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(wait_cell),
+                            HistoryDomainRecord::WaitStatus(wait_state),
+                        );
                     } else {
-                        let _ = self.history_insert_with_key_global(
+                        let _ = self.history_insert_with_key_global_tagged(
                             Box::new(wait_cell),
                             ok,
+                            "untagged",
+                            Some(HistoryDomainRecord::WaitStatus(wait_state)),
                         );
                     }
                     self.remove_background_completion_message(&call_id);
@@ -7385,7 +7445,12 @@ impl ChatWidget<'_> {
                     );
 
                     if let Some(idx) = resolved_idx {
-                        self.history_replace_at(idx, Box::new(wait_cancelled_cell));
+                        let record = HistoryDomainRecord::Plain(wait_cancelled_cell.state().clone());
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(wait_cancelled_cell),
+                            record,
+                        );
                     } else {
                         let _ = self.history_insert_plain_cell_with_key(
                             wait_cancelled_cell,

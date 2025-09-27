@@ -36,6 +36,11 @@ Line numbers reference `codex-rs/tui/src/chatwidget.rs` as of 2025-09-27.
 - **Background/system notices** – `push_system_cell` (`chatwidget.rs:1254`) now
   uses `HistoryDomainRecord::BackgroundEvent` for inserts/replacements, so these
   paths no longer reconstruct records from existing cells (migrated 2025-09-27).
+- **Plain/wait/loading inserts** – `history_insert_plain_cell_with_key`
+  (`chatwidget.rs:4660`) and wait-tool completions (`chatwidget.rs:7358`) now
+  emit `HistoryDomainRecord` variants; the inserted cells get hydrated from the
+  returned `HistoryRecord`, so `assign_history_id` no longer sets IDs for these
+  types (2025-09-27).
 - **Reasoning merge** – reasoning stream handling mutates the stored
   `CollapsibleReasoningCell` state (`chatwidget.rs:1440-2058`,
   `11288-11336`).
