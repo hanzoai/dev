@@ -64,6 +64,9 @@ Notes
 - `/agents`: list agents (running and availability).
   including autonomous follow-ups and observer status (available in dev,
   dev-fast, and pref builds).
+- `/auto [goal]`: start the maintainer-style auto coordinator. If no goal is
+  provided it defaults to "review the git log for recent changes and come up
+  with sensible follow up work".
 
 ## Prompt‑Expanding (Multi‑Agent)
 

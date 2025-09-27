@@ -3191,7 +3191,7 @@ impl ChatWidget<'_> {
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        content: vec![ContentItem::InputText { text }],
                     });
                 }
                 crate::history_cell::HistoryCellType::Assistant => {
@@ -3209,7 +3209,7 @@ impl ChatWidget<'_> {
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "assistant".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        content: vec![ContentItem::InputText { text }],
                     });
                 }
                 _ => {}
@@ -6263,6 +6263,15 @@ impl ChatWidget<'_> {
             {
                 tracing::error!("failed to send AddHistory op: {e}");
             }
+        }
+
+        if self.auto_state.active && self.auto_state.resume_after_manual_submit {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.resume_after_manual_submit = false;
+            self.auto_state.paused_for_manual_edit = false;
+            self.auto_state.awaiting_submission = false;
+            self.auto_state.seconds_remaining = 0;
+            self.auto_rebuild_live_ring();
         }
 
         self.request_redraw();
@@ -9395,11 +9404,23 @@ impl ChatWidget<'_> {
                 self.auto_start_countdown(countdown_id);
             }
             AutoCoordinatorStatus::Success => {
-                self.auto_stop(Some(format!("Coordinator success: {thoughts}")));
+                let lower = thoughts.to_ascii_lowercase();
+                let message = if lower.starts_with("coordinator success:") {
+                    thoughts
+                } else {
+                    format!("Coordinator success: {thoughts}")
+                };
+                self.auto_stop(Some(message));
                 return;
             }
             AutoCoordinatorStatus::Failed => {
-                self.auto_stop(Some(format!("Coordinator error: {thoughts}")));
+                let lower = thoughts.to_ascii_lowercase();
+                let message = if lower.starts_with("coordinator error:") {
+                    thoughts
+                } else {
+                    format!("Coordinator error: {thoughts}")
+                };
+                self.auto_stop(Some(message));
                 return;
             }
         }
@@ -9420,10 +9441,15 @@ impl ChatWidget<'_> {
             while remaining > 0 {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 remaining -= 1;
-                tx.send(AppEvent::AutoCoordinatorCountdown {
-                    countdown_id,
-                    seconds_left: remaining,
-                });
+                if tx
+                    .send(AppEvent::AutoCoordinatorCountdown {
+                        countdown_id,
+                        seconds_left: remaining,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
             }
         });
     }
