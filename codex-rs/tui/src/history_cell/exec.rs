@@ -366,9 +366,9 @@ impl ExecCell {
             .completed_at
             .and_then(|done| done.duration_since(record.started_at).ok());
         let wait_state = ExecWaitState {
-            total_wait: None,
+            total_wait: record.wait_total,
             run_duration,
-            waiting: matches!(record.status, ExecStatus::Running),
+            waiting: record.wait_active,
             notes: wait_notes_from_record(&record.wait_notes),
         };
         let start_time = if matches!(record.status, ExecStatus::Running) {
@@ -413,20 +413,32 @@ impl ExecCell {
     }
 
 
-    pub(crate) fn set_waiting(&self, waiting: bool) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.waiting != waiting {
-            state.waiting = waiting;
-            drop(state);
+    pub(crate) fn set_waiting(&mut self, waiting: bool) {
+        let mut changed = false;
+        {
+            let mut state = self.wait_state.borrow_mut();
+            if state.waiting != waiting {
+                state.waiting = waiting;
+                changed = true;
+            }
+        }
+        if changed {
+            self.record.wait_active = waiting;
             self.invalidate_render_caches();
         }
     }
 
-    pub(crate) fn set_wait_total(&self, total: Option<Duration>) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.total_wait != total {
-            state.total_wait = total;
-            drop(state);
+    pub(crate) fn set_wait_total(&mut self, total: Option<Duration>) {
+        let mut changed = false;
+        {
+            let mut state = self.wait_state.borrow_mut();
+            if state.total_wait != total {
+                state.total_wait = total;
+                changed = true;
+            }
+        }
+        if changed {
+            self.record.wait_total = total;
             self.invalidate_render_caches();
         }
     }
@@ -438,52 +450,6 @@ impl ExecCell {
             drop(state);
             self.invalidate_render_caches();
         }
-    }
-
-    pub(crate) fn wait_total(&self) -> Option<Duration> {
-        self.wait_state.borrow().total_wait
-    }
-
-    pub(crate) fn clear_wait_notes(&mut self) {
-        let mut state = self.wait_state.borrow_mut();
-        if state.notes.is_empty() {
-            return;
-        }
-        state.notes.clear();
-        drop(state);
-        self.record.wait_notes.clear();
-        self.invalidate_render_caches();
-    }
-
-    pub(crate) fn push_wait_note(&mut self, text: &str, is_error: bool) {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let mut state = self.wait_state.borrow_mut();
-        if state
-            .notes
-            .last()
-            .map(|note| note.text == trimmed && note.is_error == is_error)
-            .unwrap_or(false)
-        {
-            return;
-        }
-        state.notes.push(ExecWaitNote {
-            text: trimmed.to_string(),
-            is_error,
-        });
-        drop(state);
-        self.record.wait_notes.push(RecordExecWaitNote {
-            message: trimmed.to_string(),
-            tone: if is_error {
-                TextTone::Error
-            } else {
-                TextTone::Info
-            },
-            timestamp: SystemTime::now(),
-        });
-        self.invalidate_render_caches();
     }
 
     pub(crate) fn set_wait_notes(&mut self, notes: &[(String, bool)]) {
@@ -796,6 +762,17 @@ impl ExecCell {
         self.parsed = record.parsed.clone();
         self.has_bold_command = command_has_bold_token(&self.command);
 
+        let run_duration = record
+            .completed_at
+            .and_then(|done| done.duration_since(record.started_at).ok());
+        {
+            let mut wait_state = self.wait_state.borrow_mut();
+            wait_state.total_wait = record.wait_total;
+            wait_state.waiting = record.wait_active;
+            wait_state.run_duration = run_duration;
+            wait_state.notes = wait_notes_from_record(&record.wait_notes);
+        }
+
         if matches!(record.status, ExecStatus::Running) {
             let stdout = chunks_to_string(&record.stdout_chunks);
             let stderr = chunks_to_string(&record.stderr_chunks);
@@ -981,6 +958,8 @@ fn build_exec_record(
                 stdout_chunks: chunk_from_text(&output.stdout),
                 stderr_chunks: chunk_from_text(&output.stderr),
                 exit_code: Some(exit_code),
+                wait_total: None,
+                wait_active: false,
                 wait_notes: Vec::new(),
                 started_at,
                 completed_at: Some(SystemTime::now()),
@@ -995,6 +974,8 @@ fn build_exec_record(
             stdout_chunks: Vec::new(),
             stderr_chunks: Vec::new(),
             exit_code: None,
+            wait_total: None,
+            wait_active: false,
             wait_notes: Vec::new(),
             started_at,
             completed_at: None,

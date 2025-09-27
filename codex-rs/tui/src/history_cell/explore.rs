@@ -5,7 +5,6 @@ use crate::history::state::{
     ExploreEntryStatus,
     ExploreRecord,
     ExploreSummary,
-    HistoryId,
 };
 use codex_core::parse_command::ParsedCommand;
 use shlex::Shlex;
@@ -17,16 +16,6 @@ pub(crate) struct ExploreAggregationCell {
 }
 
 impl ExploreAggregationCell {
-    pub(crate) fn new() -> Self {
-        Self {
-            record: ExploreRecord {
-                id: HistoryId::ZERO,
-                entries: Vec::new(),
-            },
-            is_trailing: true,
-        }
-    }
-
     pub(crate) fn from_record(record: ExploreRecord) -> Self {
         Self {
             record,
