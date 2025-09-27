@@ -33,6 +33,7 @@ mod app;
 mod app_event;
 mod app_event_sender;
 mod backtrack_helpers;
+mod account_label;
 mod bottom_pane;
 mod chatwidget;
 mod citation_regex;

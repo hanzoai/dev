@@ -173,6 +173,7 @@ fn status_tokens_prefix() -> &'static str {
     STATUS_TOKENS_PREFIX
 }
 
+use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
     BackgroundPlacement,
@@ -3604,7 +3605,7 @@ impl ChatWidget<'_> {
                 .and_then(|id| usage_summary_map.get(id));
 
             let title = account_ref
-                .map(Self::account_label)
+                .map(account_display_label)
                 .or_else(|| active_id.clone())
                 .unwrap_or_else(|| "Current session".to_string());
             let header = Self::account_header_lines(account_ref, snapshot_ref, summary_ref);
@@ -3626,23 +3627,28 @@ impl ChatWidget<'_> {
             .filter(|id| !seen_ids.contains(*id))
             .cloned()
             .collect();
-        remaining_ids.sort_by(|a, b| {
-            let a_label = account_map
-                .get(a)
-                .map(Self::account_label)
-                .unwrap_or_else(|| a.clone());
-            let b_label = account_map
-                .get(b)
-                .map(Self::account_label)
-                .unwrap_or_else(|| b.clone());
-            let a_cmp = a_label.to_ascii_lowercase();
-            let b_cmp = b_label.to_ascii_lowercase();
-            let order = a_cmp.cmp(&b_cmp);
-            if order == std::cmp::Ordering::Equal {
-                a_label.cmp(&b_label)
+
+        let account_sort_key = |id: &String| {
+            if let Some(account) = account_map.get(id) {
+                let label = account_display_label(account);
+                (
+                    account_mode_priority(account.mode),
+                    label.to_ascii_lowercase(),
+                    label,
+                )
             } else {
-                order
+                (u8::MAX, id.to_ascii_lowercase(), id.clone())
             }
+        };
+
+        remaining_ids.sort_by(|a, b| {
+            let (a_priority, a_lower, a_label) = account_sort_key(a);
+            let (b_priority, b_lower, b_label) = account_sort_key(b);
+            a_priority
+                .cmp(&b_priority)
+                .then_with(|| a_lower.cmp(&b_lower))
+                .then_with(|| a_label.cmp(&b_label))
+                .then_with(|| a.cmp(b))
         });
 
         for id in remaining_ids {
@@ -3650,7 +3656,7 @@ impl ChatWidget<'_> {
             let record = snapshot_map.remove(&id);
             let usage_summary = usage_summary_map.remove(&id);
             let title = account
-                .map(Self::account_label)
+                .map(account_display_label)
                 .unwrap_or_else(|| id.clone());
             match record {
                 Some(record) => {
@@ -3710,14 +3716,6 @@ impl ChatWidget<'_> {
         }
 
         tabs
-    }
-
-    fn account_label(account: &StoredAccount) -> String {
-        account
-            .label
-            .clone()
-            .filter(|label| !label.trim().is_empty())
-            .unwrap_or_else(|| account.id.clone())
     }
 
     fn usage_cost_usd_from_totals(totals: &TokenTotals) -> f64 {
