@@ -15,6 +15,7 @@ use crate::tui;
 use crate::tui::TerminalInfo;
 use codex_core::config::add_project_allowed_command;
 use codex_core::config::Config;
+use codex_core::config_types::Notifications;
 use codex_core::protocol::Event;
 use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
@@ -416,6 +417,66 @@ impl App<'_> {
             std::io::stdout(),
             crossterm::terminal::SetTitle(title.to_string())
         );
+    }
+
+    fn sanitize_notification_text(input: &str) -> String {
+        let mut sanitized = String::with_capacity(input.len());
+        for ch in input.chars() {
+            match ch {
+                '\u{00}'..='\u{08}' | '\u{0B}' | '\u{0C}' | '\u{0E}'..='\u{1F}' | '\u{7F}' => {}
+                '\n' | '\r' | '\t' => {
+                    if !sanitized.ends_with(' ') {
+                        sanitized.push(' ');
+                    }
+                }
+                _ => sanitized.push(ch),
+            }
+        }
+        sanitized
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn format_notification_message(title: &str, body: Option<&str>) -> Option<String> {
+        let title = Self::sanitize_notification_text(title);
+        let body = body.map(Self::sanitize_notification_text);
+        let mut message = match body {
+            Some(ref b) if !b.is_empty() => {
+                if title.is_empty() {
+                    b.clone()
+                } else {
+                    format!("{}: {}", title, b)
+                }
+            }
+            _ => title.clone(),
+        };
+
+        if message.is_empty() {
+            return None;
+        }
+
+        const MAX_LEN: usize = 160;
+        if message.chars().count() > MAX_LEN {
+            let mut truncated = String::new();
+            for ch in message.chars() {
+                if truncated.chars().count() >= MAX_LEN.saturating_sub(3) {
+                    break;
+                }
+                truncated.push(ch);
+            }
+            truncated.push_str("...");
+            message = truncated;
+        }
+
+        Some(message)
+    }
+
+    fn emit_osc9_notification(message: &str) {
+        let payload = format!("\u{1b}]9;{}\u{7}", message);
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all(payload.as_bytes());
+        let _ = stdout.flush();
     }
 
 
@@ -1705,6 +1766,11 @@ impl App<'_> {
                                 widget.handle_update_command();
                             }
                         }
+                        SlashCommand::Notifications => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_notifications_command(command_args);
+                            }
+                        }
                         SlashCommand::Agents => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_agents_command(command_args);
@@ -1884,6 +1950,13 @@ impl App<'_> {
                         widget.set_github_watcher(enabled);
                     }
                 }
+                AppEvent::UpdateTuiNotifications(enabled) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_tui_notifications(enabled);
+                    }
+                    self.config.tui.notifications = Notifications::Enabled(enabled);
+                    self.config.tui_notifications = Notifications::Enabled(enabled);
+                }
                 AppEvent::UpdateValidationTool { name, enable } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.toggle_validation_tool(&name, enable);
@@ -1897,6 +1970,11 @@ impl App<'_> {
                 AppEvent::SetTerminalTitle { title } => {
                     self.terminal_title_override = title;
                     self.apply_terminal_title();
+                }
+                AppEvent::EmitTuiNotification { title, body } => {
+                    if let Some(message) = Self::format_notification_message(&title, body.as_deref()) {
+                        Self::emit_osc9_notification(&message);
+                    }
                 }
                 AppEvent::UpdateMcpServer { name, enable } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -2378,6 +2456,11 @@ impl App<'_> {
                     // Schedule the next redraw with the requested duration
                     self.schedule_redraw_in(duration);
                 }
+                AppEvent::GhostSnapshotFinished { job_id, result, elapsed } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_ghost_snapshot_finished(job_id, result, elapsed);
+                    }
+                }
             }
         }
         if self.alt_screen_active {
@@ -2476,6 +2559,13 @@ impl App<'_> {
         self.commit_anim_running.store(false, Ordering::Release);
         self.input_running.store(false, Ordering::Release);
         usage
+    }
+
+    pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
+        match &self.app_state {
+            AppState::Chat { widget } => widget.session_id(),
+            AppState::Onboarding { .. } => None,
+        }
     }
 
     /// Return a human-readable performance summary if timing was enabled.

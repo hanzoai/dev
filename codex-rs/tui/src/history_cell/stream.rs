@@ -301,4 +301,12 @@ impl StreamingContentCell {
     fn ensure_stream_layout(&self, width: u16) -> AssistantLayoutCache {
         self.assistant.ensure_layout(width)
     }
+
+    pub(crate) fn state(&self) -> &AssistantStreamState {
+        &self.state
+    }
+
+    pub(crate) fn state_mut(&mut self) -> &mut AssistantStreamState {
+        &mut self.state
+    }
 }
