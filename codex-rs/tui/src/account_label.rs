@@ -6,12 +6,27 @@ const KEY_SUFFIX_LEN: usize = 8;
 /// Returns a user-facing label for the given account.
 /// Prefers stored labels when present, otherwise formats a sensible default.
 pub(crate) fn account_display_label(account: &StoredAccount) -> String {
-    if let Some(label) = account
-        .label
-        .as_ref()
-        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()))
-    {
-        return label;
+    if let Some(label) = account.label.as_ref() {
+        let trimmed = label.trim();
+        if !trimmed.is_empty() {
+            match account.mode {
+                AuthMode::ChatGPT => {
+                    let default_email = account
+                        .tokens
+                        .as_ref()
+                        .and_then(|tokens| tokens.id_token.email.as_deref());
+                    if default_email.is_some_and(|email| trimmed.eq_ignore_ascii_case(email)) {
+                        // Fall back to the default ChatGPT label format when the stored
+                        // label is just the raw email we persist automatically.
+                    } else {
+                        return trimmed.to_string();
+                    }
+                }
+                AuthMode::ApiKey => {
+                    return trimmed.to_string();
+                }
+            }
+        }
     }
 
     match account.mode {
