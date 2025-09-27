@@ -212,6 +212,7 @@ use crate::history_cell::ExecCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
+use crate::history_cell::PlanUpdateCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
@@ -3112,7 +3113,7 @@ impl ChatWidget<'_> {
         use codex_protocol::models::ContentItem;
         use codex_protocol::models::ResponseItem;
         let mut items = Vec::new();
-        let mut last_plan_update: Option<String> = None;
+        let mut latest_plan: Option<String> = None;
 
         for cell in &self.history_cells {
             match cell.kind() {
@@ -3135,6 +3136,15 @@ impl ChatWidget<'_> {
                     if trimmed.is_empty() {
                         continue;
                     }
+                    if let Some(plan_text) = latest_plan.as_ref() {
+                        items.push(ResponseItem::Message {
+                            id: None,
+                            role: "user".to_string(),
+                            content: vec![ContentItem::InputText {
+                                text: plan_text.clone(),
+                            }],
+                        });
+                    }
                     let prefixed = format!("CLI: {trimmed}");
                     items.push(ResponseItem::Message {
                         id: None,
@@ -3143,44 +3153,11 @@ impl ChatWidget<'_> {
                     });
                 }
                 crate::history_cell::HistoryCellType::PlanUpdate => {
-                    let text = Self::history_lines_to_string(cell.display_lines());
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        last_plan_update = Some(format!("CLI: {trimmed}"));
+                    if let Some(plan_cell) = cell.as_any().downcast_ref::<PlanUpdateCell>() {
+                        latest_plan = Self::format_plan_update(plan_cell);
                     }
                 }
                 _ => {}
-            }
-        }
-
-        if let Some(plan_text) = last_plan_update {
-            let plan_item = ResponseItem::Message {
-                id: None,
-                role: "user".to_string(),
-                content: vec![ContentItem::InputText { text: plan_text.clone() }],
-            };
-            if let Some(idx) = items
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(idx, item)| match item {
-                    ResponseItem::Message { role, content, .. } if role == "user" => {
-                        if let Some(ContentItem::InputText { text }) = content.first() {
-                            if text.starts_with("CLI:") {
-                                Some(idx)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                })
-            {
-                items.insert(idx, plan_item);
-            } else {
-                items.push(plan_item);
             }
         }
 
@@ -3198,6 +3175,47 @@ impl ChatWidget<'_> {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn format_plan_update(plan: &PlanUpdateCell) -> Option<String> {
+        let state = plan.state();
+        let name = state.name.trim();
+        let completed = state.progress.completed;
+        let total = state.progress.total;
+
+        let mut header = if total > 0 {
+            match name.is_empty() {
+                true => format!("Updated Plan: ({completed}/{total})"),
+                false => format!("Updated Plan: {name} ({completed}/{total})"),
+            }
+        } else if name.is_empty() {
+            "Updated Plan".to_string()
+        } else {
+            format!("Updated Plan: {name}")
+        };
+
+        let mut lines = Vec::new();
+        for (idx, step) in state.steps.iter().enumerate() {
+            let (symbol, label) = match step.status {
+                StepStatus::Completed => ("✔", "completed"),
+                StepStatus::InProgress => ("□", "in_progress"),
+                StepStatus::Pending => ("□", "pending"),
+            };
+            let prefix = if idx == 0 { " └" } else { "   " };
+            lines.push(format!("{prefix} {symbol} {} ({label})", step.description));
+        }
+
+        if lines.is_empty() && header == "Updated Plan" {
+            return None;
+        }
+
+        let mut formatted = format!("CLI: {header}");
+        if !lines.is_empty() {
+            formatted.push('\n');
+            formatted.push_str(&lines.join("\n"));
+        }
+
+        Some(formatted)
     }
 
     pub(crate) fn config_ref(&self) -> &Config {
