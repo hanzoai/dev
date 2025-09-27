@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.170] - 2025-09-27
+
+- TUI/History: drive exec, assistant, explore, and rate-limit cells from domain events for consistent streaming. (38abccc, 5409493, e6e72d3, f851369, d7e9ee7)
+- TUI/Notifications: add an OSC toggle command and harden slash routing, persistence, and filters so alerts stay accurate. (6a8aac2, 7ab484a, 449aeb0, 9c4101c, 51a3c28)
+- Usage/Rate-limits: compact persisted stats, relog after resets, and persist reset state to keep quotas current. (7573b40, bf325f7, 51fd601)
+- TUI/Accounts: prioritize ChatGPT accounts in login flows and restore the label prefix for clarity. (1db6193, 489bfb1)
+- UX: show a session resume hint on exit, surface Zed model selection, and restore Option+Enter newline plus Cmd+Z undo. (13dd4ca, 0e39d1f, eed1952)
+
 ## [0.2.168] - 2025-09-26
 
 - TUI/Limits: restore the 6 month history view with expanded layout, spacing, and weekday labels. (840998b, 7c956be, 2f6b506, 395e2ba)
