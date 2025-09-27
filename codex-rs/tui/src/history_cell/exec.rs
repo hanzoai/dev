@@ -790,38 +790,35 @@ impl ExecCell {
         (pre, out, status)
     }
 
-    pub(crate) fn update_stream_preview(&mut self, stdout: &str, stderr: &str) {
-        if stdout.is_empty() && stderr.is_empty() {
-            if self.stream_preview.is_none() {
-                return;
+    pub(crate) fn sync_from_record(&mut self, record: &ExecRecord) {
+        self.record = record.clone();
+        self.command = record.command.clone();
+        self.parsed = record.parsed.clone();
+        self.has_bold_command = command_has_bold_token(&self.command);
+
+        if matches!(record.status, ExecStatus::Running) {
+            let stdout = chunks_to_string(&record.stdout_chunks);
+            let stderr = chunks_to_string(&record.stderr_chunks);
+            if stdout.is_empty() && stderr.is_empty() {
+                self.stream_preview = None;
+            } else {
+                self.stream_preview = Some(CommandOutput {
+                    exit_code: STREAMING_EXIT_CODE,
+                    stdout,
+                    stderr,
+                });
             }
-            self.stream_preview = None;
-            self.record.stdout_chunks.clear();
-            self.record.stderr_chunks.clear();
         } else {
-            self.stream_preview = Some(CommandOutput {
-                exit_code: STREAMING_EXIT_CODE,
-                stdout: stdout.to_string(),
-                stderr: stderr.to_string(),
-            });
-            self.record.stdout_chunks = if stdout.is_empty() {
-                Vec::new()
-            } else {
-                vec![ExecStreamChunk {
-                    offset: 0,
-                    content: stdout.to_string(),
-                }]
-            };
-            self.record.stderr_chunks = if stderr.is_empty() {
-                Vec::new()
-            } else {
-                vec![ExecStreamChunk {
-                    offset: 0,
-                    content: stderr.to_string(),
-                }]
-            };
+            self.stream_preview = None;
         }
-        self.invalidate_render_caches();
+
+        // Invalidate cached layouts so the refreshed state re-renders.
+        self.cached_display_lines.borrow_mut().take();
+        self.cached_pre_lines.borrow_mut().take();
+        self.cached_out_lines.borrow_mut().take();
+        self.cached_layout.borrow_mut().take();
+        self.cached_command_lines.borrow_mut().take();
+        self.cached_wait_extras.borrow_mut().take();
     }
 
     fn exec_render_parts_generic(

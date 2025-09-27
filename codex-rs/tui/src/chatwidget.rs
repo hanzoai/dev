@@ -4542,6 +4542,24 @@ impl ChatWidget<'_> {
                     return true;
                 }
             }
+            HistoryRecord::Exec(state) => {
+                if let Some(exec) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::ExecCell>()
+                {
+                    exec.sync_from_record(state);
+                    return true;
+                }
+            }
+            HistoryRecord::AssistantStream(state) => {
+                if let Some(stream) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::StreamingContentCell>()
+                {
+                    stream.update_from_state(state.clone(), &self.config);
+                    return true;
+                }
+            }
             HistoryRecord::RateLimits(state) => {
                 if let Some(rate_limits) = cell
                     .as_any_mut()
@@ -6962,17 +6980,50 @@ impl ChatWidget<'_> {
                 let call_id = ExecCallId(ev.call_id.clone());
                 if let Some(running) = self.exec.running_commands.get_mut(&call_id) {
                     let chunk = String::from_utf8_lossy(&ev.chunk).to_string();
-                    match ev.stream {
-                        ExecOutputStream::Stdout => running.stdout.push_str(&chunk),
-                        ExecOutputStream::Stderr => running.stderr.push_str(&chunk),
-                    }
+                    let (stdout_chunk, stderr_chunk) = match ev.stream {
+                        ExecOutputStream::Stdout => {
+                            let offset = running.stdout.len();
+                            running.stdout.push_str(&chunk);
+                            (
+                                Some(crate::history::state::ExecStreamChunk {
+                                    offset,
+                                    content: chunk.clone(),
+                                }),
+                                None,
+                            )
+                        }
+                        ExecOutputStream::Stderr => {
+                            let offset = running.stderr.len();
+                            running.stderr.push_str(&chunk);
+                            (
+                                None,
+                                Some(crate::history::state::ExecStreamChunk {
+                                    offset,
+                                    content: chunk.clone(),
+                                }),
+                            )
+                        }
+                    };
                     if let Some(idx) = running.history_index {
-                        if idx < self.history_cells.len() {
-                            if let Some(exec) = self.history_cells[idx]
-                                .as_any_mut()
-                                .downcast_mut::<history_cell::ExecCell>()
-                            {
-                                exec.update_stream_preview(&running.stdout, &running.stderr);
+                        let mutation = self.history_state.apply_domain_event(
+                            HistoryDomainEvent::UpdateExecStream {
+                                index: idx,
+                                stdout_chunk,
+                                stderr_chunk,
+                            },
+                        );
+                        if let HistoryMutation::Replaced {
+                            record: HistoryRecord::Exec(exec_record),
+                            ..
+                        } = mutation
+                        {
+                            if idx < self.history_cells.len() {
+                                if let Some(exec) = self.history_cells[idx]
+                                    .as_any_mut()
+                                    .downcast_mut::<history_cell::ExecCell>()
+                                {
+                                    exec.sync_from_record(&exec_record);
+                                }
                             }
                         }
                     }
@@ -11648,9 +11699,11 @@ impl ChatWidget<'_> {
                     id,
                     Self::debug_fmt_order_key(key)
                 );
-                let new_idx = self.history_insert_with_key_global(
-                    Box::new(history_cell::new_streaming_content(state, &self.config)),
+                let new_idx = self.history_insert_with_key_global_tagged(
+                    Box::new(history_cell::new_streaming_content(state.clone(), &self.config)),
                     key,
+                    "stream-begin",
+                    Some(HistoryDomainRecord::AssistantStream(state)),
                 );
                 tracing::debug!(
                     "history.new StreamingContentCell at idx={} id={:?}",
@@ -11778,9 +11831,31 @@ impl ChatWidget<'_> {
                 received_at: SystemTime::now(),
             })
         };
-        self
-            .history_state
-            .upsert_assistant_stream_state(stream_id, preview, delta, None);
+        let mutation = self.history_state.apply_domain_event(
+            HistoryDomainEvent::UpsertAssistantStream {
+                stream_id: stream_id.to_string(),
+                preview_markdown: preview,
+                delta,
+                metadata: None,
+            },
+        );
+
+        if let HistoryMutation::Inserted { index, record, .. }
+        | HistoryMutation::Replaced { index, record, .. } = mutation
+        {
+            if let HistoryRecord::AssistantStream(state) = record {
+                if index < self.history_cells.len() {
+                    if let Some(stream_cell) = self.history_cells[index]
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::StreamingContentCell>()
+                    {
+                        stream_cell.update_from_state(state.clone(), &self.config);
+                    }
+                } else {
+                    self.refresh_streaming_cell_for_stream_id(stream_id, state);
+                }
+            }
+        }
     }
 
     fn finalize_answer_stream_state(
