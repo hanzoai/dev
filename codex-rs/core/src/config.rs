@@ -2491,7 +2491,6 @@ exclude_slash_tmp = true
             }
             _ => panic!("expected stdio transport"),
         }
-        assert_eq!(docs.args, vec!["hello".to_string()]);
 
         let empty = BTreeMap::new();
         write_global_mcp_servers(codex_home.path(), &empty)?;
@@ -2981,7 +2980,6 @@ model_verbosity = "high"
             tools_web_search_request: false,
             tools_web_search_allowed_domains: None,
             use_experimental_streamable_shell_tool: false,
-            use_experimental_use_rmcp_client: false,
             use_experimental_use_rmcp_client: false,
             include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
