@@ -325,6 +325,7 @@ pub(crate) fn has_truecolor_terminal() -> bool {
 /// Quantize all theme colors to the ANSI-256 palette so backends that do not
 /// render truecolor reliably still get consistent colors.
 fn quantize_theme_to_ansi256(theme: &mut Theme) {
+    let original = theme.clone();
     // Preserve exact white backgrounds as truecolor to avoid terminals whose
     // ANSI palette's "white" (15) is a light gray. This specifically fixes
     // macOS Terminal.app where bright white can appear gray.
@@ -363,6 +364,8 @@ fn quantize_theme_to_ansi256(theme: &mut Theme) {
     theme.function = q(theme.function);
     theme.spinner = q(theme.spinner);
     theme.progress = q(theme.progress);
+
+    enforce_light_theme_contrast(&original, theme);
 }
 
 fn quantize_color_to_ansi256(c: Color) -> Color {
@@ -455,6 +458,207 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
     }
 
     best_index
+}
+
+fn enforce_light_theme_contrast(original: &Theme, quantized: &mut Theme) {
+    if !is_light_color(original.background) {
+        return;
+    }
+    if !is_light_color(quantized.background) {
+        return;
+    }
+
+    quantized.text = ensure_contrast(original.text, quantized.text, quantized.background, 7.0);
+    quantized.text_dim = ensure_contrast(original.text_dim, quantized.text_dim, quantized.background, 3.0);
+    quantized.text_bright = ensure_contrast(original.text_bright, quantized.text_bright, quantized.background, 4.5);
+    quantized.border = ensure_contrast(original.border, quantized.border, quantized.background, 1.4);
+    quantized.border_focused = ensure_contrast(original.border_focused, quantized.border_focused, quantized.background, 1.8);
+    quantized.comment = ensure_contrast(original.comment, quantized.comment, quantized.background, 2.0);
+}
+
+fn ensure_contrast(original: Color, current: Color, background: Color, min_ratio: f32) -> Color {
+    if contrast_ratio(current, background) >= min_ratio {
+        return current;
+    }
+
+    let target = color_to_rgb(original);
+    let prefer_grayscale = is_low_saturation(target);
+    if let Some(candidate) =
+        find_palette_match_with_contrast(target, background, min_ratio, prefer_grayscale)
+    {
+        return candidate;
+    }
+
+    if is_light_color(background) {
+        Color::Indexed(16)
+    } else {
+        Color::Indexed(231)
+    }
+}
+
+fn find_palette_match_with_contrast(
+    target: (u8, u8, u8),
+    background: Color,
+    min_ratio: f32,
+    prefer_grayscale: bool,
+) -> Option<Color> {
+    let mut best: Option<(i32, Color)> = None;
+
+    let consider_candidate = |candidate: Color, best: &mut Option<(i32, Color)>| {
+        if contrast_ratio(candidate, background) < min_ratio {
+            return;
+        }
+        let rgb = color_to_rgb(candidate);
+        let dist = color_distance(rgb, target);
+        match best {
+            None => *best = Some((dist, candidate)),
+            Some((best_dist, _)) if dist < *best_dist => *best = Some((dist, candidate)),
+            _ => {}
+        }
+    };
+
+    if prefer_grayscale {
+        const GRAY_INDICES: [u8; 29] = [
+            0, 8, 7, 15, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245,
+            246, 247, 248, 249, 250, 251, 252, 253, 254, 255,
+        ];
+        for &idx in &GRAY_INDICES {
+            consider_candidate(Color::Indexed(idx), &mut best);
+        }
+        if best.is_some() {
+            return best.map(|(_, color)| color);
+        }
+    }
+
+    for idx in 0u16..=255 {
+        consider_candidate(Color::Indexed(idx as u8), &mut best);
+    }
+    best.map(|(_, color)| color)
+}
+
+fn color_distance(a: (u8, u8, u8), b: (u8, u8, u8)) -> i32 {
+    let dr = a.0 as i32 - b.0 as i32;
+    let dg = a.1 as i32 - b.1 as i32;
+    let db = a.2 as i32 - b.2 as i32;
+    dr * dr + dg * dg + db * db
+}
+
+fn contrast_ratio(foreground: Color, background: Color) -> f32 {
+    let lf = relative_luminance_color(foreground);
+    let lb = relative_luminance_color(background);
+    if lf >= lb {
+        (lf + 0.05) / (lb + 0.05)
+    } else {
+        (lb + 0.05) / (lf + 0.05)
+    }
+}
+
+fn is_light_color(color: Color) -> bool {
+    relative_luminance_color(color) > 0.78
+}
+
+fn relative_luminance_color(color: Color) -> f32 {
+    let (r, g, b) = color_to_rgb(color);
+    relative_luminance(r, g, b)
+}
+
+fn relative_luminance(r: u8, g: u8, b: u8) -> f32 {
+    fn channel(v: u8) -> f32 {
+        let c = v as f32 / 255.0;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+fn is_low_saturation((r, g, b): (u8, u8, u8)) -> bool {
+    let max_v = r.max(g.max(b)) as i32;
+    let min_v = r.min(g.min(b)) as i32;
+    (max_v - min_v) <= 30
+}
+
+fn color_to_rgb(color: Color) -> (u8, u8, u8) {
+    match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Black => (0, 0, 0),
+        Color::Red => (205, 0, 0),
+        Color::Green => (0, 205, 0),
+        Color::Yellow => (205, 205, 0),
+        Color::Blue => (0, 0, 205),
+        Color::Magenta => (205, 0, 205),
+        Color::Cyan => (0, 205, 205),
+        Color::Gray => (192, 192, 192),
+        Color::DarkGray => (128, 128, 128),
+        Color::LightRed => (255, 102, 102),
+        Color::LightGreen => (102, 255, 178),
+        Color::LightYellow => (255, 255, 102),
+        Color::LightBlue => (102, 153, 255),
+        Color::LightMagenta => (255, 102, 255),
+        Color::LightCyan => (102, 255, 255),
+        Color::White => (255, 255, 255),
+        Color::Indexed(idx) => ansi256_to_rgb(idx),
+        Color::Reset => (255, 255, 255),
+    }
+}
+
+fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
+    const ANSI16: [(u8, u8, u8); 16] = [
+        (0, 0, 0),
+        (205, 0, 0),
+        (0, 205, 0),
+        (205, 205, 0),
+        (0, 0, 205),
+        (205, 0, 205),
+        (0, 205, 205),
+        (229, 229, 229),
+        (127, 127, 127),
+        (255, 102, 102),
+        (102, 255, 178),
+        (255, 255, 102),
+        (102, 153, 255),
+        (255, 102, 255),
+        (102, 255, 255),
+        (255, 255, 255),
+    ];
+
+    if idx < 16 {
+        return ANSI16[idx as usize];
+    }
+    if (16..=231).contains(&idx) {
+        let offset = idx - 16;
+        let r = offset / 36;
+        let g = (offset % 36) / 6;
+        let b = offset % 6;
+        let steps = [0, 95, 135, 175, 215, 255];
+        return (steps[r as usize], steps[g as usize], steps[b as usize]);
+    }
+    let level = idx.saturating_sub(232);
+    let value = 8 + 10 * level;
+    (value, value, value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn light_theme_quantization_preserves_contrast() {
+        let mut theme = get_predefined_theme(ThemeName::LightPhoton);
+        quantize_theme_to_ansi256(&mut theme);
+
+        assert!(contrast_ratio(theme.text, theme.background) >= 7.0);
+        assert!(contrast_ratio(theme.text_dim, theme.background) >= 3.0);
+        assert!(contrast_ratio(theme.border, theme.background) >= 1.4);
+        assert!(contrast_ratio(theme.border_focused, theme.background) >= 1.8);
+        assert!(contrast_ratio(theme.comment, theme.background) >= 2.0);
+
+        let (r_text_dim, g_text_dim, b_text_dim) = color_to_rgb(theme.text_dim);
+        assert_eq!(r_text_dim, g_text_dim, "text_dim should remain neutral grayscale");
+        assert_eq!(g_text_dim, b_text_dim, "text_dim should remain neutral grayscale");
+    }
 }
 /// Get a predefined theme by name
 fn get_predefined_theme(name: ThemeName) -> Theme {

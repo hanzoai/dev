@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use crate::protocol::RateLimitSnapshotEvent;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -84,6 +85,12 @@ struct TokenWindowEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AggregatedUsageEntry {
+    period_start: DateTime<Utc>,
+    tokens: TokenTotals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RateLimitInfo {
     #[serde(default)]
     snapshot: Option<RateLimitSnapshotEvent>,
@@ -114,6 +121,12 @@ struct AccountUsageData {
     #[serde(default)]
     hourly_entries: Vec<TokenWindowEntry>,
     #[serde(default)]
+    hourly_buckets: Vec<AggregatedUsageEntry>,
+    #[serde(default)]
+    daily_buckets: Vec<AggregatedUsageEntry>,
+    #[serde(default)]
+    monthly_buckets: Vec<AggregatedUsageEntry>,
+    #[serde(default)]
     tokens_last_hour: TokenTotals,
     #[serde(default)]
     rate_limit: Option<RateLimitInfo>,
@@ -128,6 +141,9 @@ impl AccountUsageData {
             last_updated: Utc::now(),
             totals: TokenTotals::default(),
             hourly_entries: Vec::new(),
+            hourly_buckets: Vec::new(),
+            daily_buckets: Vec::new(),
+            monthly_buckets: Vec::new(),
             tokens_last_hour: TokenTotals::default(),
             rate_limit: None,
         }
@@ -142,6 +158,7 @@ impl AccountUsageData {
     }
 
     fn update_last_hour(&mut self, now: DateTime<Utc>) {
+        self.compact_usage(now);
         let hourly_cutoff = now - Duration::hours(1);
         let history_cutoff = now - Duration::days(HOURLY_HISTORY_DAYS);
         self.hourly_entries
@@ -156,6 +173,137 @@ impl AccountUsageData {
         }
         self.tokens_last_hour = totals;
     }
+
+    fn compact_usage(&mut self, now: DateTime<Utc>) {
+        let recent_cutoff = now - Duration::hours(1);
+        let mut rollover: BTreeMap<DateTime<Utc>, TokenTotals> = BTreeMap::new();
+        let mut recent: Vec<TokenWindowEntry> = Vec::new();
+
+        for entry in self.hourly_entries.drain(..) {
+            if entry.timestamp >= recent_cutoff {
+                recent.push(entry);
+            } else {
+                let bucket = truncate_to_hour(entry.timestamp);
+                rollover
+                    .entry(bucket)
+                    .or_insert_with(TokenTotals::default)
+                    .add_totals(&entry.tokens);
+            }
+        }
+
+        self.hourly_entries = recent;
+
+        for (period_start, tokens) in rollover {
+            add_to_bucket(&mut self.hourly_buckets, period_start, tokens);
+        }
+
+        self.compact_hourly_buckets(now);
+        self.compact_daily_buckets(now);
+    }
+
+    fn compact_hourly_buckets(&mut self, now: DateTime<Utc>) {
+        if self.hourly_buckets.is_empty() {
+            return;
+        }
+
+        let current_hour = truncate_to_hour(now);
+        let cutoff = current_hour - Duration::hours(24);
+        let mut remaining: Vec<AggregatedUsageEntry> = Vec::new();
+        let mut daily_rollover: BTreeMap<DateTime<Utc>, TokenTotals> = BTreeMap::new();
+
+        for entry in self.hourly_buckets.drain(..) {
+            if entry.period_start < cutoff {
+                let day_key = truncate_to_day(entry.period_start);
+                daily_rollover
+                    .entry(day_key)
+                    .or_insert_with(TokenTotals::default)
+                    .add_totals(&entry.tokens);
+            } else {
+                remaining.push(entry);
+            }
+        }
+
+        remaining.sort_by_key(|item| item.period_start);
+        self.hourly_buckets = remaining;
+
+        for (period_start, tokens) in daily_rollover {
+            add_to_bucket(&mut self.daily_buckets, period_start, tokens);
+        }
+    }
+
+    fn compact_daily_buckets(&mut self, now: DateTime<Utc>) {
+        if self.daily_buckets.is_empty() {
+            return;
+        }
+
+        let today = truncate_to_day(now);
+        let cutoff = today - Duration::days(30);
+        let mut remaining: Vec<AggregatedUsageEntry> = Vec::new();
+        let mut monthly_rollover: BTreeMap<DateTime<Utc>, TokenTotals> = BTreeMap::new();
+
+        for entry in self.daily_buckets.drain(..) {
+            if entry.period_start < cutoff {
+                let month_key = truncate_to_month(entry.period_start);
+                monthly_rollover
+                    .entry(month_key)
+                    .or_insert_with(TokenTotals::default)
+                    .add_totals(&entry.tokens);
+            } else {
+                remaining.push(entry);
+            }
+        }
+
+        remaining.sort_by_key(|item| item.period_start);
+        self.daily_buckets = remaining;
+
+        for (period_start, tokens) in monthly_rollover {
+            add_to_bucket(&mut self.monthly_buckets, period_start, tokens);
+        }
+    }
+}
+
+fn add_to_bucket(
+    buckets: &mut Vec<AggregatedUsageEntry>,
+    period_start: DateTime<Utc>,
+    tokens: TokenTotals,
+) {
+    match buckets.binary_search_by(|entry| entry.period_start.cmp(&period_start)) {
+        Ok(idx) => buckets[idx].tokens.add_totals(&tokens),
+        Err(idx) => {
+            buckets.insert(
+                idx,
+                AggregatedUsageEntry {
+                    period_start,
+                    tokens,
+                },
+            );
+        }
+    }
+}
+
+fn truncate_to_hour(ts: DateTime<Utc>) -> DateTime<Utc> {
+    let naive = ts.naive_utc();
+    let trimmed = naive
+        .with_minute(0)
+        .and_then(|dt| dt.with_second(0))
+        .and_then(|dt| dt.with_nanosecond(0))
+        .expect("valid hour truncation");
+    Utc.from_utc_datetime(&trimmed)
+}
+
+fn truncate_to_day(ts: DateTime<Utc>) -> DateTime<Utc> {
+    let date = ts.date_naive();
+    let start = date.and_hms_opt(0, 0, 0).expect("valid day truncation");
+    Utc.from_utc_datetime(&start)
+}
+
+fn truncate_to_month(ts: DateTime<Utc>) -> DateTime<Utc> {
+    let date = ts.date_naive();
+    let month_start = NaiveDate::from_ymd_opt(date.year(), date.month(), 1)
+        .expect("valid month truncation")
+        .and_hms_opt(0, 0, 0)
+        .expect("valid month start time");
+    Utc.from_utc_datetime(&month_start)
 }
 
 #[derive(Debug, Clone)]
@@ -176,12 +324,21 @@ pub struct StoredUsageEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoredUsageBucket {
+    pub period_start: DateTime<Utc>,
+    pub tokens: TokenTotals,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoredUsageSummary {
     pub account_id: String,
     pub plan: Option<String>,
     pub totals: TokenTotals,
     pub last_updated: DateTime<Utc>,
     pub hourly_entries: Vec<StoredUsageEntry>,
+    pub hourly_buckets: Vec<StoredUsageBucket>,
+    pub daily_buckets: Vec<StoredUsageBucket>,
+    pub monthly_buckets: Vec<StoredUsageBucket>,
 }
 
 fn usage_dir(codex_home: &Path) -> PathBuf {
@@ -242,10 +399,21 @@ where
     update(&mut data);
 
     let json = serde_json::to_string_pretty(&data)?;
-    file.seek(SeekFrom::Start(0))?;
-    file.set_len(0)?;
-    file.write_all(json.as_bytes())?;
-    file.flush()?;
+    let tmp_path = usage_dir.join(format!("{account_id}.json.tmp"));
+    {
+        let mut tmp = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
+        tmp.write_all(json.as_bytes())?;
+        tmp.sync_all()?;
+    }
+    if let Err(err) = fs::rename(&tmp_path, &path) {
+        let _ = fs::remove_file(&tmp_path);
+        file.unlock()?;
+        return Err(err);
+    }
     file.unlock()?;
     Ok(())
 }
@@ -544,12 +712,42 @@ pub fn load_account_usage(
         })
         .collect();
 
+    let hourly_buckets = data
+        .hourly_buckets
+        .into_iter()
+        .map(|entry| StoredUsageBucket {
+            period_start: entry.period_start,
+            tokens: entry.tokens,
+        })
+        .collect();
+
+    let daily_buckets = data
+        .daily_buckets
+        .into_iter()
+        .map(|entry| StoredUsageBucket {
+            period_start: entry.period_start,
+            tokens: entry.tokens,
+        })
+        .collect();
+
+    let monthly_buckets = data
+        .monthly_buckets
+        .into_iter()
+        .map(|entry| StoredUsageBucket {
+            period_start: entry.period_start,
+            tokens: entry.tokens,
+        })
+        .collect();
+
     Ok(Some(StoredUsageSummary {
         account_id: data.account_id,
         plan: data.plan,
         totals: data.totals,
         last_updated: data.last_updated,
         hourly_entries,
+        hourly_buckets,
+        daily_buckets,
+        monthly_buckets,
     }))
 }
 
