@@ -209,6 +209,8 @@ use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
 use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
+    HistoryDomainEvent,
+    HistoryDomainRecord,
     AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
@@ -250,7 +252,7 @@ use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::ValidationGroup;
 use crate::rate_limits_view::{build_limits_view, RateLimitResetInfo, DEFAULT_GRID_CONFIG};
 use codex_core::review_format::format_review_findings_block;
-use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike, Utc};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
@@ -1255,20 +1257,25 @@ impl ChatWidget<'_> {
     /// If `id_for_replace` is provided and we have a prior index for it, replace in place.
     fn push_system_cell(
         &mut self,
-        cell: impl HistoryCell + 'static,
+        cell: Box<dyn HistoryCell>,
         placement: SystemPlacement,
         id_for_replace: Option<String>,
         order: Option<&codex_core::protocol::OrderMeta>,
         tag: &'static str,
+        record: Option<HistoryDomainRecord>,
     ) {
         if let Some(id) = id_for_replace.as_ref() {
             if let Some(&idx) = self.system_cell_by_id.get(id) {
-                self.history_replace_at(idx, Box::new(cell));
+                if let Some(record) = record.clone() {
+                    self.history_replace_with_record(idx, cell, record);
+                } else {
+                    self.history_replace_at(idx, cell);
+                }
                 return;
             }
         }
         let key = self.system_order_key(placement, order);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, None);
+        let pos = self.history_insert_with_key_global_tagged(cell, key, tag, record);
         if let Some(id) = id_for_replace {
             self.system_cell_by_id.insert(id, pos);
         }
@@ -2306,22 +2313,29 @@ impl ChatWidget<'_> {
 
                 let record = self.history_record_from_cell(self.history_cells[idx].as_ref());
                 if let Some(record) = record {
-                    if let HistoryMutation::Replaced { id, .. } = self
-                        .history_state
-                        .apply_event(HistoryEvent::Replace { index: idx, record })
-                    {
-                        if let Some(cell) = self.history_cells.get_mut(idx) {
-                            if let Some(plain_cell) = cell
-                                .as_any_mut()
-                                .downcast_mut::<history_cell::PlainHistoryCell>()
-                            {
-                                let state = plain_cell.state_mut();
-                                state.id = id;
+                    if let Some(record_index) = self.record_index_for_cell(idx) {
+                        if let HistoryMutation::Replaced { id, .. } = self
+                            .history_state
+                            .apply_event(HistoryEvent::Replace { index: record_index, record })
+                        {
+                            if let Some(cell) = self.history_cells.get_mut(idx) {
+                                if let Some(plain_cell) = cell
+                                    .as_any_mut()
+                                    .downcast_mut::<history_cell::PlainHistoryCell>()
+                                {
+                                    let state = plain_cell.state_mut();
+                                    state.id = id;
+                                }
+                            }
+                            if idx < self.history_cell_ids.len() {
+                                self.history_cell_ids[idx] = Some(id);
                             }
                         }
-                        if idx < self.history_cell_ids.len() {
-                            self.history_cell_ids[idx] = Some(id);
-                        }
+                    } else {
+                        tracing::warn!(
+                            "history-state mismatch: no persisted index for patch cell {}",
+                            idx
+                        );
                     }
                 }
 
@@ -3844,35 +3858,20 @@ impl ChatWidget<'_> {
             - ChronoDuration::seconds(now.second() as i64)
             - ChronoDuration::nanoseconds(now.nanosecond() as i64);
 
-        let mut hours: Vec<(DateTime<Local>, TokenTotals)> = (0..12)
-            .map(|offset| {
-                (
-                    anchor - ChronoDuration::hours(offset as i64),
-                    TokenTotals::default(),
-                )
+        let hourly_totals = Self::aggregate_hourly_totals(summary);
+        let series: Vec<(DateTime<Local>, TokenTotals)> = (0..12)
+            .map(|offset| anchor - ChronoDuration::hours(offset as i64))
+            .map(|dt| {
+                let utc_key = Self::truncate_utc_hour(dt.with_timezone(&Utc));
+                let totals = hourly_totals
+                    .get(&utc_key)
+                    .cloned()
+                    .unwrap_or_default();
+                (dt, totals)
             })
             .collect();
 
-        let mut lookup: HashMap<i64, usize> = HashMap::new();
-        for (idx, (dt, _)) in hours.iter().enumerate() {
-            lookup.insert(dt.timestamp(), idx);
-        }
-
-        if let Some(summary) = summary {
-            for entry in &summary.hourly_entries {
-                let local_time = entry.timestamp.with_timezone(&Local);
-                let truncated = local_time
-                    - ChronoDuration::minutes(local_time.minute() as i64)
-                    - ChronoDuration::seconds(local_time.second() as i64)
-                    - ChronoDuration::nanoseconds(local_time.nanosecond() as i64);
-                if let Some(&pos) = lookup.get(&truncated.timestamp()) {
-                    let (_, totals) = &mut hours[pos];
-                    Self::accumulate_token_totals(totals, &entry.tokens);
-                }
-            }
-        }
-
-        let max_total = hours
+        let max_total = series
             .iter()
             .map(|(_, totals)| totals.total_tokens)
             .max()
@@ -3885,12 +3884,12 @@ impl ChatWidget<'_> {
         )]));
 
         let prefix = status_content_prefix();
-        let tokens_width = hours
+        let tokens_width = series
             .iter()
             .map(|(_, totals)| format_with_separators(totals.total_tokens).len())
             .max()
             .unwrap_or(0);
-        for (dt, totals) in hours.iter() {
+        for (dt, totals) in series.iter() {
             let label = Self::format_hour_label(*dt);
             let bar = Self::bar_segment(totals.total_tokens, max_total, WIDTH);
             let tokens = format_with_separators(totals.total_tokens);
@@ -3919,26 +3918,14 @@ impl ChatWidget<'_> {
     fn daily_usage_lines(summary: Option<&StoredUsageSummary>) -> Vec<RtLine<'static>> {
         const WIDTH: usize = 14;
         let today = Local::now().date_naive();
-        let mut daily: Vec<(chrono::NaiveDate, TokenTotals)> = (0..7)
-            .map(|offset| {
-                (
-                    today - ChronoDuration::days(offset as i64),
-                    TokenTotals::default(),
-                )
+        let day_totals = Self::aggregate_daily_totals(summary);
+        let daily: Vec<(chrono::NaiveDate, TokenTotals)> = (0..7)
+            .map(|offset| today - ChronoDuration::days(offset as i64))
+            .map(|day| {
+                let totals = day_totals.get(&day).cloned().unwrap_or_default();
+                (day, totals)
             })
             .collect();
-
-        if let Some(summary) = summary {
-            for entry in &summary.hourly_entries {
-                let entry_date = entry.timestamp.with_timezone(&Local).date_naive();
-                let diff = today.signed_duration_since(entry_date).num_days();
-                if (0..=6).contains(&diff) {
-                    let idx = diff as usize;
-                    let (_, totals) = &mut daily[idx];
-                    Self::accumulate_token_totals(totals, &entry.tokens);
-                }
-            }
-        }
 
         let max_total = daily
             .iter()
@@ -4022,32 +4009,22 @@ impl ChatWidget<'_> {
         let mut year = today.year();
         let mut month = today.month();
 
+        let month_totals = Self::aggregate_monthly_totals(summary);
         let mut months: Vec<(chrono::NaiveDate, TokenTotals)> = Vec::with_capacity(MONTHS);
         for _ in 0..MONTHS {
             let start = chrono::NaiveDate::from_ymd_opt(year, month, 1)
                 .expect("valid month start");
-            months.push((start, TokenTotals::default()));
+            let key = (start.year(), start.month());
+            let totals = month_totals
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
+            months.push((start, totals));
             if month == 1 {
                 month = 12;
                 year -= 1;
             } else {
                 month -= 1;
-            }
-        }
-
-        let mut lookup: HashMap<(i32, u32), usize> = HashMap::new();
-        for (idx, (start, _)) in months.iter().enumerate() {
-            lookup.insert((start.year(), start.month()), idx);
-        }
-
-        if let Some(summary) = summary {
-            for entry in &summary.hourly_entries {
-                let local_time = entry.timestamp.with_timezone(&Local);
-                let date = local_time.date_naive();
-                if let Some(&pos) = lookup.get(&(date.year(), date.month())) {
-                    let (_, totals) = &mut months[pos];
-                    Self::accumulate_token_totals(totals, &entry.tokens);
-                }
             }
         }
 
@@ -4118,6 +4095,88 @@ impl ChatWidget<'_> {
             text.into(),
             Style::default().fg(crate::colors::text_dim()),
         )])
+    }
+
+    fn truncate_utc_hour(ts: DateTime<Utc>) -> DateTime<Utc> {
+        let naive = ts.naive_utc();
+        let trimmed = naive
+            .with_minute(0)
+            .and_then(|dt| dt.with_second(0))
+            .and_then(|dt| dt.with_nanosecond(0))
+            .expect("valid hour truncation");
+        Utc.from_utc_datetime(&trimmed)
+    }
+
+    fn aggregate_hourly_totals(
+        summary: Option<&StoredUsageSummary>,
+    ) -> HashMap<DateTime<Utc>, TokenTotals> {
+        let mut totals = HashMap::new();
+        if let Some(summary) = summary {
+            for entry in &summary.hourly_entries {
+                let key = Self::truncate_utc_hour(entry.timestamp);
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &entry.tokens);
+            }
+            for bucket in &summary.hourly_buckets {
+                let slot = totals
+                    .entry(bucket.period_start)
+                    .or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &bucket.tokens);
+            }
+        }
+        totals
+    }
+
+    fn aggregate_daily_totals(
+        summary: Option<&StoredUsageSummary>,
+    ) -> HashMap<chrono::NaiveDate, TokenTotals> {
+        let mut totals = HashMap::new();
+        if let Some(summary) = summary {
+            for bucket in &summary.daily_buckets {
+                let key = bucket.period_start.date_naive();
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &bucket.tokens);
+            }
+            for bucket in &summary.hourly_buckets {
+                let key = bucket.period_start.date_naive();
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &bucket.tokens);
+            }
+            for entry in &summary.hourly_entries {
+                let key = entry.timestamp.date_naive();
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, &entry.tokens);
+            }
+        }
+        totals
+    }
+
+    fn aggregate_monthly_totals(
+        summary: Option<&StoredUsageSummary>,
+    ) -> HashMap<(i32, u32), TokenTotals> {
+        let mut totals = HashMap::new();
+        if let Some(summary) = summary {
+            let mut accumulate = |dt: DateTime<Utc>, tokens: &TokenTotals| {
+                let date = dt.date_naive();
+                let key = (date.year(), date.month());
+                let slot = totals.entry(key).or_insert_with(TokenTotals::default);
+                Self::accumulate_token_totals(slot, tokens);
+            };
+
+            for bucket in &summary.monthly_buckets {
+                accumulate(bucket.period_start, &bucket.tokens);
+            }
+            for bucket in &summary.daily_buckets {
+                accumulate(bucket.period_start, &bucket.tokens);
+            }
+            for bucket in &summary.hourly_buckets {
+                accumulate(bucket.period_start, &bucket.tokens);
+            }
+            for entry in &summary.hourly_entries {
+                accumulate(entry.timestamp, &entry.tokens);
+            }
+        }
+        totals
     }
 
     // dispatch_command() removed — command routing is handled at the App layer via AppEvent::DispatchCommand
@@ -4239,7 +4298,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         key: OrderKey,
         tag: &'static str,
-        record: Option<HistoryRecord>,
+        record: Option<HistoryDomainRecord>,
     ) -> usize {
         #[cfg(debug_assertions)]
         {
@@ -4349,8 +4408,21 @@ impl ChatWidget<'_> {
 
         let mut cell = cell;
 
-        let record = record.or_else(|| self.history_record_from_cell(cell.as_ref()));
-        let maybe_id = if let Some(record) = record {
+        let maybe_id = if let Some(domain_record) = record {
+            let record_index = self.record_index_for_position(pos);
+            match self.history_state.apply_domain_event(HistoryDomainEvent::Insert {
+                index: record_index,
+                record: domain_record,
+            }) {
+                HistoryMutation::Inserted { id, record, .. } => {
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
+                    Some(id)
+                }
+                _ => None,
+            }
+        } else if let Some(record) = self.history_record_from_cell(cell.as_ref()) {
             let record_index = self.record_index_for_position(pos);
             match self
                 .history_state
@@ -4359,8 +4431,10 @@ impl ChatWidget<'_> {
                     record,
                 })
             {
-                HistoryMutation::Inserted { id, .. } => {
-                    self.assign_history_id(&mut cell, id);
+                HistoryMutation::Inserted { id, record, .. } => {
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     Some(id)
                 }
                 _ => None,
@@ -4426,28 +4500,64 @@ impl ChatWidget<'_> {
         pos
     }
 
+    fn hydrate_cell_from_record(
+        &self,
+        cell: &mut Box<dyn HistoryCell>,
+        record: &HistoryRecord,
+    ) -> bool {
+        match record {
+            HistoryRecord::PlainMessage(state) => {
+                if let Some(plain) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::PlainHistoryCell>()
+                {
+                    *plain.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::WaitStatus(state) => {
+                if let Some(wait) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::WaitStatusCell>()
+                {
+                    *wait.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::Loading(state) => {
+                if let Some(loading) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::LoadingCell>()
+                {
+                    *loading.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::BackgroundEvent(state) => {
+                if let Some(background) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::BackgroundEventCell>()
+                {
+                    *background.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::RateLimits(state) => {
+                if let Some(rate_limits) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::RateLimitsCell>()
+                {
+                    *rate_limits.record_mut() = state.clone();
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     fn assign_history_id(&self, cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
-        if let Some(plain) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::PlainHistoryCell>()
-        {
-            plain.state_mut().id = id;
-        } else if let Some(wait) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::WaitStatusCell>()
-        {
-            wait.state_mut().id = id;
-        } else if let Some(loading) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::LoadingCell>()
-        {
-            loading.state_mut().id = id;
-        } else if let Some(background) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::BackgroundEventCell>()
-        {
-            background.state_mut().id = id;
-        } else if let Some(tool_call) = cell
+        if let Some(tool_call) = cell
             .as_any_mut()
             .downcast_mut::<crate::history_cell::ToolCallCell>()
         {
@@ -4640,7 +4750,7 @@ impl ChatWidget<'_> {
         key: OrderKey,
         tag: &'static str,
     ) -> usize {
-        let record = HistoryRecord::PlainMessage(cell.state().clone());
+        let record = HistoryDomainRecord::Plain(cell.state().clone());
         self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, Some(record))
     }
 
@@ -4681,12 +4791,15 @@ impl ChatWidget<'_> {
                 }
             }
         };
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             system_placement,
             None,
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -4712,6 +4825,51 @@ impl ChatWidget<'_> {
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt", None);
     }
 
+    fn history_replace_with_record(
+        &mut self,
+        idx: usize,
+        mut cell: Box<dyn HistoryCell>,
+        record: HistoryDomainRecord,
+    ) {
+        if idx >= self.history_cells.len() {
+            return;
+        }
+
+        let record_idx = self
+            .record_index_for_cell(idx)
+            .unwrap_or_else(|| self.record_index_for_position(idx));
+
+        let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::Replace {
+            index: record_idx,
+            record,
+        });
+
+        if let Some(id) = match mutation {
+            HistoryMutation::Replaced { id, record, .. } => {
+                if !self.hydrate_cell_from_record(&mut cell, &record) {
+                    self.assign_history_id(&mut cell, id);
+                }
+                Some(id)
+            }
+            HistoryMutation::Inserted { id, record, .. } => {
+                if !self.hydrate_cell_from_record(&mut cell, &record) {
+                    self.assign_history_id(&mut cell, id);
+                }
+                Some(id)
+            }
+            _ => None,
+        } {
+            if idx < self.history_cell_ids.len() {
+                self.history_cell_ids[idx] = Some(id);
+            }
+        }
+
+        self.history_cells[idx] = cell;
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
+    }
+
     fn history_replace_at(&mut self, idx: usize, mut cell: Box<dyn HistoryCell>) {
         if idx >= self.history_cells.len() {
             return;
@@ -4722,27 +4880,31 @@ impl ChatWidget<'_> {
 
         match (record, self.record_index_for_cell(idx)) {
             (Some(record), Some(record_idx)) => {
-                if let HistoryMutation::Replaced { id, .. } = self
+                if let HistoryMutation::Replaced { id, record, .. } = self
                     .history_state
                     .apply_event(HistoryEvent::Replace {
                         index: record_idx,
                         record,
                     })
                 {
-                    self.assign_history_id(&mut cell, id);
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     maybe_id = Some(id);
                 }
             }
             (Some(record), None) => {
                 let record_idx = self.record_index_for_position(idx);
-                if let HistoryMutation::Inserted { id, .. } = self
+                if let HistoryMutation::Inserted { id, record, .. } = self
                     .history_state
                     .apply_event(HistoryEvent::Insert {
                         index: record_idx,
                         record,
                     })
                 {
-                    self.assign_history_id(&mut cell, id);
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     maybe_id = Some(id);
                 }
             }
@@ -6671,7 +6833,7 @@ impl ChatWidget<'_> {
                             Box::new(cell),
                             key,
                             "rate-limits",
-                            Some(HistoryRecord::RateLimits(record)),
+                            Some(HistoryDomainRecord::RateLimits(record)),
                         );
                         self.request_redraw();
                     }
@@ -7250,12 +7412,19 @@ impl ChatWidget<'_> {
                 if tool_name == "wait" && success {
                     let target = wait_target_from_params(params_string.as_ref(), &call_id);
                     let wait_cell = history_cell::new_completed_wait_tool_call(target, duration);
+                    let wait_state = wait_cell.state().clone();
                     if let Some(idx) = resolved_idx {
-                        self.history_replace_at(idx, Box::new(wait_cell));
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(wait_cell),
+                            HistoryDomainRecord::WaitStatus(wait_state),
+                        );
                     } else {
-                        let _ = self.history_insert_with_key_global(
+                        let _ = self.history_insert_with_key_global_tagged(
                             Box::new(wait_cell),
                             ok,
+                            "untagged",
+                            Some(HistoryDomainRecord::WaitStatus(wait_state)),
                         );
                     }
                     self.remove_background_completion_message(&call_id);
@@ -7276,7 +7445,12 @@ impl ChatWidget<'_> {
                     );
 
                     if let Some(idx) = resolved_idx {
-                        self.history_replace_at(idx, Box::new(wait_cancelled_cell));
+                        let record = HistoryDomainRecord::Plain(wait_cancelled_cell.state().clone());
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(wait_cancelled_cell),
+                            record,
+                        );
                     } else {
                         let _ = self.history_insert_plain_cell_with_key(
                             wait_cancelled_cell,
@@ -7382,12 +7556,15 @@ impl ChatWidget<'_> {
                 };
                 let id_for_replace = Some(id.clone());
                 let message_clone = message.clone();
+                let cell = history_cell::new_background_event(message_clone);
+                let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
                 self.push_system_cell(
-                    history_cell::new_background_event(message_clone),
+                    Box::new(cell),
                     placement,
                     id_for_replace,
                     event.order.as_ref(),
                     "background",
+                    Some(record),
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
@@ -10321,12 +10498,14 @@ impl ChatWidget<'_> {
         }
 
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort);
         self.push_system_cell(
-            history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort),
+            Box::new(cell),
             placement,
             Some("ui:model".to_string()),
             None,
             "system",
+            None,
         );
 
         self.request_redraw();
@@ -10561,12 +10740,14 @@ impl ChatWidget<'_> {
 
         // Add status message to history (replaceable system notice)
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_reasoning_output(&new_effort);
         self.push_system_cell(
-            history_cell::new_reasoning_output(&new_effort),
+            Box::new(cell),
             placement,
             Some("ui:reasoning".to_string()),
             None,
             "system",
+            None,
         );
     }
 
@@ -10742,12 +10923,15 @@ impl ChatWidget<'_> {
         };
         let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             placement,
             Some("ui:theme".to_string()),
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -10768,12 +10952,15 @@ impl ChatWidget<'_> {
         // Confirmation message (replaceable system notice)
         let message = format!("Spinner changed to {}", spinner_name);
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             placement,
             Some("ui:spinner".to_string()),
             None,
             "background",
+            Some(record),
         );
     }
 
