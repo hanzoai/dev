@@ -3188,7 +3188,7 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let prefixed = format!("CLI: {text}");
+                    let prefixed = format!("Coordinator: {text}");
                     let content = ContentItem::InputText {
                         text: prefixed.clone(),
                     };
@@ -3210,7 +3210,7 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let prefixed = format!("Coordinator: {text}");
+                    let prefixed = format!("CLI: {text}");
                     let content = ContentItem::InputText {
                         text: prefixed.clone(),
                     };
