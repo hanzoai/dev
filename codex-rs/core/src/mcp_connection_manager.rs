@@ -42,9 +42,6 @@ const MAX_TOOL_NAME_LENGTH: usize = 64;
 /// Default timeout for initializing MCP server & initially listing tools.
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Default timeout for individual tool calls.
-const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// Map that holds a startup error for every MCP server that could **not** be
 /// spawned successfully.
 pub type ClientStartErrors = HashMap<String, anyhow::Error>;
@@ -217,7 +214,7 @@ impl McpConnectionManager {
             }
 
             let startup_timeout = cfg.startup_timeout_sec.unwrap_or(DEFAULT_STARTUP_TIMEOUT);
-            let tool_timeout = cfg.tool_timeout_sec.unwrap_or(DEFAULT_TOOL_TIMEOUT);
+            let tool_timeout = cfg.tool_timeout_sec;
 
             let use_rmcp_client_flag = use_rmcp_client;
             join_set.spawn(async move {
@@ -291,7 +288,7 @@ impl McpConnectionManager {
                         ManagedClient {
                             client,
                             startup_timeout,
-                            tool_timeout: Some(tool_timeout),
+                            tool_timeout,
                         },
                     );
                 }
@@ -301,13 +298,7 @@ impl McpConnectionManager {
             }
         }
 
-        let all_tools = match list_all_tools(&clients, &excluded_tools).await {
-            Ok(tools) => tools,
-            Err(e) => {
-                warn!("Failed to list tools from some MCP servers: {e:#}");
-                Vec::new()
-            }
-        };
+        let all_tools = list_all_tools(&clients, &excluded_tools, &mut errors).await;
 
         let tools = qualify_tools(all_tools);
 
@@ -355,7 +346,8 @@ impl McpConnectionManager {
 async fn list_all_tools(
     clients: &HashMap<String, ManagedClient>,
     excluded_tools: &HashSet<(String, String)>,
-) -> Result<Vec<ToolInfo>> {
+    errors: &mut ClientStartErrors,
+) -> Vec<ToolInfo> {
     let mut join_set = JoinSet::new();
 
     // Spawn one task per server so we can query them concurrently. This
@@ -381,23 +373,26 @@ async fn list_all_tools(
             continue;
         };
 
-        let list_result = if let Ok(result) = list_result {
-            result
-        } else {
-            warn!("Failed to list tools for MCP server '{server_name}': {list_result:#?}");
-            continue;
-        };
-
-        for tool in list_result.tools {
-            if excluded_tools.contains(&(server_name.clone(), tool.name.clone())) {
-                continue;
+        match list_result {
+            Ok(result) => {
+                for tool in result.tools {
+                    if excluded_tools.contains(&(server_name.clone(), tool.name.clone())) {
+                        continue;
+                    }
+                    let tool_info = ToolInfo {
+                        server_name: server_name.clone(),
+                        tool_name: tool.name.clone(),
+                        tool,
+                    };
+                    aggregated.push(tool_info);
+                }
             }
-            let tool_info = ToolInfo {
-                server_name: server_name.clone(),
-                tool_name: tool.name.clone(),
-                tool,
-            };
-            aggregated.push(tool_info);
+            Err(err) => {
+                warn!(
+                    "Failed to list tools for MCP server '{server_name}': {err:#?}"
+                );
+                errors.insert(server_name, err.into());
+            }
         }
     }
 
@@ -407,7 +402,7 @@ async fn list_all_tools(
         clients.len()
     );
 
-    Ok(aggregated)
+    aggregated
 }
 
 fn is_valid_mcp_server_name(server_name: &str) -> bool {
