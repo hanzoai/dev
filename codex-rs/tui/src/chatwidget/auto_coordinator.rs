@@ -349,10 +349,12 @@ fn strip_role_prefix(input: &str) -> &str {
     let trimmed = input.trim_start();
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
-        if trimmed.len() >= prefix.len()
-            && trimmed[..prefix.len()].eq_ignore_ascii_case(prefix)
-        {
-            return trimmed[prefix.len()..].trim_start();
+        if let Some(head) = trimmed.get(..prefix.len()) {
+            if head.eq_ignore_ascii_case(prefix) {
+                if let Some(rest) = trimmed.get(prefix.len()..) {
+                    return rest.trim_start();
+                }
+            }
         }
     }
     trimmed
