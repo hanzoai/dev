@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use crate::header_wave::HeaderWaveEffect;
 
 use codex_common::elapsed::format_duration;
 use codex_common::model_presets::ModelPreset;
@@ -107,6 +108,12 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
+use crate::bottom_pane::{
+    AutoCoordinatorButton,
+    AutoCoordinatorView,
+    AutoCoordinatorViewModel,
+    CountdownState,
+};
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -121,7 +128,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
@@ -155,7 +162,6 @@ const STATUS_LABEL_TARGET_WIDTH: usize = 7;
 const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
-const AUTO_DEFAULT_GOAL: &str = "review the git log for recent changes and come up with sensible follow up work";
 const AUTO_COUNTDOWN_SECONDS: u8 = 10;
 
 fn status_field_prefix(label: &str) -> String {
@@ -444,6 +450,7 @@ struct AutoCoordinatorUiState {
     resume_after_manual_submit: bool,
     countdown_id: u64,
     seconds_remaining: u8,
+    awaiting_goal_input: bool,
 }
 
 impl AutoCoordinatorUiState {
@@ -500,6 +507,7 @@ pub(crate) struct ChatWidget<'a> {
     exec: ExecState,
     tools_state: ToolState,
     live_builder: RowBuilder,
+    header_wave: HeaderWaveEffect,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
@@ -2805,6 +2813,11 @@ impl ChatWidget<'_> {
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
+            header_wave: {
+                let effect = HeaderWaveEffect::new();
+                effect.set_enabled(false, Instant::now());
+                effect
+            },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -3044,6 +3057,11 @@ impl ChatWidget<'_> {
                 running_kill_tools: HashMap::new(),
             },
             live_builder: RowBuilder::new(usize::MAX),
+            header_wave: {
+                let effect = HeaderWaveEffect::new();
+                effect.set_enabled(false, Instant::now());
+                effect
+            },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -3322,7 +3340,22 @@ impl ChatWidget<'_> {
                 self.auto_pause_for_manual_edit();
                 return;
             }
-            self.auto_stop(Some("Coordinator stopped by user.".to_string()));
+            self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+            return;
+        }
+
+        if self.auto_state.awaiting_submission
+            && !self.auto_state.paused_for_manual_edit
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        {
+            match key_event.code {
+                crossterm::event::KeyCode::Enter
+                | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
+                    self.auto_submit_prompt();
+                    return;
+                }
+                _ => {}
+            }
         }
 
         // Global HUD toggles (avoid conflicting with common editor keys):
@@ -3469,6 +3502,24 @@ impl ChatWidget<'_> {
 
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
+                if self.auto_state.awaiting_goal_input {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        self.bottom_pane.set_task_running(true);
+                        self.bottom_pane
+                            .update_status_text("Auto Drive Goal".to_string());
+                        self.clear_composer();
+                        self.request_redraw();
+                        return;
+                    }
+
+                    self.auto_state.awaiting_goal_input = false;
+                    self.clear_composer();
+                    self.bottom_pane.update_status_text(String::new());
+                    self.bottom_pane.set_task_running(false);
+                    self.handle_auto_command(Some(trimmed.to_string()));
+                    return;
+                }
                 // Commit pending jump-back (make trimming permanent) before submission
                 if self.pending_jump_back.is_some() {
                     self.pending_jump_back = None;
@@ -6280,6 +6331,8 @@ impl ChatWidget<'_> {
             self.auto_state.awaiting_submission = false;
             self.auto_state.seconds_remaining = 0;
             self.auto_rebuild_live_ring();
+            self.bottom_pane.update_status_text(String::new());
+            self.bottom_pane.set_task_running(false);
         }
 
         self.request_redraw();
@@ -9330,11 +9383,26 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
-        let goal_text = if trimmed.is_empty() {
-            AUTO_DEFAULT_GOAL.to_string()
-        } else {
-            trimmed.to_string()
-        };
+        if trimmed.is_empty() {
+            if self.auto_state.active {
+                self.auto_stop(None);
+            }
+            self.auto_state.reset();
+            self.auto_state.awaiting_goal_input = true;
+            self.clear_composer();
+            self.bottom_pane.ensure_input_focus();
+            self.bottom_pane.set_task_running(true);
+            self.bottom_pane
+                .update_status_text("Auto Drive Goal".to_string());
+            self.header_wave.set_enabled(false, Instant::now());
+            self.push_background_tail(
+                "Please enter the goal you would like to work autonomously towards.".to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
+
+        let goal_text = trimmed.to_string();
 
         if self.auto_state.active {
             self.auto_stop(None);
@@ -9352,10 +9420,13 @@ impl ChatWidget<'_> {
                 self.auto_state.reset();
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
-                self.auto_state.current_thoughts = Some("Analyzing conversation…".to_string());
+                self.auto_state
+                    .current_thoughts
+                    .replace("Starting Drive...".to_string());
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.header_wave.set_enabled(true, Instant::now());
                 self.auto_rebuild_live_ring();
-                self.push_background_tail(format!("Coordinator started: {goal_text}"));
+                self.push_background_tail(format!("Auto Drive started: {goal_text}"));
                 self.request_redraw();
             }
             Err(err) => {
@@ -9495,6 +9566,8 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = 0;
+        self.bottom_pane.update_status_text(String::new());
+        self.bottom_pane.set_task_running(false);
         self.submit_text_message(prompt);
         self.auto_rebuild_live_ring();
         self.request_redraw();
@@ -9515,6 +9588,9 @@ impl ChatWidget<'_> {
         self.clear_composer();
         self.insert_str(&prompt);
         self.bottom_pane.ensure_input_focus();
+        self.bottom_pane.set_task_running(true);
+        self.bottom_pane
+            .update_status_text("Auto Drive".to_string());
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -9527,7 +9603,11 @@ impl ChatWidget<'_> {
             self.push_background_tail(msg);
         }
         self.auto_state.reset();
+        self.bottom_pane.clear_auto_coordinator_view();
         self.bottom_pane.clear_live_ring();
+        self.bottom_pane.update_status_text(String::new());
+        self.bottom_pane.set_task_running(false);
+        self.header_wave.set_enabled(false, Instant::now());
         self.request_redraw();
     }
 
@@ -9540,7 +9620,7 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
-        self.auto_state.current_thoughts = Some("Analyzing CLI response…".to_string());
+        self.auto_state.current_thoughts = Some(String::new());
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_send_conversation();
@@ -9548,46 +9628,166 @@ impl ChatWidget<'_> {
 
     fn auto_rebuild_live_ring(&mut self) {
         if !self.auto_state.active {
+            self.bottom_pane.clear_auto_coordinator_view();
             self.bottom_pane.clear_live_ring();
             return;
         }
 
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        let label_style = Style::default()
-            .fg(crate::colors::text_dim())
-            .add_modifier(Modifier::BOLD);
-        let value_style = Style::default().fg(crate::colors::text());
+        if self.auto_state.paused_for_manual_edit {
+            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_live_ring();
+            return;
+        }
 
-        let thoughts = self
+        self.bottom_pane.clear_live_ring();
+
+        if self
+            .auto_state
+            .current_thoughts
+            .as_ref()
+            .map(|text| text.trim().is_empty())
+            .unwrap_or(true)
+        {
+            self.auto_state
+                .current_thoughts
+                .replace("Starting Drive...".to_string());
+        }
+
+        let base_text = self
             .auto_state
             .current_thoughts
             .clone()
-            .unwrap_or_else(|| "Coordinator is preparing…".to_string());
-        lines.push(Line::from(vec![
-            Span::styled("Coordinator message: ", label_style),
-            Span::styled(thoughts, value_style),
-        ]));
+            .unwrap_or_else(|| "Starting Drive...".to_string());
 
-        if let Some(prompt) = &self.auto_state.current_prompt {
-            lines.push(Line::from(vec![
-                Span::styled("Coordinator prompt: ", label_style),
-                Span::styled(prompt.clone(), value_style),
-            ]));
+        let mut status_lines: Vec<String> = base_text
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+
+        if status_lines.is_empty() {
+            status_lines.push(base_text.clone());
+        } else {
+            // ensure stored thoughts match cleaned output to avoid trailing whitespace
+            self.auto_state.current_thoughts = Some(status_lines.join("\n"));
         }
 
-        let status_text = if self.auto_state.paused_for_manual_edit {
-            "[Edit prompt, then send manually]".to_string()
-        } else if self.auto_state.countdown_active() {
-            format!("[Continue ({}s)]", self.auto_state.seconds_remaining)
-        } else if self.auto_state.waiting_for_response {
-            "[Waiting for CLI response…]".to_string()
+        let prompt = self
+            .auto_state
+            .current_prompt
+            .clone()
+            .filter(|p| !p.trim().is_empty());
+
+        let countdown = if self.auto_state.awaiting_submission && AUTO_COUNTDOWN_SECONDS > 0 {
+            Some(CountdownState {
+                remaining: self
+                    .auto_state
+                    .seconds_remaining
+                    .min(AUTO_COUNTDOWN_SECONDS),
+            })
         } else {
-            "[Preparing next suggestion…]".to_string()
+            None
         };
-        lines.push(Line::from(vec![Span::styled(status_text, value_style)]));
+
+        let button = if self.auto_state.awaiting_submission {
+            let label = if self.auto_state.countdown_active() {
+                format!("Continue ({}s)", self.auto_state.seconds_remaining)
+            } else {
+                "Continue now".to_string()
+            };
+            Some(AutoCoordinatorButton {
+                label,
+                enabled: true,
+            })
+        } else if self.auto_state.waiting_for_response {
+            None
+        } else {
+            None
+        };
+
+        let manual_hint = if self.auto_state.awaiting_submission {
+            None
+        } else if self.auto_state.waiting_for_response {
+            Some("Press Esc to stop Auto Drive".to_string())
+        } else {
+            None
+        };
+
+        let ctrl_switch_hint = if self.auto_state.awaiting_submission {
+            "Esc to cancel".to_string()
+        } else if self.auto_state.waiting_for_response {
+            String::new()
+        } else {
+            String::new()
+        };
+
+        let model = AutoCoordinatorViewModel {
+            goal: self.auto_state.goal.clone(),
+            status_lines,
+            prompt,
+            awaiting_submission: self.auto_state.awaiting_submission,
+            waiting_for_response: self.auto_state.waiting_for_response,
+            countdown,
+            button,
+            manual_hint,
+            ctrl_switch_hint,
+        };
 
         self.bottom_pane
-            .set_live_ring_rows(lines.len() as u16, lines);
+            .show_auto_coordinator_view(AutoCoordinatorView::new(model, self.app_event_tx.clone()));
+
+        let interval = crate::spinner::current_spinner().interval_ms.max(80);
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+    }
+
+    fn auto_collect_thinking_titles(
+        cell: &history_cell::CollapsibleReasoningCell,
+    ) -> Option<String> {
+        let mut titles: Vec<String> = cell
+            .display_lines()
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+                    .trim()
+                    .to_string()
+            })
+            .filter(|text| !text.is_empty())
+            .collect();
+
+        if titles.is_empty() {
+            return None;
+        }
+
+        titles.reverse();
+        Some(titles.join("\n"))
+    }
+
+    fn auto_update_thinking_titles_if_new(&mut self, joined: Option<String>) {
+        if !self.auto_state.active || !self.auto_state.waiting_for_response {
+            return;
+        }
+
+        let Some(joined) = joined else {
+            return;
+        };
+
+        if self
+            .auto_state
+            .current_thoughts
+            .as_ref()
+            .map(|existing| existing == &joined)
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        self.auto_state.current_thoughts = Some(joined);
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
     }
 
     fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
@@ -11861,10 +12061,13 @@ impl ChatWidget<'_> {
                                 );
                                 reasoning_cell.append_lines_dedup(lines);
                                 reasoning_cell.set_in_progress(true);
+                                let updated_titles =
+                                    Self::auto_collect_thinking_titles(&*reasoning_cell);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
                                 self.refresh_reasoning_collapsed_visibility();
+                                self.auto_update_thinking_titles_if_new(updated_titles);
                                 return;
                             }
                         }
@@ -11888,10 +12091,13 @@ impl ChatWidget<'_> {
                                 );
                                 reasoning_cell.append_lines_dedup(lines);
                                 reasoning_cell.set_in_progress(true);
+                                let updated_titles =
+                                    Self::auto_collect_thinking_titles(&*reasoning_cell);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
                                 self.refresh_reasoning_collapsed_visibility();
+                                self.auto_update_thinking_titles_if_new(updated_titles);
                                 return;
                             }
                         } else {
@@ -11932,6 +12138,14 @@ impl ChatWidget<'_> {
                 let idx = self.history_insert_with_key_global(Box::new(cell), key);
                 if let Some(rid) = id {
                     self.reasoning_index.insert(rid, idx);
+                }
+                if let Some(reasoning_cell) = self.history_cells[idx]
+                    .as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                {
+                    let updated_titles =
+                        Self::auto_collect_thinking_titles(reasoning_cell);
+                    self.auto_update_thinking_titles_if_new(updated_titles);
                 }
             }
             StreamKind::Answer => {
@@ -15267,8 +15481,17 @@ impl ChatWidget<'_> {
 
         let status_line = Line::from(status_spans);
 
+        let now = Instant::now();
+        if self.header_wave.schedule_if_needed(now) {
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
+        }
+
         // Render the block first
         status_block.render(padded_area, buf);
+        if self.header_wave.is_enabled() {
+            self.header_wave.render(padded_area, buf, now);
+        }
 
         // Then render the text inside with padding, centered
         let status_widget = Paragraph::new(vec![status_line])
