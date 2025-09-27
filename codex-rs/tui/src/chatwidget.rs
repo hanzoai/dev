@@ -452,6 +452,7 @@ struct AutoCoordinatorUiState {
     countdown_id: u64,
     seconds_remaining: u8,
     awaiting_goal_input: bool,
+    last_broadcast_thought: Option<String>,
 }
 
 impl AutoCoordinatorUiState {
@@ -6711,7 +6712,6 @@ impl ChatWidget<'_> {
                     ok
                 );
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
-                // Stream reasoning delta through StreamController
                 streaming::delta_text(
                     self,
                     StreamKind::Reasoning,
@@ -6838,6 +6838,7 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
                 self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
+
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
@@ -9424,7 +9425,9 @@ impl ChatWidget<'_> {
                 self.auto_state
                     .current_thoughts
                     .replace(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_state.last_broadcast_thought = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_state.waiting_for_response = true;
                 self.header_wave.set_enabled(true, Instant::now());
                 self.auto_rebuild_live_ring();
                 self.push_background_tail(format!("Auto Drive started: {goal_text}"));
@@ -9449,6 +9452,12 @@ impl ChatWidget<'_> {
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+        } else {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.current_thoughts = None;
+            self.auto_state.last_broadcast_thought = None;
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
         }
     }
 
@@ -9462,7 +9471,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.auto_state.current_thoughts = Some(thoughts.clone());
+        self.auto_on_reasoning_final(&thoughts);
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
@@ -9549,6 +9558,13 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn auto_handle_thinking(&mut self, delta: String) {
+        if !self.auto_state.active {
+            return;
+        }
+        self.auto_on_reasoning_delta(&delta);
+    }
+
     fn auto_submit_prompt(&mut self) {
         if !self.auto_state.active {
             return;
@@ -9567,6 +9583,8 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = 0;
+        self.auto_state.current_thoughts = None;
+        self.auto_state.last_broadcast_thought = None;
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
         self.submit_text_message(prompt);
@@ -9742,56 +9760,74 @@ impl ChatWidget<'_> {
             .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
     }
 
-    fn auto_collect_thinking_titles(
-        cell: &history_cell::CollapsibleReasoningCell,
-    ) -> Option<String> {
-        let mut titles: Vec<String> = cell
-            .display_lines()
-            .into_iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-                    .trim()
-                    .to_string()
-            })
-            .filter(|text| !text.is_empty())
-            .collect();
-
-        if titles.is_empty() {
-            return None;
-        }
-
-        titles.reverse();
-        Some(titles.join("\n"))
-    }
-
-    fn auto_update_thinking_titles_if_new(&mut self, joined: Option<String>) {
-        if !self.auto_state.active || !self.auto_state.waiting_for_response {
+    fn auto_broadcast_thoughts(&mut self, raw: &str) {
+        if !self.auto_state.active {
             return;
         }
 
-        let Some(joined) = joined else {
+        let Some(first_line) = raw
+            .lines()
+            .find_map(|line| {
+                let trimmed = line.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
+            })
+        else {
             return;
         };
 
         if self
             .auto_state
-            .current_thoughts
+            .last_broadcast_thought
             .as_ref()
-            .map(|existing| existing == &joined)
+            .map(|prev| prev == &first_line)
             .unwrap_or(false)
         {
             return;
         }
 
-        if let Some(first_line) = joined.lines().next().map(|l| l.trim()).filter(|l| !l.is_empty()) {
-            self.push_background_tail(format!("Auto Drive: {first_line}"));
+        self.auto_state.last_broadcast_thought = Some(first_line.clone());
+        self.push_background_tail(format!("Auto Drive: {first_line}"));
+    }
+
+    fn auto_on_reasoning_delta(&mut self, delta: &str) {
+        if !self.auto_state.active || delta.trim().is_empty() {
+            return;
         }
-        self.auto_state.current_thoughts = Some(joined);
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
+
+        let payload = {
+            let entry = self
+                .auto_state
+                .current_thoughts
+                .get_or_insert_with(String::new);
+
+            if auto_drive_strings::is_auto_drive_phrase(entry) {
+                entry.clear();
+            }
+
+            entry.push_str(delta);
+            entry.clone()
+        };
+
+        self.auto_broadcast_thoughts(&payload);
+
+        if self.auto_state.waiting_for_response {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    fn auto_on_reasoning_final(&mut self, text: &str) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        self.auto_state.current_thoughts = Some(text.to_string());
+        self.auto_broadcast_thoughts(text);
+
+        if self.auto_state.waiting_for_response {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
     }
 
     fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
@@ -12065,13 +12101,10 @@ impl ChatWidget<'_> {
                                 );
                                 reasoning_cell.append_lines_dedup(lines);
                                 reasoning_cell.set_in_progress(true);
-                                let updated_titles =
-                                    Self::auto_collect_thinking_titles(&*reasoning_cell);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
                                 self.refresh_reasoning_collapsed_visibility();
-                                self.auto_update_thinking_titles_if_new(updated_titles);
                                 return;
                             }
                         }
@@ -12095,13 +12128,10 @@ impl ChatWidget<'_> {
                                 );
                                 reasoning_cell.append_lines_dedup(lines);
                                 reasoning_cell.set_in_progress(true);
-                                let updated_titles =
-                                    Self::auto_collect_thinking_titles(&*reasoning_cell);
                                 self.invalidate_height_cache();
                                 self.autoscroll_if_near_bottom();
                                 self.request_redraw();
                                 self.refresh_reasoning_collapsed_visibility();
-                                self.auto_update_thinking_titles_if_new(updated_titles);
                                 return;
                             }
                         } else {
@@ -12143,14 +12173,7 @@ impl ChatWidget<'_> {
                 if let Some(rid) = id {
                     self.reasoning_index.insert(rid, idx);
                 }
-                if let Some(reasoning_cell) = self.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                {
-                    let updated_titles =
-                        Self::auto_collect_thinking_titles(reasoning_cell);
-                    self.auto_update_thinking_titles_if_new(updated_titles);
-                }
+                // Auto Drive status updates are handled via coordinator decisions.
             }
             StreamKind::Answer => {
                 tracing::debug!(

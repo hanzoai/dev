@@ -70,3 +70,8 @@ pub fn next_auto_drive_phrase() -> &'static str {
         % AUTO_DRIVE_PHRASES.len();
     AUTO_DRIVE_PHRASES[idx]
 }
+
+pub fn is_auto_drive_phrase(candidate: &str) -> bool {
+    let trimmed = candidate.trim();
+    AUTO_DRIVE_PHRASES.iter().any(|phrase| phrase == &trimmed)
+}
