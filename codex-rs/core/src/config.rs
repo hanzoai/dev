@@ -13,6 +13,7 @@ use crate::config_types::ValidationConfig;
 use crate::config_types::ThemeName;
 use crate::config_types::ThemeColors;
 use crate::config_types::McpServerConfig;
+use crate::config_types::McpServerTransportConfig;
 use crate::config_types::Notifications;
 use crate::config_types::ProjectCommandConfig;
 use crate::config_types::ProjectHookConfig;
@@ -37,6 +38,7 @@ use crate::config_types::ReasoningSummary;
 use crate::project_features::{load_project_commands, ProjectCommand, ProjectHooks};
 use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
+use std::time::Duration;
 use dirs::home_dir;
 use serde::Deserialize;
 use serde::de::{self, Unexpected};
@@ -236,6 +238,8 @@ pub struct Config {
     pub tools_web_search_allowed_domains: Option<Vec<String>>,
     /// Experimental: enable streamable shell tool selection (off by default).
     pub use_experimental_streamable_shell_tool: bool,
+    /// Experimental: opt into the RMCP client implementation for MCP servers.
+    pub use_experimental_use_rmcp_client: bool,
     /// Enable the `view_image` tool that lets the agent attach local images.
     pub include_view_image_tool: bool,
     /// The value for the `originator` header included with Responses API requests.
@@ -378,37 +382,45 @@ pub fn write_global_mcp_servers(
         for (name, config) in servers {
             let mut entry = TomlTable::new();
             entry.set_implicit(false);
-            entry["command"] = toml_edit::value(config.command.clone());
+            match &config.transport {
+                McpServerTransportConfig::Stdio { command, args, env } => {
+                    entry["command"] = toml_edit::value(command.clone());
 
-            if !config.args.is_empty() {
-                let mut args = TomlArray::new();
-                for arg in &config.args {
-                    args.push(arg.clone());
+                    if !args.is_empty() {
+                        let mut args_array = TomlArray::new();
+                        for arg in args {
+                            args_array.push(arg.clone());
+                        }
+                        entry["args"] = TomlItem::Value(args_array.into());
+                    }
+
+                    if let Some(env) = env
+                        && !env.is_empty()
+                    {
+                        let mut env_table = TomlTable::new();
+                        env_table.set_implicit(false);
+                        let mut pairs: Vec<_> = env.iter().collect();
+                        pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+                        for (key, value) in pairs {
+                            env_table.insert(key, toml_edit::value(value.clone()));
+                        }
+                        entry["env"] = TomlItem::Table(env_table);
+                    }
                 }
-                entry["args"] = TomlItem::Value(args.into());
+                McpServerTransportConfig::StreamableHttp { url, bearer_token } => {
+                    entry["url"] = toml_edit::value(url.clone());
+                    if let Some(token) = bearer_token {
+                        entry["bearer_token"] = toml_edit::value(token.clone());
+                    }
+                }
             }
 
-            if let Some(env) = &config.env
-                && !env.is_empty()
-            {
-                let mut env_table = TomlTable::new();
-                env_table.set_implicit(false);
-                let mut pairs: Vec<_> = env.iter().collect();
-                pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
-                for (key, value) in pairs {
-                    env_table.insert(key, toml_edit::value(value.clone()));
-                }
-                entry["env"] = TomlItem::Table(env_table);
+            if let Some(timeout) = config.startup_timeout_sec {
+                entry["startup_timeout_sec"] = toml_edit::value(timeout.as_secs_f64());
             }
 
-            if let Some(timeout) = config.startup_timeout_ms {
-                let timeout = i64::try_from(timeout).map_err(|_| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "startup_timeout_ms exceeds supported range",
-                    )
-                })?;
-                entry["startup_timeout_ms"] = toml_edit::value(timeout);
+            if let Some(timeout) = config.tool_timeout_sec {
+                entry["tool_timeout_sec"] = toml_edit::value(timeout.as_secs_f64());
             }
 
             doc["mcp_servers"][name.as_str()] = TomlItem::Table(entry);
@@ -1177,32 +1189,78 @@ pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
         let mut out = Vec::new();
         for (name, item) in tbl.iter() {
             if let Some(t) = item.as_table() {
-                let command = t
-                    .get("command")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let args: Vec<String> = t
-                    .get("args")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|i| i.as_str().map(|s| s.to_string())).collect())
-                    .unwrap_or_default();
-                let env: Option<std::collections::HashMap<String, String>> = t
-                    .get("env")
-                    .and_then(|v| v.as_inline_table())
-                    .map(|tbl| {
-                        tbl.iter()
-                            .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
-                            .collect()
+                let transport = if let Some(command) = t.get("command").and_then(|v| v.as_str()) {
+                    let args: Vec<String> = t
+                        .get("args")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|i| i.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let env = t
+                        .get("env")
+                        .and_then(|v| v.as_inline_table())
+                        .map(|tbl| {
+                            tbl.iter()
+                                .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
+                                .collect()
+                        });
+
+                    McpServerTransportConfig::Stdio {
+                        command: command.to_string(),
+                        args,
+                        env,
+                    }
+                } else if let Some(url) = t.get("url").and_then(|v| v.as_str()) {
+                    let bearer_token = t
+                        .get("bearer_token")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    McpServerTransportConfig::StreamableHttp {
+                        url: url.to_string(),
+                        bearer_token,
+                    }
+                } else {
+                    continue;
+                };
+
+                let startup_timeout_sec = t
+                    .get("startup_timeout_sec")
+                    .and_then(|v| {
+                        v.as_float()
+                            .map(|f| Duration::try_from_secs_f64(f).ok())
+                            .or_else(|| {
+                                Some(v.as_integer().map(|i| Duration::from_secs(i as u64)))
+                            })
+                    })
+                    .flatten()
+                    .or_else(|| {
+                        t.get("startup_timeout_ms")
+                            .and_then(|v| v.as_integer())
+                            .map(|ms| Duration::from_millis(ms as u64))
                     });
-                let startup_timeout_ms = t
-                    .get("startup_timeout_ms")
-                    .and_then(|v| v.as_integer())
-                    .map(|i| i as u64);
+
+                let tool_timeout_sec = t
+                    .get("tool_timeout_sec")
+                    .and_then(|v| {
+                        v.as_float()
+                            .map(|f| Duration::try_from_secs_f64(f).ok())
+                            .or_else(|| {
+                                Some(v.as_integer().map(|i| Duration::from_secs(i as u64)))
+                            })
+                    })
+                    .flatten();
 
                 out.push((
                     name.to_string(),
-                    McpServerConfig { command, args, env, startup_timeout_ms },
+                    McpServerConfig {
+                        transport,
+                        startup_timeout_sec,
+                        tool_timeout_sec,
+                    },
                 ));
             }
         }
@@ -1255,25 +1313,45 @@ pub fn add_mcp_server(
     }
     let tbl = doc["mcp_servers"].as_table_mut().unwrap();
 
+    let McpServerConfig {
+        transport,
+        startup_timeout_sec,
+        tool_timeout_sec,
+    } = cfg;
+
     // Build table for this server
     let mut server_tbl = toml_edit::Table::new();
-    server_tbl.insert("command", toml_edit::value(cfg.command));
-    if !cfg.args.is_empty() {
-        let mut arr = toml_edit::Array::new();
-        for a in cfg.args.into_iter() {
-            arr.push(toml_edit::Value::from(a));
+    match transport {
+        McpServerTransportConfig::Stdio { command, args, env } => {
+            server_tbl.insert("command", toml_edit::value(command));
+            if !args.is_empty() {
+                let mut arr = toml_edit::Array::new();
+                for a in args {
+                    arr.push(toml_edit::Value::from(a));
+                }
+                server_tbl.insert("args", TomlItem::Value(toml_edit::Value::Array(arr)));
+            }
+            if let Some(env) = env {
+                let mut it = toml_edit::InlineTable::new();
+                for (k, v) in env {
+                    it.insert(&k, toml_edit::Value::from(v));
+                }
+                server_tbl.insert("env", TomlItem::Value(toml_edit::Value::InlineTable(it)));
+            }
         }
-        server_tbl.insert("args", TomlItem::Value(toml_edit::Value::Array(arr)));
-    }
-    if let Some(env) = cfg.env {
-        let mut it = toml_edit::InlineTable::new();
-        for (k, v) in env {
-            it.insert(&k, toml_edit::Value::from(v));
+        McpServerTransportConfig::StreamableHttp { url, bearer_token } => {
+            server_tbl.insert("url", toml_edit::value(url));
+            if let Some(token) = bearer_token {
+                server_tbl.insert("bearer_token", toml_edit::value(token));
+            }
         }
-        server_tbl.insert("env", TomlItem::Value(toml_edit::Value::InlineTable(it)));
     }
-    if let Some(ms) = cfg.startup_timeout_ms {
-        server_tbl.insert("startup_timeout_ms", TomlItem::Value(toml_edit::Value::from(ms as i64)));
+
+    if let Some(duration) = startup_timeout_sec {
+        server_tbl.insert("startup_timeout_sec", toml_edit::value(duration.as_secs_f64()));
+    }
+    if let Some(duration) = tool_timeout_sec {
+        server_tbl.insert("tool_timeout_sec", toml_edit::value(duration.as_secs_f64()));
     }
 
     // Write into enabled table
@@ -1427,6 +1505,9 @@ pub struct ConfigToml {
 
     #[serde(default)]
     pub confirm_guard: Option<ConfirmGuardConfig>,
+
+    #[serde(default)]
+    pub experimental_use_rmcp_client: Option<bool>,
 
     /// Disable server-side response storage (sends the full conversation
     /// context with every request). Currently necessary for OpenAI customers
@@ -2041,6 +2122,9 @@ impl Config {
             use_experimental_streamable_shell_tool: cfg
                 .experimental_use_exec_command_tool
                 .unwrap_or(false),
+            use_experimental_use_rmcp_client: cfg
+                .experimental_use_rmcp_client
+                .unwrap_or(false),
             include_view_image_tool: include_view_image_tool_flag,
             responses_originator_header,
             debug: debug.unwrap_or(false),
@@ -2384,10 +2468,13 @@ exclude_slash_tmp = true
         servers.insert(
             "docs".to_string(),
             McpServerConfig {
-                command: "echo".to_string(),
-                args: vec!["hello".to_string()],
-                env: None,
-                startup_timeout_ms: None,
+                transport: McpServerTransportConfig::Stdio {
+                    command: "echo".to_string(),
+                    args: vec!["hello".to_string()],
+                    env: None,
+                },
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
             },
         );
 
@@ -2396,7 +2483,14 @@ exclude_slash_tmp = true
         let loaded = load_global_mcp_servers(codex_home.path())?;
         assert_eq!(loaded.len(), 1);
         let docs = loaded.get("docs").expect("docs entry");
-        assert_eq!(docs.command, "echo");
+        match &docs.transport {
+            McpServerTransportConfig::Stdio { command, args, env } => {
+                assert_eq!(command, "echo");
+                assert_eq!(args, &vec!["hello".to_string()]);
+                assert!(env.is_none());
+            }
+            _ => panic!("expected stdio transport"),
+        }
         assert_eq!(docs.args, vec!["hello".to_string()]);
 
         let empty = BTreeMap::new();
@@ -2730,6 +2824,7 @@ model_verbosity = "high"
                 tools_web_search_request: false,
                 tools_web_search_allowed_domains: None,
                 use_experimental_streamable_shell_tool: false,
+                use_experimental_use_rmcp_client: false,
                 include_view_image_tool: true,
                 responses_originator_header: "codex_cli_rs".to_string(),
                 debug: false,
@@ -2798,9 +2893,10 @@ model_verbosity = "high"
             include_plan_tool: false,
             include_apply_patch_tool: false,
             tools_web_search_request: false,
-            tools_web_search_allowed_domains: None,
-            use_experimental_streamable_shell_tool: false,
-            include_view_image_tool: true,
+        tools_web_search_allowed_domains: None,
+        use_experimental_streamable_shell_tool: false,
+        use_experimental_use_rmcp_client: false,
+        include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,
             using_chatgpt_auth: false,
@@ -2885,6 +2981,8 @@ model_verbosity = "high"
             tools_web_search_request: false,
             tools_web_search_allowed_domains: None,
             use_experimental_streamable_shell_tool: false,
+            use_experimental_use_rmcp_client: false,
+            use_experimental_use_rmcp_client: false,
             include_view_image_tool: true,
             responses_originator_header: "codex_cli_rs".to_string(),
             debug: false,

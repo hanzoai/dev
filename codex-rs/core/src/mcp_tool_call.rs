@@ -1,4 +1,3 @@
-use std::time::Duration;
 use std::time::Instant;
 
 use tracing::error;
@@ -19,7 +18,6 @@ pub(crate) async fn handle_mcp_tool_call(
     server: String,
     tool_name: String,
     arguments: String,
-    timeout: Option<Duration>,
 ) -> ResponseInputItem {
     // Parse the `arguments` as JSON. An empty string is OK, but invalid JSON
     // is not.
@@ -53,7 +51,7 @@ pub(crate) async fn handle_mcp_tool_call(
     let start = Instant::now();
     // Perform the tool call.
     let result = sess
-        .call_tool(&server, &tool_name, arguments_value.clone(), timeout)
+        .call_tool(&server, &tool_name, arguments_value.clone())
         .await
         .map_err(|e| format!("tool call error: {e}"));
     let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent { call_id: ctx.call_id.clone(), invocation, duration: start.elapsed(), result: result.clone() });
