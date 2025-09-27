@@ -10,11 +10,11 @@ use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
 use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
 mod approval_modal_view;
+mod auto_coordinator_view;
 mod bottom_pane_view;
 mod chat_composer;
 mod chat_composer_history;
@@ -24,7 +24,6 @@ mod custom_prompt_view;
 mod command_popup;
 mod file_search_popup;
 mod paste_burst;
-mod live_ring_widget;
 mod popup_consts;
 mod agent_editor_view;
 mod agents_overview_view;
@@ -57,6 +56,12 @@ pub(crate) enum CancellationEvent {
 
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
+pub(crate) use auto_coordinator_view::{
+    AutoCoordinatorButton,
+    AutoCoordinatorView,
+    AutoCoordinatorViewModel,
+    CountdownState,
+};
 pub(crate) use login_accounts_view::{
     LoginAccountsState,
     LoginAccountsView,
@@ -78,6 +83,13 @@ use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
 pub(crate) use undo_restore_view::UndoRestoreView;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveViewKind {
+    None,
+    AutoCoordinator,
+    Other,
+}
+
 /// Pane displayed in the lower half of the chat UI.
 pub(crate) struct BottomPane<'a> {
     /// Composer is retained even when a BottomPaneView is displayed so the
@@ -86,15 +98,12 @@ pub(crate) struct BottomPane<'a> {
 
     /// If present, this is displayed instead of the `composer`.
     active_view: Option<Box<dyn BottomPaneView<'a> + 'a>>,
+    active_view_kind: ActiveViewKind,
 
     app_event_tx: AppEventSender,
     has_input_focus: bool,
     is_task_running: bool,
     ctrl_c_quit_hint: bool,
-
-    /// Optional transient ring shown above the composer. This is a rendering-only
-    /// container used during development before we wire it to ChatWidget events.
-    live_ring: Option<live_ring_widget::LiveRingWidget>,
 
     /// True if the active view is the StatusIndicatorView that replaces the
     /// composer during a running task.
@@ -128,11 +137,11 @@ impl BottomPane<'_> {
                 params.using_chatgpt_auth,
             ),
             active_view: None,
+            active_view_kind: ActiveViewKind::None,
             app_event_tx: params.app_event_tx,
             has_input_focus: params.has_input_focus,
             is_task_running: false,
             ctrl_c_quit_hint: false,
-            live_ring: None,
             status_view_active: false,
             top_spacer_enabled: true,
             using_chatgpt_auth: params.using_chatgpt_auth,
@@ -149,6 +158,7 @@ impl BottomPane<'_> {
         use agents_overview_view::AgentsOverviewView;
         let view = AgentsOverviewView::new(agents, commands, selected_index, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -160,12 +170,14 @@ impl BottomPane<'_> {
         }
 
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
 
     pub fn show_notifications_settings(&mut self, view: NotificationsSettingsView) {
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -191,18 +203,21 @@ impl BottomPane<'_> {
             self.app_event_tx.clone(),
         );
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
 
     pub fn show_login_accounts(&mut self, view: LoginAccountsView) {
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
 
     pub fn show_login_add_account(&mut self, view: LoginAddAccountView) {
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -220,12 +235,6 @@ impl BottomPane<'_> {
     }
 
     pub fn desired_height(&self, width: u16) -> u16 {
-        let ring_h = self
-            .live_ring
-            .as_ref()
-            .map(|r| r.desired_height(width))
-            .unwrap_or(0);
-
         let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
             (view.desired_height(width), 0)
         } else {
@@ -234,9 +243,7 @@ impl BottomPane<'_> {
             (spacer + self.composer.desired_height(width), Self::BOTTOM_PAD_LINES)
         };
 
-        ring_h
-            .saturating_add(view_height)
-            .saturating_add(pad_lines)
+        view_height.saturating_add(pad_lines)
     }
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
@@ -265,9 +272,13 @@ impl BottomPane<'_> {
     /// Forward a key event to the active view or the composer.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         if let Some(mut view) = self.active_view.take() {
+            let kind = self.active_view_kind;
             view.handle_key_event(self, key_event);
             if !view.is_complete() {
                 self.active_view = Some(view);
+                self.active_view_kind = kind;
+            } else {
+                self.active_view_kind = ActiveViewKind::None;
             }
             // Don't create a status view - keep composer visible
             // Debounce view navigation redraws to reduce render thrash
@@ -318,6 +329,7 @@ impl BottomPane<'_> {
     /// Handle Ctrl-C in the bottom pane. If a modal view is active it gets a
     /// chance to consume the event (e.g. to dismiss itself).
     pub(crate) fn on_ctrl_c(&mut self) -> CancellationEvent {
+        let kind = self.active_view_kind;
         let mut view = match self.active_view.take() {
             Some(view) => view,
             None => return CancellationEvent::Ignored,
@@ -328,12 +340,16 @@ impl BottomPane<'_> {
             CancellationEvent::Handled => {
                 if !view.is_complete() {
                     self.active_view = Some(view);
+                    self.active_view_kind = kind;
+                } else {
+                    self.active_view_kind = ActiveViewKind::None;
                 }
                 // Don't create a status view - keep composer visible
                 self.show_ctrl_c_quit_hint();
             }
             CancellationEvent::Ignored => {
                 self.active_view = Some(view);
+                self.active_view_kind = kind;
             }
         }
         event
@@ -459,8 +475,12 @@ impl BottomPane<'_> {
             // Drop the status view when a task completes, but keep other
             // modal views (e.g. approval dialogs).
             if let Some(mut view) = self.active_view.take() {
+                let kind = self.active_view_kind;
                 if !view.should_hide_when_task_is_done() {
                     self.active_view = Some(view);
+                    self.active_view_kind = kind;
+                } else {
+                    self.active_view_kind = ActiveViewKind::None;
                 }
                 self.status_view_active = false;
             }
@@ -512,6 +532,7 @@ impl BottomPane<'_> {
         // Otherwise create a new approval modal overlay.
         let modal = ApprovalModalView::new(request, self.app_event_tx.clone());
         self.active_view = Some(Box::new(modal));
+        self.active_view_kind = ActiveViewKind::Other;
         // Hide any overlay status while a modal is visible.
         // Status shown in composer title now
         self.status_view_active = false;
@@ -527,6 +548,7 @@ impl BottomPane<'_> {
     ) {
         let view = ModelSelectionView::new(presets, current_model, current_effort, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
@@ -536,6 +558,7 @@ impl BottomPane<'_> {
     pub fn show_theme_selection(&mut self, current_theme: ThemeName) {
         let view = ThemeSelectionView::new(current_theme, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
@@ -546,6 +569,7 @@ impl BottomPane<'_> {
         use chrome_selection_view::ChromeSelectionView;
         let view = ChromeSelectionView::new(self.app_event_tx.clone(), port);
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
@@ -556,6 +580,7 @@ impl BottomPane<'_> {
     pub fn show_diff_popup(&mut self, tabs: Vec<(String, Vec<ratatui::text::Line<'static>>)>) {
         let view = diff_popup::DiffPopupView::new(tabs);
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw()
     }
@@ -564,6 +589,7 @@ impl BottomPane<'_> {
     pub fn show_verbosity_selection(&mut self, current_verbosity: TextVerbosity) {
         let view = VerbositySelectionView::new(current_verbosity, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw()
@@ -572,6 +598,7 @@ impl BottomPane<'_> {
     /// Show a multi-line prompt input view (used for custom review instructions)
     pub fn show_custom_prompt(&mut self, view: CustomPromptView) {
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -585,6 +612,7 @@ impl BottomPane<'_> {
         items: crate::bottom_pane::list_selection_view::ListSelectionView,
     ) {
         self.active_view = Some(Box::new(items));
+        self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
         self.status_view_active = false;
         self.request_redraw();
@@ -600,6 +628,7 @@ impl BottomPane<'_> {
         use resume_selection_view::ResumeSelectionView;
         let view = ResumeSelectionView::new(title, subtitle.unwrap_or_default(), rows, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw()
     }
@@ -609,12 +638,14 @@ impl BottomPane<'_> {
         use github_settings_view::GithubSettingsView;
         let view = GithubSettingsView::new(watcher_enabled, token_status, ready, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
 
     pub fn show_undo_restore_view(&mut self, view: UndoRestoreView) {
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -624,6 +655,7 @@ impl BottomPane<'_> {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -637,6 +669,7 @@ impl BottomPane<'_> {
         use validation_settings_view::ValidationSettingsView;
         let view = ValidationSettingsView::new(groups, tools, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
@@ -652,8 +685,28 @@ impl BottomPane<'_> {
         use crate::bottom_pane::agents_settings_view::SubagentEditorView;
         let view = SubagentEditorView::new_with_data(name, available_agents, existing, is_new, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
+    }
+
+    pub(crate) fn show_auto_coordinator_view(&mut self, view: AutoCoordinatorView) {
+        if self.active_view.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            return;
+        }
+        self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::AutoCoordinator;
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub(crate) fn clear_auto_coordinator_view(&mut self) {
+        if self.active_view_kind == ActiveViewKind::AutoCoordinator {
+            self.active_view = None;
+            self.active_view_kind = ActiveViewKind::None;
+            self.status_view_active = false;
+            self.request_redraw();
+        }
     }
 
     /// Height (terminal rows) required by the current bottom pane.
@@ -743,14 +796,7 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-    pub(crate) fn clear_live_ring(&mut self) {
-        self.live_ring = None;
-    }
-
-    pub(crate) fn set_live_ring_rows(&mut self, max_rows: u16, rows: Vec<Line<'static>>) {
-        self.live_ring = Some(live_ring_widget::LiveRingWidget::new(max_rows, rows));
-        self.request_redraw();
-    }
+    pub(crate) fn clear_live_ring(&mut self) {}
     
     // test helper removed
 
@@ -807,24 +853,6 @@ impl WidgetRef for &BottomPane<'_> {
         fill_rect(buf, area, Some(' '), base_style);
 
         let mut y_offset = 0u16;
-        if let Some(ring) = &self.live_ring {
-            let live_h = ring.desired_height(area.width).min(area.height);
-            if live_h > 0 {
-                let live_rect = Rect {
-                    x: area.x,
-                    y: area.y,
-                    width: area.width,
-                    height: live_h,
-                };
-                ring.render_ref(live_rect, buf);
-                y_offset = live_h;
-            }
-        }
-        // Spacer between live ring and status view when active
-        if self.live_ring.is_some() && self.status_view_active && y_offset < area.height {
-            // Leave one empty line
-            y_offset = y_offset.saturating_add(1);
-        }
 
         // When a modal view is active and not yet complete, it owns the whole content area.
         if let Some(view) = &self.active_view {
@@ -911,106 +939,6 @@ mod tests_removed {
         assert!(pane.ctrl_c_quit_hint_visible());
         assert_eq!(CancellationEvent::Ignored, pane.on_ctrl_c());
     }
-
-    #[test]
-    fn live_ring_renders_above_composer() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
-        let tx = AppEventSender::new(tx_raw);
-        let mut pane = BottomPane::new(BottomPaneParams {
-            app_event_tx: tx,
-            has_input_focus: true,
-            enhanced_keys_supported: false,
-            using_chatgpt_auth: false,
-        });
-
-        // Provide 4 rows with max_rows=3; only the last 3 should be visible.
-        pane.set_live_ring_rows(
-            3,
-            vec![
-                Line::from("one".to_string()),
-                Line::from("two".to_string()),
-                Line::from("three".to_string()),
-                Line::from("four".to_string()),
-            ],
-        );
-
-        let area = Rect::new(0, 0, 10, 5);
-        let mut buf = Buffer::empty(area);
-        (&pane).render_ref(area, &mut buf);
-
-        // Extract the first 3 rows and assert they contain the last three lines.
-        let mut lines: Vec<String> = Vec::new();
-        for y in 0..3 {
-            let mut s = String::new();
-            for x in 0..area.width {
-                s.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
-            }
-            lines.push(s.trim_end().to_string());
-        }
-        assert_eq!(lines, vec!["two", "three", "four"]);
-    }
-
-    #[test]
-    fn status_indicator_visible_with_live_ring() {
-        let (tx_raw, _rx) = channel::<AppEvent>();
-        let tx = AppEventSender::new(tx_raw);
-        let mut pane = BottomPane::new(BottomPaneParams {
-            app_event_tx: tx,
-            has_input_focus: true,
-            enhanced_keys_supported: false,
-            using_chatgpt_auth: false,
-        });
-
-        // Simulate task running which replaces composer with the status indicator.
-        pane.set_task_running(true);
-        pane.update_status_text("waiting for model".to_string());
-
-        // Provide 2 rows in the live ring (e.g., streaming CoT) and ensure the
-        // status indicator remains visible below them.
-        pane.set_live_ring_rows(
-            2,
-            vec![
-                Line::from("cot1".to_string()),
-                Line::from("cot2".to_string()),
-            ],
-        );
-
-        // Allow some frames so the dot animation is present.
-        std::thread::sleep(std::time::Duration::from_millis(120));
-
-        // Height should include both ring rows, 1 spacer, and the 1-line status.
-        let area = Rect::new(0, 0, 30, 4);
-        let mut buf = Buffer::empty(area);
-        (&pane).render_ref(area, &mut buf);
-
-        // Top two rows are the live ring.
-        let mut r0 = String::new();
-        let mut r1 = String::new();
-        for x in 0..area.width {
-            r0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
-            r1.push(buf[(x, 1)].symbol().chars().next().unwrap_or(' '));
-        }
-        assert!(r0.contains("cot1"), "expected first live row: {r0:?}");
-        assert!(r1.contains("cot2"), "expected second live row: {r1:?}");
-
-        // Row 2 is the spacer (blank)
-        let mut r2 = String::new();
-        for x in 0..area.width {
-            r2.push(buf[(x, 2)].symbol().chars().next().unwrap_or(' '));
-        }
-        assert!(r2.trim().is_empty(), "expected blank spacer line: {r2:?}");
-
-        // Bottom row is the status line; it should contain the "Coding" header.
-        let mut r3 = String::new();
-        for x in 0..area.width {
-            r3.push(buf[(x, 3)].symbol().chars().next().unwrap_or(' '));
-        }
-        assert!(
-            r3.contains("Coding"),
-            "expected Coding header in status line: {r3:?}"
-        );
-    }
-    // live ring removed; related tests deleted.
 
     #[test]
     fn overlay_not_shown_above_approval_modal() {
