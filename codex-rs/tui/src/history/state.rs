@@ -28,6 +28,84 @@ pub enum HistoryRecord {
     Notice(NoticeRecord),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryDomainEvent {
+    Insert {
+        index: usize,
+        record: HistoryDomainRecord,
+    },
+    Replace {
+        index: usize,
+        record: HistoryDomainRecord,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HistoryDomainRecord {
+    Plain(PlainMessageState),
+    WaitStatus(WaitStatusState),
+    Loading(LoadingState),
+    BackgroundEvent(BackgroundEventRecord),
+    RateLimits(RateLimitsRecord),
+}
+
+impl From<PlainMessageState> for HistoryDomainRecord {
+    fn from(state: PlainMessageState) -> Self {
+        HistoryDomainRecord::Plain(state)
+    }
+}
+
+impl From<WaitStatusState> for HistoryDomainRecord {
+    fn from(state: WaitStatusState) -> Self {
+        HistoryDomainRecord::WaitStatus(state)
+    }
+}
+
+impl From<LoadingState> for HistoryDomainRecord {
+    fn from(state: LoadingState) -> Self {
+        HistoryDomainRecord::Loading(state)
+    }
+}
+
+impl From<BackgroundEventRecord> for HistoryDomainRecord {
+    fn from(state: BackgroundEventRecord) -> Self {
+        HistoryDomainRecord::BackgroundEvent(state)
+    }
+}
+
+impl From<RateLimitsRecord> for HistoryDomainRecord {
+    fn from(state: RateLimitsRecord) -> Self {
+        HistoryDomainRecord::RateLimits(state)
+    }
+}
+
+impl HistoryDomainRecord {
+    fn into_history_record(self) -> HistoryRecord {
+        match self {
+            HistoryDomainRecord::Plain(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::PlainMessage(state)
+            }
+            HistoryDomainRecord::WaitStatus(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::WaitStatus(state)
+            }
+            HistoryDomainRecord::Loading(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Loading(state)
+            }
+            HistoryDomainRecord::BackgroundEvent(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::BackgroundEvent(state)
+            }
+            HistoryDomainRecord::RateLimits(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::RateLimits(state)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlainMessageState {
     pub id: HistoryId,
@@ -674,6 +752,19 @@ impl HistoryState {
                 } else {
                     HistoryMutation::Noop
                 }
+            }
+        }
+    }
+
+    pub fn apply_domain_event(&mut self, event: HistoryDomainEvent) -> HistoryMutation {
+        match event {
+            HistoryDomainEvent::Insert { index, record } => {
+                let record = record.into_history_record();
+                self.apply_event(HistoryEvent::Insert { index, record })
+            }
+            HistoryDomainEvent::Replace { index, record } => {
+                let record = record.into_history_record();
+                self.apply_event(HistoryEvent::Replace { index, record })
             }
         }
     }

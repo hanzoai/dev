@@ -13,6 +13,8 @@ To do that we're working on refactoring the history cells so that state is separ
 - [~] **Introduce single `HistoryState` vector** – foundational types (`HistoryRecord`, `HistoryState`, `HistoryId`) now live in `history/state.rs`; still need to adopt them in `chatwidget.rs` and event handling.
 - [ ] **Centralize event → state mapping** – funnel all `handle_*` mutations through `HistoryState::apply_event` and a dedicated render adapter.
 - [ ] **Unlock serialization & perf goals** – once the state vector exists, wire serialization, resume snapshots, undo rewind, and cached layout per `(record_id, width)`.
+- [ ] **Document interim cache bridge** – keep legacy per-cell layout caches (exec/assistant/diff) in place until the Step 6 renderer cache is implemented, and track their removal behind the new caching system.
+- [ ] **Land HistoryDomainEvent layer** – introduce a dedicated domain-event enum + helpers so every TUI mutation flows through `HistoryState::apply_event` without reconstructing records from cells.
 
 ## Shared Rendering Inputs
 - History viewport width (drives wrapping and layout caches).
@@ -99,27 +101,32 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 ### ⏳ Exec Commands – `ExecCell`
 - **Status:** [~] `ExecRecord` lives in `HistoryState`, but rendering still depends on the legacy `ExecCell` caches.
 - **Current:** command metadata, layout caches, and wait state remain coupled to the UI struct instead of the serialized record.
-- **Needed:** read/write `ExecRecord` via a dedicated `history_cell/exec.rs`, and move per-width layout caches into the renderer layer.
+- **Decision:** keep those caches energized until the Step 6 renderer cache is available; otherwise exec redraws regressed by >2× during testing.
+- **Needed:** read/write `ExecRecord` via a dedicated `history_cell/exec.rs`, and move per-width layout caches into the renderer layer once the shared cache exists.
 - **External settings:** theme, width, monotonic time for “running” durations.
 
 ### ⏳ Assistant Streaming – `StreamingContentCell`
 - **Status:** [~] streaming records capture IDs, markdown deltas, citations, and metadata in `AssistantStreamState`; the cell still owns a redundant `Vec<Line>` cache.
 - **Current:** renderer ignores the stored deltas and instead maintains wrapped lines per width.
+- **Decision:** hold this cache until the centralized renderer cache exists so streaming updates stay smooth.
 - **Needed:** rebuild previews from `AssistantStreamState`, drop the duplicated line cache, and finish piping citations/token usage through serialization.
 
 ### ⏳ Assistant Answers – `AssistantMarkdownCell`
 - **Status:** [~] finalized messages persist markdown/citations/token usage via `AssistantMessageState`, while the cell caches a wrapped copy for legacy rendering.
 - **Current:** raw markdown and per-width layout live in the UI layer, so `HistoryState` snapshots cannot rehydrate the answer alone.
+- **Decision:** keep the wrapped-line cache until Step 6 introduces the shared renderer cache to avoid flicker on theme/width changes.
 - **Needed:** render directly from `AssistantMessageState`, move layout caching to the renderer, and delete the redundant `lines` buffer.
 
 ### ⏳ Merged Exec Summary – `MergedExecCell`
 - **Status:** ⏳ still reuses rendered `ExecCell` line pairs instead of the structured `ExecRecord` output chunks.
 - **Current:** keeps preformatted preamble/output text, preventing reuse of serialized exec data.
+- **Decision:** rely on the existing `ExecCell` cache bridge until the new renderer cache is ready so merged exec performance stays stable.
 - **Needed:** rebuild merged summaries from `Vec<ExecRecord>` snapshots once the exec module is refactored.
 
 ### ⏳ Diffs – `DiffCell`
 - **Status:** [~] `DiffRecord` already stores hunks and `DiffLineKind`; the cell precomputes styled lines for legacy rendering.
 - **Current:** cached `Vec<Line<'static>>` duplicates the structured data and bypasses `HistoryState` for updates.
+- **Decision:** retain the RefCell layout cache until the shared renderer cache is available; otherwise large diffs stutter on scroll.
 - **Needed:** route diff events through `HistoryState`, render directly from `DiffRecord`, then remove the cached line buffer.
 
 ### ⏳ Explore Fetch / HTTP – `ExploreRecord`
@@ -141,23 +148,33 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 1.6 **Wait status & background notices** – ✅ wait tools use `WaitStatusState`; background notices render via `BackgroundEventRecord`.
 1.7 **Documentation** – ✅ inline docs now cover reasoning summaries/bullets; audit of constructors confirmed strongly typed state (2025-09-26).
 
-## Step 2 – Exec / Streaming / Diff Family *(Pending)*
-2.1 **Exec state extraction & module split** – ✅ `ExecCell` now lives in `history_cell/exec.rs`, builds from `ExecRecord` (including wait notes/stream chunks), and keeps layout caches strictly in the renderer layer (2025-09-26).
-2.2 **Streaming assistant module** – Capture raw markdown deltas + metadata in `AssistantStreamState`, relocate the streaming renderer to `history_cell/stream.rs`, and support merge/upsert by stream id. **Status:** ✅ streaming renderer now rebuilds cells directly from `AssistantStreamState`, token usage metadata is upserted alongside deltas, and redundant layout caches were removed (2025-09-26).
-2.3 **Finalized assistant markdown module** – Use `AssistantMessageState` storing markdown + citations + token metadata. **Status:** ✅ assistant markdown cells now rebuild directly from `AssistantMessageState`, `InsertFinalAnswer` carries stream metadata (citations/token usage) into history state, and redundant raw caching has been removed in favor of state-driven rebuilds (2025-09-26).
-2.4 **Diff module breakout** – ✅ diff cells now rebuild from `DiffRecord` state with per-width layouts, ChatWidget persists diff snapshots in `HistoryState`, and the renderer applies line-kind styling with dedicated marker columns (2025-09-26).
-2.5 **Merged exec views** – ✅ merged exec cells now clone `ExecRecord` snapshots for each segment, rebuild layouts on demand (theme-aware caches), and ChatWidget merges/retints using the recorded exec state instead of legacy line buffers (2025-09-26).
+## Step 2 – Exec / Streaming / Diff Bridge *(In Progress)*
+2.1 **Exec state extraction & module split** – [~] `ExecCell` now lives in `history_cell/exec.rs` and consumes `ExecRecord`, but we are deliberately keeping the legacy per-width layout caches and wait-state buffers until the new renderer cache (Step 6) lands to avoid regressions.
+2.2 **Streaming assistant module** – [~] `AssistantStreamState` drives the streaming cell and carries token/citation metadata; `StreamingContentCell` still wraps `AssistantMarkdownCell`, so the internal markdown+layout caches remain as an intentional bridge until the shared renderer cache is ready.
+2.3 **Finalized assistant markdown module** – [~] `AssistantMessageState` is the source of truth, but `AssistantMarkdownCell` continues to own per-width layout caches for performance; plan to migrate them once Step 6 introduces the centralized cache.
+2.4 **Diff module breakout** – [~] diff cells read `DiffRecord` hunks, yet the `DiffCell` keeps a per-width layout cache; removal is blocked on the new caching layer.
+2.5 **Merged exec views** – [~] merged exec cells construct segments from `ExecRecord`, but each segment spins up an `ExecCell` to reuse the old caches; this is acceptable until the shared renderer cache replaces both layers.
 
 ## Step 3 – HistoryState Manager *(Pending)*
 3.1 **HistoryRecord enum** – ✅ complete: `history/state.rs` defines `HistoryRecord`, per-cell state structs, and `HistoryState` scaffolding with ID management helpers.
-3.2 **ChatWidget incremental adoption** – Introduce `HistoryState`/`HistoryRenderState` alongside the legacy `history_cells` vector, migrate low-risk cell types (plain, loading, wait status) to the new state, then remove the legacy vector once the path is stable. **Status:** assistant streaming/final answer flows now write into `HistoryState`; plain/background/wait/loading cells, running/completed tool calls, plan updates, upgrade notices, reasoning summaries, exec cells, diff summaries, patch summaries, image previews, **and explore aggregations** now insert exclusively via `history_insert_with_key_global_tagged` + `HistoryState::apply_event`. Next steps: migrate rate-limit notices and remaining niche cells before deleting the legacy vector. **Update (2025-09-26):** migration will now happen only via the new `HistoryState::apply_event` entrypoint so every cell’s lifecycle is driven by events rather than bespoke insert/replace helpers.
-3.3 **Apply-event pipeline** – Implement `HistoryState::apply_event(&mut self, event: &EventMsg)` covering all core/TUI event types (exec lifecycle, tool updates, background notices, resume snapshots, undo) and route migrated cells through it. **Status:** Insert events now assign `HistoryId`s for plain/background/loading/wait/tool/plan/upgrade/reasoning/exec/diff/assistant/patch/image/explore/rate-limit cells and keep `history_cell_ids` in sync. Replacement and removal helpers also call `HistoryState::apply_event`; remaining follow-up: emit domain-specific `HistoryEvent::Replace` updates for patch/result metadata and delete the few direct `history_cells` mutations that still rebuild cells inline. **Update (2025-09-26):** build `apply_event` first, then iterate cell-by-cell: for each event family (plain messages, loading indicators, wait status, etc.) add a handler in `apply_event`, update `ChatWidget` to publish only events, and adapt rendering to rebuild from the resulting `HistoryRecord`s. The legacy `history_cells` vector will temporarily mirror `HistoryState` via an ID→cell cache until Step 3.5 removes it entirely.
+3.2 **ChatWidget incremental adoption** – Introduce `HistoryState`/`HistoryRenderState` alongside the legacy `history_cells` vector, migrate low-risk cell types (plain, loading, wait status) to the new state, then remove the legacy vector once the path is stable. **Status:** [~] `history_insert_with_key_global_tagged` now mirrors inserts into `HistoryState` to assign `HistoryId`s, but the `history_cells: Vec<Box<dyn HistoryCell>>` is still the primary source of truth and several helpers reconstruct `HistoryRecord` values from existing cells. Next steps: migrate the remaining rate-limit/system notice paths, then flip the ownership so `HistoryState` drives rendering and cells become a derived cache only.
+3.3 **Apply-event pipeline** – Implement `HistoryState::apply_event(&mut self, event: &EventMsg)` covering all core/TUI event types (exec lifecycle, tool updates, background notices, resume snapshots, undo) and route migrated cells through it. **Status:** [~] `HistoryState::apply_domain_event` now converts `HistoryDomainRecord` values into `HistoryRecord`s so background/system notices insert via domain events; remaining flows still emit bespoke mutations (e.g., patch success). Follow-up: add typed handlers per event family, eliminate `history_record_from_cell`, and collapse direct cell mutation once Step 3.5 is ready.
 3.4 **Undo/resume hooks** – Expose `snapshot`, `restore`, and `truncate_after(id)` to support /undo and resume flows.
 3.5 **ChatWidget full integration** – Delete `history_cells: Vec<Box<dyn HistoryCell>>`, wire all helper methods (`history_push`, `history_replace`, etc.) into `HistoryState`, and treat Step 4 as the follow-up for centralized rendering.
 
 ### Outstanding Gaps (2025-09-26)
 - Patch apply success/failure currently mutates `PatchSummaryCell` in place; emit `HistoryEvent::Replace` once the replace arm is implemented so records stay authoritative.
 - Several helpers still rebuild cells inline (e.g., patch success) instead of emitting domain-specific events; consolidate around `HistoryState::apply_event` so the legacy `history_cells` vector can be retired.
+- Track exec/assistant/diff layout caches as an intentional bridge; remove them only after the shared renderer cache in Step 6 ships to avoid frame-time regressions.
+
+### Event Pipeline Consolidation Plan
+- **Phase A – Inventory:** enumerate every direct mutation (`history_cells[idx] = ...`, `history_cells.remove`, `history_record_from_cell`) and map them to a target `HistoryEvent` variant. Track results in `chatwidget/events_audit.md` (new doc) so progress is visible.
+- **Phase B – API surface:** extend `HistoryState::apply_event` to accept domain enums (`HistoryDomainEvent`) which wrap core `EventMsg` payloads; expose helpers like `apply_exec_event` to keep match arms local to each module.
+- **Phase C – Migration waves:**
+  1. Plain/background/loading/wait/tool/plan/upgrade (already idempotent) – replace inline constructors with `HistoryDomainEvent::InsertPlain` etc.
+  2. Exec/stream/assistant – route lifecycle through domain events so streaming merges/final answers run purely on `HistoryState` data.
+  3. Diff/patch/image/explore/rate-limit – remove bespoke mutation helpers and rely on event emissions from their source modules.
+- **Phase D – Flip ownership:** once all mutations go through domain events, replace `history_cells` with a derived cache built from `HistoryRecord` snapshots + the renderer cache. Provide a debug flag to assert no code path mutates `history_cells` directly.
 
 ## Step 4 – Event Mapping & Rendering *(Pending)*
 4.1 **Centralize handlers** – Route every mutation in `handle_*` (exec events, tool deltas, diff updates, background notices) through `HistoryState` so ordering/id management lives in one place.
@@ -171,6 +188,20 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - Persist history vector in session logs; implement `/undo` by restoring prior snapshot.
 
 ## Step 6 – Performance Improvements *(Blocked on Step 4)*
-- Memoize per-cell layouts keyed by `(HistoryId, width, theme_epoch)`.
+- Ship the shared renderer cache (memoized per-cell layouts keyed by `(HistoryId, width, theme_epoch)`) so the interim exec/assistant/diff caches can be removed.
 - Add instrumentation to measure render latency and scrolling cost pre/post refactor.
 - Benchmark resume/undo operations using new snapshots.
+
+### Renderer Cache Design Sketch
+- **Responsibility:** centralize layout caching in `HistoryRenderState` so individual cells own only semantic state. Cache entries map `(HistoryId, width, theme_epoch, reason_visibility)` → `RenderedCell` (lines + per-row buffers + meta).
+- **Structure:**
+  - `RenderedCell` wraps immutable `Vec<Line<'static>>` plus precomposed `Vec<Box<[BufferCell]>>` for fast draw.
+  - `HistoryRenderState` keeps an `IndexMap<CacheKey, Arc<RenderedCell>>` with LRU eviction (target: 512 entries, tunable via config).
+  - `CacheKey` includes `theme_epoch` (incremented on palette change) and any feature flags (e.g., reasoning collapsed) so stale entries drop naturally.
+- **Invalidation hooks:**
+  - `HistoryState::apply_event` emits `HistoryRenderInvalidate` messages when the underlying record changes.
+  - Width changes call `HistoryRenderState::handle_width_change(new_width)` to flush mismatched entries.
+  - Theme swaps bump `theme_epoch`; toggling reasoning detail flips a `ReasoningVisibility` enum baked into the key.
+- **Warm path:** when rendering, look up `(id, width, theme_epoch, visibility)`. If present, reuse. If missing, invoke cell-specific `render_to_lines(record, settings)` helpers to produce lines, then store.
+- **Cold path optimizations:** reuse arena-allocated span buffers to reduce allocations; consider hashing markdown bodies to share across identical answers when history rewinds.
+- **Telemetry:** wrap cache hits/misses with counters exported via `/perf` to confirm the shared cache covers ≥90 % of paint operations before removing per-cell caches.
