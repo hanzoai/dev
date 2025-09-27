@@ -3,7 +3,9 @@
 use super::ChatWidget;
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
-use crate::history::state::ExecAction;
+use crate::history::state::{
+    ExecAction, ExecRecord, ExecStatus, HistoryDomainRecord,
+};
 use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
 use codex_core::parse_command::ParsedCommand;
@@ -36,6 +38,23 @@ fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
         break;
     }
     None
+}
+
+fn exec_record_from_begin(ev: &ExecCommandBeginEvent) -> ExecRecord {
+    let action = history_cell::action_enum_from_parsed(&ev.parsed_cmd);
+    ExecRecord {
+        id: crate::history::state::HistoryId::ZERO,
+        command: ev.command.clone(),
+        parsed: ev.parsed_cmd.clone(),
+        action,
+        status: ExecStatus::Running,
+        stdout_chunks: Vec::new(),
+        stderr_chunks: Vec::new(),
+        exit_code: None,
+        wait_notes: Vec::new(),
+        started_at: std::time::SystemTime::now(),
+        completed_at: None,
+    }
 }
 
 pub(super) fn finalize_exec_cell_at(
@@ -554,9 +573,15 @@ pub(super) fn handle_exec_begin_now(
         }
     }
 
-    let cell = history_cell::new_active_exec_command(ev.command.clone(), parsed_command.clone());
+    let exec_record = exec_record_from_begin(&ev);
     let key = ChatWidget::order_key_from_order_meta(order);
-    let idx = chat.history_insert_with_key_global(Box::new(cell), key);
+    let cell = history_cell::ExecCell::from_record(exec_record.clone());
+    let idx = chat.history_insert_with_key_global_tagged(
+        Box::new(cell),
+        key,
+        "exec-begin",
+        Some(HistoryDomainRecord::Exec(exec_record)),
+    );
     chat.exec.running_commands.insert(
         super::ExecCallId(ev.call_id.clone()),
         super::RunningCommand {

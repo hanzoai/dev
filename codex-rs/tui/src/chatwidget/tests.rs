@@ -3,7 +3,7 @@
 use super::*;
 use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::app_event_sender::AppEventSender;
-use crate::history::state::{HistoryRecord, HistoryState};
+use crate::history::state::{ExecStatus, HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -23,6 +23,8 @@ use codex_core::protocol::EventMsg;
 use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
+use codex_core::protocol::ExecCommandOutputDeltaEvent;
+use codex_core::protocol::ExecOutputStream;
 use codex_core::protocol::FileChange;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::PatchApplyBeginEvent;
@@ -1005,6 +1007,48 @@ fn exec_history_cell_shows_working_then_failed() {
         blob.contains("Failed (exit 2)"),
         "expected completed exec cell to show Failed header with exit code: {blob:?}"
     );
+}
+
+#[test]
+fn exec_output_delta_updates_history_state() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.handle_codex_event(Event {
+        id: "call-stream".into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-stream".into(),
+            command: vec!["bash".into(), "-lc".into(), "echo streaming".into()],
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: vec![codex_core::parse_command::ParsedCommand::Unknown {
+                cmd: "echo streaming".into(),
+            }],
+        }),
+    });
+
+    chat.handle_codex_event(Event {
+        id: "call-stream".into(),
+        msg: EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+            call_id: "call-stream".into(),
+            stream: ExecOutputStream::Stdout,
+            chunk: b"hello".to_vec(),
+        }),
+    });
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) => Some(rec.clone()),
+            _ => None,
+        })
+        .expect("exec record present");
+
+    assert_eq!(exec_record.status, ExecStatus::Running);
+    assert_eq!(exec_record.stdout_chunks.len(), 1);
+    assert_eq!(exec_record.stdout_chunks[0].offset, 0);
+    assert_eq!(exec_record.stdout_chunks[0].content, "hello");
+    assert!(exec_record.stderr_chunks.is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]

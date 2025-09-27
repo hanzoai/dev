@@ -30,6 +30,22 @@
 - Documentation update in `events_audit.md` marking these categories as
   migrated.
 
+## Status (2025-09-27)
+- Domain-event constructors landed and `chatwidget.rs` now hydrates inserted
+  plain/loading/wait/background cells from `HistoryRecord` responses.
+- `events_audit.md` updated to reflect the new flow.
+- Outstanding: add automated coverage for the hydration helpers so regressions
+  are caught when more cell types migrate.
+
+## Next Steps for Agent
+- Extend `chatwidget` tests (or add focused unit coverage) that drive
+  `HistoryDomainEvent` inserts for plain/loading/wait/background cells and
+  assert the resulting `HistoryState` records.
+- Confirm there are no remaining `history_record_from_cell` call sites for
+  these variants; remove or document any unavoidable leftovers.
+- Update this file with findings and link any follow-up TODOs uncovered during
+  testing.
+
 ## References
 - `codex-rs/tui/HISTORY_CELLS_PLAN.md` – Step 3, Event Pipeline Consolidation
   Plan (Phase C – wave 1).

@@ -30,6 +30,22 @@
 - Documentation update (HISTORY_CELLS_PLAN.md Step 6) noting completion and
   instructions for removing cell-local caches.
 
+## Status (2025-09-27)
+- Prerequisites outstanding: exec/assistant/diff domain-event migrations still
+  mutate cells directly, so this cache must remain on hold until those flows
+  emit `HistoryDomainEvent`s.
+- Current work-in-progress skeletons: none.
+
+## Next Steps for Agent (Design Spike)
+- Draft a lightweight design doc or code comments outlining cache key shapes,
+  invalidation triggers, and integration points with `HistoryRenderState`.
+- Explore adding feature-gated scaffolding (e.g., new module with TODOs) without
+  altering existing rendering behavior.
+- Identify instrumentation needs and note open dependencies on ongoing
+  migrations.
+- Update this file with findings and explicitly list blockers before attempting
+  implementation.
+
 ## References
 - `codex-rs/tui/HISTORY_CELLS_PLAN.md` – Step 6 renderer cache design sketch.
 - `codex-rs/tui/src/chatwidget/history_render.rs` – existing memoization hooks.
