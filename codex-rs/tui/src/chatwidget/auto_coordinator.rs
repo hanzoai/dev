@@ -198,7 +198,7 @@ fn request_coordinator_decision(
     client: &ModelClient,
     developer_intro: &str,
     schema: &Value,
-    mut conversation: Vec<ResponseItem>,
+    conversation: Vec<ResponseItem>,
 ) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
     const MAX_ATTEMPTS: usize = 5;
     for attempt in 0..MAX_ATTEMPTS {
