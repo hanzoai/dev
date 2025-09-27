@@ -99,7 +99,9 @@ Status legend: ✅ complete (semantic deterministic state ready), ⏳ still need
 - **Needed:** emit `PatchRecord` entries in `HistoryState`, render from the recorded metadata, and retire the cached per-width line buffer.
 
 ### ⏳ Exec Commands – `ExecCell`
-- **Status:** [~] `ExecRecord` lives in `HistoryState`, but rendering still depends on the legacy `ExecCell` caches.
+- **Status:** [~] `ExecRecord` lives in `HistoryState`, but rendering still depends on the legacy `ExecCell` caches. Streaming stdout/stderr updates now emit
+  `HistoryDomainEvent::UpdateExecStream` so `HistoryState` remains the source of
+  truth for in-flight commands.
 - **Current:** command metadata, layout caches, and wait state remain coupled to the UI struct instead of the serialized record.
 - **Decision:** keep those caches energized until the Step 6 renderer cache is available; otherwise exec redraws regressed by >2× during testing.
 - **Needed:** read/write `ExecRecord` via a dedicated `history_cell/exec.rs`, and move per-width layout caches into the renderer layer once the shared cache exists.

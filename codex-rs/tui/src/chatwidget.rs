@@ -4412,8 +4412,10 @@ impl ChatWidget<'_> {
                 index: record_index,
                 record: domain_record,
             }) {
-                HistoryMutation::Inserted { id, .. } => {
-                    self.assign_history_id(&mut cell, id);
+                HistoryMutation::Inserted { id, record, .. } => {
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     Some(id)
                 }
                 _ => None,
@@ -4427,8 +4429,10 @@ impl ChatWidget<'_> {
                     record,
                 })
             {
-                HistoryMutation::Inserted { id, .. } => {
-                    self.assign_history_id(&mut cell, id);
+                HistoryMutation::Inserted { id, record, .. } => {
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     Some(id)
                 }
                 _ => None,
@@ -4494,28 +4498,82 @@ impl ChatWidget<'_> {
         pos
     }
 
+    fn hydrate_cell_from_record(
+        &self,
+        cell: &mut Box<dyn HistoryCell>,
+        record: &HistoryRecord,
+    ) -> bool {
+        match record {
+            HistoryRecord::PlainMessage(state) => {
+                if let Some(plain) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::PlainHistoryCell>()
+                {
+                    *plain.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::WaitStatus(state) => {
+                if let Some(wait) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::WaitStatusCell>()
+                {
+                    *wait.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::Loading(state) => {
+                if let Some(loading) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::LoadingCell>()
+                {
+                    *loading.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::BackgroundEvent(state) => {
+                if let Some(background) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::BackgroundEventCell>()
+                {
+                    *background.state_mut() = state.clone();
+                    return true;
+                }
+            }
+            HistoryRecord::Exec(state) => {
+                if let Some(exec) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::ExecCell>()
+                {
+                    exec.sync_from_record(state);
+                    return true;
+                }
+            }
+            HistoryRecord::AssistantStream(state) => {
+                if let Some(stream) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::StreamingContentCell>()
+                {
+                    stream.update_from_state(state.clone(), &self.config);
+                    return true;
+                }
+            }
+            HistoryRecord::RateLimits(state) => {
+                if let Some(rate_limits) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::RateLimitsCell>()
+                {
+                    *rate_limits.record_mut() = state.clone();
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     fn assign_history_id(&self, cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
-        if let Some(plain) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::PlainHistoryCell>()
-        {
-            plain.state_mut().id = id;
-        } else if let Some(wait) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::WaitStatusCell>()
-        {
-            wait.state_mut().id = id;
-        } else if let Some(loading) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::LoadingCell>()
-        {
-            loading.state_mut().id = id;
-        } else if let Some(background) = cell
-            .as_any_mut()
-            .downcast_mut::<crate::history_cell::BackgroundEventCell>()
-        {
-            background.state_mut().id = id;
-        } else if let Some(tool_call) = cell
+        if let Some(tool_call) = cell
             .as_any_mut()
             .downcast_mut::<crate::history_cell::ToolCallCell>()
         {
@@ -4803,11 +4861,20 @@ impl ChatWidget<'_> {
         });
 
         if let Some(id) = match mutation {
-            HistoryMutation::Replaced { id, .. } => Some(id),
-            HistoryMutation::Inserted { id, .. } => Some(id),
+            HistoryMutation::Replaced { id, record, .. } => {
+                if !self.hydrate_cell_from_record(&mut cell, &record) {
+                    self.assign_history_id(&mut cell, id);
+                }
+                Some(id)
+            }
+            HistoryMutation::Inserted { id, record, .. } => {
+                if !self.hydrate_cell_from_record(&mut cell, &record) {
+                    self.assign_history_id(&mut cell, id);
+                }
+                Some(id)
+            }
             _ => None,
         } {
-            self.assign_history_id(&mut cell, id);
             if idx < self.history_cell_ids.len() {
                 self.history_cell_ids[idx] = Some(id);
             }
@@ -4829,27 +4896,31 @@ impl ChatWidget<'_> {
 
         match (record, self.record_index_for_cell(idx)) {
             (Some(record), Some(record_idx)) => {
-                if let HistoryMutation::Replaced { id, .. } = self
+                if let HistoryMutation::Replaced { id, record, .. } = self
                     .history_state
                     .apply_event(HistoryEvent::Replace {
                         index: record_idx,
                         record,
                     })
                 {
-                    self.assign_history_id(&mut cell, id);
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     maybe_id = Some(id);
                 }
             }
             (Some(record), None) => {
                 let record_idx = self.record_index_for_position(idx);
-                if let HistoryMutation::Inserted { id, .. } = self
+                if let HistoryMutation::Inserted { id, record, .. } = self
                     .history_state
                     .apply_event(HistoryEvent::Insert {
                         index: record_idx,
                         record,
                     })
                 {
-                    self.assign_history_id(&mut cell, id);
+                    if !self.hydrate_cell_from_record(&mut cell, &record) {
+                        self.assign_history_id(&mut cell, id);
+                    }
                     maybe_id = Some(id);
                 }
             }
@@ -6907,17 +6978,50 @@ impl ChatWidget<'_> {
                 let call_id = ExecCallId(ev.call_id.clone());
                 if let Some(running) = self.exec.running_commands.get_mut(&call_id) {
                     let chunk = String::from_utf8_lossy(&ev.chunk).to_string();
-                    match ev.stream {
-                        ExecOutputStream::Stdout => running.stdout.push_str(&chunk),
-                        ExecOutputStream::Stderr => running.stderr.push_str(&chunk),
-                    }
+                    let (stdout_chunk, stderr_chunk) = match ev.stream {
+                        ExecOutputStream::Stdout => {
+                            let offset = running.stdout.len();
+                            running.stdout.push_str(&chunk);
+                            (
+                                Some(crate::history::state::ExecStreamChunk {
+                                    offset,
+                                    content: chunk.clone(),
+                                }),
+                                None,
+                            )
+                        }
+                        ExecOutputStream::Stderr => {
+                            let offset = running.stderr.len();
+                            running.stderr.push_str(&chunk);
+                            (
+                                None,
+                                Some(crate::history::state::ExecStreamChunk {
+                                    offset,
+                                    content: chunk.clone(),
+                                }),
+                            )
+                        }
+                    };
                     if let Some(idx) = running.history_index {
-                        if idx < self.history_cells.len() {
-                            if let Some(exec) = self.history_cells[idx]
-                                .as_any_mut()
-                                .downcast_mut::<history_cell::ExecCell>()
-                            {
-                                exec.update_stream_preview(&running.stdout, &running.stderr);
+                        let mutation = self.history_state.apply_domain_event(
+                            HistoryDomainEvent::UpdateExecStream {
+                                index: idx,
+                                stdout_chunk,
+                                stderr_chunk,
+                            },
+                        );
+                        if let HistoryMutation::Replaced {
+                            record: HistoryRecord::Exec(exec_record),
+                            ..
+                        } = mutation
+                        {
+                            if idx < self.history_cells.len() {
+                                if let Some(exec) = self.history_cells[idx]
+                                    .as_any_mut()
+                                    .downcast_mut::<history_cell::ExecCell>()
+                                {
+                                    exec.sync_from_record(&exec_record);
+                                }
                             }
                         }
                     }
@@ -7357,12 +7461,19 @@ impl ChatWidget<'_> {
                 if tool_name == "wait" && success {
                     let target = wait_target_from_params(params_string.as_ref(), &call_id);
                     let wait_cell = history_cell::new_completed_wait_tool_call(target, duration);
+                    let wait_state = wait_cell.state().clone();
                     if let Some(idx) = resolved_idx {
-                        self.history_replace_at(idx, Box::new(wait_cell));
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(wait_cell),
+                            HistoryDomainRecord::WaitStatus(wait_state),
+                        );
                     } else {
-                        let _ = self.history_insert_with_key_global(
+                        let _ = self.history_insert_with_key_global_tagged(
                             Box::new(wait_cell),
                             ok,
+                            "untagged",
+                            Some(HistoryDomainRecord::WaitStatus(wait_state)),
                         );
                     }
                     self.remove_background_completion_message(&call_id);
@@ -7383,7 +7494,12 @@ impl ChatWidget<'_> {
                     );
 
                     if let Some(idx) = resolved_idx {
-                        self.history_replace_at(idx, Box::new(wait_cancelled_cell));
+                        let record = HistoryDomainRecord::Plain(wait_cancelled_cell.state().clone());
+                        self.history_replace_with_record(
+                            idx,
+                            Box::new(wait_cancelled_cell),
+                            record,
+                        );
                     } else {
                         let _ = self.history_insert_plain_cell_with_key(
                             wait_cancelled_cell,
@@ -11581,9 +11697,11 @@ impl ChatWidget<'_> {
                     id,
                     Self::debug_fmt_order_key(key)
                 );
-                let new_idx = self.history_insert_with_key_global(
-                    Box::new(history_cell::new_streaming_content(state, &self.config)),
+                let new_idx = self.history_insert_with_key_global_tagged(
+                    Box::new(history_cell::new_streaming_content(state.clone(), &self.config)),
                     key,
+                    "stream-begin",
+                    Some(HistoryDomainRecord::AssistantStream(state)),
                 );
                 tracing::debug!(
                     "history.new StreamingContentCell at idx={} id={:?}",
@@ -11711,9 +11829,31 @@ impl ChatWidget<'_> {
                 received_at: SystemTime::now(),
             })
         };
-        self
-            .history_state
-            .upsert_assistant_stream_state(stream_id, preview, delta, None);
+        let mutation = self.history_state.apply_domain_event(
+            HistoryDomainEvent::UpsertAssistantStream {
+                stream_id: stream_id.to_string(),
+                preview_markdown: preview,
+                delta,
+                metadata: None,
+            },
+        );
+
+        if let HistoryMutation::Inserted { index, record, .. }
+        | HistoryMutation::Replaced { index, record, .. } = mutation
+        {
+            if let HistoryRecord::AssistantStream(state) = record {
+                if index < self.history_cells.len() {
+                    if let Some(stream_cell) = self.history_cells[index]
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::StreamingContentCell>()
+                    {
+                        stream_cell.update_from_state(state.clone(), &self.config);
+                    }
+                } else {
+                    self.refresh_streaming_cell_for_stream_id(stream_id, state);
+                }
+            }
+        }
     }
 
     fn finalize_answer_stream_state(
@@ -15294,14 +15434,31 @@ impl ChatWidget<'_> {
                     let worktree_cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
                     tokio::spawn(async move {
-                        let default_branch = codex_core::git_worktree::detect_default_branch(&git_root)
+                    let branch_metadata =
+                        codex_core::git_worktree::load_branch_metadata(&worktree_cwd);
+                    let metadata_base = branch_metadata.as_ref().and_then(|meta| {
+                        meta.remote_ref.clone().or_else(|| {
+                            if let (Some(remote_name), Some(base_branch)) =
+                                (meta.remote_name.clone(), meta.base_branch.clone())
+                            {
+                                Some(format!("{}/{}", remote_name, base_branch))
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| meta.base_branch.clone())
+                    });
+                    let default_branch = match metadata_base {
+                        Some(value) => Some(value),
+                        None => codex_core::git_worktree::detect_default_branch(&git_root)
                             .await
                             .map(|name| name.trim().to_string())
-                            .filter(|name| !name.is_empty());
-                        let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
-                            .await
-                            .map(|name| name.trim().to_string())
-                            .filter(|name| !name.is_empty());
+                            .filter(|name| !name.is_empty()),
+                    };
+                    let current_branch = codex_core::git_info::current_branch_name(&worktree_cwd)
+                        .await
+                        .map(|name| name.trim().to_string())
+                        .filter(|name| !name.is_empty());
 
                         if let (Some(base_branch), Some(current_branch)) =
                             (default_branch, current_branch)
@@ -15499,6 +15656,17 @@ impl ChatWidget<'_> {
                     return;
                 }
             };
+            let current_base_branch = Command::new("git")
+                .current_dir(&git_root)
+                .args(["branch", "--show-current"])
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if name.is_empty() { None } else { Some(name) }
+                });
             // Determine branch name
             let task_opt = if args.trim().is_empty() {
                 None
@@ -15533,6 +15701,33 @@ impl ChatWidget<'_> {
                         0
                     }
                 };
+
+            let mut branch_metadata: Option<codex_core::git_worktree::BranchMetadata> = None;
+            match codex_core::git_worktree::ensure_local_default_remote(
+                &git_root,
+                current_base_branch.as_deref(),
+            )
+            .await
+            {
+                Ok(meta_option) => {
+                    if let Some(meta) = meta_option.clone() {
+                        if let Err(e) = codex_core::git_worktree::write_branch_metadata(&worktree, &meta).await
+                        {
+                            tx.send_background_event(format!(
+                                "`/branch` — failed to record branch metadata: {}",
+                                e
+                            ));
+                        }
+                        branch_metadata = meta_option;
+                    }
+                }
+                Err(err) => {
+                    tx.send_background_event(format!(
+                        "`/branch` — failed to configure local-default remote: {}",
+                        err
+                    ));
+                }
+            }
 
             // Attempt to set upstream for the new branch to match the source branch's upstream,
             // falling back to origin/<default> when available. Also ensure origin/HEAD is set.
@@ -15585,20 +15780,38 @@ impl ChatWidget<'_> {
             }
 
             // Build clean multi-line output as a BackgroundEvent (not streaming Answer)
+            let base_summary = branch_metadata
+                .as_ref()
+                .and_then(|meta| {
+                    if let Some(remote_ref) = meta.remote_ref.as_ref() {
+                        Some(format!("\n  Base: {remote_ref}"))
+                    } else if let (Some(remote_name), Some(base_branch)) =
+                        (meta.remote_name.as_ref(), meta.base_branch.as_ref())
+                    {
+                        Some(format!("\n  Base: {remote_name}/{base_branch}"))
+                    } else if let Some(remote_name) = meta.remote_name.as_ref() {
+                        Some(format!("\n  Base remote: {remote_name}"))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
             let msg = if let Some(task_text) = task_opt {
                 format!(
-                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Task: {task}\n  Starting task...",
+                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files{base}\n  Task: {task}\n  Starting task...",
                     used = used_branch,
                     path = worktree.display(),
                     copied = copied,
-                    task = task_text
+                    task = task_text,
+                    base = base_summary
                 )
             } else {
                 format!(
-                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files\n  Type your task when ready.",
+                    "Created worktree '{used}'\n  Path: {path}\n  Copied {copied} changed files{base}\n  Type your task when ready.",
                     used = used_branch,
                     path = worktree.display(),
-                    copied = copied
+                    copied = copied,
+                    base = base_summary
                 )
             };
             {
@@ -15689,13 +15902,59 @@ impl ChatWidget<'_> {
             .and_then(|n| n.to_str())
             .map(|name| format!(" (worktree: {})", name))
             .unwrap_or_default();
-        let branch_note = format!(
+        let default_branch_note = format!(
             "System: Working directory changed from {} to {}{}. Use {} for subsequent commands.",
             previous_cwd.display(),
             new_cwd.display(),
             worktree_hint,
             new_cwd.display()
         );
+        let branch_note = if Self::is_branch_worktree_path(&new_cwd) {
+            if let Some(meta) = codex_core::git_worktree::load_branch_metadata(&new_cwd) {
+                let branch_name = new_cwd
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| new_cwd.display().to_string());
+                let base_descriptor = meta
+                    .remote_ref
+                    .clone()
+                    .or_else(|| {
+                        if let (Some(remote_name), Some(base_branch)) =
+                            (meta.remote_name.clone(), meta.base_branch.clone())
+                        {
+                            Some(format!("{}/{}", remote_name, base_branch))
+                        } else {
+                            None
+                        }
+                    })
+                    .or(meta.base_branch.clone())
+                    .unwrap_or_else(|| codex_core::git_worktree::LOCAL_DEFAULT_REMOTE.to_string());
+                let mut note = format!(
+                    "System: Working directory changed from {} to {}{}. You are now working on branch '{}' checked out at {}. Compare against '{}' for the parent branch and run all commands from this directory.",
+                    previous_cwd.display(),
+                    new_cwd.display(),
+                    worktree_hint,
+                    branch_name,
+                    new_cwd.display(),
+                    base_descriptor
+                );
+                if let (Some(remote_name), Some(remote_url)) =
+                    (meta.remote_name.as_ref(), meta.remote_url.as_ref())
+                {
+                    note.push_str(&format!(
+                        " The remote '{}' points to {}.",
+                        remote_name,
+                        remote_url
+                    ));
+                }
+                note
+            } else {
+                default_branch_note.clone()
+            }
+        } else {
+            default_branch_note.clone()
+        };
         self.queue_agent_note(branch_note);
 
         let op = Op::ConfigureSession {

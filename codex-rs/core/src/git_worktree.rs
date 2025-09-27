@@ -1,7 +1,10 @@
+use base64::Engine;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::fs as stdfs;
 use std::path::{Path, PathBuf};
-use tokio::process::Command;
 use tokio::fs::OpenOptions;
+use tokio::process::Command;
 
 /// Sanitize a string to be used as a single git refname component.
 ///
@@ -47,6 +50,21 @@ pub fn generate_branch_name_from_task(task: Option<&str>) -> String {
     // Fallback: timestamped id
     let ts = Utc::now().format("%Y%m%d-%H%M%S");
     format!("code-branch-{}", ts)
+}
+
+pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
+const BRANCH_METADATA_DIR: &str = "_branch-meta";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BranchMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_ref: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
 }
 
 /// Resolve the git repository root (top-level) for the given cwd.
@@ -157,6 +175,145 @@ async fn record_worktree_in_session(git_root: &Path, worktree_path: &Path) {
         let line = format!("{}\t{}\n", git_root.display(), worktree_path.display());
         let _ = tokio::io::AsyncWriteExt::write_all(&mut f, line.as_bytes()).await;
     }
+}
+
+pub async fn ensure_local_default_remote(
+    git_root: &Path,
+    base_branch: Option<&str>,
+) -> Result<Option<BranchMetadata>, String> {
+    let remote_name = LOCAL_DEFAULT_REMOTE;
+    let canonical_root = tokio::fs::canonicalize(git_root)
+        .await
+        .unwrap_or_else(|_| git_root.to_path_buf());
+    let remote_url = canonical_root.to_string_lossy().to_string();
+
+    let remote_check = Command::new("git")
+        .current_dir(git_root)
+        .args(["remote", "get-url", remote_name])
+        .output()
+        .await;
+
+    match remote_check {
+        Ok(out) if out.status.success() => {
+            let existing = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if existing != remote_url {
+                let update = Command::new("git")
+                    .current_dir(git_root)
+                    .args(["remote", "set-url", remote_name, &remote_url])
+                    .output()
+                    .await
+                    .map_err(|e| format!("Failed to set {remote_name} URL: {e}"))?;
+                if !update.status.success() {
+                    let stderr = String::from_utf8_lossy(&update.stderr).trim().to_string();
+                    return Err(format!("Failed to set {remote_name} URL: {stderr}"));
+                }
+            }
+        }
+        _ => {
+            let add = Command::new("git")
+                .current_dir(git_root)
+                .args(["remote", "add", remote_name, &remote_url])
+                .output()
+                .await
+                .map_err(|e| format!("Failed to add {remote_name}: {e}"))?;
+            if !add.status.success() {
+                let stderr = String::from_utf8_lossy(&add.stderr).trim().to_string();
+                return Err(format!("Failed to add {remote_name}: {stderr}"));
+            }
+        }
+    }
+
+    let base_branch_clean = base_branch
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && *s != "HEAD")
+        .map(|s| s.to_string());
+    let base_branch_clean = match base_branch_clean {
+        Some(value) => Some(value),
+        None => detect_default_branch(git_root).await,
+    };
+
+    let mut metadata = BranchMetadata {
+        base_branch: base_branch_clean.clone(),
+        remote_name: Some(remote_name.to_string()),
+        remote_ref: None,
+        remote_url: Some(remote_url),
+    };
+
+    if let Some(base) = base_branch_clean {
+        let commit = Command::new("git")
+            .current_dir(git_root)
+            .args(["rev-parse", "--verify", &base])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to resolve base branch {base}: {e}"))?;
+        if commit.status.success() {
+            let sha = String::from_utf8_lossy(&commit.stdout).trim().to_string();
+            if !sha.is_empty() {
+                let remote_ref = format!("refs/remotes/{remote_name}/{base}");
+                let update = Command::new("git")
+                    .current_dir(git_root)
+                    .args(["update-ref", &remote_ref, &sha])
+                    .output()
+                    .await
+                    .map_err(|e| format!("Failed to update {remote_ref}: {e}"))?;
+                if update.status.success() {
+                    metadata.remote_ref = Some(format!("{remote_name}/{base}"));
+                }
+            }
+        }
+    }
+
+    Ok(Some(metadata))
+}
+
+fn canonical_worktree_path(worktree_path: &Path) -> Option<PathBuf> {
+    stdfs::canonicalize(worktree_path)
+        .ok()
+        .or_else(|| Some(worktree_path.to_path_buf()))
+}
+
+fn metadata_file_path(worktree_path: &Path) -> Option<PathBuf> {
+    let canonical = canonical_worktree_path(worktree_path)?;
+    let mut base = dirs::home_dir()?;
+    base = base
+        .join(".code")
+        .join("working")
+        .join(BRANCH_METADATA_DIR);
+    let key = canonical.to_string_lossy();
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key.as_bytes());
+    Some(base.join(encoded).with_extension("json"))
+}
+
+pub async fn write_branch_metadata(
+    worktree_path: &Path,
+    metadata: &BranchMetadata,
+) -> Result<(), String> {
+    let Some(path) = metadata_file_path(worktree_path) else { return Ok(()); };
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Failed to prepare branch metadata directory: {e}"))?;
+    }
+    let serialised = serde_json::to_vec_pretty(metadata)
+        .map_err(|e| format!("Failed to serialise branch metadata: {e}"))?;
+    let legacy_path = worktree_path.join(".codex-branch.json");
+    let _ = tokio::fs::remove_file(&legacy_path).await;
+    tokio::fs::write(&path, serialised)
+        .await
+        .map_err(|e| format!("Failed to write branch metadata: {e}"))
+}
+
+pub fn load_branch_metadata(worktree_path: &Path) -> Option<BranchMetadata> {
+    if let Some(path) = metadata_file_path(worktree_path) {
+        if let Ok(bytes) = stdfs::read(&path) {
+            if let Ok(parsed) = serde_json::from_slice(&bytes) {
+                return Some(parsed);
+            }
+        }
+    }
+    let legacy_path = worktree_path.join(".codex-branch.json");
+    let bytes = stdfs::read(legacy_path).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Ensure a remote named `origin` exists. If it's missing, choose a likely
