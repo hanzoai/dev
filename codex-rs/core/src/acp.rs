@@ -9,7 +9,6 @@ use mcp_types::CallToolResult;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
 use uuid::Uuid;
 
 use crate::config_types::{ClientTools, McpToolId};
@@ -60,7 +59,6 @@ impl<'a> AcpFileSystem<'a> {
                 &tool.mcp_server,
                 &tool.tool_name,
                 Some(serde_json::to_value(arguments).unwrap_or_default()),
-                Some(Duration::from_secs(15)),
             )
             .await?;
 
@@ -98,7 +96,6 @@ impl<'a> AcpFileSystem<'a> {
                 &tool.mcp_server,
                 &tool.tool_name,
                 Some(serde_json::to_value(arguments).unwrap_or_default()),
-                Some(Duration::from_secs(15)),
             )
             .await?;
 
@@ -175,7 +172,6 @@ pub(crate) async fn request_permission(
             &permission_tool.mcp_server,
             &permission_tool.tool_name,
             Some(serde_json::to_value(arguments).unwrap_or_default()),
-            None,
         )
         .await?;
 

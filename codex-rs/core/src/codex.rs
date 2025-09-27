@@ -2389,10 +2389,9 @@ impl Session {
         server: &str,
         tool: &str,
         arguments: Option<serde_json::Value>,
-        timeout: Option<Duration>,
     ) -> anyhow::Result<CallToolResult> {
         self.mcp_connection_manager
-            .call_tool(server, tool, arguments, timeout)
+            .call_tool(server, tool, arguments)
             .await
     }
 
@@ -2976,16 +2975,21 @@ async fn submission_loop(
                     }
                 }
 
-                let (mcp_connection_manager, failed_clients) =
-                    match McpConnectionManager::new(config.mcp_servers.clone(), excluded_tools).await {
-                        Ok((mgr, failures)) => (mgr, failures),
-                        Err(e) => {
-                            let message = format!("Failed to create MCP connection manager: {e:#}");
-                            error!("{message}");
-                            mcp_connection_errors.push(message);
-                            (McpConnectionManager::default(), Default::default())
-                        }
-                    };
+                let (mcp_connection_manager, failed_clients) = match McpConnectionManager::new(
+                    config.mcp_servers.clone(),
+                    config.use_experimental_use_rmcp_client,
+                    excluded_tools,
+                )
+                .await
+                {
+                    Ok((mgr, failures)) => (mgr, failures),
+                    Err(e) => {
+                        let message = format!("Failed to create MCP connection manager: {e:#}");
+                        error!("{message}");
+                        mcp_connection_errors.push(message);
+                        (McpConnectionManager::default(), Default::default())
+                    }
+                };
 
                 // Surface individual client start-up failures to the user.
                 if !failed_clients.is_empty() {
@@ -4847,10 +4851,8 @@ async fn handle_function_call(
         _ => {
             match sess.mcp_connection_manager.parse_tool_name(&name) {
                 Some((server, tool_name)) => {
-                    // TODO(mbolin): Determine appropriate timeout for tool call.
-                    let timeout = None;
-                    handle_mcp_tool_call(sess, &ctx, server, tool_name, arguments, timeout)
-                    .await
+                    // Tool timeouts are derived from per-server config; no per-call override here.
+                    handle_mcp_tool_call(sess, &ctx, server, tool_name, arguments).await
                 }
                 None => {
                     // Unknown function: reply with structured failure so the model can adapt.

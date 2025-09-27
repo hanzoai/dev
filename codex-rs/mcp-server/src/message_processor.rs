@@ -25,7 +25,7 @@ use codex_protocol::mcp_protocol::ConversationId;
 use codex_common::model_presets::{builtin_model_presets, ModelPreset};
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
-use codex_core::config_types::{ClientTools, McpServerConfig, ReasoningEffort};
+use codex_core::config_types::{ClientTools, McpServerConfig, McpServerTransportConfig, ReasoningEffort};
 use codex_core::config::Config;
 use codex_core::default_client::USER_AGENT_SUFFIX;
 use codex_core::default_client::get_codex_user_agent_default;
@@ -1447,10 +1447,13 @@ fn convert_mcp_servers(
                 map.insert(
                     name,
                     McpServerConfig {
-                        command: command.display().to_string(),
-                        args,
-                        env: env_map,
-                        startup_timeout_ms: None,
+                        transport: McpServerTransportConfig::Stdio {
+                            command: command.display().to_string(),
+                            args,
+                            env: env_map,
+                        },
+                        startup_timeout_sec: None,
+                        tool_timeout_sec: None,
                     },
                 );
             }
