@@ -132,6 +132,9 @@ pub(crate) enum AppEvent {
         thoughts: String,
         prompt: Option<String>,
     },
+    AutoCoordinatorThinking {
+        delta: String,
+    },
     AutoCoordinatorCountdown {
         countdown_id: u64,
         seconds_left: u8,

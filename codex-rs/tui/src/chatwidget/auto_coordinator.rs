@@ -126,6 +126,7 @@ fn run_auto_loop(
                 &developer_intro,
                 &schema,
                 conv,
+                &app_event_tx,
             ) {
                 Ok((status, thoughts, prompt_opt)) => {
                     let event = AppEvent::AutoCoordinatorDecision {
@@ -199,6 +200,7 @@ fn request_coordinator_decision(
     developer_intro: &str,
     schema: &Value,
     mut conversation: Vec<ResponseItem>,
+    app_event_tx: &AppEventSender,
 ) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
     let mut prompt = Prompt::default();
     prompt.store = true;
@@ -215,7 +217,7 @@ fn request_coordinator_decision(
         .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
     prompt.model_family_override = Some(family);
 
-    let raw = request_decision(runtime, client, &prompt)?;
+    let raw = request_decision(runtime, client, &prompt, app_event_tx)?;
     let (decision, value) = parse_decision(&raw)?;
     debug!("[Auto coordinator] model decision: {:?}", value);
 
@@ -249,8 +251,10 @@ fn request_decision(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
     prompt: &Prompt,
+    app_event_tx: &AppEventSender,
 ) -> Result<String> {
-    runtime.block_on(async {
+    let tx = app_event_tx.clone();
+    runtime.block_on(async move {
         let mut stream = client.stream(prompt).await?;
         let mut out = String::new();
         while let Some(ev) = stream.next().await {
@@ -264,6 +268,11 @@ fn request_decision(
                             }
                         }
                     }
+                }
+                Ok(ResponseEvent::ReasoningSummaryDelta { delta, .. })
+                | Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                    let message = strip_role_prefix(&delta).to_string();
+                    tx.send(AppEvent::AutoCoordinatorThinking { delta: message });
                 }
                 Ok(ResponseEvent::Completed { .. }) => break,
                 Err(err) => return Err(anyhow!("model stream error: {err}")),
