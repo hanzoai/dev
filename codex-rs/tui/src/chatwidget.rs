@@ -209,6 +209,8 @@ use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
 use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
+    HistoryDomainEvent,
+    HistoryDomainRecord,
     AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
@@ -1255,20 +1257,25 @@ impl ChatWidget<'_> {
     /// If `id_for_replace` is provided and we have a prior index for it, replace in place.
     fn push_system_cell(
         &mut self,
-        cell: impl HistoryCell + 'static,
+        cell: Box<dyn HistoryCell>,
         placement: SystemPlacement,
         id_for_replace: Option<String>,
         order: Option<&codex_core::protocol::OrderMeta>,
         tag: &'static str,
+        record: Option<HistoryDomainRecord>,
     ) {
         if let Some(id) = id_for_replace.as_ref() {
             if let Some(&idx) = self.system_cell_by_id.get(id) {
-                self.history_replace_at(idx, Box::new(cell));
+                if let Some(record) = record.clone() {
+                    self.history_replace_with_record(idx, cell, record);
+                } else {
+                    self.history_replace_at(idx, cell);
+                }
                 return;
             }
         }
         let key = self.system_order_key(placement, order);
-        let pos = self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, None);
+        let pos = self.history_insert_with_key_global_tagged(cell, key, tag, record);
         if let Some(id) = id_for_replace {
             self.system_cell_by_id.insert(id, pos);
         }
@@ -4239,7 +4246,7 @@ impl ChatWidget<'_> {
         cell: Box<dyn HistoryCell>,
         key: OrderKey,
         tag: &'static str,
-        record: Option<HistoryRecord>,
+        record: Option<HistoryDomainRecord>,
     ) -> usize {
         #[cfg(debug_assertions)]
         {
@@ -4349,8 +4356,19 @@ impl ChatWidget<'_> {
 
         let mut cell = cell;
 
-        let record = record.or_else(|| self.history_record_from_cell(cell.as_ref()));
-        let maybe_id = if let Some(record) = record {
+        let maybe_id = if let Some(domain_record) = record {
+            let record_index = self.record_index_for_position(pos);
+            match self.history_state.apply_domain_event(HistoryDomainEvent::Insert {
+                index: record_index,
+                record: domain_record,
+            }) {
+                HistoryMutation::Inserted { id, .. } => {
+                    self.assign_history_id(&mut cell, id);
+                    Some(id)
+                }
+                _ => None,
+            }
+        } else if let Some(record) = self.history_record_from_cell(cell.as_ref()) {
             let record_index = self.record_index_for_position(pos);
             match self
                 .history_state
@@ -4640,7 +4658,7 @@ impl ChatWidget<'_> {
         key: OrderKey,
         tag: &'static str,
     ) -> usize {
-        let record = HistoryRecord::PlainMessage(cell.state().clone());
+        let record = HistoryDomainRecord::Plain(cell.state().clone());
         self.history_insert_with_key_global_tagged(Box::new(cell), key, tag, Some(record))
     }
 
@@ -4681,12 +4699,15 @@ impl ChatWidget<'_> {
                 }
             }
         };
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             system_placement,
             None,
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -4710,6 +4731,42 @@ impl ChatWidget<'_> {
     fn history_push_prompt_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_prompt();
         let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "prompt", None);
+    }
+
+    fn history_replace_with_record(
+        &mut self,
+        idx: usize,
+        mut cell: Box<dyn HistoryCell>,
+        record: HistoryDomainRecord,
+    ) {
+        if idx >= self.history_cells.len() {
+            return;
+        }
+
+        let record_idx = self
+            .record_index_for_cell(idx)
+            .unwrap_or_else(|| self.record_index_for_position(idx));
+
+        let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::Replace {
+            index: record_idx,
+            record,
+        });
+
+        if let Some(id) = match mutation {
+            HistoryMutation::Replaced { id, .. } => Some(id),
+            HistoryMutation::Inserted { id, .. } => Some(id),
+            _ => None,
+        } {
+            self.assign_history_id(&mut cell, id);
+            if idx < self.history_cell_ids.len() {
+                self.history_cell_ids[idx] = Some(id);
+            }
+        }
+
+        self.history_cells[idx] = cell;
+        self.invalidate_height_cache();
+        self.request_redraw();
+        self.refresh_explore_trailing_flags();
     }
 
     fn history_replace_at(&mut self, idx: usize, mut cell: Box<dyn HistoryCell>) {
@@ -6671,7 +6728,7 @@ impl ChatWidget<'_> {
                             Box::new(cell),
                             key,
                             "rate-limits",
-                            Some(HistoryRecord::RateLimits(record)),
+                            Some(HistoryDomainRecord::RateLimits(record)),
                         );
                         self.request_redraw();
                     }
@@ -7382,12 +7439,15 @@ impl ChatWidget<'_> {
                 };
                 let id_for_replace = Some(id.clone());
                 let message_clone = message.clone();
+                let cell = history_cell::new_background_event(message_clone);
+                let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
                 self.push_system_cell(
-                    history_cell::new_background_event(message_clone),
+                    Box::new(cell),
                     placement,
                     id_for_replace,
                     event.order.as_ref(),
                     "background",
+                    Some(record),
                 );
                 // If we inserted during streaming, keep the reasoning ellipsis visible.
                 self.restore_reasoning_in_progress_if_streaming();
@@ -10321,12 +10381,14 @@ impl ChatWidget<'_> {
         }
 
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort);
         self.push_system_cell(
-            history_cell::new_model_output(&self.config.model, self.config.model_reasoning_effort),
+            Box::new(cell),
             placement,
             Some("ui:model".to_string()),
             None,
             "system",
+            None,
         );
 
         self.request_redraw();
@@ -10561,12 +10623,14 @@ impl ChatWidget<'_> {
 
         // Add status message to history (replaceable system notice)
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_reasoning_output(&new_effort);
         self.push_system_cell(
-            history_cell::new_reasoning_output(&new_effort),
+            Box::new(cell),
             placement,
             Some("ui:reasoning".to_string()),
             None,
             "system",
+            None,
         );
     }
 
@@ -10742,12 +10806,15 @@ impl ChatWidget<'_> {
         };
         let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             placement,
             Some("ui:theme".to_string()),
             None,
             "background",
+            Some(record),
         );
     }
 
@@ -10768,12 +10835,15 @@ impl ChatWidget<'_> {
         // Confirmation message (replaceable system notice)
         let message = format!("Spinner changed to {}", spinner_name);
         let placement = self.ui_placement_for_now();
+        let cell = history_cell::new_background_event(message);
+        let record = HistoryDomainRecord::BackgroundEvent(cell.state().clone());
         self.push_system_cell(
-            history_cell::new_background_event(message),
+            Box::new(cell),
             placement,
             Some("ui:spinner".to_string()),
             None,
             "background",
+            Some(record),
         );
     }
 
