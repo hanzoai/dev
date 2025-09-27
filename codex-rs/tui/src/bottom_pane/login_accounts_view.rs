@@ -14,6 +14,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 
+use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
@@ -117,6 +118,11 @@ impl LoginAccountsState {
     }
 
     fn reload_accounts(&mut self) {
+        let previously_selected_id = self
+            .accounts
+            .get(self.selected)
+            .map(|row| row.id.clone());
+
         match auth_accounts::list_accounts(&self.codex_home) {
             Ok(raw_accounts) => {
                 let active_id = auth_accounts::get_active_account_id(&self.codex_home).ok().flatten();
@@ -125,10 +131,33 @@ impl LoginAccountsState {
                     .into_iter()
                     .map(|account| AccountRow::from(account, active_id.as_deref()))
                     .collect();
+
+                self.accounts.sort_by(|a, b| {
+                    let priority = account_mode_priority;
+                    let a_priority = priority(a.mode);
+                    let b_priority = priority(b.mode);
+                    a_priority
+                        .cmp(&b_priority)
+                        .then_with(|| a.label.to_ascii_lowercase().cmp(&b.label.to_ascii_lowercase()))
+                        .then_with(|| a.label.cmp(&b.label))
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+
+                let mut selected_idx = previously_selected_id
+                    .and_then(|id| self.accounts.iter().position(|row| row.id == id))
+                    .or_else(|| {
+                        active_id
+                            .as_ref()
+                            .and_then(|id| self.accounts.iter().position(|row| &row.id == id))
+                    });
+
                 if self.accounts.is_empty() {
                     self.selected = 0;
-                } else if self.selected >= self.accounts.len() {
-                    self.selected = self.accounts.len().saturating_sub(1);
+                } else {
+                    if selected_idx.is_none() {
+                        selected_idx = Some(0);
+                    }
+                    self.selected = selected_idx.unwrap_or(0).min(self.accounts.len() - 1);
                 }
             }
             Err(err) => {
@@ -832,23 +861,12 @@ impl LoginAddAccountState {
 
 impl AccountRow {
     fn from(account: StoredAccount, active_id: Option<&str>) -> Self {
-        let label = match account.mode {
-            AuthMode::ApiKey => account
-                .openai_api_key
-                .as_ref()
-                .map(|key| format!("API key (…{})", suffix(key)))
-                .unwrap_or_else(|| "API key".to_string()),
-            AuthMode::ChatGPT => account
-                .tokens
-                .as_ref()
-                .and_then(|t| t.id_token.email.clone())
-                .map(|email| format!("ChatGPT ({email})"))
-                .unwrap_or_else(|| "ChatGPT".to_string()),
-        };
-
+        let id = account.id.clone();
+        let label = account_display_label(&account);
+        let mode = account.mode;
         let mut detail_parts: Vec<String> = Vec::new();
 
-        if let AuthMode::ChatGPT = account.mode {
+        if let AuthMode::ChatGPT = mode {
             if let Some(plan) = account
                 .tokens
                 .as_ref()
@@ -868,24 +886,16 @@ impl AccountRow {
             Some(detail_parts.join(" • "))
         };
 
+        let is_active = active_id.is_some_and(|candidate| candidate == id);
+
         Self {
-            id: account.id.clone(),
+            id,
             label,
             detail,
-            mode: account.mode,
-            is_active: active_id.is_some_and(|id| id == account.id),
+            mode,
+            is_active,
         }
     }
-}
-
-fn suffix(text: &str) -> String {
-    let tail = text
-        .char_indices()
-        .rev()
-        .take(4)
-        .map(|(_, c)| c)
-        .collect::<Vec<_>>();
-    tail.into_iter().rev().collect()
 }
 
 fn format_timestamp(ts: DateTime<Utc>) -> String {

@@ -1,3 +1,4 @@
+use crate::account_label::key_suffix;
 use crate::diff_render::create_diff_summary_with_width;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::sanitize::Mode as SanitizeMode;
@@ -5632,10 +5633,7 @@ pub(crate) fn new_status_output(
                             .ok()
                             .and_then(|a| a.openai_api_key)
                             .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
-                            .map(|k| {
-                                let n = k.len().saturating_sub(4);
-                                k[n..].to_string()
-                            })
+                            .map(|k| key_suffix(&k))
                             .unwrap_or_else(|| "????".to_string());
                     lines.push(Line::from(format!("  • Method: API key (…{suffix})")));
                 }
