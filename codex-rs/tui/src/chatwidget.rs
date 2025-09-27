@@ -9441,13 +9441,10 @@ impl ChatWidget<'_> {
             while remaining > 0 {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 remaining -= 1;
-                if tx
-                    .send(AppEvent::AutoCoordinatorCountdown {
-                        countdown_id,
-                        seconds_left: remaining,
-                    })
-                    .is_err()
-                {
+                if !tx.send_with_result(AppEvent::AutoCoordinatorCountdown {
+                    countdown_id,
+                    seconds_left: remaining,
+                }) {
                     break;
                 }
             }
