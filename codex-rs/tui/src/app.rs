@@ -1614,6 +1614,21 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::AutoCoordinatorDecision { status, thoughts, prompt } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_decision(status, thoughts, prompt);
+                    }
+                }
+                AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_thinking(delta, summary_index);
+                    }
+                }
+                AppEvent::AutoCoordinatorCountdown { countdown_id, seconds_left } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_countdown(countdown_id, seconds_left);
+                    }
+                }
                 AppEvent::ShowUndoOptions { index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.show_undo_restore_options(index);
@@ -1749,6 +1764,16 @@ impl App<'_> {
                         SlashCommand::Cmd => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_project_command(command_args);
+                            }
+                        }
+                        SlashCommand::Auto => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                let goal = if command_args.is_empty() {
+                                    None
+                                } else {
+                                    Some(command_args.clone())
+                                };
+                                widget.handle_auto_command(goal);
                             }
                         }
                         SlashCommand::Status => {

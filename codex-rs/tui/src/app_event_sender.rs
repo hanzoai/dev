@@ -23,10 +23,16 @@ impl AppEventSender {
         Self { high_tx: app_event_tx.clone(), bulk_tx: app_event_tx }
     }
 
-
     /// Send an event to the app event channel. If it fails, we swallow the
     /// error and log it.
     pub(crate) fn send(&self, event: AppEvent) {
+        let _ = self.send_with_result(event);
+    }
+
+    /// Send an event while surfacing whether the channel was still connected.
+    /// Returns `true` if the event was delivered, `false` if the channel was
+    /// disconnected (already logged).
+    pub(crate) fn send_with_result(&self, event: AppEvent) -> bool {
         // Record inbound events for high-fidelity session replay.
         // Avoid double-logging Ops; those are logged at the point of submission.
         if !matches!(event, AppEvent::CodexOp(_)) {
@@ -45,8 +51,12 @@ impl AppEventSender {
         );
 
         let tx = if is_high { &self.high_tx } else { &self.bulk_tx };
-        if let Err(e) = tx.send(event) {
-            tracing::error!("failed to send event: {e}");
+        match tx.send(event) {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::error!("failed to send event: {e}");
+                false
+            }
         }
     }
 

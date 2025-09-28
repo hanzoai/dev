@@ -38,6 +38,9 @@ pub enum HistoryDomainEvent {
         index: usize,
         record: HistoryDomainRecord,
     },
+    Remove {
+        index: usize,
+    },
     UpdateExecStream {
         index: usize,
         stdout_chunk: Option<ExecStreamChunk>,
@@ -48,6 +51,12 @@ pub enum HistoryDomainEvent {
         preview_markdown: String,
         delta: Option<AssistantStreamDelta>,
         metadata: Option<MessageMetadata>,
+    },
+    UpdateExecWait {
+        index: usize,
+        total_wait: Option<Duration>,
+        wait_active: bool,
+        notes: Vec<ExecWaitNote>,
     },
 }
 
@@ -60,6 +69,11 @@ pub enum HistoryDomainRecord {
     RateLimits(RateLimitsRecord),
     Exec(ExecRecord),
     AssistantStream(AssistantStreamState),
+    Patch(PatchRecord),
+    Image(ImageRecord),
+    Diff(DiffRecord),
+    Explore(ExploreRecord),
+    Notice(NoticeRecord),
 }
 
 impl From<PlainMessageState> for HistoryDomainRecord {
@@ -104,6 +118,36 @@ impl From<AssistantStreamState> for HistoryDomainRecord {
     }
 }
 
+impl From<PatchRecord> for HistoryDomainRecord {
+    fn from(state: PatchRecord) -> Self {
+        HistoryDomainRecord::Patch(state)
+    }
+}
+
+impl From<ImageRecord> for HistoryDomainRecord {
+    fn from(state: ImageRecord) -> Self {
+        HistoryDomainRecord::Image(state)
+    }
+}
+
+impl From<DiffRecord> for HistoryDomainRecord {
+    fn from(state: DiffRecord) -> Self {
+        HistoryDomainRecord::Diff(state)
+    }
+}
+
+impl From<ExploreRecord> for HistoryDomainRecord {
+    fn from(state: ExploreRecord) -> Self {
+        HistoryDomainRecord::Explore(state)
+    }
+}
+
+impl From<NoticeRecord> for HistoryDomainRecord {
+    fn from(state: NoticeRecord) -> Self {
+        HistoryDomainRecord::Notice(state)
+    }
+}
+
 impl HistoryDomainRecord {
     fn into_history_record(self) -> HistoryRecord {
         match self {
@@ -135,6 +179,26 @@ impl HistoryDomainRecord {
                 state.id = HistoryId::ZERO;
                 HistoryRecord::AssistantStream(state)
             }
+            HistoryDomainRecord::Patch(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Patch(state)
+            }
+            HistoryDomainRecord::Image(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Image(state)
+            }
+            HistoryDomainRecord::Diff(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Diff(state)
+            }
+            HistoryDomainRecord::Explore(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Explore(state)
+            }
+            HistoryDomainRecord::Notice(mut state) => {
+                state.id = HistoryId::ZERO;
+                HistoryRecord::Notice(state)
+            }
         }
     }
 }
@@ -143,9 +207,21 @@ impl HistoryDomainRecord {
 pub struct PlainMessageState {
     pub id: HistoryId,
     pub role: PlainMessageRole,
+    pub kind: PlainMessageKind,
     pub header: Option<MessageHeader>,
     pub lines: Vec<MessageLine>,
     pub metadata: Option<MessageMetadata>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlainMessageKind {
+    Plain,
+    User,
+    Assistant,
+    Tool,
+    Error,
+    Background,
+    Notice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -403,6 +479,10 @@ pub struct ExecRecord {
     pub stdout_chunks: Vec<ExecStreamChunk>,
     pub stderr_chunks: Vec<ExecStreamChunk>,
     pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub wait_total: Option<Duration>,
+    #[serde(default)]
+    pub wait_active: bool,
     pub wait_notes: Vec<ExecWaitNote>,
     pub started_at: SystemTime,
     pub completed_at: Option<SystemTime>,
@@ -769,6 +849,9 @@ impl HistoryState {
                 let record = record.into_history_record();
                 self.apply_event(HistoryEvent::Replace { index, record })
             }
+            HistoryDomainEvent::Remove { index } => {
+                self.apply_event(HistoryEvent::Remove { index })
+            }
             HistoryDomainEvent::UpdateExecStream {
                 index,
                 stdout_chunk,
@@ -845,6 +928,25 @@ impl HistoryState {
                     index: self.records.len(),
                     record,
                 })
+            }
+            HistoryDomainEvent::UpdateExecWait {
+                index,
+                total_wait,
+                wait_active,
+                notes,
+            } => {
+                if let Some(HistoryRecord::Exec(existing)) = self.records.get(index).cloned() {
+                    let mut updated = existing;
+                    updated.wait_total = total_wait;
+                    updated.wait_active = wait_active;
+                    updated.wait_notes = notes;
+                    self.apply_event(HistoryEvent::Replace {
+                        index,
+                        record: HistoryRecord::Exec(updated),
+                    })
+                } else {
+                    HistoryMutation::Noop
+                }
             }
         }
     }

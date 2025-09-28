@@ -343,8 +343,14 @@ impl ChatComposer {
 
         let lower = technical_message.to_lowercase();
 
+        // Auto Drive manual edit indicator
+        if lower.contains("auto drive goal") {
+            "Auto Drive Goal".to_string()
+        } else if lower.contains("auto drive") {
+            "Auto Drive".to_string()
+        }
         // Thinking/reasoning patterns
-        if lower.contains("reasoning")
+        else if lower.contains("reasoning")
             || lower.contains("thinking")
             || lower.contains("planning")
             || lower.contains("waiting for model")
@@ -1725,6 +1731,34 @@ impl ChatComposer {
     pub(crate) fn mark_next_down_scrolls_history(&mut self) {
         self.next_down_scrolls_history = true;
     }
+
+    pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
+        self.standard_terminal_hint.as_deref()
+    }
+
+    pub(crate) fn token_usage_spans(&self, label_style: Style) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if let Some(token_usage_info) = &self.token_usage_info {
+            let turn_usage = &token_usage_info.last_token_usage;
+            let tokens_used = turn_usage.tokens_in_context_window();
+            let used_str = format_with_thousands(tokens_used);
+            spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
+            spans.push(Span::from(" tokens").style(label_style));
+            if let Some(context_window) = token_usage_info.model_context_window {
+                if context_window > 0 {
+                    let percent_remaining = {
+                        let percent = 100.0
+                            - (tokens_used as f32 / context_window as f32 * 100.0);
+                        percent.clamp(0.0, 100.0) as u8
+                    };
+                    spans.push(Span::from(" (").style(label_style));
+                    spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
+                    spans.push(Span::from("% left)").style(label_style));
+                }
+            }
+        }
+        spans
+    }
 }
 
 impl WidgetRef for ChatComposer {
@@ -1827,26 +1861,7 @@ impl WidgetRef for ChatComposer {
                 let mut right_spans: Vec<Span> = Vec::new();
 
                 // Prepare token usage spans (always shown when available)
-                let mut token_spans: Vec<Span> = Vec::new();
-                if let Some(token_usage_info) = &self.token_usage_info {
-                    let turn_usage = &token_usage_info.last_token_usage;
-                    let tokens_used = turn_usage.tokens_in_context_window();
-                    let used_str = format_with_thousands(tokens_used);
-                    token_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
-                    token_spans.push(Span::from(" tokens").style(label_style));
-                    if let Some(context_window) = token_usage_info.model_context_window {
-                        if context_window > 0 {
-                            let percent_remaining = {
-                                let percent = 100.0
-                                    - (tokens_used as f32 / context_window as f32 * 100.0);
-                                percent.clamp(0.0, 100.0) as u8
-                            };
-                            token_spans.push(Span::from(" (").style(label_style));
-                            token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
-                            token_spans.push(Span::from("% left)").style(label_style));
-                        }
-                    }
-                }
+                let token_spans: Vec<Span> = self.token_usage_spans(label_style);
 
                 // Helper to build hint spans based on inclusion flags
                 let build_hints = |include_reasoning: bool, include_diff: bool| -> Vec<Span> {
@@ -1957,26 +1972,44 @@ impl WidgetRef for ChatComposer {
             .style(Style::default().bg(crate::colors::background()));
 
         if self.is_task_running {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            // Use selected spinner style
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let def = crate::spinner::current_spinner();
-            let spinner_str = crate::spinner::frame_at_time(def, now_ms);
+            if self.status_message.eq_ignore_ascii_case("auto drive") {
+                let title_line = Line::from(Span::styled(
+                    " Auto Drive ",
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ));
+                input_block = input_block.title(title_line);
+            } else if self.status_message.eq_ignore_ascii_case("auto drive goal") {
+                let title_line = Line::from(Span::styled(
+                    " Auto Drive Goal ",
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ));
+                input_block = input_block.title(title_line);
+            } else {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                // Use selected spinner style
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let def = crate::spinner::current_spinner();
+                let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
-            // Create centered title with spinner and spaces
-            let title_line = Line::from(vec![
-                Span::raw(" "), // Space before spinner
-                Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
-                Span::styled(
-                    format!(" {}... ", self.status_message),
-                    Style::default().fg(crate::colors::info()),
-                ), // Space after spinner and after text
-            ])
-            .centered();
-            input_block = input_block.title(title_line);
+                // Create centered title with spinner and spaces
+                let title_line = Line::from(vec![
+                    Span::raw(" "), // Space before spinner
+                    Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
+                    Span::styled(
+                        format!(" {}... ", self.status_message),
+                        Style::default().fg(crate::colors::info()),
+                    ), // Space after spinner and after text
+                ])
+                .centered();
+                input_block = input_block.title(title_line);
+            }
         }
 
         let textarea_rect = input_block.inner(input_area);
