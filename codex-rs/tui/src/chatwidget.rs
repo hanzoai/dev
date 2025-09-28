@@ -15764,7 +15764,7 @@ fn extract_latest_bold_title(text: &str) -> Option<String> {
 }
 
 fn heading_from_line(line: &str) -> Option<String> {
-    let normalized = remove_bullet_prefix(line);
+    let normalized = remove_bullet_prefix(line.trim_start());
     if !normalized.starts_with("**") {
         return None;
     }
@@ -15776,12 +15776,11 @@ fn heading_from_line(line: &str) -> Option<String> {
         None => rest,
     };
 
-    let cleaned = title.trim();
-    if cleaned.is_empty() {
+    if title.trim().is_empty() {
         return None;
     }
 
-    Some(cleaned.to_string())
+    Some(title.to_string())
 }
 
 fn remove_bullet_prefix(line: &str) -> &str {
