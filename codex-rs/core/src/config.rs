@@ -1201,11 +1201,27 @@ pub fn list_mcp_servers(codex_home: &Path) -> anyhow::Result<(
                         .unwrap_or_default();
                     let env = t
                         .get("env")
-                        .and_then(|v| v.as_inline_table())
-                        .map(|tbl| {
-                            tbl.iter()
-                                .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
-                                .collect()
+                        .and_then(|v| {
+                            if let Some(tbl) = v.as_inline_table() {
+                                Some(
+                                    tbl.iter()
+                                        .filter_map(|(k, v)| {
+                                            v.as_str().map(|s| (k.to_string(), s.to_string()))
+                                        })
+                                        .collect::<HashMap<_, _>>(),
+                                )
+                            } else if let Some(table) = v.as_table() {
+                                Some(
+                                    table
+                                        .iter()
+                                        .filter_map(|(k, v)| {
+                                            v.as_str().map(|s| (k.to_string(), s.to_string()))
+                                        })
+                                        .collect::<HashMap<_, _>>(),
+                                )
+                            } else {
+                                None
+                            }
                         });
 
                     McpServerTransportConfig::Stdio {
