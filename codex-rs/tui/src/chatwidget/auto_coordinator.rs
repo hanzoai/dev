@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use codex_core::config::Config;
-use codex_core::config::ConfigOverrides;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::debug_logger::DebugLogger;
 use codex_core::model_family::{find_family_for_model, derive_default_model_family};
@@ -45,6 +44,7 @@ pub(super) fn start_auto_coordinator(
     app_event_tx: AppEventSender,
     goal_text: String,
     conversation: Vec<ResponseItem>,
+    config: Config,
     debug_enabled: bool,
 ) -> Result<AutoCoordinatorHandle> {
     let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -55,6 +55,7 @@ pub(super) fn start_auto_coordinator(
             app_event_tx,
             goal_text,
             conversation,
+            config,
             cmd_rx,
             debug_enabled,
         ) {
@@ -69,28 +70,34 @@ fn run_auto_loop(
     app_event_tx: AppEventSender,
     goal_text: String,
     initial_conversation: Vec<ResponseItem>,
+    config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
     debug_enabled: bool,
 ) -> Result<()> {
-    let cfg = Config::load_with_cli_overrides(vec![], ConfigOverrides::default())
-        .context("loading config")?;
-    let preferred_auth = if cfg.using_chatgpt_auth {
+    let preferred_auth = if config.using_chatgpt_auth {
         codex_protocol::mcp_protocol::AuthMode::ChatGPT
     } else {
         codex_protocol::mcp_protocol::AuthMode::ApiKey
     };
+    let codex_home = config.codex_home.clone();
+    let responses_originator_header = config.responses_originator_header.clone();
     let auth_mgr = AuthManager::shared(
-        cfg.codex_home.clone(),
+        codex_home,
         preferred_auth,
-        cfg.responses_originator_header.clone(),
+        responses_originator_header,
     );
+    let model_provider = config.model_provider.clone();
+    let model_reasoning_summary = config.model_reasoning_summary;
+    let model_text_verbosity = config.model_text_verbosity;
+    let sandbox_policy = config.sandbox_policy.clone();
+    let config = Arc::new(config);
     let client = ModelClient::new(
-        Arc::new(cfg.clone()),
+        config.clone(),
         Some(auth_mgr),
-        cfg.model_provider.clone(),
+        model_provider,
         ReasoningEffort::Medium,
-        cfg.model_reasoning_summary,
-        cfg.model_text_verbosity,
+        model_reasoning_summary,
+        model_text_verbosity,
         Uuid::new_v4(),
         Arc::new(Mutex::new(
             DebugLogger::new(debug_enabled)
@@ -99,7 +106,7 @@ fn run_auto_loop(
     );
 
     let developer_intro = build_developer_message(&goal_text, matches!(
-        cfg.sandbox_policy,
+        sandbox_policy,
         SandboxPolicy::DangerFullAccess
     ));
     let schema = build_schema();
