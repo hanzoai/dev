@@ -377,7 +377,13 @@ mod tests {
             request_escalated_privileges,
         );
 
-        assert_eq!(safety_check, SafetyCheck::AskUser);
+        assert_eq!(
+            safety_check,
+            SafetyCheck::Reject {
+                reason: "dangerous command detected; rejected by user approval settings"
+                    .to_string(),
+            }
+        );
     }
 
     #[test]

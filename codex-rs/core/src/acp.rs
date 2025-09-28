@@ -175,7 +175,7 @@ pub(crate) async fn request_permission(
             &permission_tool.mcp_server,
             &permission_tool.tool_name,
             Some(serde_json::to_value(arguments).unwrap_or_default()),
-            None,
+            Some(Duration::from_secs(15)),
         )
         .await?;
 
