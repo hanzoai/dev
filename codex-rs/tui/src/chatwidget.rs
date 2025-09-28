@@ -14708,6 +14708,21 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn format_mcp_summary(cfg: &codex_core::config_types::McpServerConfig) -> String {
+        use codex_core::config_types::McpServerTransportConfig;
+
+        match &cfg.transport {
+            McpServerTransportConfig::Stdio { command, args, .. } => {
+                if args.is_empty() {
+                    command.clone()
+                } else {
+                    format!("{} {}", command, args.join(" "))
+                }
+            }
+            McpServerTransportConfig::StreamableHttp { url, .. } => format!("HTTP {}", url),
+        }
+    }
+
     /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
@@ -14720,27 +14735,17 @@ impl ChatWidget<'_> {
                         let mut rows: Vec<crate::bottom_pane::mcp_settings_view::McpServerRow> =
                             Vec::new();
                         for (name, cfg) in enabled.into_iter() {
-                            let args = if cfg.args.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" {}", cfg.args.join(" "))
-                            };
                             rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow {
+                                summary: Self::format_mcp_summary(&cfg),
                                 name,
                                 enabled: true,
-                                summary: format!("{}{}", cfg.command, args),
                             });
                         }
                         for (name, cfg) in disabled.into_iter() {
-                            let args = if cfg.args.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" {}", cfg.args.join(" "))
-                            };
                             rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow {
+                                summary: Self::format_mcp_summary(&cfg),
                                 name,
                                 enabled: false,
-                                summary: format!("{}{}", cfg.command, args),
                             });
                         }
                         // Sort by name for stability
@@ -14773,21 +14778,19 @@ impl ChatWidget<'_> {
                         } else {
                             lines.push_str(&format!("Enabled ({}):\n", enabled.len()));
                             for (name, cfg) in enabled {
-                                let args = if cfg.args.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {}", cfg.args.join(" "))
-                                };
-                                lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
+                                lines.push_str(&format!(
+                                    "• {} — {}\n",
+                                    name,
+                                    Self::format_mcp_summary(&cfg)
+                                ));
                             }
                             lines.push_str(&format!("\nDisabled ({}):\n", disabled.len()));
                             for (name, cfg) in disabled {
-                                let args = if cfg.args.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {}", cfg.args.join(" "))
-                                };
-                                lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
+                                lines.push_str(&format!(
+                                    "• {} — {}\n",
+                                    name,
+                                    Self::format_mcp_summary(&cfg)
+                                ));
                             }
                         }
                         self.push_background_tail(lines);
@@ -14964,29 +14967,22 @@ impl ChatWidget<'_> {
                 }
                 match find_codex_home() {
                     Ok(home) => {
-                        let cfg = codex_core::config_types::McpServerConfig {
+                        let transport = codex_core::config_types::McpServerTransportConfig::Stdio {
                             command: command.to_string(),
                             args: args.clone(),
-                            env: if env.is_empty() {
-                                None
-                            } else {
-                                Some(env.clone())
-                            },
-                            startup_timeout_ms: None,
+                            env: if env.is_empty() { None } else { Some(env.clone()) },
+                        };
+                        let cfg = codex_core::config_types::McpServerConfig {
+                            transport,
+                            startup_timeout_sec: None,
+                            tool_timeout_sec: None,
                         };
                         match codex_core::config::add_mcp_server(&home, &name, cfg.clone()) {
                             Ok(()) => {
+                                let summary = Self::format_mcp_summary(&cfg);
                                 // Update in-memory config for future sessions
                                 self.config.mcp_servers.insert(name.clone(), cfg);
-                                let args_disp = if args.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {}", args.join(" "))
-                                };
-                                let msg = format!(
-                                    "Added MCP server '{}': {}{}",
-                                    name, command, args_disp
-                                );
+                                let msg = format!("Added MCP server '{}': {}", name, summary);
                                 self.push_background_tail(msg);
                             }
                             Err(e) => {
