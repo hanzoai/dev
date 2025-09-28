@@ -7,10 +7,11 @@ use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
 use codex_core::protocol::TokenUsage;
 use codex_file_search::FileMatch;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::widgets::WidgetRef;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Widget, WidgetRef};
 use std::time::Duration;
 
 mod approval_modal_view;
@@ -236,7 +237,14 @@ impl BottomPane<'_> {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
-            (view.desired_height(width), 0)
+            let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
+            let top_spacer = if is_auto && self.top_spacer_enabled { 1 } else { 0 };
+            let pad = if is_auto {
+                BottomPane::BOTTOM_PAD_LINES
+            } else {
+                0
+            };
+            (view.desired_height(width).saturating_add(top_spacer), pad)
         } else {
             // Optionally add 1 for the empty line above the composer
             let spacer = if self.top_spacer_enabled { 1 } else { 0 };
@@ -283,6 +291,17 @@ impl BottomPane<'_> {
             // Don't create a status view - keep composer visible
             // Debounce view navigation redraws to reduce render thrash
             self.request_redraw();
+
+            if matches!(kind, ActiveViewKind::AutoCoordinator)
+                && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            {
+                match key_event.code {
+                    KeyCode::Up => return InputResult::ScrollUp,
+                    KeyCode::Down => return InputResult::ScrollDown,
+                    _ => {}
+                }
+            }
+
             InputResult::None
         } else {
             // If a task is running and a status line is visible, allow Esc to
@@ -839,6 +858,64 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    fn spans_char_width(spans: &[Span]) -> usize {
+        spans.iter().map(|s| s.content.chars().count()).sum()
+    }
+
+    fn render_auto_coordinator_footer(&self, area: Rect, buf: &mut Buffer) {
+        if area.height == 0 {
+            return;
+        }
+
+        let base_style = ratatui::style::Style::default()
+            .bg(crate::colors::background())
+            .fg(crate::colors::text());
+        fill_rect(buf, area, Some(' '), base_style);
+
+        let hint_text = self
+            .composer
+            .standard_terminal_hint()
+            .unwrap_or("Esc to stop Auto Drive");
+
+        let warning_style = ratatui::style::Style::default()
+            .fg(crate::colors::warning())
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        let label_style = ratatui::style::Style::default().fg(crate::colors::text_dim());
+
+        let mut content_spans: Vec<Span> = Vec::new();
+        if let Some((first, rest)) = hint_text.split_once(' ') {
+            content_spans.push(Span::from(first.to_string()).style(warning_style));
+            if !rest.is_empty() {
+                content_spans.push(Span::from(format!(" {}", rest)).style(label_style));
+            }
+        } else {
+            content_spans.push(Span::from(hint_text.to_string()).style(warning_style));
+        }
+
+        let token_spans = self.composer.token_usage_spans(label_style);
+        if !token_spans.is_empty() {
+            content_spans.push(Span::from("  •  ").style(label_style));
+            content_spans.extend(token_spans);
+        }
+
+        let total_width = area.width as usize;
+        let trailing_pad = 1usize;
+        let content_len = BottomPane::spans_char_width(&content_spans);
+        let padding = total_width
+            .saturating_sub(content_len + trailing_pad)
+            .max(1);
+
+        let mut line_spans: Vec<Span> = Vec::new();
+        line_spans.push(Span::from(" ".repeat(padding)));
+        line_spans.extend(content_spans);
+        line_spans.push(Span::from(" "));
+
+        let line = Line::from(line_spans)
+            .style(ratatui::style::Style::default().bg(crate::colors::background()));
+
+        ratatui::widgets::Paragraph::new(line).render(area, buf);
+    }
+
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
 
@@ -863,24 +940,50 @@ impl WidgetRef for &BottomPane<'_> {
             } else if y_offset < area.height {
                 if y_offset < area.height {
                     // Reserve bottom padding lines; keep at least 1 line for the view.
-                    let avail = area.height - y_offset;
-                    let pad = if self.active_view.is_some() {
-                        0
-                    } else {
-                        BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
-                    };
-                    // Add horizontal padding (2 chars on each side) for views
+                    let mut avail = area.height - y_offset;
+                    let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                     let horizontal_padding = 1u16;
+
+                    if is_auto && self.top_spacer_enabled && avail > 0 {
+                        y_offset = y_offset.saturating_add(1);
+                        avail = avail.saturating_sub(1);
+                    }
+
+                    if avail == 0 {
+                        return;
+                    }
+
+                    let pad = if is_auto {
+                        BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
+                    } else {
+                        0
+                    };
+
+                    let view_height = avail.saturating_sub(pad);
+                    if view_height == 0 {
+                        return;
+                    }
+
                     let view_rect = Rect {
                         x: area.x + horizontal_padding,
                         y: area.y + y_offset,
                         width: area.width.saturating_sub(horizontal_padding * 2),
-                        height: avail - pad,
+                        height: view_height,
                     };
                     // Ensure view background is painted under its content
                     let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
                     fill_rect(buf, view_rect, None, view_bg);
                     view.render(view_rect, buf);
+
+                    if is_auto && pad > 0 {
+                        let footer_rect = Rect {
+                            x: area.x + horizontal_padding,
+                            y: view_rect.y.saturating_add(view_rect.height),
+                            width: area.width.saturating_sub(horizontal_padding * 2),
+                            height: pad,
+                        };
+                        self.render_auto_coordinator_footer(footer_rect, buf);
+                    }
                 }
                 return;
             }

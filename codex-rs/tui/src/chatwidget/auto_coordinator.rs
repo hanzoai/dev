@@ -276,10 +276,23 @@ fn request_decision(
                         }
                     }
                 }
-                Ok(ResponseEvent::ReasoningSummaryDelta { delta, .. })
-                | Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                Ok(ResponseEvent::ReasoningSummaryDelta {
+                    delta,
+                    summary_index,
+                    ..
+                }) => {
                     let message = strip_role_prefix(&delta).to_string();
-                    tx.send(AppEvent::AutoCoordinatorThinking { delta: message });
+                    tx.send(AppEvent::AutoCoordinatorThinking {
+                        delta: message,
+                        summary_index,
+                    });
+                }
+                Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                    let message = strip_role_prefix(&delta).to_string();
+                    tx.send(AppEvent::AutoCoordinatorThinking {
+                        delta: message,
+                        summary_index: None,
+                    });
                 }
                 Ok(ResponseEvent::Completed { .. }) => break,
                 Err(err) => return Err(anyhow!("model stream error: {err}")),
@@ -364,10 +377,11 @@ fn make_message(role: &str, text: String) -> ResponseItem {
 fn strip_role_prefix(input: &str) -> &str {
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
-        if input.len() >= prefix.len() {
-            let head = &input[..prefix.len()];
+        if let Some(head) = input.get(..prefix.len()) {
             if head.eq_ignore_ascii_case(prefix) {
-                let rest = &input[prefix.len()..];
+                let rest = input
+                    .get(prefix.len()..)
+                    .unwrap_or_default();
                 return rest.strip_prefix(' ').unwrap_or(rest);
             }
         }
