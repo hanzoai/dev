@@ -9793,7 +9793,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let Some(first_line) = raw
+        let Some(first_line_raw) = raw
             .lines()
             .find_map(|line| {
                 let trimmed = line.trim();
@@ -9803,18 +9803,20 @@ impl ChatWidget<'_> {
             return;
         };
 
+        let display_text = heading_from_line(&first_line_raw).unwrap_or_else(|| first_line_raw.clone());
+
         if self
             .auto_state
             .last_broadcast_thought
             .as_ref()
-            .map(|prev| prev == &first_line)
+            .map(|prev| prev == &display_text)
             .unwrap_or(false)
         {
             return;
         }
 
-        self.auto_state.last_broadcast_thought = Some(first_line.clone());
-        self.push_background_tail(format!("Auto Drive: {first_line}"));
+        self.auto_state.last_broadcast_thought = Some(display_text.clone());
+        self.push_background_tail(format!("Auto Drive: {display_text}"));
     }
 
     fn auto_on_reasoning_delta(&mut self, delta: &str) {
@@ -15745,8 +15747,7 @@ impl ChatWidget<'_> {
 }
 
 fn extract_latest_bold_title(text: &str) -> Option<String> {
-    let mut latest_complete: Option<String> = None;
-    let mut latest_partial: Option<String> = None;
+    let mut latest: Option<String> = None;
 
     for raw_line in text.lines() {
         let trimmed = raw_line.trim();
@@ -15754,30 +15755,34 @@ fn extract_latest_bold_title(text: &str) -> Option<String> {
             continue;
         }
 
-        let normalized = remove_bullet_prefix(trimmed);
-        if let Some(title) = extract_complete_bold_heading(normalized) {
-            latest_complete = Some(title);
-        } else if normalized.starts_with("**") {
-            latest_partial = Some(normalized.to_string());
+        if let Some(title) = heading_from_line(trimmed) {
+            latest = Some(title);
         }
     }
 
-    latest_complete.or(latest_partial)
+    latest
 }
 
-fn extract_complete_bold_heading(line: &str) -> Option<String> {
-    if !line.starts_with("**") {
+fn heading_from_line(line: &str) -> Option<String> {
+    let normalized = remove_bullet_prefix(line.trim());
+    if !normalized.starts_with("**") {
         return None;
     }
 
-    let rest = &line[2..];
-    let end = rest.find("**")?;
-    let title = rest[..end].trim();
-    if title.is_empty() {
+    let rest = &normalized[2..];
+    let end = rest.find("**");
+
+    let title = match end {
+        Some(idx) => &rest[..idx],
+        None => rest,
+    };
+
+    let cleaned = title.trim();
+    if cleaned.is_empty() {
         return None;
     }
 
-    Some(format!("**{}**", title))
+    Some(cleaned.to_string())
 }
 
 fn remove_bullet_prefix(line: &str) -> &str {
