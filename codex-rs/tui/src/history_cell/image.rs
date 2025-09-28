@@ -41,6 +41,15 @@ impl ImageOutputCell {
         Self { state, record }
     }
 
+    pub(crate) fn from_record(record: ImageRecord) -> Self {
+        let state = ImageCellState {
+            width: record.width as u32,
+            height: record.height as u32,
+            rgba: Vec::new(),
+        };
+        Self { state, record }
+    }
+
     pub(crate) fn record(&self) -> &ImageRecord {
         &self.record
     }

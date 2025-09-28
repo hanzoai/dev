@@ -16,6 +16,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use crate::header_wave::HeaderWaveEffect;
+use crate::auto_drive_strings;
 
 use codex_common::elapsed::format_duration;
 use codex_common::model_presets::ModelPreset;
@@ -44,6 +46,7 @@ use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
 use codex_protocol::num_format::format_with_separators;
 
 
+mod auto_coordinator;
 mod diff_handlers;
 mod agent_install;
 mod diff_ui;
@@ -68,6 +71,7 @@ use self::agent_install::{
     start_prompt_terminal_session,
     wrap_command,
 };
+use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand};
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{CachedLayout, HistoryRenderState, LayoutRef};
@@ -105,6 +109,12 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
+use crate::bottom_pane::{
+    AutoCoordinatorButton,
+    AutoCoordinatorView,
+    AutoCoordinatorViewModel,
+    CountdownState,
+};
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -153,6 +163,7 @@ const STATUS_LABEL_TARGET_WIDTH: usize = 7;
 const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
+const AUTO_COUNTDOWN_SECONDS: u8 = 10;
 
 fn status_field_prefix(label: &str) -> String {
     let padding = STATUS_LABEL_GAP
@@ -176,6 +187,7 @@ fn status_tokens_prefix() -> &'static str {
 use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
+    AutoCoordinatorStatus,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -212,6 +224,7 @@ use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
     HistoryDomainEvent,
     HistoryDomainRecord,
+    ExecWaitNote,
     AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
@@ -427,6 +440,37 @@ pub(crate) struct GhostState {
     queued_user_messages: VecDeque<UserMessage>,
 }
 
+#[derive(Default)]
+struct AutoCoordinatorUiState {
+    active: bool,
+    goal: Option<String>,
+    current_thoughts: Option<String>,
+    current_prompt: Option<String>,
+    current_display_line: Option<String>,
+    placeholder_phrase: Option<String>,
+    thinking_prefix_stripped: bool,
+    current_summary_index: Option<u32>,
+    awaiting_submission: bool,
+    waiting_for_response: bool,
+    paused_for_manual_edit: bool,
+    resume_after_manual_submit: bool,
+    countdown_id: u64,
+    seconds_remaining: u8,
+    awaiting_goal_input: bool,
+    last_broadcast_thought: Option<String>,
+    last_decision_display: Option<String>,
+}
+
+impl AutoCoordinatorUiState {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn countdown_active(&self) -> bool {
+        self.awaiting_submission && !self.paused_for_manual_edit
+    }
+}
+
 struct UndoSnapshotPreview {
     index: usize,
     short_id: String,
@@ -471,6 +515,7 @@ pub(crate) struct ChatWidget<'a> {
     exec: ExecState,
     tools_state: ToolState,
     live_builder: RowBuilder,
+    header_wave: HeaderWaveEffect,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
@@ -585,6 +630,9 @@ pub(crate) struct ChatWidget<'a> {
     active_ghost_snapshot: Option<(u64, GhostSnapshotRequest)>,
     next_ghost_snapshot_id: u64,
     pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
+
+    auto_state: AutoCoordinatorUiState,
+    auto_tx: Option<Sender<AutoCoordinatorCommand>>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2258,101 +2306,38 @@ impl ChatWidget<'_> {
                     }
                 )
             }) {
-                if let Some(summary) = self.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::PatchSummaryCell>()
+                if let Some(record) = self
+                    .history_cells
+                    .get(idx)
+                    .and_then(|existing| self.history_record_from_cell(existing.as_ref()))
                 {
-                    let mut updated = history_cell::new_patch_event(
-                        PatchEventType::ApplySuccess,
-                        summary.record().changes.clone(),
-                    );
-                    updated.title = "Updated".to_string();
-                    updated.kind = history_cell::PatchKind::ApplySuccess;
-                    updated.record_mut().patch_type = HistoryPatchEventType::ApplySuccess;
-                    self.history_replace_at(idx, Box::new(updated));
-                    return;
-                }
-
-                if let Some(cell) = self.history_cells.get_mut(idx) {
-                    if let Some(plain) = cell
-                        .as_any_mut()
-                        .downcast_mut::<history_cell::PlainHistoryCell>()
-                    {
-                        let state = plain.state_mut();
-                        if let Some(header) = state.header.as_mut() {
-                            header.label = "Updated".to_string();
-                        }
-                        if let Some(first_line) = state.lines.first_mut() {
-                            if first_line.spans.is_empty() {
-                                first_line.kind = crate::history::MessageLineKind::Paragraph;
-                                first_line.spans.push(crate::history::InlineSpan {
-                                    text: "Updated".to_string(),
-                                    tone: crate::history::TextTone::Success,
-                                    emphasis: crate::history::TextEmphasis {
-                                        bold: true,
-                                        italic: false,
-                                        dim: false,
-                                        strike: false,
-                                        underline: false,
-                                    },
-                                    entity: None,
-                                });
-                            } else {
-                                for span in &mut first_line.spans {
-                                    span.tone = crate::history::TextTone::Success;
-                                    span.emphasis.bold = true;
-                                    span.emphasis.dim = false;
-                                }
-                                first_line.spans[0].text = "Updated".to_string();
-                            }
-                        }
-                        plain.set_kind(history_cell::HistoryCellType::Patch {
-                            kind: history_cell::PatchKind::ApplySuccess,
+                    if let HistoryRecord::Patch(mut patch_record) = record {
+                        patch_record.patch_type = HistoryPatchEventType::ApplySuccess;
+                        let record_index = self
+                            .record_index_for_cell(idx)
+                            .unwrap_or_else(|| self.record_index_for_position(idx));
+                        let mutation = self.history_state.apply_event(HistoryEvent::Replace {
+                            index: record_index,
+                            record: HistoryRecord::Patch(patch_record.clone()),
                         });
-                        plain.invalidate_layout_cache();
-                    }
-                }
-
-                let record = self.history_record_from_cell(self.history_cells[idx].as_ref());
-                if let Some(record) = record {
-                    if let Some(record_index) = self.record_index_for_cell(idx) {
-                        if let HistoryMutation::Replaced { id, .. } = self
-                            .history_state
-                            .apply_event(HistoryEvent::Replace { index: record_index, record })
-                        {
-                            if let Some(cell) = self.history_cells.get_mut(idx) {
-                                if let Some(plain_cell) = cell
-                                    .as_any_mut()
-                                    .downcast_mut::<history_cell::PlainHistoryCell>()
-                                {
-                                    let state = plain_cell.state_mut();
-                                    state.id = id;
-                                }
-                            }
+                        if let Some(id) = self.apply_mutation_to_cell_index(idx, mutation) {
                             if idx < self.history_cell_ids.len() {
                                 self.history_cell_ids[idx] = Some(id);
                             }
+                            self.maybe_hide_spinner();
+                            return;
                         }
-                    } else {
-                        tracing::warn!(
-                            "history-state mismatch: no persisted index for patch cell {}",
-                            idx
-                        );
                     }
                 }
-
-                self.request_redraw();
-                return;
             }
-            // If nothing to update, fall through without inserting a duplicate cell.
-        } else {
-            let key = self.next_internal_key();
-            let _ = self.history_insert_with_key_global(
-                Box::new(history_cell::new_patch_apply_failure(ev.stderr)),
-                key,
-            );
+            self.maybe_hide_spinner();
+            return;
         }
-        // After patch application completes, re-evaluate idle state
+
+        // failure path
+        let failure_cell = history_cell::new_patch_apply_failure(ev.stderr);
+        let key = self.next_internal_key();
+        let _ = self.history_insert_plain_cell_with_key(failure_cell, key, "patch-failure");
         self.maybe_hide_spinner();
     }
 
@@ -2774,6 +2759,11 @@ impl ChatWidget<'_> {
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
+            header_wave: {
+                let effect = HeaderWaveEffect::new();
+                effect.set_enabled(false, Instant::now());
+                effect
+            },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -2860,6 +2850,8 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_state: AutoCoordinatorUiState::default(),
+            auto_tx: None,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3012,6 +3004,11 @@ impl ChatWidget<'_> {
                 running_kill_tools: HashMap::new(),
             },
             live_builder: RowBuilder::new(usize::MAX),
+            header_wave: {
+                let effect = HeaderWaveEffect::new();
+                effect.set_enabled(false, Instant::now());
+                effect
+            },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -3098,6 +3095,8 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_state: AutoCoordinatorUiState::default(),
+            auto_tx: None,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3155,10 +3154,14 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let prefixed = format!("Coordinator: {text}");
+                    let content = ContentItem::InputText {
+                        text: prefixed.clone(),
+                    };
                     items.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        content: vec![content],
                     });
                 }
                 crate::history_cell::HistoryCellType::Assistant => {
@@ -3173,10 +3176,14 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let prefixed = format!("CLI: {text}");
+                    let content = ContentItem::InputText {
+                        text: prefixed.clone(),
+                    };
                     items.push(ResponseItem::Message {
                         id: None,
-                        role: "assistant".to_string(),
-                        content: vec![ContentItem::OutputText { text }],
+                        role: "user".to_string(),
+                        content: vec![content],
                     });
                 }
                 _ => {}
@@ -3271,6 +3278,32 @@ impl ChatWidget<'_> {
         }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
+        }
+
+        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            && matches!(key_event.code, crossterm::event::KeyCode::Esc)
+            && self.auto_state.active
+        {
+            if self.auto_state.countdown_active() {
+                self.auto_pause_for_manual_edit();
+                return;
+            }
+            self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+            return;
+        }
+
+        if self.auto_state.awaiting_submission
+            && !self.auto_state.paused_for_manual_edit
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        {
+            match key_event.code {
+                crossterm::event::KeyCode::Enter
+                | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
+                    self.auto_submit_prompt();
+                    return;
+                }
+                _ => {}
+            }
         }
 
         // Global HUD toggles (avoid conflicting with common editor keys):
@@ -3417,6 +3450,24 @@ impl ChatWidget<'_> {
 
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
+                if self.auto_state.awaiting_goal_input {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        self.bottom_pane.set_task_running(true);
+                        self.bottom_pane
+                            .update_status_text("Auto Drive Goal".to_string());
+                        self.clear_composer();
+                        self.request_redraw();
+                        return;
+                    }
+
+                    self.auto_state.awaiting_goal_input = false;
+                    self.clear_composer();
+                    self.bottom_pane.update_status_text(String::new());
+                    self.bottom_pane.set_task_running(false);
+                    self.handle_auto_command(Some(trimmed.to_string()));
+                    return;
+                }
                 // Commit pending jump-back (make trimming permanent) before submission
                 if self.pending_jump_back.is_some() {
                     self.pending_jump_back = None;
@@ -4409,40 +4460,34 @@ impl ChatWidget<'_> {
 
         let mut cell = cell;
 
-        let maybe_id = if let Some(domain_record) = record {
+        let mutation = if let Some(domain_record) = record {
             let record_index = self.record_index_for_position(pos);
-            match self.history_state.apply_domain_event(HistoryDomainEvent::Insert {
-                index: record_index,
-                record: domain_record,
-            }) {
-                HistoryMutation::Inserted { id, record, .. } => {
-                    if !self.hydrate_cell_from_record(&mut cell, &record) {
-                        self.assign_history_id(&mut cell, id);
-                    }
-                    Some(id)
-                }
-                _ => None,
-            }
+            Some(
+                self.history_state
+                    .apply_domain_event(HistoryDomainEvent::Insert {
+                        index: record_index,
+                        record: domain_record,
+                    }),
+            )
         } else if let Some(record) = self.history_record_from_cell(cell.as_ref()) {
             let record_index = self.record_index_for_position(pos);
-            match self
-                .history_state
-                .apply_event(HistoryEvent::Insert {
-                    index: record_index,
-                    record,
-                })
-            {
-                HistoryMutation::Inserted { id, record, .. } => {
-                    if !self.hydrate_cell_from_record(&mut cell, &record) {
-                        self.assign_history_id(&mut cell, id);
-                    }
-                    Some(id)
-                }
-                _ => None,
-            }
+            Some(
+                self.history_state
+                    .apply_event(HistoryEvent::Insert {
+                        index: record_index,
+                        record,
+                    }),
+            )
         } else {
             None
         };
+
+        let mut maybe_id = None;
+        if let Some(mutation) = mutation {
+            if let Some(id) = self.apply_mutation_to_cell(&mut cell, mutation) {
+                maybe_id = Some(id);
+            }
+        }
 
         self.history_cells.insert(pos, cell);
         self.history_cell_ids.insert(pos, maybe_id);
@@ -4501,10 +4546,96 @@ impl ChatWidget<'_> {
         pos
     }
 
+    fn append_wait_pairs(target: &mut Vec<(String, bool)>, additions: &[(String, bool)]) {
+        for (text, is_error) in additions {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if target
+                .last()
+                .map(|(existing, existing_err)| existing == trimmed && *existing_err == *is_error)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            target.push((trimmed.to_string(), *is_error));
+        }
+    }
+
+    fn wait_pairs_from_exec_notes(notes: &[ExecWaitNote]) -> Vec<(String, bool)> {
+        notes
+            .iter()
+            .map(|note| {
+                (
+                    note.message.clone(),
+                    matches!(note.tone, TextTone::Error),
+                )
+            })
+            .collect()
+    }
+
+    fn update_exec_wait_state_with_pairs(
+        &mut self,
+        history_idx: usize,
+        total_wait: Option<Duration>,
+        wait_active: bool,
+        notes: &[(String, bool)],
+    ) -> bool {
+        if history_idx >= self.history_cells.len() {
+            return false;
+        }
+        let record_idx = self
+            .record_index_for_cell(history_idx)
+            .unwrap_or_else(|| self.record_index_for_position(history_idx));
+        let note_records: Vec<ExecWaitNote> = notes
+            .iter()
+            .filter_map(|(text, is_error)| {
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(ExecWaitNote {
+                        message: trimmed.to_string(),
+                        tone: if *is_error {
+                            TextTone::Error
+                        } else {
+                            TextTone::Info
+                        },
+                        timestamp: SystemTime::now(),
+                    })
+                }
+            })
+            .collect();
+        let mutation = self.history_state.apply_domain_event(HistoryDomainEvent::UpdateExecWait {
+            index: record_idx,
+            total_wait,
+            wait_active,
+            notes: note_records,
+        });
+        if let Some(id) = self.apply_mutation_to_cell_index(history_idx, mutation) {
+            if history_idx < self.history_cell_ids.len() {
+                self.history_cell_ids[history_idx] = Some(id);
+            }
+            self.invalidate_height_cache();
+            self.request_redraw();
+            return true;
+        }
+        false
+    }
+
     fn hydrate_cell_from_record(
         &self,
         cell: &mut Box<dyn HistoryCell>,
         record: &HistoryRecord,
+    ) -> bool {
+        Self::hydrate_cell_from_record_inner(cell, record, &self.config)
+    }
+
+    fn hydrate_cell_from_record_inner(
+        cell: &mut Box<dyn HistoryCell>,
+        record: &HistoryRecord,
+        config: &Config,
     ) -> bool {
         match record {
             HistoryRecord::PlainMessage(state) => {
@@ -4557,7 +4688,7 @@ impl ChatWidget<'_> {
                     .as_any_mut()
                     .downcast_mut::<crate::history_cell::StreamingContentCell>()
                 {
-                    stream.update_from_state(state.clone(), &self.config);
+                    stream.update_from_state(state.clone(), config);
                     return true;
                 }
             }
@@ -4570,12 +4701,180 @@ impl ChatWidget<'_> {
                     return true;
                 }
             }
+            HistoryRecord::Patch(state) => {
+                if let Some(patch) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::PatchSummaryCell>()
+                {
+                    *patch.record_mut() = state.clone();
+                    patch.invalidate_cache();
+                    return true;
+                }
+            }
+            HistoryRecord::Image(state) => {
+                if let Some(image) = cell
+                    .as_any_mut()
+                    .downcast_mut::<crate::history_cell::ImageOutputCell>()
+                {
+                    *image.record_mut() = state.clone();
+                    return true;
+                }
+            }
             _ => {}
         }
         false
     }
 
+    fn build_cell_from_record(&self, record: &HistoryRecord) -> Option<Box<dyn HistoryCell>> {
+        use crate::history_cell;
+
+        match record {
+            HistoryRecord::PlainMessage(state) => Some(Box::new(
+                history_cell::PlainHistoryCell::from_state(state.clone()),
+            )),
+            HistoryRecord::WaitStatus(state) => {
+                Some(Box::new(history_cell::WaitStatusCell::from_state(state.clone())))
+            }
+            HistoryRecord::Loading(state) => {
+                Some(Box::new(history_cell::LoadingCell::from_state(state.clone())))
+            }
+            HistoryRecord::RunningTool(state) => Some(Box::new(
+                history_cell::RunningToolCallCell::from_state(state.clone()),
+            )),
+            HistoryRecord::ToolCall(state) => Some(Box::new(
+                history_cell::ToolCallCell::from_state(state.clone()),
+            )),
+            HistoryRecord::PlanUpdate(state) => Some(Box::new(
+                history_cell::PlanUpdateCell::from_state(state.clone()),
+            )),
+            HistoryRecord::UpgradeNotice(state) => Some(Box::new(
+                history_cell::UpgradeNoticeCell::from_state(state.clone()),
+            )),
+            HistoryRecord::Reasoning(state) => Some(Box::new(
+                history_cell::CollapsibleReasoningCell::from_state(state.clone()),
+            )),
+            HistoryRecord::Exec(state) => {
+                Some(Box::new(history_cell::ExecCell::from_record(state.clone())))
+            }
+            HistoryRecord::AssistantStream(state) => Some(Box::new(
+                history_cell::StreamingContentCell::from_state(state.clone(), &self.config),
+            )),
+            HistoryRecord::AssistantMessage(state) => Some(Box::new(
+                history_cell::AssistantMarkdownCell::from_state(state.clone(), &self.config),
+            )),
+            HistoryRecord::Diff(state) => {
+                Some(Box::new(history_cell::DiffCell::from_record(state.clone())))
+            }
+            HistoryRecord::Patch(state) => {
+                Some(Box::new(history_cell::PatchSummaryCell::from_record(state.clone())))
+            }
+            HistoryRecord::Explore(state) => Some(Box::new(
+                history_cell::ExploreAggregationCell::from_record(state.clone()),
+            )),
+            HistoryRecord::RateLimits(state) => Some(Box::new(
+                history_cell::RateLimitsCell::from_record(state.clone()),
+            )),
+            HistoryRecord::BackgroundEvent(state) => {
+                Some(Box::new(history_cell::BackgroundEventCell::new(state.clone())))
+            }
+            HistoryRecord::Image(state) => Some(Box::new(
+                history_cell::ImageOutputCell::from_record(state.clone()),
+            )),
+            HistoryRecord::Notice(state) => Some(Box::new(
+                history_cell::PlainHistoryCell::from_notice_record(state.clone()),
+            )),
+        }
+    }
+
+    fn apply_mutation_to_cell(
+        &self,
+        cell: &mut Box<dyn HistoryCell>,
+        mutation: HistoryMutation,
+    ) -> Option<HistoryId> {
+        match mutation {
+            HistoryMutation::Inserted { id, record, .. }
+            | HistoryMutation::Replaced { id, record, .. } => {
+                if let Some(mut new_cell) = self.build_cell_from_record(&record) {
+                    self.assign_history_id(&mut new_cell, id);
+                    *cell = new_cell;
+                } else if !self.hydrate_cell_from_record(cell, &record) {
+                    self.assign_history_id(cell, id);
+                }
+                Some(id)
+            }
+            _ => None,
+        }
+    }
+
+    fn apply_mutation_to_cell_index(
+        &mut self,
+        idx: usize,
+        mutation: HistoryMutation,
+    ) -> Option<HistoryId> {
+        if idx >= self.history_cells.len() {
+            return None;
+        }
+        match mutation {
+            HistoryMutation::Inserted { id, record, .. }
+            | HistoryMutation::Replaced { id, record, .. } => {
+                self.update_cell_from_record(id, record);
+                Some(id)
+            }
+            _ => None,
+        }
+    }
+
+    fn cell_index_for_history_id(&self, id: HistoryId) -> Option<usize> {
+        if let Some(idx) = self
+            .history_cell_ids
+            .iter()
+            .position(|maybe| maybe.map(|stored| stored == id).unwrap_or(false))
+        {
+            return Some(idx);
+        }
+
+        self.history_cells.iter().enumerate().find_map(|(idx, cell)| {
+            self.history_record_from_cell(cell.as_ref())
+                .map(|record| record.id() == id)
+                .filter(|matched| *matched)
+                .map(|_| idx)
+        })
+    }
+
+    fn update_cell_from_record(&mut self, id: HistoryId, record: HistoryRecord) {
+        if id == HistoryId::ZERO {
+            tracing::debug!("skip update_cell_from_record: zero id");
+            return;
+        }
+
+        if let Some(idx) = self.cell_index_for_history_id(id) {
+            if let Some(mut rebuilt) = self.build_cell_from_record(&record) {
+                Self::assign_history_id_inner(&mut rebuilt, id);
+                self.history_cells[idx] = rebuilt;
+            } else if let Some(cell_slot) = self.history_cells.get_mut(idx) {
+                if !Self::hydrate_cell_from_record_inner(cell_slot, &record, &self.config) {
+                    Self::assign_history_id_inner(cell_slot, id);
+                }
+            }
+
+            if idx < self.history_cell_ids.len() {
+                self.history_cell_ids[idx] = Some(id);
+            }
+            self.invalidate_height_cache();
+            self.request_redraw();
+        } else {
+            tracing::warn!(
+                "history-state mismatch: unable to locate cell for id {:?}",
+                id
+            );
+        }
+    }
+
     fn assign_history_id(&self, cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
+        Self::assign_history_id_inner(cell, id);
+    }
+
+    fn assign_history_id_inner(cell: &mut Box<dyn HistoryCell>, id: HistoryId) {
         if let Some(tool_call) = cell
             .as_any_mut()
             .downcast_mut::<crate::history_cell::ToolCallCell>()
@@ -4641,6 +4940,26 @@ impl ChatWidget<'_> {
             .downcast_mut::<crate::history_cell::RateLimitsCell>()
         {
             rate_limits.record_mut().id = id;
+        } else if let Some(plain) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::PlainHistoryCell>()
+        {
+            plain.state_mut().id = id;
+        } else if let Some(wait) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::WaitStatusCell>()
+        {
+            wait.state_mut().id = id;
+        } else if let Some(loading) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::LoadingCell>()
+        {
+            loading.state_mut().id = id;
+        } else if let Some(background) = cell
+            .as_any_mut()
+            .downcast_mut::<crate::history_cell::BackgroundEventCell>()
+        {
+            background.state_mut().id = id;
         }
     }
 
@@ -4783,8 +5102,13 @@ impl ChatWidget<'_> {
             title.unwrap_or_default(),
             &diff_output,
         );
-        let cell = history_cell::DiffCell::from_record(record);
-        self.history_push(cell);
+        let key = self.next_internal_key();
+        let _ = self.history_insert_with_key_global_tagged(
+            Box::new(history_cell::DiffCell::from_record(record.clone())),
+            key,
+            "diff",
+            Some(HistoryDomainRecord::Diff(record)),
+        );
     }
     /// Insert a background event near the top of the current request so it appears
     /// before imminent provider output (e.g. Exec begin).
@@ -4863,21 +5187,7 @@ impl ChatWidget<'_> {
             record,
         });
 
-        if let Some(id) = match mutation {
-            HistoryMutation::Replaced { id, record, .. } => {
-                if !self.hydrate_cell_from_record(&mut cell, &record) {
-                    self.assign_history_id(&mut cell, id);
-                }
-                Some(id)
-            }
-            HistoryMutation::Inserted { id, record, .. } => {
-                if !self.hydrate_cell_from_record(&mut cell, &record) {
-                    self.assign_history_id(&mut cell, id);
-                }
-                Some(id)
-            }
-            _ => None,
-        } {
+        if let Some(id) = self.apply_mutation_to_cell(&mut cell, mutation) {
             if idx < self.history_cell_ids.len() {
                 self.history_cell_ids[idx] = Some(id);
             }
@@ -4899,38 +5209,32 @@ impl ChatWidget<'_> {
 
         match (record, self.record_index_for_cell(idx)) {
             (Some(record), Some(record_idx)) => {
-                if let HistoryMutation::Replaced { id, record, .. } = self
+                let mutation = self
                     .history_state
                     .apply_event(HistoryEvent::Replace {
                         index: record_idx,
                         record,
-                    })
-                {
-                    if !self.hydrate_cell_from_record(&mut cell, &record) {
-                        self.assign_history_id(&mut cell, id);
-                    }
+                    });
+                if let Some(id) = self.apply_mutation_to_cell(&mut cell, mutation) {
                     maybe_id = Some(id);
                 }
             }
             (Some(record), None) => {
                 let record_idx = self.record_index_for_position(idx);
-                if let HistoryMutation::Inserted { id, record, .. } = self
+                let mutation = self
                     .history_state
                     .apply_event(HistoryEvent::Insert {
                         index: record_idx,
                         record,
-                    })
-                {
-                    if !self.hydrate_cell_from_record(&mut cell, &record) {
-                        self.assign_history_id(&mut cell, id);
-                    }
+                    });
+                if let Some(id) = self.apply_mutation_to_cell(&mut cell, mutation) {
                     maybe_id = Some(id);
                 }
             }
             (None, Some(record_idx)) => {
                 let _ = self
                     .history_state
-                    .apply_event(HistoryEvent::Remove { index: record_idx });
+                    .apply_domain_event(HistoryDomainEvent::Remove { index: record_idx });
             }
             (None, None) => {}
         }
@@ -4967,7 +5271,7 @@ impl ChatWidget<'_> {
         if let Some(record_idx) = self.record_index_for_cell(idx) {
             let _ = self
                 .history_state
-                .apply_event(HistoryEvent::Remove { index: record_idx });
+                .apply_domain_event(HistoryDomainEvent::Remove { index: record_idx });
         }
 
         self.history_cells.remove(idx);
@@ -6221,6 +6525,17 @@ impl ChatWidget<'_> {
             }
         }
 
+        if self.auto_state.active && self.auto_state.resume_after_manual_submit {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.resume_after_manual_submit = false;
+            self.auto_state.paused_for_manual_edit = false;
+            self.auto_state.awaiting_submission = false;
+            self.auto_state.seconds_remaining = 0;
+            self.auto_rebuild_live_ring();
+            self.bottom_pane.update_status_text(String::new());
+            self.bottom_pane.set_task_running(false);
+        }
+
         self.request_redraw();
     }
 
@@ -6426,6 +6741,7 @@ impl ChatWidget<'_> {
                 // the status spinner can hide promptly when nothing else is running.
                 self.active_task_ids.remove(&id);
                 self.maybe_hide_spinner();
+                self.auto_on_assistant_final();
             }
             EventMsg::ReplayHistory(ev) => {
                 let codex_core::protocol::ReplayHistoryEvent { items, events } = ev;
@@ -6595,7 +6911,6 @@ impl ChatWidget<'_> {
                     ok
                 );
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
-                // Stream reasoning delta through StreamController
                 streaming::delta_text(
                     self,
                     StreamKind::Reasoning,
@@ -6722,6 +7037,7 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
                 self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
+
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
@@ -7014,18 +7330,12 @@ impl ChatWidget<'_> {
                             },
                         );
                         if let HistoryMutation::Replaced {
+                            id,
                             record: HistoryRecord::Exec(exec_record),
                             ..
                         } = mutation
                         {
-                            if idx < self.history_cells.len() {
-                                if let Some(exec) = self.history_cells[idx]
-                                    .as_any_mut()
-                                    .downcast_mut::<history_cell::ExecCell>()
-                                {
-                                    exec.sync_from_record(&exec_record);
-                                }
-                            }
+                            self.update_cell_from_record(id, HistoryRecord::Exec(exec_record));
                         }
                     }
                     self.invalidate_height_cache();
@@ -7211,21 +7521,16 @@ impl ChatWidget<'_> {
                             .running_wait_tools
                             .insert(ToolCallId(call_id.clone()), exec_call_id.clone());
 
+                        let mut wait_update: Option<(usize, Option<Duration>, Vec<(String, bool)>)> = None;
                         if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
                             running.wait_active = true;
                             running.wait_notes.clear();
-                            let history_index = running.history_index;
-                            if let Some(idx) = history_index {
-                                if idx < self.history_cells.len() {
-                                    if let Some(exec_cell) = self.history_cells[idx]
-                                        .as_any_mut()
-                                        .downcast_mut::<history_cell::ExecCell>()
-                                    {
-                                        exec_cell.set_waiting(true);
-                                        exec_cell.clear_wait_notes();
-                                    }
-                                }
+                            if let Some(idx) = running.history_index {
+                                wait_update = Some((idx, running.wait_total, running.wait_notes.clone()));
                             }
+                        }
+                        if let Some((idx, total, notes)) = wait_update {
+                            let _ = self.update_exec_wait_state_with_pairs(idx, total, true, &notes);
                         }
                         self.bottom_pane
                             .update_status_text("waiting for command".to_string());
@@ -7348,74 +7653,65 @@ impl ChatWidget<'_> {
                                 note_lines.push((note_text.to_string(), is_error_note));
                             }
                         }
-                        let mut history_index: Option<usize> = None;
+                        let mut history_idx: Option<usize> = None;
+                        let mut wait_total: Option<Duration> = None;
+                        let mut wait_notes_snapshot: Vec<(String, bool)> = Vec::new();
                         if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
                             let base = running.wait_total.unwrap_or_default();
                             let total = base.saturating_add(duration);
                             running.wait_total = Some(total);
-                            history_index = running.history_index;
                             running.wait_active = wait_still_pending;
-                            for (text, is_error_note) in &note_lines {
-                                if running
-                                    .wait_notes
-                                    .last()
-                                    .map(|(existing, existing_err)| existing == text && existing_err == is_error_note)
-                                    .unwrap_or(false)
-                                {
-                                    continue;
+                            Self::append_wait_pairs(&mut running.wait_notes, &note_lines);
+                            wait_notes_snapshot = running.wait_notes.clone();
+                            wait_total = running.wait_total;
+                            history_idx = running.history_index;
+                        } else {
+                            Self::append_wait_pairs(&mut wait_notes_snapshot, &note_lines);
+                        }
+
+                        if history_idx.is_none() {
+                            if let Some((idx, _)) = self.history_cells.iter().enumerate().rev().find(|(_, cell)| {
+                                cell.as_any()
+                                    .downcast_ref::<history_cell::ExecCell>()
+                                    .is_some()
+                            }) {
+                                history_idx = Some(idx);
+                                if let Some(running) = self.exec.running_commands.get_mut(&exec_call_id) {
+                                    running.history_index = Some(idx);
                                 }
-                                running.wait_notes.push((text.clone(), *is_error_note));
                             }
                         }
 
-                        let mut updated = false;
-                        if let Some(idx) = history_index {
-                            if idx < self.history_cells.len() {
-                                if let Some(exec_cell) = self.history_cells[idx]
-                                    .as_any_mut()
-                                    .downcast_mut::<history_cell::ExecCell>()
-                                {
-                                    let total = exec_cell
-                                        .wait_total()
-                                        .unwrap_or_default()
-                                        .saturating_add(duration);
-                                    exec_cell.set_wait_total(Some(total));
-                                    if wait_still_pending {
-                                        exec_cell.set_waiting(true);
-                                    } else {
-                                        exec_cell.set_waiting(false);
-                                    }
-                                    for (text, is_error_note) in &note_lines {
-                                        exec_cell.push_wait_note(text, *is_error_note);
-                                    }
-                                    updated = true;
-                                }
-                            }
-                        }
-                        if !updated {
-                            if let Some(exec_cell) = self
-                                .history_cells
-                                .iter_mut()
-                                .rev()
-                                .find_map(|cell| {
-                                    cell.as_any_mut()
-                                        .downcast_mut::<history_cell::ExecCell>()
-                                })
+                        if let Some(idx) = history_idx {
+                            let record_idx = self
+                                .record_index_for_cell(idx)
+                                .unwrap_or_else(|| self.record_index_for_position(idx));
+                            if let Some(HistoryRecord::Exec(exec_record)) =
+                                self.history_state.get(record_idx).cloned()
                             {
-                                let total = exec_cell
-                                    .wait_total()
-                                    .unwrap_or_default()
-                                    .saturating_add(duration);
-                                exec_cell.set_wait_total(Some(total));
-                                if wait_still_pending {
-                                    exec_cell.set_waiting(true);
-                                } else {
-                                    exec_cell.set_waiting(false);
+                                if wait_total.is_none() {
+                                    let base = exec_record.wait_total.unwrap_or_default();
+                                    wait_total = Some(base.saturating_add(duration));
                                 }
-                                for (text, is_error_note) in &note_lines {
-                                    exec_cell.push_wait_note(text, *is_error_note);
+                                if wait_notes_snapshot.is_empty() {
+                                    wait_notes_snapshot =
+                                        Self::wait_pairs_from_exec_notes(&exec_record.wait_notes);
+                                    Self::append_wait_pairs(&mut wait_notes_snapshot, &note_lines);
+                                }
+                            } else {
+                                if wait_total.is_none() {
+                                    wait_total = Some(duration);
+                                }
+                                if wait_notes_snapshot.is_empty() {
+                                    Self::append_wait_pairs(&mut wait_notes_snapshot, &note_lines);
                                 }
                             }
+                            let _ = self.update_exec_wait_state_with_pairs(
+                                idx,
+                                wait_total,
+                                wait_still_pending,
+                                &wait_notes_snapshot,
+                            );
                         }
 
                         if success {
@@ -9263,6 +9559,532 @@ impl ChatWidget<'_> {
             controller_rx,
             self.config.debug,
         );
+    }
+
+    pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
+        let provided = goal.unwrap_or_default();
+        let trimmed = provided.trim();
+        if trimmed.is_empty() {
+            if self.auto_state.active {
+                self.auto_stop(None);
+            }
+            self.auto_state.reset();
+            self.auto_state.awaiting_goal_input = true;
+            self.clear_composer();
+            self.bottom_pane.ensure_input_focus();
+            self.bottom_pane.set_task_running(true);
+            self.bottom_pane
+                .update_status_text("Auto Drive Goal".to_string());
+            self.header_wave.set_enabled(false, Instant::now());
+            self.push_background_tail(
+                "Please enter the goal you would like to work autonomously towards.".to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
+
+        let goal_text = trimmed.to_string();
+
+        if self.auto_state.active {
+            self.auto_stop(None);
+        }
+
+        let conversation = self.export_response_items();
+        match start_auto_coordinator(
+            self.app_event_tx.clone(),
+            goal_text.clone(),
+            conversation,
+            self.config.clone(),
+            self.config.debug,
+        ) {
+            Ok(handle) => {
+                self.auto_tx = Some(handle.tx);
+                self.auto_state.reset();
+                self.auto_state.active = true;
+                self.auto_state.goal = Some(goal_text.clone());
+                self.auto_state.current_thoughts = None;
+                self.auto_state.current_display_line = None;
+                self.auto_state.current_summary_index = None;
+                self.auto_state.placeholder_phrase =
+                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.last_broadcast_thought = None;
+                self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_state.waiting_for_response = true;
+                self.header_wave.set_enabled(true, Instant::now());
+                self.auto_rebuild_live_ring();
+                self.push_background_tail(format!("Auto Drive started: {goal_text}"));
+                self.request_redraw();
+            }
+            Err(err) => {
+                self.push_background_tail(format!("Coordinator failed to start: {err}"));
+            }
+        }
+    }
+
+    fn auto_send_conversation(&mut self) {
+        if !self.auto_state.active || self.auto_state.waiting_for_response {
+            return;
+        }
+        let Some(tx) = self.auto_tx.as_ref() else {
+            return;
+        };
+        let conversation = self.export_response_items();
+        if tx
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+            .is_err()
+        {
+            self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+        } else {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.current_thoughts = None;
+            self.auto_state.last_broadcast_thought = None;
+            self.auto_state.current_display_line = None;
+            self.auto_state.current_summary_index = None;
+            self.auto_state.last_decision_display = None;
+            self.auto_state.placeholder_phrase =
+                Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+            self.auto_state.thinking_prefix_stripped = false;
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn auto_handle_decision(
+        &mut self,
+        status: AutoCoordinatorStatus,
+        thoughts: String,
+        prompt: Option<String>,
+    ) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        self.auto_on_reasoning_final(&thoughts);
+        self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.waiting_for_response = false;
+
+        match status {
+            AutoCoordinatorStatus::Continue => {
+                let Some(prompt_text) = prompt else {
+                    self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
+                    return;
+                };
+                self.auto_state.current_prompt = Some(prompt_text.clone());
+                self.auto_state.awaiting_submission = true;
+                self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+                let countdown_id = self.auto_state.countdown_id;
+                self.auto_rebuild_live_ring();
+                self.request_redraw();
+                self.auto_start_countdown(countdown_id);
+            }
+            AutoCoordinatorStatus::Success => {
+                let lower = thoughts.to_ascii_lowercase();
+                let message = if lower.starts_with("coordinator success:") {
+                    thoughts
+                } else {
+                    format!("Coordinator success: {thoughts}")
+                };
+                self.auto_stop(Some(message));
+                return;
+            }
+            AutoCoordinatorStatus::Failed => {
+                let lower = thoughts.to_ascii_lowercase();
+                let message = if lower.starts_with("coordinator error:") {
+                    thoughts
+                } else {
+                    format!("Coordinator error: {thoughts}")
+                };
+                self.auto_stop(Some(message));
+                return;
+            }
+        }
+    }
+
+    fn auto_start_countdown(&self, countdown_id: u64) {
+        if AUTO_COUNTDOWN_SECONDS == 0 {
+            let _ = self.app_event_tx.send(AppEvent::AutoCoordinatorCountdown {
+                countdown_id,
+                seconds_left: 0,
+            });
+            return;
+        }
+
+        let tx = self.app_event_tx.clone();
+        std::thread::spawn(move || {
+            let mut remaining = AUTO_COUNTDOWN_SECONDS;
+            while remaining > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                remaining -= 1;
+                if !tx.send_with_result(AppEvent::AutoCoordinatorCountdown {
+                    countdown_id,
+                    seconds_left: remaining,
+                }) {
+                    break;
+                }
+            }
+        });
+    }
+
+    pub(crate) fn auto_handle_countdown(&mut self, countdown_id: u64, seconds_left: u8) {
+        if !self.auto_state.active
+            || countdown_id != self.auto_state.countdown_id
+            || !self.auto_state.awaiting_submission
+            || self.auto_state.paused_for_manual_edit
+        {
+            return;
+        }
+
+        self.auto_state.seconds_remaining = seconds_left;
+        if seconds_left == 0 {
+            self.auto_submit_prompt();
+        } else {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
+        if !self.auto_state.active {
+            return;
+        }
+        self.auto_state.placeholder_phrase = None;
+        self.auto_on_reasoning_delta(&delta, summary_index);
+    }
+
+    fn auto_submit_prompt(&mut self) {
+        if !self.auto_state.active {
+            return;
+        }
+        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+            self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
+            return;
+        };
+        if prompt.trim().is_empty() {
+            self.auto_stop(Some("Coordinator produced an empty prompt.".to_string()));
+            return;
+        }
+
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.waiting_for_response = true;
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.seconds_remaining = 0;
+        let post_submit_display = self.auto_state.last_decision_display.clone();
+        self.auto_state.current_thoughts = None;
+        self.auto_state.last_broadcast_thought = None;
+        self.auto_state.current_display_line = post_submit_display.clone();
+        self.auto_state.current_summary_index = None;
+        self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
+            auto_drive_strings::next_auto_drive_phrase().to_string()
+        });
+        self.auto_state.thinking_prefix_stripped = false;
+        self.bottom_pane.update_status_text(String::new());
+        self.bottom_pane.set_task_running(false);
+        self.submit_text_message(prompt);
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    fn auto_pause_for_manual_edit(&mut self) {
+        if !self.auto_state.active || !self.auto_state.awaiting_submission {
+            return;
+        }
+        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+            return;
+        };
+
+        self.auto_state.paused_for_manual_edit = true;
+        self.auto_state.resume_after_manual_submit = true;
+        self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+        self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+        self.clear_composer();
+        self.insert_str(&prompt);
+        self.bottom_pane.ensure_input_focus();
+        self.bottom_pane.set_task_running(true);
+        self.bottom_pane
+            .update_status_text("Auto Drive".to_string());
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    fn auto_stop(&mut self, message: Option<String>) {
+        if let Some(tx) = self.auto_tx.take() {
+            let _ = tx.send(AutoCoordinatorCommand::Stop);
+        }
+        if let Some(msg) = message {
+            self.push_background_tail(msg);
+        }
+        self.bottom_pane.set_standard_terminal_hint(None);
+        self.auto_state.reset();
+        self.bottom_pane.clear_auto_coordinator_view();
+        self.bottom_pane.clear_live_ring();
+        let any_exec_running = !self.exec.running_commands.is_empty();
+        let any_tools_running = !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty();
+        let any_streaming = self.stream.is_write_cycle_active();
+        let any_tasks_active = !self.active_task_ids.is_empty();
+
+        if any_exec_running || any_tools_running || any_streaming || any_tasks_active {
+            self.bottom_pane.set_task_running(true);
+        } else {
+            self.bottom_pane.set_task_running(false);
+            self.bottom_pane.update_status_text(String::new());
+        }
+        self.bottom_pane.ensure_input_focus();
+        self.header_wave.set_enabled(false, Instant::now());
+        self.request_redraw();
+    }
+
+    fn auto_on_assistant_final(&mut self) {
+        if !self.auto_state.active || !self.auto_state.waiting_for_response {
+            return;
+        }
+        self.auto_state.waiting_for_response = false;
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+        self.auto_state.current_thoughts = Some(String::new());
+        self.auto_state.current_display_line = None;
+        self.auto_state.current_summary_index = None;
+        self.auto_state.placeholder_phrase = None;
+        self.auto_state.thinking_prefix_stripped = false;
+        self.auto_state.last_decision_display = None;
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+        self.auto_send_conversation();
+    }
+
+    fn auto_rebuild_live_ring(&mut self) {
+        if !self.auto_state.active {
+            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_live_ring();
+            return;
+        }
+
+        if self.auto_state.paused_for_manual_edit {
+            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_live_ring();
+            return;
+        }
+
+        self.bottom_pane.clear_live_ring();
+
+        let status_text = if let Some(line) = self
+            .auto_state
+            .current_display_line
+            .as_ref()
+            .filter(|line| !line.trim().is_empty())
+        {
+            line.clone()
+        } else {
+            self
+                .auto_state
+                .placeholder_phrase
+                .get_or_insert_with(|| auto_drive_strings::next_auto_drive_phrase().to_string())
+                .clone()
+        };
+
+        let status_lines: Vec<String> = vec![append_thought_ellipsis(&status_text)];
+
+        let prompt = self
+            .auto_state
+            .current_prompt
+            .clone()
+            .filter(|p| !p.trim().is_empty());
+
+        let countdown = if self.auto_state.awaiting_submission && AUTO_COUNTDOWN_SECONDS > 0 {
+            Some(CountdownState {
+                remaining: self
+                    .auto_state
+                    .seconds_remaining
+                    .min(AUTO_COUNTDOWN_SECONDS),
+            })
+        } else {
+            None
+        };
+
+        let button = if self.auto_state.awaiting_submission {
+            let label = if self.auto_state.countdown_active() {
+                format!("Continue ({}s)", self.auto_state.seconds_remaining)
+            } else {
+                "Continue now".to_string()
+            };
+            Some(AutoCoordinatorButton {
+                label,
+                enabled: true,
+            })
+        } else if self.auto_state.waiting_for_response {
+            None
+        } else {
+            None
+        };
+
+        let manual_hint = None;
+
+        let ctrl_switch_hint = if self.auto_state.awaiting_submission {
+            "Esc to cancel".to_string()
+        } else if self.auto_state.waiting_for_response {
+            String::new()
+        } else {
+            String::new()
+        };
+
+        let model = AutoCoordinatorViewModel {
+            goal: self.auto_state.goal.clone(),
+            status_lines,
+            prompt,
+            awaiting_submission: self.auto_state.awaiting_submission,
+            waiting_for_response: self.auto_state.waiting_for_response,
+            countdown,
+            button,
+            manual_hint,
+            ctrl_switch_hint,
+        };
+
+        self.bottom_pane
+            .show_auto_coordinator_view(AutoCoordinatorView::new(model, self.app_event_tx.clone()));
+
+        if self.auto_state.waiting_for_response {
+            self.bottom_pane
+                .set_standard_terminal_hint(Some("Esc to stop Auto Drive".to_string()));
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
+        }
+
+        let interval = crate::spinner::current_spinner().interval_ms.max(80);
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+    }
+
+    fn auto_update_display_title(&mut self) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        let Some(thoughts) = self.auto_state.current_thoughts.as_ref() else {
+            return;
+        };
+
+        if let Some(title) = extract_latest_bold_title(thoughts) {
+            let needs_update = self
+                .auto_state
+                .current_display_line
+                .as_ref()
+                .map(|current| current != &title)
+                .unwrap_or(true);
+
+            if needs_update {
+                self.auto_state.current_display_line = Some(title);
+                self.auto_state.placeholder_phrase = None;
+            }
+        }
+    }
+
+    fn auto_broadcast_thoughts(&mut self, raw: &str) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        let display_text = extract_latest_bold_title(raw).or_else(|| {
+            raw.lines().find_map(|line| {
+                let trimmed = line.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
+            })
+        });
+
+        let Some(display_text) = display_text else {
+            return;
+        };
+
+        if self
+            .auto_state
+            .last_broadcast_thought
+            .as_ref()
+            .map(|prev| prev == &display_text)
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        self.auto_state.last_broadcast_thought = Some(display_text);
+    }
+
+    fn auto_on_reasoning_delta(&mut self, delta: &str, summary_index: Option<u32>) {
+        if !self.auto_state.active || delta.trim().is_empty() {
+            return;
+        }
+
+        if let Some(idx) = summary_index {
+            if self.auto_state.current_summary_index != Some(idx) {
+                self.auto_state.current_summary_index = Some(idx);
+                self.auto_state.current_thoughts = Some(String::new());
+                self.auto_state.current_display_line = None;
+                self.auto_state.last_broadcast_thought = None;
+                self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.last_decision_display = None;
+            }
+        }
+
+        let cleaned_delta = if !self.auto_state.thinking_prefix_stripped {
+            let (without_prefix, stripped) = strip_role_prefix_if_present(delta);
+            if stripped {
+                self.auto_state.thinking_prefix_stripped = true;
+            }
+            without_prefix.to_string()
+        } else {
+            delta.to_string()
+        };
+
+        if !self.auto_state.thinking_prefix_stripped && !cleaned_delta.trim().is_empty() {
+            self.auto_state.thinking_prefix_stripped = true;
+        }
+
+        let payload = {
+            let entry = self
+                .auto_state
+                .current_thoughts
+                .get_or_insert_with(String::new);
+
+            if auto_drive_strings::is_auto_drive_phrase(entry) {
+                entry.clear();
+            }
+
+            entry.push_str(&cleaned_delta);
+            entry.clone()
+        };
+
+        self.auto_update_display_title();
+        self.auto_broadcast_thoughts(&payload);
+
+        if self.auto_state.waiting_for_response {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    fn auto_on_reasoning_final(&mut self, text: &str) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        self.auto_state.current_thoughts = Some(text.to_string());
+        self.auto_state.thinking_prefix_stripped = true;
+        self.auto_state.current_summary_index = None;
+        self.auto_update_display_title();
+        self.auto_broadcast_thoughts(text);
+
+        if self.auto_state.waiting_for_response {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
     }
 
     fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
@@ -11608,6 +12430,7 @@ impl ChatWidget<'_> {
                 if let Some(rid) = id {
                     self.reasoning_index.insert(rid, idx);
                 }
+                // Auto Drive status updates are handled via coordinator decisions.
             }
             StreamKind::Answer => {
                 tracing::debug!(
@@ -11775,6 +12598,14 @@ impl ChatWidget<'_> {
         stream_id: &str,
         state: AssistantStreamState,
     ) {
+        if state.id != HistoryId::ZERO {
+            self.update_cell_from_record(
+                state.id,
+                HistoryRecord::AssistantStream(state.clone()),
+            );
+            return;
+        }
+
         if let Some(idx) = self.history_cells.iter().rposition(|c| {
             c.as_any()
                 .downcast_ref::<history_cell::StreamingContentCell>()
@@ -11841,21 +12672,18 @@ impl ChatWidget<'_> {
             },
         );
 
-        if let HistoryMutation::Inserted { index, record, .. }
-        | HistoryMutation::Replaced { index, record, .. } = mutation
-        {
-            if let HistoryRecord::AssistantStream(state) = record {
-                if index < self.history_cells.len() {
-                    if let Some(stream_cell) = self.history_cells[index]
-                        .as_any_mut()
-                        .downcast_mut::<history_cell::StreamingContentCell>()
-                    {
-                        stream_cell.update_from_state(state.clone(), &self.config);
-                    }
-                } else {
+        match mutation {
+            HistoryMutation::Inserted { record, .. } => {
+                if let HistoryRecord::AssistantStream(state) = record {
                     self.refresh_streaming_cell_for_stream_id(stream_id, state);
                 }
             }
+            HistoryMutation::Replaced { id, record, .. } => {
+                if matches!(record, HistoryRecord::AssistantStream(_)) {
+                    self.update_cell_from_record(id, record);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -13963,6 +14791,21 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn format_mcp_summary(cfg: &codex_core::config_types::McpServerConfig) -> String {
+        use codex_core::config_types::McpServerTransportConfig;
+
+        match &cfg.transport {
+            McpServerTransportConfig::Stdio { command, args, .. } => {
+                if args.is_empty() {
+                    command.clone()
+                } else {
+                    format!("{} {}", command, args.join(" "))
+                }
+            }
+            McpServerTransportConfig::StreamableHttp { url, .. } => format!("HTTP {}", url),
+        }
+    }
+
     /// Handle `/mcp` command: manage MCP servers (status/on/off/add).
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
@@ -13975,27 +14818,17 @@ impl ChatWidget<'_> {
                         let mut rows: Vec<crate::bottom_pane::mcp_settings_view::McpServerRow> =
                             Vec::new();
                         for (name, cfg) in enabled.into_iter() {
-                            let args = if cfg.args.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" {}", cfg.args.join(" "))
-                            };
                             rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow {
+                                summary: Self::format_mcp_summary(&cfg),
                                 name,
                                 enabled: true,
-                                summary: format!("{}{}", cfg.command, args),
                             });
                         }
                         for (name, cfg) in disabled.into_iter() {
-                            let args = if cfg.args.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" {}", cfg.args.join(" "))
-                            };
                             rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow {
+                                summary: Self::format_mcp_summary(&cfg),
                                 name,
                                 enabled: false,
-                                summary: format!("{}{}", cfg.command, args),
                             });
                         }
                         // Sort by name for stability
@@ -14028,21 +14861,19 @@ impl ChatWidget<'_> {
                         } else {
                             lines.push_str(&format!("Enabled ({}):\n", enabled.len()));
                             for (name, cfg) in enabled {
-                                let args = if cfg.args.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {}", cfg.args.join(" "))
-                                };
-                                lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
+                                lines.push_str(&format!(
+                                    "• {} — {}\n",
+                                    name,
+                                    Self::format_mcp_summary(&cfg)
+                                ));
                             }
                             lines.push_str(&format!("\nDisabled ({}):\n", disabled.len()));
                             for (name, cfg) in disabled {
-                                let args = if cfg.args.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {}", cfg.args.join(" "))
-                                };
-                                lines.push_str(&format!("• {} — {}{}\n", name, cfg.command, args));
+                                lines.push_str(&format!(
+                                    "• {} — {}\n",
+                                    name,
+                                    Self::format_mcp_summary(&cfg)
+                                ));
                             }
                         }
                         self.push_background_tail(lines);
@@ -14219,29 +15050,22 @@ impl ChatWidget<'_> {
                 }
                 match find_codex_home() {
                     Ok(home) => {
-                        let cfg = codex_core::config_types::McpServerConfig {
+                        let transport = codex_core::config_types::McpServerTransportConfig::Stdio {
                             command: command.to_string(),
                             args: args.clone(),
-                            env: if env.is_empty() {
-                                None
-                            } else {
-                                Some(env.clone())
-                            },
-                            startup_timeout_ms: None,
+                            env: if env.is_empty() { None } else { Some(env.clone()) },
+                        };
+                        let cfg = codex_core::config_types::McpServerConfig {
+                            transport,
+                            startup_timeout_sec: None,
+                            tool_timeout_sec: None,
                         };
                         match codex_core::config::add_mcp_server(&home, &name, cfg.clone()) {
                             Ok(()) => {
+                                let summary = Self::format_mcp_summary(&cfg);
                                 // Update in-memory config for future sessions
                                 self.config.mcp_servers.insert(name.clone(), cfg);
-                                let args_disp = if args.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {}", args.join(" "))
-                                };
-                                let msg = format!(
-                                    "Added MCP server '{}': {}{}",
-                                    name, command, args_disp
-                                );
+                                let msg = format!("Added MCP server '{}': {}", name, summary);
                                 self.push_background_tail(msg);
                             }
                             Err(e) => {
@@ -15022,17 +15846,31 @@ impl ChatWidget<'_> {
 
         let status_line = Line::from(status_spans);
 
+        let now = Instant::now();
+        if self.header_wave.schedule_if_needed(now) {
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
+        }
+
         // Render the block first
         status_block.render(padded_area, buf);
+        let wave_enabled = self.header_wave.is_enabled();
+        if wave_enabled {
+            self.header_wave.render(padded_area, buf, now);
+        }
 
         // Then render the text inside with padding, centered
+        let status_style = if wave_enabled {
+            Style::default().fg(crate::colors::text())
+        } else {
+            Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text())
+        };
+
         let status_widget = Paragraph::new(vec![status_line])
             .alignment(ratatui::layout::Alignment::Center)
-            .style(
-                Style::default()
-                    .bg(crate::colors::background())
-                    .fg(crate::colors::text()),
-            );
+            .style(status_style);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
@@ -15202,6 +16040,137 @@ impl ChatWidget<'_> {
 
         placeholder_widget.render(area, buf);
     }
+}
+
+fn append_thought_ellipsis(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.ends_with('…') {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}…")
+    }
+}
+
+fn extract_latest_bold_title(text: &str) -> Option<String> {
+    fn prev_non_ws(text: &str, end: usize) -> Option<char> {
+        text[..end].chars().rev().find(|ch| !ch.is_whitespace())
+    }
+
+    fn next_non_ws(text: &str, start: usize) -> Option<char> {
+        text[start..].chars().find(|ch| !ch.is_whitespace())
+    }
+
+    fn normalize_candidate(candidate: &str) -> Option<String> {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+
+    let bytes = text.as_bytes();
+    let mut idx = 0usize;
+    let mut latest: Option<String> = None;
+    let mut open_start: Option<usize> = None;
+
+    while idx + 1 < bytes.len() {
+        if bytes[idx] == b'*' && bytes[idx + 1] == b'*' {
+            if let Some(start) = open_start {
+                let candidate = &text[start..idx];
+                let before = prev_non_ws(text, start);
+                let after = next_non_ws(text, idx + 2);
+                let looks_like_heading = before
+                    .map(|ch| matches!(ch, '"' | '\n' | '\r' | ':' | '[' | '{'))
+                    .unwrap_or(true)
+                    && after
+                        .map(|ch| matches!(ch, '"' | '\n' | '\r' | ',' | '}' | ']'))
+                        .unwrap_or(true);
+
+                if looks_like_heading {
+                    if let Some(clean) = normalize_candidate(candidate) {
+                        latest = Some(clean);
+                    }
+                }
+                open_start = None;
+                idx += 2;
+                continue;
+            } else {
+                open_start = Some(idx + 2);
+                idx += 2;
+                continue;
+            }
+        }
+        idx += 1;
+    }
+
+    if latest.is_none() {
+        if let Some(start) = open_start {
+            if let Some(clean) = normalize_candidate(&text[start..]) {
+                latest = Some(clean);
+            }
+        }
+    }
+
+    if latest.is_some() {
+        return latest;
+    }
+
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(title) = heading_from_line(trimmed) {
+            latest = Some(title);
+        }
+    }
+
+    latest
+}
+
+fn heading_from_line(line: &str) -> Option<String> {
+    let normalized = remove_bullet_prefix(line.trim_start());
+    if !normalized.starts_with("**") {
+        return None;
+    }
+
+    let rest = &normalized[2..];
+    let end = rest.find("**");
+    let title = match end {
+        Some(idx) => &rest[..idx],
+        None => rest,
+    };
+
+    if title.trim().is_empty() {
+        return None;
+    }
+
+    Some(title.to_string())
+}
+
+fn remove_bullet_prefix(line: &str) -> &str {
+    let mut normalized = line;
+    for prefix in ["- ", "* ", "\u{2022} "] {
+        if normalized.starts_with(prefix) {
+            normalized = normalized[prefix.len()..].trim_start();
+            break;
+        }
+    }
+    normalized
+}
+
+fn strip_role_prefix_if_present(input: &str) -> (&str, bool) {
+    const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
+    for prefix in PREFIXES {
+        if input.len() >= prefix.len() {
+            let (head, tail) = input.split_at(prefix.len());
+            if head.eq_ignore_ascii_case(prefix) {
+                return (tail, true);
+            }
+        }
+    }
+    (input, false)
 }
 
 impl ChatWidget<'_> {
