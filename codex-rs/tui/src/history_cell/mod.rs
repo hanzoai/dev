@@ -5842,18 +5842,6 @@ pub(crate) fn new_patch_event(
     event_type: PatchEventType,
     changes: HashMap<PathBuf, FileChange>,
 ) -> PatchSummaryCell {
-    let title = match event_type {
-        PatchEventType::ApprovalRequest => "proposed patch".to_string(),
-        PatchEventType::ApplyBegin { .. } => "Updated".to_string(),
-        PatchEventType::ApplySuccess => "Patch applied".to_string(),
-        PatchEventType::ApplyFailure => "Patch failed".to_string(),
-    };
-    let kind = match event_type {
-        PatchEventType::ApprovalRequest => PatchKind::Proposed,
-        PatchEventType::ApplyBegin { .. } => PatchKind::ApplyBegin,
-        PatchEventType::ApplySuccess => PatchKind::ApplySuccess,
-        PatchEventType::ApplyFailure => PatchKind::ApplyFailure,
-    };
     let record = PatchRecord {
         id: HistoryId::ZERO,
         patch_type: match event_type {
@@ -5866,12 +5854,7 @@ pub(crate) fn new_patch_event(
         },
         changes,
     };
-    PatchSummaryCell {
-        title,
-        kind,
-        record,
-        cached: std::cell::RefCell::new(None),
-    }
+    PatchSummaryCell::from_record(record)
 }
 
 pub(crate) fn new_patch_apply_failure(stderr: String) -> PlainHistoryCell {
@@ -5927,6 +5910,31 @@ struct PatchLayoutCache {
 }
 
 impl PatchSummaryCell {
+    pub(crate) fn from_record(record: PatchRecord) -> Self {
+        let kind = match record.patch_type {
+            HistoryPatchEventType::ApprovalRequest => PatchKind::Proposed,
+            HistoryPatchEventType::ApplyBegin { .. } => PatchKind::ApplyBegin,
+            HistoryPatchEventType::ApplySuccess => PatchKind::ApplySuccess,
+            HistoryPatchEventType::ApplyFailure => PatchKind::ApplyFailure,
+        };
+        let title = match record.patch_type {
+            HistoryPatchEventType::ApprovalRequest => "proposed patch".to_string(),
+            HistoryPatchEventType::ApplyBegin { .. } => "Updated".to_string(),
+            HistoryPatchEventType::ApplySuccess => "Patch applied".to_string(),
+            HistoryPatchEventType::ApplyFailure => "Patch failed".to_string(),
+        };
+        Self {
+            title,
+            kind,
+            record,
+            cached: std::cell::RefCell::new(None),
+        }
+    }
+
+    pub(crate) fn invalidate_cache(&self) {
+        self.cached.borrow_mut().take();
+    }
+
     fn ui_event_type(&self) -> PatchEventType {
         match self.record.patch_type {
             HistoryPatchEventType::ApprovalRequest => PatchEventType::ApprovalRequest,
