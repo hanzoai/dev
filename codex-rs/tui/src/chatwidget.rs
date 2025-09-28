@@ -9415,6 +9415,7 @@ impl ChatWidget<'_> {
             self.app_event_tx.clone(),
             goal_text.clone(),
             conversation,
+            self.config.clone(),
             self.config.debug,
         ) {
             Ok(handle) => {
