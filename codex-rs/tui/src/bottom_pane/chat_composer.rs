@@ -1731,6 +1731,34 @@ impl ChatComposer {
     pub(crate) fn mark_next_down_scrolls_history(&mut self) {
         self.next_down_scrolls_history = true;
     }
+
+    pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
+        self.standard_terminal_hint.as_deref()
+    }
+
+    pub(crate) fn token_usage_spans(&self, label_style: Style) -> Vec<Span<'static>> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if let Some(token_usage_info) = &self.token_usage_info {
+            let turn_usage = &token_usage_info.last_token_usage;
+            let tokens_used = turn_usage.tokens_in_context_window();
+            let used_str = format_with_thousands(tokens_used);
+            spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
+            spans.push(Span::from(" tokens").style(label_style));
+            if let Some(context_window) = token_usage_info.model_context_window {
+                if context_window > 0 {
+                    let percent_remaining = {
+                        let percent = 100.0
+                            - (tokens_used as f32 / context_window as f32 * 100.0);
+                        percent.clamp(0.0, 100.0) as u8
+                    };
+                    spans.push(Span::from(" (").style(label_style));
+                    spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
+                    spans.push(Span::from("% left)").style(label_style));
+                }
+            }
+        }
+        spans
+    }
 }
 
 impl WidgetRef for ChatComposer {
@@ -1833,26 +1861,7 @@ impl WidgetRef for ChatComposer {
                 let mut right_spans: Vec<Span> = Vec::new();
 
                 // Prepare token usage spans (always shown when available)
-                let mut token_spans: Vec<Span> = Vec::new();
-                if let Some(token_usage_info) = &self.token_usage_info {
-                    let turn_usage = &token_usage_info.last_token_usage;
-                    let tokens_used = turn_usage.tokens_in_context_window();
-                    let used_str = format_with_thousands(tokens_used);
-                    token_spans.push(Span::from(used_str).style(label_style.add_modifier(Modifier::BOLD)));
-                    token_spans.push(Span::from(" tokens").style(label_style));
-                    if let Some(context_window) = token_usage_info.model_context_window {
-                        if context_window > 0 {
-                            let percent_remaining = {
-                                let percent = 100.0
-                                    - (tokens_used as f32 / context_window as f32 * 100.0);
-                                percent.clamp(0.0, 100.0) as u8
-                            };
-                            token_spans.push(Span::from(" (").style(label_style));
-                            token_spans.push(Span::from(percent_remaining.to_string()).style(label_style.add_modifier(Modifier::BOLD)));
-                            token_spans.push(Span::from("% left)").style(label_style));
-                        }
-                    }
-                }
+                let token_spans: Vec<Span> = self.token_usage_spans(label_style);
 
                 // Helper to build hint spans based on inclusion flags
                 let build_hints = |include_reasoning: bool, include_diff: bool| -> Vec<Span> {

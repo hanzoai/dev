@@ -448,6 +448,7 @@ struct AutoCoordinatorUiState {
     current_display_line: Option<String>,
     placeholder_phrase: Option<String>,
     thinking_prefix_stripped: bool,
+    current_summary_index: Option<u32>,
     awaiting_submission: bool,
     waiting_for_response: bool,
     paused_for_manual_edit: bool,
@@ -456,6 +457,7 @@ struct AutoCoordinatorUiState {
     seconds_remaining: u8,
     awaiting_goal_input: bool,
     last_broadcast_thought: Option<String>,
+    last_decision_display: Option<String>,
 }
 
 impl AutoCoordinatorUiState {
@@ -3211,7 +3213,7 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let prefixed = format!("CLI: {text}");
+                    let prefixed = format!("Coordinator: {text}");
                     let content = ContentItem::InputText {
                         text: prefixed.clone(),
                     };
@@ -3233,7 +3235,7 @@ impl ChatWidget<'_> {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let prefixed = format!("Coordinator: {text}");
+                    let prefixed = format!("CLI: {text}");
                     let content = ContentItem::InputText {
                         text: prefixed.clone(),
                     };
@@ -9428,6 +9430,7 @@ impl ChatWidget<'_> {
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_thoughts = None;
                 self.auto_state.current_display_line = None;
+                self.auto_state.current_summary_index = None;
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_state.thinking_prefix_stripped = false;
@@ -9463,6 +9466,8 @@ impl ChatWidget<'_> {
             self.auto_state.current_thoughts = None;
             self.auto_state.last_broadcast_thought = None;
             self.auto_state.current_display_line = None;
+            self.auto_state.current_summary_index = None;
+            self.auto_state.last_decision_display = None;
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
@@ -9482,6 +9487,7 @@ impl ChatWidget<'_> {
         }
 
         self.auto_on_reasoning_final(&thoughts);
+        self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
@@ -9568,12 +9574,12 @@ impl ChatWidget<'_> {
         }
     }
 
-    pub(crate) fn auto_handle_thinking(&mut self, delta: String) {
+    pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
         if !self.auto_state.active {
             return;
         }
         self.auto_state.placeholder_phrase = None;
-        self.auto_on_reasoning_delta(&delta);
+        self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
     fn auto_submit_prompt(&mut self) {
@@ -9594,11 +9600,14 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = 0;
+        let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_thoughts = None;
         self.auto_state.last_broadcast_thought = None;
-        self.auto_state.current_display_line = None;
-        self.auto_state.placeholder_phrase =
-            Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+        self.auto_state.current_display_line = post_submit_display.clone();
+        self.auto_state.current_summary_index = None;
+        self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
+            auto_drive_strings::next_auto_drive_phrase().to_string()
+        });
         self.auto_state.thinking_prefix_stripped = false;
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
@@ -9636,11 +9645,25 @@ impl ChatWidget<'_> {
         if let Some(msg) = message {
             self.push_background_tail(msg);
         }
+        self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_state.reset();
         self.bottom_pane.clear_auto_coordinator_view();
         self.bottom_pane.clear_live_ring();
-        self.bottom_pane.update_status_text(String::new());
-        self.bottom_pane.set_task_running(false);
+        let any_exec_running = !self.exec.running_commands.is_empty();
+        let any_tools_running = !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty();
+        let any_streaming = self.stream.is_write_cycle_active();
+        let any_tasks_active = !self.active_task_ids.is_empty();
+
+        if any_exec_running || any_tools_running || any_streaming || any_tasks_active {
+            self.bottom_pane.set_task_running(true);
+        } else {
+            self.bottom_pane.set_task_running(false);
+            self.bottom_pane.update_status_text(String::new());
+        }
+        self.bottom_pane.ensure_input_focus();
         self.header_wave.set_enabled(false, Instant::now());
         self.request_redraw();
     }
@@ -9656,8 +9679,10 @@ impl ChatWidget<'_> {
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
         self.auto_state.current_thoughts = Some(String::new());
         self.auto_state.current_display_line = None;
+        self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
+        self.auto_state.last_decision_display = None;
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_send_conversation();
@@ -9693,7 +9718,7 @@ impl ChatWidget<'_> {
                 .clone()
         };
 
-        let status_lines: Vec<String> = vec![status_text];
+        let status_lines: Vec<String> = vec![append_thought_ellipsis(&status_text)];
 
         let prompt = self
             .auto_state
@@ -9728,13 +9753,7 @@ impl ChatWidget<'_> {
             None
         };
 
-        let manual_hint = if self.auto_state.awaiting_submission {
-            None
-        } else if self.auto_state.waiting_for_response {
-            Some("Press Esc to stop Auto Drive".to_string())
-        } else {
-            None
-        };
+        let manual_hint = None;
 
         let ctrl_switch_hint = if self.auto_state.awaiting_submission {
             "Esc to cancel".to_string()
@@ -9758,6 +9777,13 @@ impl ChatWidget<'_> {
 
         self.bottom_pane
             .show_auto_coordinator_view(AutoCoordinatorView::new(model, self.app_event_tx.clone()));
+
+        if self.auto_state.waiting_for_response {
+            self.bottom_pane
+                .set_standard_terminal_hint(Some("Esc to stop Auto Drive".to_string()));
+        } else {
+            self.bottom_pane.set_standard_terminal_hint(None);
+        }
 
         let interval = crate::spinner::current_spinner().interval_ms.max(80);
         self.app_event_tx
@@ -9814,13 +9840,23 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.auto_state.last_broadcast_thought = Some(display_text.clone());
-        self.push_background_tail(format!("Auto Drive: {display_text}"));
+        self.auto_state.last_broadcast_thought = Some(display_text);
     }
 
-    fn auto_on_reasoning_delta(&mut self, delta: &str) {
+    fn auto_on_reasoning_delta(&mut self, delta: &str, summary_index: Option<u32>) {
         if !self.auto_state.active || delta.trim().is_empty() {
             return;
+        }
+
+        if let Some(idx) = summary_index {
+            if self.auto_state.current_summary_index != Some(idx) {
+                self.auto_state.current_summary_index = Some(idx);
+                self.auto_state.current_thoughts = Some(String::new());
+                self.auto_state.current_display_line = None;
+                self.auto_state.last_broadcast_thought = None;
+                self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.last_decision_display = None;
+            }
         }
 
         let cleaned_delta = if !self.auto_state.thinking_prefix_stripped {
@@ -9867,6 +9903,7 @@ impl ChatWidget<'_> {
 
         self.auto_state.current_thoughts = Some(text.to_string());
         self.auto_state.thinking_prefix_stripped = true;
+        self.auto_state.current_summary_index = None;
         self.auto_update_display_title();
         self.auto_broadcast_thoughts(text);
 
@@ -15562,18 +15599,23 @@ impl ChatWidget<'_> {
 
         // Render the block first
         status_block.render(padded_area, buf);
-        if self.header_wave.is_enabled() {
+        let wave_enabled = self.header_wave.is_enabled();
+        if wave_enabled {
             self.header_wave.render(padded_area, buf, now);
         }
 
         // Then render the text inside with padding, centered
+        let status_style = if wave_enabled {
+            Style::default().fg(crate::colors::text())
+        } else {
+            Style::default()
+                .bg(crate::colors::background())
+                .fg(crate::colors::text())
+        };
+
         let status_widget = Paragraph::new(vec![status_line])
             .alignment(ratatui::layout::Alignment::Center)
-            .style(
-                Style::default()
-                    .bg(crate::colors::background())
-                    .fg(crate::colors::text()),
-            );
+            .style(status_style);
         ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
@@ -15745,8 +15787,78 @@ impl ChatWidget<'_> {
     }
 }
 
+fn append_thought_ellipsis(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.ends_with('…') {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}…")
+    }
+}
+
 fn extract_latest_bold_title(text: &str) -> Option<String> {
+    fn prev_non_ws(text: &str, end: usize) -> Option<char> {
+        text[..end].chars().rev().find(|ch| !ch.is_whitespace())
+    }
+
+    fn next_non_ws(text: &str, start: usize) -> Option<char> {
+        text[start..].chars().find(|ch| !ch.is_whitespace())
+    }
+
+    fn normalize_candidate(candidate: &str) -> Option<String> {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(trimmed.to_string())
+    }
+
+    let bytes = text.as_bytes();
+    let mut idx = 0usize;
     let mut latest: Option<String> = None;
+    let mut open_start: Option<usize> = None;
+
+    while idx + 1 < bytes.len() {
+        if bytes[idx] == b'*' && bytes[idx + 1] == b'*' {
+            if let Some(start) = open_start {
+                let candidate = &text[start..idx];
+                let before = prev_non_ws(text, start);
+                let after = next_non_ws(text, idx + 2);
+                let looks_like_heading = before
+                    .map(|ch| matches!(ch, '"' | '\n' | '\r' | ':' | '[' | '{'))
+                    .unwrap_or(true)
+                    && after
+                        .map(|ch| matches!(ch, '"' | '\n' | '\r' | ',' | '}' | ']'))
+                        .unwrap_or(true);
+
+                if looks_like_heading {
+                    if let Some(clean) = normalize_candidate(candidate) {
+                        latest = Some(clean);
+                    }
+                }
+                open_start = None;
+                idx += 2;
+                continue;
+            } else {
+                open_start = Some(idx + 2);
+                idx += 2;
+                continue;
+            }
+        }
+        idx += 1;
+    }
+
+    if latest.is_none() {
+        if let Some(start) = open_start {
+            if let Some(clean) = normalize_candidate(&text[start..]) {
+                latest = Some(clean);
+            }
+        }
+    }
+
+    if latest.is_some() {
+        return latest;
+    }
 
     for raw_line in text.lines() {
         let trimmed = raw_line.trim();
