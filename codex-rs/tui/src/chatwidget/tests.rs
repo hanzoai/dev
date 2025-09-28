@@ -3,7 +3,7 @@
 use super::*;
 use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::app_event_sender::AppEventSender;
-use crate::history::state::{ExecStatus, HistoryRecord, HistoryState};
+use crate::history::state::{ExecStatus, ExploreEntryStatus, HistoryId, HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -11,6 +11,7 @@ use codex_core::config::ConfigToml;
 use codex_core::plan_tool::PlanItemArg;
 use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
+use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentStatusUpdateEvent;
@@ -20,6 +21,8 @@ use codex_core::protocol::AgentReasoningEvent;
 use codex_core::protocol::ApplyPatchApprovalRequestEvent;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
+use codex_core::protocol::CustomToolCallBeginEvent;
+use codex_core::protocol::CustomToolCallEndEvent;
 use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
@@ -29,6 +32,7 @@ use codex_core::protocol::FileChange;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
+use codex_core::protocol::OrderMeta;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use crossterm::event::KeyCode;
@@ -43,8 +47,10 @@ use std::io::BufReader;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
+use std::time::Duration;
 use tokio::sync::mpsc::unbounded_channel;
 use strip_ansi_escapes::strip as strip_ansi_bytes;
+use serde_json::json;
 
 fn test_config() -> Config {
     // Use base defaults to avoid depending on host state.
@@ -214,6 +220,191 @@ fn background_event_before_next_output_precedes_later_cells() {
         "guard".to_string(),
         "tail".to_string(),
     ]);
+}
+
+#[test]
+fn wait_tool_updates_exec_record_via_history_state() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let cwd = chat.config.cwd.clone();
+    chat.handle_codex_event(Event {
+        id: "req-1".into(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-1".into(),
+            command: vec!["sleep".into(), "1".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(order_meta(0)),
+    });
+    pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let wait_params = json!({
+        "call_id": "call-1",
+        "for": "sleep 1",
+    });
+
+    chat.handle_codex_event(Event {
+        id: "req-1".into(),
+        event_seq: 2,
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "wait-1".into(),
+            tool_name: "wait".into(),
+            parameters: Some(wait_params.clone()),
+        }),
+        order: Some(order_meta(1)),
+    });
+    pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    chat.handle_codex_event(Event {
+        id: "req-1".into(),
+        event_seq: 3,
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "wait-1".into(),
+            tool_name: "wait".into(),
+            parameters: Some(wait_params),
+            duration: Duration::from_secs(2),
+            result: Ok("Scaling services".to_string()),
+        }),
+        order: Some(order_meta(2)),
+    });
+    pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Exec(record) => Some(record.clone()),
+            _ => None,
+        })
+        .expect("exec record present");
+    assert_eq!(exec_record.wait_total, Some(Duration::from_secs(2)));
+    assert!(!exec_record.wait_active);
+    assert!(exec_record
+        .wait_notes
+        .iter()
+        .any(|note| note.message.contains("Scaling services")));
+
+    let exec_cell = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| cell.as_any().downcast_ref::<history_cell::ExecCell>())
+        .expect("exec cell present");
+    assert_eq!(exec_cell.record.wait_total, exec_record.wait_total);
+    assert_eq!(exec_cell.record.wait_notes.len(), exec_record.wait_notes.len());
+}
+
+#[test]
+fn explore_updates_history_state_via_domain_events() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let cwd = chat.config.cwd.clone();
+    let search_cmd = vec!["rg".into(), "foo".into()];
+    let parsed = vec![ParsedCommand::Search {
+        cmd: "rg foo".to_string(),
+        query: Some("foo".to_string()),
+        path: None,
+    }];
+
+    chat.handle_codex_event(Event {
+        id: "req-1".into(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-1".into(),
+            command: search_cmd.clone(),
+            cwd: cwd.clone(),
+            parsed_cmd: parsed.clone(),
+        }),
+        order: Some(order_meta(0)),
+    });
+    pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let explore_id = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Explore(record) => Some(record.id),
+            _ => None,
+        })
+        .expect("explore record inserted");
+    assert_ne!(explore_id, HistoryId::ZERO);
+
+    let explore_state = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Explore(record) if record.id == explore_id => Some(record.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(explore_state.entries.len(), 1);
+    assert!(matches!(explore_state.entries[0].status, ExploreEntryStatus::Running));
+
+    chat.handle_codex_event(Event {
+        id: "req-1".into(),
+        event_seq: 2,
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: "call-1".into(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: Duration::from_millis(250),
+        }),
+        order: Some(order_meta(1)),
+    });
+    pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let explore_state = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Explore(record) if record.id == explore_id => Some(record.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(explore_state.entries[0].status, ExploreEntryStatus::Success));
+
+    let explore_cell = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| cell.as_any().downcast_ref::<history_cell::ExploreAggregationCell>())
+        .expect("explore cell present");
+    assert_eq!(explore_cell.record().id, explore_id);
+}
+
+#[test]
+fn diff_inserts_history_record_through_domain_event() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push_diff(Some("README".to_string()), "@@ -0,0 +1 @@\n+hello world\n".to_string());
+
+    let diff_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Diff(record) => Some(record.clone()),
+            _ => None,
+        })
+        .expect("diff record present");
+    assert_ne!(diff_record.id, HistoryId::ZERO);
+
+    let diff_cell = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| cell.as_any().downcast_ref::<history_cell::DiffCell>())
+        .expect("diff cell present");
+    assert_eq!(diff_cell.record().id, diff_record.id);
 }
 
 #[test]
@@ -466,6 +657,14 @@ fn drain_insert_history(
         }
     }
     out
+}
+
+fn order_meta(seq: u64) -> OrderMeta {
+    OrderMeta {
+        request_ordinal: 1,
+        output_index: Some(0),
+        sequence_number: Some(seq),
+    }
 }
 
 fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {

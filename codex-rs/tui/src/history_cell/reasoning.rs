@@ -69,6 +69,39 @@ impl CollapsibleReasoningCell {
         }
     }
 
+    pub(crate) fn from_state(state: ReasoningState) -> Self {
+        let ReasoningState {
+            id,
+            sections,
+            effort: _,
+            in_progress,
+        } = state;
+
+        let theme = crate::theme::current_theme();
+        let rendered_lines = sections_to_ratatui_lines(&sections, &theme);
+        let entries = rendered_lines
+            .into_iter()
+            .map(|line| ReasoningLineEntry {
+                semantic: SemanticLine::from_line(line.clone()),
+                raw: line,
+            })
+            .collect::<Vec<_>>();
+
+        let cell_state = CollapsibleReasoningState {
+            lines: entries,
+            sections,
+            in_progress,
+            hide_when_collapsed: false,
+            id: None,
+            history_id: id,
+        };
+
+        Self {
+            state: RefCell::new(cell_state),
+            collapsed: Cell::new(true),
+        }
+    }
+
     pub(crate) fn matches_id(&self, candidate: &str) -> bool {
         self.state
             .borrow()

@@ -10,6 +10,7 @@ use codex_file_search::FileMatch;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
@@ -744,6 +745,11 @@ impl BottomPane<'_> {
 
     pub(crate) fn clear_live_ring(&mut self) {
         self.live_ring = None;
+    }
+
+    pub(crate) fn set_live_ring_rows(&mut self, max_rows: u16, rows: Vec<Line<'static>>) {
+        self.live_ring = Some(live_ring_widget::LiveRingWidget::new(max_rows, rows));
+        self.request_redraw();
     }
     
     // test helper removed
