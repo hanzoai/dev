@@ -15764,28 +15764,24 @@ fn extract_latest_bold_title(text: &str) -> Option<String> {
 }
 
 fn heading_from_line(line: &str) -> Option<String> {
-    let normalized = remove_bullet_prefix(line.trim());
+    let normalized = remove_bullet_prefix(line);
     if !normalized.starts_with("**") {
         return None;
     }
 
     let rest = &normalized[2..];
     let end = rest.find("**");
-
     let title = match end {
         Some(idx) => &rest[..idx],
         None => rest,
     };
 
-    let cleaned = title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let cleaned = title.trim();
     if cleaned.is_empty() {
         return None;
     }
 
-    Some(cleaned)
+    Some(cleaned.to_string())
 }
 
 fn remove_bullet_prefix(line: &str) -> &str {
