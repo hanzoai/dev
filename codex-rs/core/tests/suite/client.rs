@@ -366,6 +366,7 @@ async fn includes_conversation_id_and_model_headers_in_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn includes_base_instructions_override_in_request() {
+    skip_if_no_network!();
     // Mock server
     let server = MockServer::start().await;
 
@@ -563,6 +564,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn includes_user_instructions_message_in_request() {
+    skip_if_no_network!();
     let server = MockServer::start().await;
 
     let first = ResponseTemplate::new(200)
@@ -859,6 +861,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn token_count_includes_rate_limits_snapshot() {
+    skip_if_no_network!();
     let server = MockServer::start().await;
 
     let sse_body = responses::sse(vec![responses::ev_completed_with_tokens("resp_rate", 123)]);
@@ -1003,6 +1006,7 @@ async fn token_count_includes_rate_limits_snapshot() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
     let response = ResponseTemplate::new(429)
@@ -1082,6 +1086,7 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn azure_overrides_assign_properties_used_for_responses_url() {
+    skip_if_no_network!();
     let existing_env_var_with_random_value = if cfg!(windows) { "USERNAME" } else { "USER" };
 
     // Mock server
@@ -1159,6 +1164,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn env_var_overrides_loaded_auth() {
+    skip_if_no_network!();
     let existing_env_var_with_random_value = if cfg!(windows) { "USERNAME" } else { "USER" };
 
     // Mock server
