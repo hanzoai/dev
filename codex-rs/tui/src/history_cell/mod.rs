@@ -2399,21 +2399,28 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Limits.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/undo", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Undo.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
     lines.push(Line::from(vec![
         Span::styled("/review", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Review.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Auto.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            " Experimental",
+            Style::default().fg(crate::colors::primary()),
+        ),
     ]));
 
     lines
