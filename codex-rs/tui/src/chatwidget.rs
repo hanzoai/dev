@@ -477,6 +477,7 @@ pub(crate) struct ChatWidget<'a> {
     welcome_shown: bool,
     // Path to the latest browser screenshot and URL for display
     latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
+    browser_autofix_requested: Arc<AtomicBool>,
     // Cached image protocol to avoid recreating every frame (path, area, protocol)
     cached_image_protocol:
         std::cell::RefCell<Option<(PathBuf, Rect, ratatui_image::protocol::Protocol)>>,
@@ -2776,6 +2777,7 @@ impl ChatWidget<'_> {
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
+            browser_autofix_requested: Arc::new(AtomicBool::new(false)),
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
@@ -3013,6 +3015,7 @@ impl ChatWidget<'_> {
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
+            browser_autofix_requested: Arc::new(AtomicBool::new(false)),
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
@@ -13080,6 +13083,56 @@ impl ChatWidget<'_> {
         ));
     }
 
+    fn schedule_browser_autofix(
+        app_event_tx: AppEventSender,
+        autofix_state: Arc<AtomicBool>,
+        failure_context: &str,
+        raw_error: String,
+    ) {
+        if autofix_state
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            tracing::info!(
+                "[/browser] auto-handoff already requested; skipping duplicate dispatch"
+            );
+            return;
+        }
+
+        let sanitized = raw_error.replace('\n', " ").replace('\r', " ");
+        let trimmed = sanitized.trim();
+        let truncated = if trimmed.len() > 220 {
+            let mut shortened = trimmed.chars().take(220).collect::<String>();
+            shortened.push('…');
+            shortened
+        } else {
+            trimmed.to_string()
+        };
+
+        tracing::info!(
+            "[/browser] scheduling Code autofix for context='{}', error='{}'",
+            failure_context,
+            truncated
+        );
+
+        let visible_message = format!(
+            "🤖 Handing /browser failure ({}) to Code. Error: {}",
+            failure_context,
+            truncated
+        );
+        app_event_tx.send_background_event(visible_message);
+
+        let command_text = format!(
+            "/code The /browser command failed to {context}. Recent error: {error}. Please diagnose and fix the environment (for example, install or configure Chrome) so /browser works in this workspace.",
+            context = failure_context,
+            error = truncated
+        );
+        app_event_tx.send(AppEvent::DispatchCommand(
+            SlashCommand::Code,
+            command_text,
+        ));
+    }
+
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
         // Parse the browser subcommand
         let trimmed = command_text.trim();
@@ -13095,6 +13148,7 @@ impl ChatWidget<'_> {
 
             // Toggle asynchronously: if internal browser is active, disable it; otherwise enable and open about:blank
             let app_event_tx = self.app_event_tx.clone();
+            let browser_autofix_flag = self.browser_autofix_requested.clone();
             tokio::spawn(async move {
                 let browser_manager = ChatWidget::get_browser_manager().await;
                 // Determine if internal browser is currently active
@@ -13127,13 +13181,25 @@ impl ChatWidget<'_> {
                     }
 
                     if let Err(e) = browser_manager.start().await {
-                        tracing::error!("[/browser] failed to start internal browser: {}", e);
+                        let error_text = e.to_string();
+                        tracing::error!(
+                            "[/browser] failed to start internal browser: {}",
+                            error_text
+                        );
                         app_event_tx.send_background_event(format!(
                             "❌ Failed to start internal browser: {}",
-                            e
+                            error_text
                         ));
+                        ChatWidget::schedule_browser_autofix(
+                            app_event_tx.clone(),
+                            browser_autofix_flag.clone(),
+                            "start the internal browser",
+                            error_text,
+                        );
                         return;
                     }
+
+                    browser_autofix_flag.store(false, Ordering::SeqCst);
 
                     // Set as global manager so core/session share the same instance
                     codex_browser::global::set_global_browser_manager(browser_manager.clone())
@@ -13176,6 +13242,7 @@ impl ChatWidget<'_> {
                 // Navigate to URL and wait for it to load
                 let latest_screenshot = self.latest_browser_screenshot.clone();
                 let app_event_tx = self.app_event_tx.clone();
+                let browser_autofix_flag = self.browser_autofix_requested.clone();
                 let url_for_goto = full_url.clone();
 
                 // Add status message
@@ -13204,9 +13271,25 @@ impl ChatWidget<'_> {
 
                     // IMPORTANT: Start the browser manager first before navigating
                     if let Err(e) = browser_manager.start().await {
-                        tracing::error!("Failed to start TUI browser manager: {}", e);
+                        let error_text = e.to_string();
+                        tracing::error!(
+                            "Failed to start TUI browser manager: {}",
+                            error_text
+                        );
+                        app_event_tx.send_background_event(format!(
+                            "❌ Failed to start internal browser: {}",
+                            error_text
+                        ));
+                        ChatWidget::schedule_browser_autofix(
+                            app_event_tx.clone(),
+                            browser_autofix_flag.clone(),
+                            "launch the internal browser",
+                            error_text,
+                        );
                         return;
                     }
+
+                    browser_autofix_flag.store(false, Ordering::SeqCst);
 
                     // Set up navigation callback to auto-capture screenshots
                     {
