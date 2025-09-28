@@ -120,7 +120,7 @@ impl SlashCommand {
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Model => "choose model & reasoning effort",
             SlashCommand::Agents => "create and configure agents",
-            SlashCommand::Auto => "work autonomously with Auto Drive",
+            SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
             }
