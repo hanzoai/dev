@@ -362,16 +362,15 @@ fn make_message(role: &str, text: String) -> ResponseItem {
 }
 
 fn strip_role_prefix(input: &str) -> &str {
-    let trimmed = input.trim_start();
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
-        if let Some(head) = trimmed.get(..prefix.len()) {
+        if input.len() >= prefix.len() {
+            let head = &input[..prefix.len()];
             if head.eq_ignore_ascii_case(prefix) {
-                if let Some(rest) = trimmed.get(prefix.len()..) {
-                    return rest;
-                }
+                let rest = &input[prefix.len()..];
+                return rest.strip_prefix(' ').unwrap_or(rest);
             }
         }
     }
-    trimmed
+    input
 }
