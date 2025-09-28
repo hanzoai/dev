@@ -8,6 +8,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -236,8 +237,9 @@ impl AutoCoordinatorView {
         };
 
         let awaiting = self.model.awaiting_submission;
+        let spinner_active = !awaiting && self.model.waiting_for_response;
 
-        let mut total = 1; // top padding line
+        let mut total = 0;
 
         if awaiting {
             if let Some(prompt) = &self.model.prompt {
@@ -253,18 +255,19 @@ impl AutoCoordinatorView {
             }
         } else {
             let status_entries = self.derived_status_entries();
-            for (text, _) in &status_entries {
-                total += Self::wrap_count(&format!("• {}", text), inner_width);
-            }
-            if status_entries.len() == 1 {
-                total = total.saturating_add(1); // spacer below single status line
+            for (index, (text, _)) in status_entries.iter().enumerate() {
+                let measure: Cow<'_, str> = if index == 0 {
+                    Cow::Owned(format!("{}  {}", DRIVE_SPINNER_FRAMES[0], text))
+                } else {
+                    Cow::Borrowed(text.as_str())
+                };
+                total += Self::wrap_count(measure.as_ref(), inner_width);
             }
             if ctx.button.is_some() {
                 total += 1; // spacer before button
                 total += button_height.max(1);
             }
             if ctx.manual_hint.is_some() {
-                total += 1; // spacer before manual hint
                 total += hint_height.max(1);
             }
             if ctrl_height > 0 {
@@ -272,7 +275,10 @@ impl AutoCoordinatorView {
                 total += ctrl_height.max(1);
             }
         }
-        total += 1; // bottom padding line
+
+        if spinner_active {
+            total = total.saturating_add(2);
+        }
 
         total
             .saturating_add(2) // frame borders
@@ -292,8 +298,13 @@ impl AutoCoordinatorView {
             return;
         }
 
+        let spinner_active = !self.model.awaiting_submission && self.model.waiting_for_response;
+
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::default());
+
+        if spinner_active {
+            lines.push(Line::default());
+        }
 
         if self.model.awaiting_submission {
             if let Some(prompt_lines) =
@@ -313,11 +324,7 @@ impl AutoCoordinatorView {
             }
         } else {
             let status_lines = self.status_lines();
-            let awaiting_goal = status_lines.len() == 1;
             lines.extend(status_lines);
-            if awaiting_goal {
-                lines.push(Line::default());
-            }
 
             if let Some(button_line) = self.button_line(ctx) {
                 lines.push(Line::default());
@@ -334,7 +341,9 @@ impl AutoCoordinatorView {
             }
         }
 
-        lines.push(Line::default());
+        if spinner_active {
+            lines.push(Line::default());
+        }
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
@@ -385,26 +394,6 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
             return;
         }
 
-        let spacer_style = Style::default()
-            .bg(colors::background())
-            .fg(colors::text());
-        for x in area.x..area.x.saturating_add(area.width) {
-            let cell = &mut buf[(x, area.y)];
-            cell.set_symbol(" ");
-            cell.set_style(spacer_style);
-        }
-
-        let inner_area = Rect {
-            x: area.x,
-            y: area.y + 1,
-            width: area.width,
-            height: area.height.saturating_sub(1),
-        };
-
-        if inner_area.height == 0 {
-            return;
-        }
-
-        self.render_internal(inner_area, buf, &ctx);
+        self.render_internal(area, buf, &ctx);
     }
 }

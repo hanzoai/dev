@@ -134,6 +134,7 @@ pub(crate) enum AppEvent {
     },
     AutoCoordinatorThinking {
         delta: String,
+        summary_index: Option<u32>,
     },
     AutoCoordinatorCountdown {
         countdown_id: u64,
