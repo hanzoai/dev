@@ -1619,6 +1619,11 @@ impl App<'_> {
                         widget.auto_handle_decision(status, thoughts, prompt);
                     }
                 }
+                AppEvent::AutoCoordinatorThinking { delta } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_thinking(delta);
+                    }
+                }
                 AppEvent::AutoCoordinatorCountdown { countdown_id, seconds_left } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_countdown(countdown_id, seconds_left);

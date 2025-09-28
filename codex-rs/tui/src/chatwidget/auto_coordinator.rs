@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use codex_core::config::Config;
-use codex_core::config::ConfigOverrides;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::debug_logger::DebugLogger;
 use codex_core::model_family::{find_family_for_model, derive_default_model_family};
@@ -45,6 +44,7 @@ pub(super) fn start_auto_coordinator(
     app_event_tx: AppEventSender,
     goal_text: String,
     conversation: Vec<ResponseItem>,
+    config: Config,
     debug_enabled: bool,
 ) -> Result<AutoCoordinatorHandle> {
     let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -55,6 +55,7 @@ pub(super) fn start_auto_coordinator(
             app_event_tx,
             goal_text,
             conversation,
+            config,
             cmd_rx,
             debug_enabled,
         ) {
@@ -69,28 +70,34 @@ fn run_auto_loop(
     app_event_tx: AppEventSender,
     goal_text: String,
     initial_conversation: Vec<ResponseItem>,
+    config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
     debug_enabled: bool,
 ) -> Result<()> {
-    let cfg = Config::load_with_cli_overrides(vec![], ConfigOverrides::default())
-        .context("loading config")?;
-    let preferred_auth = if cfg.using_chatgpt_auth {
+    let preferred_auth = if config.using_chatgpt_auth {
         codex_protocol::mcp_protocol::AuthMode::ChatGPT
     } else {
         codex_protocol::mcp_protocol::AuthMode::ApiKey
     };
+    let codex_home = config.codex_home.clone();
+    let responses_originator_header = config.responses_originator_header.clone();
     let auth_mgr = AuthManager::shared(
-        cfg.codex_home.clone(),
+        codex_home,
         preferred_auth,
-        cfg.responses_originator_header.clone(),
+        responses_originator_header,
     );
+    let model_provider = config.model_provider.clone();
+    let model_reasoning_summary = config.model_reasoning_summary;
+    let model_text_verbosity = config.model_text_verbosity;
+    let sandbox_policy = config.sandbox_policy.clone();
+    let config = Arc::new(config);
     let client = ModelClient::new(
-        Arc::new(cfg.clone()),
+        config.clone(),
         Some(auth_mgr),
-        cfg.model_provider.clone(),
+        model_provider,
         ReasoningEffort::Medium,
-        cfg.model_reasoning_summary,
-        cfg.model_text_verbosity,
+        model_reasoning_summary,
+        model_text_verbosity,
         Uuid::new_v4(),
         Arc::new(Mutex::new(
             DebugLogger::new(debug_enabled)
@@ -99,7 +106,7 @@ fn run_auto_loop(
     );
 
     let developer_intro = build_developer_message(&goal_text, matches!(
-        cfg.sandbox_policy,
+        sandbox_policy,
         SandboxPolicy::DangerFullAccess
     ));
     let schema = build_schema();
@@ -126,6 +133,7 @@ fn run_auto_loop(
                 &developer_intro,
                 &schema,
                 conv,
+                &app_event_tx,
             ) {
                 Ok((status, thoughts, prompt_opt)) => {
                     let event = AppEvent::AutoCoordinatorDecision {
@@ -198,139 +206,87 @@ fn request_coordinator_decision(
     client: &ModelClient,
     developer_intro: &str,
     schema: &Value,
-    conversation: Vec<ResponseItem>,
+    mut conversation: Vec<ResponseItem>,
+    app_event_tx: &AppEventSender,
 ) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
-    const MAX_ATTEMPTS: usize = 5;
-    for attempt in 0..MAX_ATTEMPTS {
-        let mut prompt = Prompt::default();
-        prompt.store = true;
-        prompt
-            .input
-            .push(make_message("developer", developer_intro.to_string()));
-        let mut convo_clone = conversation.clone();
-        prompt.input.append(&mut convo_clone);
-        prompt.text_format = Some(TextFormat {
-            r#type: "json_schema".to_string(),
-            name: Some(SCHEMA_NAME.to_string()),
-            strict: Some(true),
-            schema: Some(schema.clone()),
-        });
-        prompt.model_override = Some(MODEL_SLUG.to_string());
-        let family = find_family_for_model(MODEL_SLUG)
-            .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
-        prompt.model_family_override = Some(family);
+    let mut prompt = Prompt::default();
+    prompt.store = true;
+    prompt.input.push(make_message("developer", developer_intro.to_string()));
+    prompt.input.append(&mut conversation);
+    prompt.text_format = Some(TextFormat {
+        r#type: "json_schema".to_string(),
+        name: Some(SCHEMA_NAME.to_string()),
+        strict: Some(true),
+        schema: Some(schema.clone()),
+    });
+    prompt.model_override = Some(MODEL_SLUG.to_string());
+    let family = find_family_for_model(MODEL_SLUG)
+        .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
+    prompt.model_family_override = Some(family);
 
-        let raw = match request_decision(runtime, client, &prompt) {
-            Ok(value) => value,
-            Err(err) => {
-                if attempt + 1 == MAX_ATTEMPTS {
-                    return Err(err);
-                }
-                debug!(
-                    "[Auto coordinator] decision attempt {}/{} failed: {err:?} — retrying",
-                    attempt + 1,
-                    MAX_ATTEMPTS
-                );
-                continue;
-            }
-        };
+    let raw = request_decision(runtime, client, &prompt, app_event_tx)?;
+    let (decision, value) = parse_decision(&raw)?;
+    debug!("[Auto coordinator] model decision: {:?}", value);
 
-        let (decision, value) = match parse_decision(&raw) {
-            Ok(res) => res,
-            Err(err) => {
-                if attempt + 1 == MAX_ATTEMPTS {
-                    return Err(err);
-                }
-                debug!(
-                    "[Auto coordinator] parse attempt {}/{} failed: {err:?} — retrying",
-                    attempt + 1,
-                    MAX_ATTEMPTS
-                );
-                continue;
-            }
-        };
-        debug!("[Auto coordinator] model decision: {:?}", value);
+    let status = match decision.finish_status.as_str() {
+        "continue" => AutoCoordinatorStatus::Continue,
+        "finish_success" => AutoCoordinatorStatus::Success,
+        "finish_failed" => AutoCoordinatorStatus::Failed,
+        other => {
+            return Err(anyhow!("unexpected finish_status '{other}'"));
+        }
+    };
 
-        let status = match decision.finish_status.as_str() {
-            "continue" => AutoCoordinatorStatus::Continue,
-            "finish_success" => AutoCoordinatorStatus::Success,
-            "finish_failed" => AutoCoordinatorStatus::Failed,
-            other => {
-                return Err(anyhow!("unexpected finish_status '{other}'"));
-            }
-        };
+    let prompt_opt = match status {
+        AutoCoordinatorStatus::Continue => {
+            let prompt_text = decision
+                .prompt
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow!("model response missing prompt for continue"))?;
+            let cleaned = strip_role_prefix(prompt_text);
+            Some(cleaned.to_string())
+        }
+        _ => None,
+    };
 
-        let prompt_opt = match status {
-            AutoCoordinatorStatus::Continue => {
-                let prompt_source = decision
-                    .prompt
-                    .as_ref()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty());
-                let Some(prompt_text) = prompt_source else {
-                    if attempt + 1 == MAX_ATTEMPTS {
-                        return Err(anyhow!("model response missing prompt for continue"));
-                    }
-                    debug!(
-                        "[Auto coordinator] missing prompt on attempt {}/{} — retrying",
-                        attempt + 1,
-                        MAX_ATTEMPTS
-                    );
-                    continue;
-                };
-                let cleaned = strip_role_prefix(prompt_text);
-                Some(cleaned.to_string())
-            }
-            _ => None,
-        };
-
-        return Ok((status, decision.thoughts.trim().to_string(), prompt_opt));
-    }
-
-    Err(anyhow!("coordinator decision attempts exceeded"))
+    Ok((status, decision.thoughts.trim().to_string(), prompt_opt))
 }
 
 fn request_decision(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
     prompt: &Prompt,
+    app_event_tx: &AppEventSender,
 ) -> Result<String> {
-    runtime.block_on(async {
+    let tx = app_event_tx.clone();
+    runtime.block_on(async move {
         let mut stream = client.stream(prompt).await?;
-        let mut current = String::new();
-        let mut last = String::new();
+        let mut out = String::new();
         while let Some(ev) = stream.next().await {
             match ev {
-                Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
-                    current.push_str(&delta);
-                    last = current.clone();
-                }
+                Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
                 Ok(ResponseEvent::OutputItemDone { item, .. }) => {
                     if let ResponseItem::Message { content, .. } = item {
-                        let mut text = String::new();
                         for c in content {
-                            if let ContentItem::OutputText { text: t } = c {
-                                if !text.is_empty() {
-                                    text.push('\n');
-                                }
-                                text.push_str(&t);
+                            if let ContentItem::OutputText { text } = c {
+                                out.push_str(&text);
                             }
                         }
-                        if !text.is_empty() {
-                            last = text;
-                        }
                     }
-                    current.clear();
+                }
+                Ok(ResponseEvent::ReasoningSummaryDelta { delta, .. })
+                | Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                    let message = strip_role_prefix(&delta).to_string();
+                    tx.send(AppEvent::AutoCoordinatorThinking { delta: message });
                 }
                 Ok(ResponseEvent::Completed { .. }) => break,
                 Err(err) => return Err(anyhow!("model stream error: {err}")),
                 _ => {}
             }
         }
-        if last.is_empty() {
-            last = current;
-        }
-        Ok(last)
+        Ok(out)
     })
 }
 
@@ -406,24 +362,15 @@ fn make_message(role: &str, text: String) -> ResponseItem {
 }
 
 fn strip_role_prefix(input: &str) -> &str {
-    let trimmed = input.trim_start();
     const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
     for prefix in PREFIXES {
-        if starts_with_ignore_ascii_case(trimmed, prefix) {
-            return trimmed[prefix.len()..].trim_start();
+        if input.len() >= prefix.len() {
+            let head = &input[..prefix.len()];
+            if head.eq_ignore_ascii_case(prefix) {
+                let rest = &input[prefix.len()..];
+                return rest.strip_prefix(' ').unwrap_or(rest);
+            }
         }
     }
-    trimmed
-}
-
-fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    let hay_bytes = haystack.as_bytes();
-    let needle_bytes = needle.as_bytes();
-    if hay_bytes.len() < needle_bytes.len() {
-        return false;
-    }
-    hay_bytes[..needle_bytes.len()]
-        .iter()
-        .zip(needle_bytes.iter())
-        .all(|(&h, &n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+    input
 }
