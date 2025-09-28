@@ -361,7 +361,7 @@ fn strip_role_prefix(input: &str) -> &str {
         if let Some(head) = trimmed.get(..prefix.len()) {
             if head.eq_ignore_ascii_case(prefix) {
                 if let Some(rest) = trimmed.get(prefix.len()..) {
-                    return rest.trim_start();
+                    return rest;
                 }
             }
         }
