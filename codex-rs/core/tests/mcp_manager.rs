@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use codex_core::config_types::McpServerConfig;
+use codex_core::config_types::{McpServerConfig, McpServerTransportConfig};
+use std::time::Duration;
 use codex_core::mcp_connection_manager::McpConnectionManager;
 
 fn server_bin_path() -> PathBuf {
@@ -29,30 +30,36 @@ async fn mcp_manager_skips_slow_server_on_timeout() {
 
     // Slow server exceeds timeout (init/list 200ms vs 100ms timeout)
     let slow_cfg = McpServerConfig {
-        command: "bash".to_string(),
-        args: vec![
-            "-lc".to_string(),
-            format!(
-                "SLOW_INIT_MS=200 SLOW_LIST_MS=200 {}",
-                server.display()
-            ),
-        ],
-        env: None,
-        startup_timeout_ms: Some(100),
+        transport: McpServerTransportConfig::Stdio {
+            command: "bash".to_string(),
+            args: vec![
+                "-lc".to_string(),
+                format!(
+                    "SLOW_INIT_MS=200 SLOW_LIST_MS=200 {}",
+                    server.display()
+                ),
+            ],
+            env: None,
+        },
+        startup_timeout_sec: Some(Duration::from_millis(100)),
+        tool_timeout_sec: None,
     };
     // Fast server responds immediately
     let fast_cfg = McpServerConfig {
-        command: server.to_string_lossy().to_string(),
-        args: vec![],
-        env: None,
-        startup_timeout_ms: Some(500),
+        transport: McpServerTransportConfig::Stdio {
+            command: server.to_string_lossy().to_string(),
+            args: vec![],
+            env: None,
+        },
+        startup_timeout_sec: Some(Duration::from_millis(500)),
+        tool_timeout_sec: None,
     };
 
     let mut servers = HashMap::new();
     servers.insert("slow".to_string(), slow_cfg);
     servers.insert("fast".to_string(), fast_cfg);
 
-    let (mgr, errs) = McpConnectionManager::new(servers, std::collections::HashSet::new())
+    let (mgr, errs) = McpConnectionManager::new(servers, false, std::collections::HashSet::new())
         .await
         .expect("manager creation should not fail entirely");
 
@@ -74,21 +81,24 @@ async fn mcp_manager_respects_extended_startup_timeout() {
 
     // Slow server within extended timeout (init/list 200ms vs 500ms)
     let slow_ok = McpServerConfig {
-        command: "bash".to_string(),
-        args: vec![
-            "-lc".to_string(),
-            format!(
-                "SLOW_INIT_MS=200 SLOW_LIST_MS=200 {}",
-                server.display()
-            ),
-        ],
-        env: None,
-        startup_timeout_ms: Some(500),
+        transport: McpServerTransportConfig::Stdio {
+            command: "bash".to_string(),
+            args: vec![
+                "-lc".to_string(),
+                format!(
+                    "SLOW_INIT_MS=200 SLOW_LIST_MS=200 {}",
+                    server.display()
+                ),
+            ],
+            env: None,
+        },
+        startup_timeout_sec: Some(Duration::from_millis(500)),
+        tool_timeout_sec: None,
     };
     let mut servers = HashMap::new();
     servers.insert("slow_ok".to_string(), slow_ok);
 
-    let (mgr, errs) = McpConnectionManager::new(servers, std::collections::HashSet::new())
+    let (mgr, errs) = McpConnectionManager::new(servers, false, std::collections::HashSet::new())
         .await
         .expect("manager creation should not fail");
 
