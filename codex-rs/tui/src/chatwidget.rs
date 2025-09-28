@@ -9793,17 +9793,16 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let Some(first_line_raw) = raw
-            .lines()
-            .find_map(|line| {
+        let display_text = extract_latest_bold_title(raw).or_else(|| {
+            raw.lines().find_map(|line| {
                 let trimmed = line.trim();
                 (!trimmed.is_empty()).then_some(trimmed.to_string())
             })
-        else {
+        });
+
+        let Some(display_text) = display_text else {
             return;
         };
-
-        let display_text = heading_from_line(&first_line_raw).unwrap_or_else(|| first_line_raw.clone());
 
         if self
             .auto_state
