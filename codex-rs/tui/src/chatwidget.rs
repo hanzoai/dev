@@ -15777,12 +15777,15 @@ fn heading_from_line(line: &str) -> Option<String> {
         None => rest,
     };
 
-    let cleaned = title.trim();
+    let cleaned = title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if cleaned.is_empty() {
         return None;
     }
 
-    Some(cleaned.to_string())
+    Some(cleaned)
 }
 
 fn remove_bullet_prefix(line: &str) -> &str {
