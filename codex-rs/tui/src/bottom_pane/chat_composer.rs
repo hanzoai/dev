@@ -343,8 +343,14 @@ impl ChatComposer {
 
         let lower = technical_message.to_lowercase();
 
+        // Auto Drive manual edit indicator
+        if lower.contains("auto drive goal") {
+            "Auto Drive Goal".to_string()
+        } else if lower.contains("auto drive") {
+            "Auto Drive".to_string()
+        }
         // Thinking/reasoning patterns
-        if lower.contains("reasoning")
+        else if lower.contains("reasoning")
             || lower.contains("thinking")
             || lower.contains("planning")
             || lower.contains("waiting for model")
@@ -1957,26 +1963,44 @@ impl WidgetRef for ChatComposer {
             .style(Style::default().bg(crate::colors::background()));
 
         if self.is_task_running {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            // Use selected spinner style
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let def = crate::spinner::current_spinner();
-            let spinner_str = crate::spinner::frame_at_time(def, now_ms);
+            if self.status_message.eq_ignore_ascii_case("auto drive") {
+                let title_line = Line::from(Span::styled(
+                    " Auto Drive ",
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ));
+                input_block = input_block.title(title_line);
+            } else if self.status_message.eq_ignore_ascii_case("auto drive goal") {
+                let title_line = Line::from(Span::styled(
+                    " Auto Drive Goal ",
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD),
+                ));
+                input_block = input_block.title(title_line);
+            } else {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                // Use selected spinner style
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let def = crate::spinner::current_spinner();
+                let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
-            // Create centered title with spinner and spaces
-            let title_line = Line::from(vec![
-                Span::raw(" "), // Space before spinner
-                Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
-                Span::styled(
-                    format!(" {}... ", self.status_message),
-                    Style::default().fg(crate::colors::info()),
-                ), // Space after spinner and after text
-            ])
-            .centered();
-            input_block = input_block.title(title_line);
+                // Create centered title with spinner and spaces
+                let title_line = Line::from(vec![
+                    Span::raw(" "), // Space before spinner
+                    Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
+                    Span::styled(
+                        format!(" {}... ", self.status_message),
+                        Style::default().fg(crate::colors::info()),
+                    ), // Space after spinner and after text
+                ])
+                .centered();
+                input_block = input_block.title(title_line);
+            }
         }
 
         let textarea_rect = input_block.inner(input_area);

@@ -16,6 +16,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use crate::header_wave::HeaderWaveEffect;
+use crate::auto_drive_strings;
 
 use codex_common::elapsed::format_duration;
 use codex_common::model_presets::ModelPreset;
@@ -108,6 +110,12 @@ use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
+use crate::bottom_pane::{
+    AutoCoordinatorButton,
+    AutoCoordinatorView,
+    AutoCoordinatorViewModel,
+    CountdownState,
+};
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -122,7 +130,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
@@ -156,7 +164,6 @@ const STATUS_LABEL_TARGET_WIDTH: usize = 7;
 const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
-const AUTO_DEFAULT_GOAL: &str = "review the git log for recent changes and come up with sensible follow up work";
 const AUTO_COUNTDOWN_SECONDS: u8 = 10;
 
 fn status_field_prefix(label: &str) -> String {
@@ -441,12 +448,17 @@ struct AutoCoordinatorUiState {
     goal: Option<String>,
     current_thoughts: Option<String>,
     current_prompt: Option<String>,
+    current_display_line: Option<String>,
+    placeholder_phrase: Option<String>,
+    thinking_prefix_stripped: bool,
     awaiting_submission: bool,
     waiting_for_response: bool,
     paused_for_manual_edit: bool,
     resume_after_manual_submit: bool,
     countdown_id: u64,
     seconds_remaining: u8,
+    awaiting_goal_input: bool,
+    last_broadcast_thought: Option<String>,
 }
 
 impl AutoCoordinatorUiState {
@@ -503,6 +515,7 @@ pub(crate) struct ChatWidget<'a> {
     exec: ExecState,
     tools_state: ToolState,
     live_builder: RowBuilder,
+    header_wave: HeaderWaveEffect,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
@@ -2760,6 +2773,11 @@ impl ChatWidget<'_> {
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
+            header_wave: {
+                let effect = HeaderWaveEffect::new();
+                effect.set_enabled(false, Instant::now());
+                effect
+            },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -2999,6 +3017,11 @@ impl ChatWidget<'_> {
                 running_kill_tools: HashMap::new(),
             },
             live_builder: RowBuilder::new(usize::MAX),
+            header_wave: {
+                let effect = HeaderWaveEffect::new();
+                effect.set_enabled(false, Instant::now());
+                effect
+            },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -3330,7 +3353,22 @@ impl ChatWidget<'_> {
                 self.auto_pause_for_manual_edit();
                 return;
             }
-            self.auto_stop(Some("Coordinator stopped by user.".to_string()));
+            self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+            return;
+        }
+
+        if self.auto_state.awaiting_submission
+            && !self.auto_state.paused_for_manual_edit
+            && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        {
+            match key_event.code {
+                crossterm::event::KeyCode::Enter
+                | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
+                    self.auto_submit_prompt();
+                    return;
+                }
+                _ => {}
+            }
         }
 
         // Global HUD toggles (avoid conflicting with common editor keys):
@@ -3477,6 +3515,24 @@ impl ChatWidget<'_> {
 
         match self.bottom_pane.handle_key_event(key_event) {
             InputResult::Submitted(text) => {
+                if self.auto_state.awaiting_goal_input {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        self.bottom_pane.set_task_running(true);
+                        self.bottom_pane
+                            .update_status_text("Auto Drive Goal".to_string());
+                        self.clear_composer();
+                        self.request_redraw();
+                        return;
+                    }
+
+                    self.auto_state.awaiting_goal_input = false;
+                    self.clear_composer();
+                    self.bottom_pane.update_status_text(String::new());
+                    self.bottom_pane.set_task_running(false);
+                    self.handle_auto_command(Some(trimmed.to_string()));
+                    return;
+                }
                 // Commit pending jump-back (make trimming permanent) before submission
                 if self.pending_jump_back.is_some() {
                     self.pending_jump_back = None;
@@ -6541,6 +6597,8 @@ impl ChatWidget<'_> {
             self.auto_state.awaiting_submission = false;
             self.auto_state.seconds_remaining = 0;
             self.auto_rebuild_live_ring();
+            self.bottom_pane.update_status_text(String::new());
+            self.bottom_pane.set_task_running(false);
         }
 
         self.request_redraw();
@@ -6918,7 +6976,6 @@ impl ChatWidget<'_> {
                     ok
                 );
                 self.seed_stream_order_key(StreamKind::Reasoning, &id, ok);
-                // Stream reasoning delta through StreamController
                 streaming::delta_text(
                     self,
                     StreamKind::Reasoning,
@@ -7045,6 +7102,7 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
                 self.emit_turn_complete_notification(last_agent_message);
                 self.mark_needs_redraw();
+
             }
             EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
@@ -9571,11 +9629,26 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
-        let goal_text = if trimmed.is_empty() {
-            AUTO_DEFAULT_GOAL.to_string()
-        } else {
-            trimmed.to_string()
-        };
+        if trimmed.is_empty() {
+            if self.auto_state.active {
+                self.auto_stop(None);
+            }
+            self.auto_state.reset();
+            self.auto_state.awaiting_goal_input = true;
+            self.clear_composer();
+            self.bottom_pane.ensure_input_focus();
+            self.bottom_pane.set_task_running(true);
+            self.bottom_pane
+                .update_status_text("Auto Drive Goal".to_string());
+            self.header_wave.set_enabled(false, Instant::now());
+            self.push_background_tail(
+                "Please enter the goal you would like to work autonomously towards.".to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
+
+        let goal_text = trimmed.to_string();
 
         if self.auto_state.active {
             self.auto_stop(None);
@@ -9586,6 +9659,7 @@ impl ChatWidget<'_> {
             self.app_event_tx.clone(),
             goal_text.clone(),
             conversation,
+            self.config.clone(),
             self.config.debug,
         ) {
             Ok(handle) => {
@@ -9593,10 +9667,17 @@ impl ChatWidget<'_> {
                 self.auto_state.reset();
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
-                self.auto_state.current_thoughts = Some("Analyzing conversation…".to_string());
+                self.auto_state.current_thoughts = None;
+                self.auto_state.current_display_line = None;
+                self.auto_state.placeholder_phrase =
+                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.last_broadcast_thought = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_state.waiting_for_response = true;
+                self.header_wave.set_enabled(true, Instant::now());
                 self.auto_rebuild_live_ring();
-                self.push_background_tail(format!("Coordinator started: {goal_text}"));
+                self.push_background_tail(format!("Auto Drive started: {goal_text}"));
                 self.request_redraw();
             }
             Err(err) => {
@@ -9618,6 +9699,16 @@ impl ChatWidget<'_> {
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+        } else {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.current_thoughts = None;
+            self.auto_state.last_broadcast_thought = None;
+            self.auto_state.current_display_line = None;
+            self.auto_state.placeholder_phrase =
+                Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+            self.auto_state.thinking_prefix_stripped = false;
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
         }
     }
 
@@ -9631,7 +9722,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.auto_state.current_thoughts = Some(thoughts.clone());
+        self.auto_on_reasoning_final(&thoughts);
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
@@ -9718,6 +9809,14 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn auto_handle_thinking(&mut self, delta: String) {
+        if !self.auto_state.active {
+            return;
+        }
+        self.auto_state.placeholder_phrase = None;
+        self.auto_on_reasoning_delta(&delta);
+    }
+
     fn auto_submit_prompt(&mut self) {
         if !self.auto_state.active {
             return;
@@ -9736,6 +9835,14 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = 0;
+        self.auto_state.current_thoughts = None;
+        self.auto_state.last_broadcast_thought = None;
+        self.auto_state.current_display_line = None;
+        self.auto_state.placeholder_phrase =
+            Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+        self.auto_state.thinking_prefix_stripped = false;
+        self.bottom_pane.update_status_text(String::new());
+        self.bottom_pane.set_task_running(false);
         self.submit_text_message(prompt);
         self.auto_rebuild_live_ring();
         self.request_redraw();
@@ -9756,6 +9863,9 @@ impl ChatWidget<'_> {
         self.clear_composer();
         self.insert_str(&prompt);
         self.bottom_pane.ensure_input_focus();
+        self.bottom_pane.set_task_running(true);
+        self.bottom_pane
+            .update_status_text("Auto Drive".to_string());
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -9768,7 +9878,11 @@ impl ChatWidget<'_> {
             self.push_background_tail(msg);
         }
         self.auto_state.reset();
+        self.bottom_pane.clear_auto_coordinator_view();
         self.bottom_pane.clear_live_ring();
+        self.bottom_pane.update_status_text(String::new());
+        self.bottom_pane.set_task_running(false);
+        self.header_wave.set_enabled(false, Instant::now());
         self.request_redraw();
     }
 
@@ -9781,7 +9895,10 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
-        self.auto_state.current_thoughts = Some("Analyzing CLI response…".to_string());
+        self.auto_state.current_thoughts = Some(String::new());
+        self.auto_state.current_display_line = None;
+        self.auto_state.placeholder_phrase = None;
+        self.auto_state.thinking_prefix_stripped = false;
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_send_conversation();
@@ -9789,46 +9906,215 @@ impl ChatWidget<'_> {
 
     fn auto_rebuild_live_ring(&mut self) {
         if !self.auto_state.active {
+            self.bottom_pane.clear_auto_coordinator_view();
             self.bottom_pane.clear_live_ring();
             return;
         }
 
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        let label_style = Style::default()
-            .fg(crate::colors::text_dim())
-            .add_modifier(Modifier::BOLD);
-        let value_style = Style::default().fg(crate::colors::text());
-
-        let thoughts = self
-            .auto_state
-            .current_thoughts
-            .clone()
-            .unwrap_or_else(|| "Coordinator is preparing…".to_string());
-        lines.push(Line::from(vec![
-            Span::styled("Coordinator message: ", label_style),
-            Span::styled(thoughts, value_style),
-        ]));
-
-        if let Some(prompt) = &self.auto_state.current_prompt {
-            lines.push(Line::from(vec![
-                Span::styled("Coordinator prompt: ", label_style),
-                Span::styled(prompt.clone(), value_style),
-            ]));
+        if self.auto_state.paused_for_manual_edit {
+            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_live_ring();
+            return;
         }
 
-        let status_text = if self.auto_state.paused_for_manual_edit {
-            "[Edit prompt, then send manually]".to_string()
-        } else if self.auto_state.countdown_active() {
-            format!("[Continue ({}s)]", self.auto_state.seconds_remaining)
-        } else if self.auto_state.waiting_for_response {
-            "[Waiting for CLI response…]".to_string()
+        self.bottom_pane.clear_live_ring();
+
+        let status_text = if let Some(line) = self
+            .auto_state
+            .current_display_line
+            .as_ref()
+            .filter(|line| !line.trim().is_empty())
+        {
+            line.clone()
         } else {
-            "[Preparing next suggestion…]".to_string()
+            self
+                .auto_state
+                .placeholder_phrase
+                .get_or_insert_with(|| auto_drive_strings::next_auto_drive_phrase().to_string())
+                .clone()
         };
-        lines.push(Line::from(vec![Span::styled(status_text, value_style)]));
+
+        let status_lines: Vec<String> = vec![status_text];
+
+        let prompt = self
+            .auto_state
+            .current_prompt
+            .clone()
+            .filter(|p| !p.trim().is_empty());
+
+        let countdown = if self.auto_state.awaiting_submission && AUTO_COUNTDOWN_SECONDS > 0 {
+            Some(CountdownState {
+                remaining: self
+                    .auto_state
+                    .seconds_remaining
+                    .min(AUTO_COUNTDOWN_SECONDS),
+            })
+        } else {
+            None
+        };
+
+        let button = if self.auto_state.awaiting_submission {
+            let label = if self.auto_state.countdown_active() {
+                format!("Continue ({}s)", self.auto_state.seconds_remaining)
+            } else {
+                "Continue now".to_string()
+            };
+            Some(AutoCoordinatorButton {
+                label,
+                enabled: true,
+            })
+        } else if self.auto_state.waiting_for_response {
+            None
+        } else {
+            None
+        };
+
+        let manual_hint = if self.auto_state.awaiting_submission {
+            None
+        } else if self.auto_state.waiting_for_response {
+            Some("Press Esc to stop Auto Drive".to_string())
+        } else {
+            None
+        };
+
+        let ctrl_switch_hint = if self.auto_state.awaiting_submission {
+            "Esc to cancel".to_string()
+        } else if self.auto_state.waiting_for_response {
+            String::new()
+        } else {
+            String::new()
+        };
+
+        let model = AutoCoordinatorViewModel {
+            goal: self.auto_state.goal.clone(),
+            status_lines,
+            prompt,
+            awaiting_submission: self.auto_state.awaiting_submission,
+            waiting_for_response: self.auto_state.waiting_for_response,
+            countdown,
+            button,
+            manual_hint,
+            ctrl_switch_hint,
+        };
 
         self.bottom_pane
-            .set_live_ring_rows(lines.len() as u16, lines);
+            .show_auto_coordinator_view(AutoCoordinatorView::new(model, self.app_event_tx.clone()));
+
+        let interval = crate::spinner::current_spinner().interval_ms.max(80);
+        self.app_event_tx
+            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+    }
+
+    fn auto_update_display_title(&mut self) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        let Some(thoughts) = self.auto_state.current_thoughts.as_ref() else {
+            return;
+        };
+
+        if let Some(title) = extract_latest_bold_title(thoughts) {
+            let needs_update = self
+                .auto_state
+                .current_display_line
+                .as_ref()
+                .map(|current| current != &title)
+                .unwrap_or(true);
+
+            if needs_update {
+                self.auto_state.current_display_line = Some(title);
+                self.auto_state.placeholder_phrase = None;
+            }
+        }
+    }
+
+    fn auto_broadcast_thoughts(&mut self, raw: &str) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        let display_text = extract_latest_bold_title(raw).or_else(|| {
+            raw.lines().find_map(|line| {
+                let trimmed = line.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
+            })
+        });
+
+        let Some(display_text) = display_text else {
+            return;
+        };
+
+        if self
+            .auto_state
+            .last_broadcast_thought
+            .as_ref()
+            .map(|prev| prev == &display_text)
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        self.auto_state.last_broadcast_thought = Some(display_text.clone());
+        self.push_background_tail(format!("Auto Drive: {display_text}"));
+    }
+
+    fn auto_on_reasoning_delta(&mut self, delta: &str) {
+        if !self.auto_state.active || delta.trim().is_empty() {
+            return;
+        }
+
+        let cleaned_delta = if !self.auto_state.thinking_prefix_stripped {
+            let (without_prefix, stripped) = strip_role_prefix_if_present(delta);
+            if stripped {
+                self.auto_state.thinking_prefix_stripped = true;
+            }
+            without_prefix.to_string()
+        } else {
+            delta.to_string()
+        };
+
+        if !self.auto_state.thinking_prefix_stripped && !cleaned_delta.trim().is_empty() {
+            self.auto_state.thinking_prefix_stripped = true;
+        }
+
+        let payload = {
+            let entry = self
+                .auto_state
+                .current_thoughts
+                .get_or_insert_with(String::new);
+
+            if auto_drive_strings::is_auto_drive_phrase(entry) {
+                entry.clear();
+            }
+
+            entry.push_str(&cleaned_delta);
+            entry.clone()
+        };
+
+        self.auto_update_display_title();
+        self.auto_broadcast_thoughts(&payload);
+
+        if self.auto_state.waiting_for_response {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    fn auto_on_reasoning_final(&mut self, text: &str) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        self.auto_state.current_thoughts = Some(text.to_string());
+        self.auto_state.thinking_prefix_stripped = true;
+        self.auto_update_display_title();
+        self.auto_broadcast_thoughts(text);
+
+        if self.auto_state.waiting_for_response {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
     }
 
     fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
@@ -12174,6 +12460,7 @@ impl ChatWidget<'_> {
                 if let Some(rid) = id {
                     self.reasoning_index.insert(rid, idx);
                 }
+                // Auto Drive status updates are handled via coordinator decisions.
             }
             StreamKind::Answer => {
                 tracing::debug!(
@@ -15490,8 +15777,17 @@ impl ChatWidget<'_> {
 
         let status_line = Line::from(status_spans);
 
+        let now = Instant::now();
+        if self.header_wave.schedule_if_needed(now) {
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
+        }
+
         // Render the block first
         status_block.render(padded_area, buf);
+        if self.header_wave.is_enabled() {
+            self.header_wave.render(padded_area, buf, now);
+        }
 
         // Then render the text inside with padding, centered
         let status_widget = Paragraph::new(vec![status_line])
@@ -15670,6 +15966,67 @@ impl ChatWidget<'_> {
 
         placeholder_widget.render(area, buf);
     }
+}
+
+fn extract_latest_bold_title(text: &str) -> Option<String> {
+    let mut latest: Option<String> = None;
+
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(title) = heading_from_line(trimmed) {
+            latest = Some(title);
+        }
+    }
+
+    latest
+}
+
+fn heading_from_line(line: &str) -> Option<String> {
+    let normalized = remove_bullet_prefix(line.trim_start());
+    if !normalized.starts_with("**") {
+        return None;
+    }
+
+    let rest = &normalized[2..];
+    let end = rest.find("**");
+    let title = match end {
+        Some(idx) => &rest[..idx],
+        None => rest,
+    };
+
+    if title.trim().is_empty() {
+        return None;
+    }
+
+    Some(title.to_string())
+}
+
+fn remove_bullet_prefix(line: &str) -> &str {
+    let mut normalized = line;
+    for prefix in ["- ", "* ", "\u{2022} "] {
+        if normalized.starts_with(prefix) {
+            normalized = normalized[prefix.len()..].trim_start();
+            break;
+        }
+    }
+    normalized
+}
+
+fn strip_role_prefix_if_present(input: &str) -> (&str, bool) {
+    const PREFIXES: [&str; 2] = ["Coordinator:", "CLI:"];
+    for prefix in PREFIXES {
+        if input.len() >= prefix.len() {
+            let (head, tail) = input.split_at(prefix.len());
+            if head.eq_ignore_ascii_case(prefix) {
+                return (tail, true);
+            }
+        }
+    }
+    (input, false)
 }
 
 impl ChatWidget<'_> {
