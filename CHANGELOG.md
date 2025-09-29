@@ -3,6 +3,23 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.174] - 2025-09-29
+
+- TUI/Auto-drive: gate weave animations to the active phase so idle sessions stay calm. (70f64ae8)
+- TUI/Auto: require full auto mode and show env context to clarify coordinator state. (599b886c)
+
+## [0.2.173] - 2025-09-29
+
+- TUI/Browser: auto hand off /browser startup failures to Code so sessions self-heal. (95e27cd0)
+- TUI/Browser: sanitize and surface error details when handoff triggers for faster diagnosis. (95e27cd0)
+
+## [0.2.172] - 2025-09-28
+
+- CLI: introduce a responses API proxy command so shared hosts can forward Responses calls securely. (c5494815)
+- MCP: add streamable HTTP client support and tighten per-call timeout handling. (3a1be084, bd6aad0b, d3ecf4de, 9bb84892)
+- Auto-drive: stream coordinator reasoning, keep plan context, and smooth heading presentation. (fc8da8cf, 0d5bc1f1, 45a6fb94, aaa91865)
+- TUI/History: route diff and explore cells through domain events for consistent playback. (0ae94dca, 0d5d57ee)
+
 ## [0.2.170] - 2025-09-27
 
 - TUI/History: drive exec, assistant, explore, and rate-limit cells from domain events for consistent streaming. (38abccc, 5409493, e6e72d3, f851369, d7e9ee7)

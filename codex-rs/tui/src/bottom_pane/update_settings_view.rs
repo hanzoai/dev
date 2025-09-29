@@ -100,7 +100,7 @@ impl UpdateSettingsView {
             .unwrap_or_else(|| command.join(" "));
 
         self.app_event_tx.send_background_event(format!(
-            "⬆️ Update available: {} → {}. Running `{}`...",
+            "⬆️ Update available: {} → {}. Opening guided upgrade with `{}`…",
             self.current_version, latest, display
         ));
         self.app_event_tx.send(AppEvent::RunUpdateCommand {
@@ -109,7 +109,7 @@ impl UpdateSettingsView {
             latest_version: Some(latest.clone()),
         });
         self.app_event_tx.send_background_event(format!(
-            "↻ Restart Code after `{}` completes to finish upgrading to {}.",
+            "↻ Complete the guided terminal steps for `{}` then restart Code to finish upgrading to {}.",
             display, latest
         ));
         self.is_complete = true;
