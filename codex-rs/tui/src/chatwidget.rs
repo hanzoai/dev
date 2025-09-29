@@ -69,6 +69,7 @@ use self::agent_install::{
     start_agent_install_session,
     start_direct_terminal_session,
     start_prompt_terminal_session,
+    start_upgrade_terminal_session,
     wrap_command,
 };
 use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand};
@@ -115,6 +116,7 @@ use crate::bottom_pane::{
     AutoCoordinatorViewModel,
     CountdownState,
 };
+use crate::exec_command::strip_bash_lc_and_escape;
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -8605,16 +8607,48 @@ impl ChatWidget<'_> {
         }
     }
 
-    pub(crate) fn handle_update_command(&mut self) {
-        if crate::updates::upgrade_ui_enabled() {
+    pub(crate) fn handle_update_command(&mut self, command_args: &str) {
+        if !crate::updates::upgrade_ui_enabled() {
+            self.app_event_tx.send_background_event(
+                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
+                    to_string(),
+            );
+            return;
+        }
+
+        let trimmed = command_args.trim();
+        if trimmed.eq_ignore_ascii_case("settings")
+            || trimmed.eq_ignore_ascii_case("ui")
+            || trimmed.eq_ignore_ascii_case("config")
+        {
             self.show_update_settings_ui();
             return;
         }
 
-        self.app_event_tx.send_background_event(
-            "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
-                to_string(),
-        );
+        match crate::updates::resolve_upgrade_resolution() {
+            crate::updates::UpgradeResolution::Command { command, display } => {
+                if command.is_empty() {
+                    self.history_push(history_cell::new_error_event(
+                        "`/upgrade` — no upgrade command available for this install.".to_string(),
+                    ));
+                    self.request_redraw();
+                    return;
+                }
+
+                let latest = self.latest_upgrade_version.clone();
+                self.push_background_tail(
+                    "Opening a guided upgrade terminal to finish installing updates.".to_string(),
+                );
+                if let Some(launch) = self.launch_update_command(command, display, latest) {
+                    self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                }
+            }
+            crate::updates::UpgradeResolution::Manual { instructions } => {
+                self.show_update_settings_ui();
+                self.history_push(history_cell::new_background_event(instructions));
+                self.request_redraw();
+            }
+        }
     }
 
     pub(crate) fn handle_notifications_command(&mut self, args: String) {
@@ -10131,19 +10165,52 @@ impl ChatWidget<'_> {
             return None;
         }
 
-        let id = self.terminal.alloc_id();
-        if let Some(version) = latest_version {
-            self.pending_upgrade_notice = Some((id, version));
+        let command_text = if display.trim().is_empty() {
+            strip_bash_lc_and_escape(&command)
+        } else {
+            display.clone()
+        };
+
+        if command_text.trim().is_empty() {
+            self.history_push(history_cell::new_error_event(
+                "`/update` — unable to resolve upgrade command text.".to_string(),
+            ));
+            self.request_redraw();
+            return None;
         }
-        Some(TerminalLaunch {
+
+        let id = self.terminal.alloc_id();
+        if let Some(version) = &latest_version {
+            self.pending_upgrade_notice = Some((id, version.clone()));
+        }
+
+        let (controller_tx, controller_rx) = mpsc::channel();
+        let controller = TerminalRunController { tx: controller_tx };
+        let display_label = Self::truncate_with_ellipsis(&format!("Guided: {command_text}"), 128);
+
+        let launch = TerminalLaunch {
             id,
             title: "Upgrade Code".to_string(),
-            command,
-            command_display: display,
-            controller: None,
+            command: Vec::new(),
+            command_display: display_label,
+            controller: Some(controller.clone()),
             auto_close_on_success: false,
             start_running: true,
-        })
+        };
+
+        let cwd = self.config.cwd.to_string_lossy().to_string();
+        start_upgrade_terminal_session(
+            self.app_event_tx.clone(),
+            id,
+            command_text,
+            latest_version,
+            Some(cwd),
+            controller,
+            controller_rx,
+            self.config.debug,
+        );
+
+        Some(launch)
     }
 
     pub(crate) fn terminal_open(&mut self, launch: &TerminalLaunch) {
@@ -11722,10 +11789,17 @@ impl ChatWidget<'_> {
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             match crate::updates::auto_upgrade_if_enabled(&cfg).await {
-                Ok(Some(version)) => {
-                    tx.send(AppEvent::AutoUpgradeCompleted { version });
+                Ok(outcome) => {
+                    if let Some(version) = outcome.installed_version {
+                        tx.send(AppEvent::AutoUpgradeCompleted { version });
+                    }
+                    if let Some(message) = outcome.user_notice {
+                        tx.send(AppEvent::InsertBackgroundEvent {
+                            message,
+                            placement: BackgroundPlacement::Tail,
+                        });
+                    }
                 }
-                Ok(None) => {}
                 Err(err) => {
                     tracing::warn!("auto-upgrade: background task failed: {err:?}");
                 }
