@@ -473,6 +473,7 @@ struct AutoCoordinatorUiState {
     last_decision_display: Option<String>,
     observer_telemetry: Option<AutoObserverTelemetry>,
     observer_status: AutoObserverStatus,
+    coordinator_waiting: bool,
 }
 
 impl AutoCoordinatorUiState {
@@ -9771,6 +9772,7 @@ impl ChatWidget<'_> {
                 self.auto_state.last_broadcast_thought = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
+                self.auto_state.coordinator_waiting = true;
                 self.update_header_border_activation();
                 self.auto_rebuild_live_ring();
                 self.push_background_tail(format!("Auto Drive started: {goal_text}"));
@@ -9797,11 +9799,10 @@ impl ChatWidget<'_> {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
         } else {
             self.auto_state.waiting_for_response = true;
+            self.auto_state.coordinator_waiting = true;
             self.auto_state.current_thoughts = None;
             self.auto_state.last_broadcast_thought = None;
-            self.auto_state.current_display_line = None;
             self.auto_state.current_summary_index = None;
-            self.auto_state.last_decision_display = None;
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
@@ -9821,6 +9822,7 @@ impl ChatWidget<'_> {
             return;
         }
 
+        self.auto_state.coordinator_waiting = false;
         self.auto_on_reasoning_final(&thoughts);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.paused_for_manual_edit = false;
@@ -9983,6 +9985,7 @@ impl ChatWidget<'_> {
 
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = true;
+        self.auto_state.coordinator_waiting = false;
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = 0;
@@ -10064,16 +10067,15 @@ impl ChatWidget<'_> {
             return;
         }
         self.auto_state.waiting_for_response = false;
+        self.auto_state.coordinator_waiting = false;
         self.auto_state.awaiting_submission = false;
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
         self.auto_state.current_thoughts = Some(String::new());
-        self.auto_state.current_display_line = None;
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
-        self.auto_state.last_decision_display = None;
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
@@ -10183,6 +10185,7 @@ impl ChatWidget<'_> {
             prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
+            coordinator_waiting: self.auto_state.coordinator_waiting,
             countdown,
             button,
             manual_hint,
@@ -10267,10 +10270,7 @@ impl ChatWidget<'_> {
             if self.auto_state.current_summary_index != Some(idx) {
                 self.auto_state.current_summary_index = Some(idx);
                 self.auto_state.current_thoughts = Some(String::new());
-                self.auto_state.current_display_line = None;
-                self.auto_state.last_broadcast_thought = None;
                 self.auto_state.thinking_prefix_stripped = false;
-                self.auto_state.last_decision_display = None;
             }
         }
 
@@ -10288,7 +10288,7 @@ impl ChatWidget<'_> {
             self.auto_state.thinking_prefix_stripped = true;
         }
 
-        let payload = {
+        {
             let entry = self
                 .auto_state
                 .current_thoughts
@@ -10299,15 +10299,6 @@ impl ChatWidget<'_> {
             }
 
             entry.push_str(&cleaned_delta);
-            entry.clone()
-        };
-
-        self.auto_update_display_title();
-        self.auto_broadcast_thoughts(&payload);
-
-        if self.auto_state.waiting_for_response {
-            self.auto_rebuild_live_ring();
-            self.request_redraw();
         }
     }
 
