@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.174] - 2025-09-29
+
+- TUI/Auto-drive: gate weave animations to the active phase so idle sessions stay calm. (70f64ae8)
+- TUI/Auto: require full auto mode and show env context to clarify coordinator state. (599b886c)
+
 ## [0.2.173] - 2025-09-29
 
 - TUI/Browser: auto hand off /browser startup failures to Code so sessions self-heal. (95e27cd0)
