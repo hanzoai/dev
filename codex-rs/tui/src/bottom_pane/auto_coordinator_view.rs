@@ -38,8 +38,8 @@ pub(crate) struct AutoCoordinatorViewModel {
     pub status_lines: Vec<String>,
     pub prompt: Option<String>,
     pub awaiting_submission: bool,
-    #[allow(dead_code)]
     pub waiting_for_response: bool,
+    pub coordinator_waiting: bool,
     pub countdown: Option<CountdownState>,
     pub button: Option<AutoCoordinatorButton>,
     pub manual_hint: Option<String>,
@@ -173,17 +173,33 @@ impl AutoCoordinatorView {
     }
 
     fn status_lines(&self) -> Vec<Line<'static>> {
-        let frame_idx = DRIVE_SPINNER_TICK.fetch_add(1, Ordering::Relaxed);
-        let spinner_symbol = DRIVE_SPINNER_FRAMES[frame_idx % DRIVE_SPINNER_FRAMES.len()].to_string();
+        let spinner_symbol = if self.model.coordinator_waiting {
+            let frame_idx = DRIVE_SPINNER_TICK.fetch_add(1, Ordering::Relaxed);
+            Some(DRIVE_SPINNER_FRAMES[frame_idx % DRIVE_SPINNER_FRAMES.len()].to_string())
+        } else {
+            None
+        };
 
         let mut lines: Vec<Line<'static>> = Vec::new();
         for (index, (text, style)) in self.derived_status_entries().into_iter().enumerate() {
             if index == 0 {
-                lines.push(Line::from(vec![
-                    Span::styled(spinner_symbol.clone(), Style::default().fg(colors::spinner()).add_modifier(Modifier::BOLD)),
-                    Span::raw("  "),
-                    Span::styled(text, style),
-                ]));
+                if let Some(symbol) = spinner_symbol.as_ref() {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            symbol.clone(),
+                            Style::default()
+                                .fg(colors::spinner())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(text, style),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("   "),
+                        Span::styled(text, style),
+                    ]));
+                }
             } else {
                 lines.push(Line::from(Span::styled(text, style)));
             }
@@ -279,7 +295,7 @@ impl AutoCoordinatorView {
         };
 
         let awaiting = self.model.awaiting_submission;
-        let spinner_active = !awaiting && self.model.waiting_for_response;
+        let spinner_active = !awaiting && self.model.coordinator_waiting;
 
         let mut total = 0;
 
@@ -358,7 +374,7 @@ impl AutoCoordinatorView {
             return;
         }
 
-        let spinner_active = !self.model.awaiting_submission && self.model.waiting_for_response;
+        let spinner_active = !self.model.awaiting_submission && self.model.coordinator_waiting;
 
         let mut lines: Vec<Line<'static>> = Vec::new();
 
