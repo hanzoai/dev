@@ -647,6 +647,32 @@ pub(crate) fn make_chatwidget_manual_with_sender() -> (
     (widget, app_event_tx, rx, op_rx)
 }
 
+struct EnvGuard {
+    key: String,
+    prev: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(key: &str, value: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        Self {
+            key: key.to_string(),
+            prev,
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            std::env::set_var(&self.key, prev);
+        } else {
+            std::env::remove_var(&self.key);
+        }
+    }
+}
+
 fn drain_insert_history(
     rx: &std::sync::mpsc::Receiver<AppEvent>,
 ) -> Vec<Vec<ratatui::text::Line<'static>>> {
@@ -928,6 +954,9 @@ fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<App
             AppEvent::DispatchCommand(SlashCommand::Undo, _command_text) => {
                 chat.handle_undo_command();
             }
+            AppEvent::DispatchCommand(SlashCommand::Update, command_text) => {
+                chat.handle_update_command(&command_text);
+            }
             AppEvent::ShowUndoOptions { index } => {
                 chat.show_undo_restore_options(index);
             }
@@ -1012,6 +1041,41 @@ fn slash_agents_opens_overview() {
         lower.contains("add new"),
         "expected Add new row in overview\n{plain}"
     );
+}
+
+#[test]
+fn slash_upgrade_opens_guided_terminal() {
+    let _guard = EnvGuard::set("CODEX_MANAGED_BY_NPM", "1");
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+    chat.latest_upgrade_version = Some("9.9.9".to_string());
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('u'),
+        ScriptStep::key_char('p'),
+        ScriptStep::key_char('g'),
+        ScriptStep::key_char('r'),
+        ScriptStep::key_char('a'),
+        ScriptStep::key_char('d'),
+        ScriptStep::key_char('e'),
+        ScriptStep::enter(),
+    ];
+    run_script(&mut chat, &script, &rx);
+
+    let mut saw_open_terminal = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::OpenTerminal(launch) = event {
+            saw_open_terminal = true;
+            assert_eq!(launch.title, "Upgrade Code");
+            assert!(
+                launch.command_display.contains("Guided"),
+                "expected guided terminal display, got {}",
+                launch.command_display
+            );
+        }
+    }
+
+    assert!(saw_open_terminal, "expected guided upgrade terminal to open");
 }
 
 #[test]
