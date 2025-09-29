@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.173] - 2025-09-29
+
+- TUI/Browser: auto hand off /browser startup failures to Code so sessions self-heal. (95e27cd0)
+- TUI/Browser: sanitize and surface error details when handoff triggers for faster diagnosis. (95e27cd0)
+
 ## [0.2.172] - 2025-09-28
 
 - CLI: introduce a responses API proxy command so shared hosts can forward Responses calls securely. (c5494815)
