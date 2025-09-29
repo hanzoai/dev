@@ -455,6 +455,61 @@ fn request_decision(
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<String> {
+    match request_decision_with_model(
+        runtime,
+        client,
+        developer_intro,
+        primary_goal,
+        schema,
+        conversation,
+        app_event_tx,
+        cancel_token,
+        MODEL_SLUG,
+    ) {
+        Ok(output) => Ok(output),
+        Err(err) => {
+            let fallback_slug = client.default_model_slug().to_string();
+            if fallback_slug != MODEL_SLUG && should_retry_with_default_model(&err) {
+                debug!(
+                    preferred = %MODEL_SLUG,
+                    fallback = %fallback_slug,
+                    "auto coordinator falling back to configured model after invalid model error"
+                );
+                let original_error = err.to_string();
+                return request_decision_with_model(
+                    runtime,
+                    client,
+                    developer_intro,
+                    primary_goal,
+                    schema,
+                    conversation,
+                    app_event_tx,
+                    cancel_token,
+                    &fallback_slug,
+                )
+                .map_err(|fallback_err| {
+                    fallback_err.context(format!(
+                        "coordinator fallback with model '{}' failed after original error: {}",
+                        fallback_slug, original_error
+                    ))
+                });
+            }
+            Err(err)
+        }
+    }
+}
+
+fn request_decision_with_model(
+    runtime: &tokio::runtime::Runtime,
+    client: &ModelClient,
+    developer_intro: &str,
+    primary_goal: &str,
+    schema: &Value,
+    conversation: &[ResponseItem],
+    app_event_tx: &AppEventSender,
+    cancel_token: &CancellationToken,
+    model_slug: &str,
+) -> Result<String> {
     let developer_intro = developer_intro.to_string();
     let primary_goal = primary_goal.to_string();
     let schema = schema.clone();
@@ -467,11 +522,12 @@ fn request_decision(
     let result = runtime.block_on(async move {
         retry_with_backoff(
             || {
-                let prompt = build_prompt(
+                let prompt = build_prompt_for_model(
                     &developer_intro,
                     &primary_goal,
                     &schema,
                     &conversation,
+                    model_slug,
                 );
                 let tx_inner = tx.clone();
                 async move {
@@ -576,11 +632,12 @@ fn request_decision(
     }
 }
 
-fn build_prompt(
+fn build_prompt_for_model(
     developer_intro: &str,
     primary_goal: &str,
     schema: &Value,
     conversation: &[ResponseItem],
+    model_slug: &str,
 ) -> Prompt {
     let mut prompt = Prompt::default();
     prompt.store = true;
@@ -597,11 +654,29 @@ fn build_prompt(
         strict: Some(true),
         schema: Some(schema.clone()),
     });
-    prompt.model_override = Some(MODEL_SLUG.to_string());
-    let family = find_family_for_model(MODEL_SLUG)
-        .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
+    prompt.model_override = Some(model_slug.to_string());
+    let family = find_family_for_model(model_slug)
+        .unwrap_or_else(|| derive_default_model_family(model_slug));
     prompt.model_family_override = Some(family);
     prompt
+}
+
+fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(codex_err) = cause.downcast_ref::<CodexErr>() {
+            if let CodexErr::UnexpectedStatus(status, body) = codex_err {
+                if !status.is_client_error() {
+                    return false;
+                }
+                let body_lower = body.to_lowercase();
+                return body_lower.contains("invalid model")
+                    || body_lower.contains("unknown model")
+                    || body_lower.contains("model_not_found")
+                    || body_lower.contains("model does not exist");
+            }
+        }
+        false
+    })
 }
 
 fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
