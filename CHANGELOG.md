@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.175] - 2025-09-29
+
+- TUI/Auto-drive: add retry/backoff orchestration so coordinator runs recover after transient failures. (6c5856e8)
+- TUI/Auto-drive: honor rate-limit reset hints and jittered buffers to resume safely after 429 responses. (6c5856e8)
+- Docs: outline dev fault injection knobs for rehearsing auto-drive failure scenarios. (6c5856e8)
+
 ## [0.2.174] - 2025-09-29
 
 - TUI/Auto-drive: gate weave animations to the active phase so idle sessions stay calm. (70f64ae8)
