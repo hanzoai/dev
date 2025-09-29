@@ -704,7 +704,18 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 > Codex emits desktop notifications using terminal escape codes. Not all terminals support these (notably, macOS Terminal.app and VS Code's terminal do not support custom notifications. iTerm2, Ghostty and WezTerm do support these notifications).
 
 > [!NOTE]
-> `tui.notifications` is built‑in and limited to the TUI session. For programmatic or cross‑environment notifications—or to integrate with OS‑specific notifiers—use the top‑level `notify` option to run an external program that receives event JSON. The two settings are independent and can be used together.
+> `tui.notifications` is built‑in and limited to the TUI session. For programmatic or cross‑environment notifications—or to integrate with OS‑specific notifiers—use the top-level `notify` option to run an external program that receives event JSON. The two settings are independent and can be used together.
+
+### Auto Drive Observer
+
+Codex keeps long-running Auto Drive sessions in check with a lightweight observer thread. Configure its cadence with the top-level `auto_drive_observer_cadence` key (default `5`). After every *n* completed requests the observer reviews the coordinator/CLI transcript, emits telemetry, and—if necessary—suggests a corrected prompt or follow-up guidance. Setting the value to `0` disables the observer entirely.
+
+```toml
+# Run the observer after every third Auto Drive request
+auto_drive_observer_cadence = 3
+```
+
+When the observer reports `status = "failing"`, the TUI banner highlights the intervention, updates the pending prompt when provided, and records guidance for future coordinator turns.
 
 ## Project Hooks
 

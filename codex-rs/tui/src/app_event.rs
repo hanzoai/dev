@@ -80,6 +80,25 @@ pub(crate) enum AutoCoordinatorStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutoObserverStatus {
+    Ok,
+    Failing,
+}
+
+impl Default for AutoObserverStatus {
+    fn default() -> Self {
+        Self::Ok
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AutoObserverTelemetry {
+    pub trigger_count: u64,
+    pub last_status: AutoObserverStatus,
+    pub last_intervention: Option<String>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -139,6 +158,12 @@ pub(crate) enum AppEvent {
     AutoCoordinatorCountdown {
         countdown_id: u64,
         seconds_left: u8,
+    },
+    AutoObserverReport {
+        status: AutoObserverStatus,
+        telemetry: AutoObserverTelemetry,
+        replace_message: Option<String>,
+        additional_instructions: Option<String>,
     },
 
     /// Dispatch a recognized slash command from the UI (composer) to the app
