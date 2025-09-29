@@ -821,6 +821,7 @@ pub enum ThemeName {
     // Light themes (at top)
     #[default]
     LightPhoton,
+    LightPhotonAnsi16,
     LightPrismRainbow,
     LightVividTriad,
     LightPorcelain,
@@ -828,6 +829,7 @@ pub enum ThemeName {
     LightGlacier,
     // Dark themes (below)
     DarkCarbonNight,
+    DarkCarbonAnsi16,
     DarkShinobiDusk,
     DarkOledBlackPro,
     DarkAmberTerminal,

@@ -3,10 +3,12 @@ use codex_core::config_types::ThemeConfig;
 use codex_core::config_types::ThemeName;
 use lazy_static::lazy_static;
 use ratatui::style::Color;
+use std::cmp::Ordering;
 use std::sync::RwLock;
 
 lazy_static! {
     static ref CURRENT_THEME: RwLock<Theme> = RwLock::new(Theme::default());
+    static ref CURRENT_THEME_NAME: RwLock<ThemeName> = RwLock::new(ThemeName::LightPhoton);
     static ref CUSTOM_THEME_LABEL: RwLock<Option<String>> = RwLock::new(None);
     static ref CUSTOM_THEME_COLORS: RwLock<Option<codex_core::config_types::ThemeColors>> = RwLock::new(None);
     static ref CUSTOM_THEME_IS_DARK: RwLock<Option<bool>> = RwLock::new(None);
@@ -57,11 +59,12 @@ impl Default for Theme {
 
 /// Initialize the global theme from configuration
 pub fn init_theme(config: &ThemeConfig) {
-    let mut theme = get_predefined_theme(config.name);
+    let mapped_name = map_theme_for_palette(config.name, config.is_dark);
+    let mut theme = get_predefined_theme(mapped_name);
     // Important: Only apply color overrides for the Custom theme.
     // Built-in themes should render exactly as defined so that switching away
     // from Custom does not keep stale custom overrides from config.
-    if matches!(config.name, ThemeName::Custom) {
+    if matches!(config.name, ThemeName::Custom) && matches!(palette_mode(), PaletteMode::Ansi256) {
         apply_custom_colors(&mut theme, &config.colors);
     }
 
@@ -73,7 +76,8 @@ pub fn init_theme(config: &ThemeConfig) {
     }
 
     let mut current = CURRENT_THEME.write().unwrap();
-    *current = theme;
+    *current = theme.clone();
+    *CURRENT_THEME_NAME.write().unwrap() = mapped_name;
     // Track custom theme label for UI display
     if matches!(config.name, ThemeName::Custom) {
         *CUSTOM_THEME_LABEL.write().unwrap() = config.label.clone();
@@ -85,6 +89,10 @@ pub fn init_theme(config: &ThemeConfig) {
 /// Get the current theme
 pub fn current_theme() -> Theme {
     CURRENT_THEME.read().unwrap().clone()
+}
+
+pub(crate) fn current_theme_name() -> ThemeName {
+    *CURRENT_THEME_NAME.read().unwrap()
 }
 
 /// Get the custom theme's display label, if any
@@ -117,13 +125,14 @@ pub fn custom_theme_is_dark() -> Option<bool> {
 
 /// Switch to a different predefined theme
 pub fn switch_theme(theme_name: ThemeName) {
-    let theme = get_predefined_theme(theme_name);
-    let mut current = CURRENT_THEME.write().unwrap();
-    let mut theme = theme;
+    let mapped_name = map_theme_for_palette(theme_name, custom_theme_is_dark());
+    let mut theme = get_predefined_theme(mapped_name);
     if needs_ansi256_fallback() {
         quantize_theme_to_ansi256(&mut theme);
     }
-    *current = theme;
+    let mut current = CURRENT_THEME.write().unwrap();
+    *current = theme.clone();
+    *CURRENT_THEME_NAME.write().unwrap() = mapped_name;
 }
 
 /// Parse a color string (hex or named color)
@@ -324,8 +333,90 @@ pub(crate) fn has_truecolor_terminal() -> bool {
 
 /// Quantize all theme colors to the ANSI-256 palette so backends that do not
 /// render truecolor reliably still get consistent colors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaletteMode {
+    Ansi16,
+    Ansi256,
+}
+
+const ANSI16_COLORS: [(u8, u8, u8); 16] = [
+    (0, 0, 0),       // 0 black
+    (205, 0, 0),     // 1 red
+    (0, 205, 0),     // 2 green
+    (205, 205, 0),   // 3 yellow
+    (0, 0, 205),     // 4 blue
+    (205, 0, 205),   // 5 magenta
+    (0, 205, 205),   // 6 cyan
+    (229, 229, 229), // 7 light gray
+    (127, 127, 127), // 8 dark gray
+    (255, 102, 102), // 9 light red
+    (102, 255, 178), // 10 light green
+    (255, 255, 102), // 11 light yellow
+    (102, 153, 255), // 12 light blue
+    (255, 102, 255), // 13 light magenta
+    (102, 255, 255), // 14 light cyan
+    (255, 255, 255), // 15 white
+];
+
+pub(crate) fn palette_mode() -> PaletteMode {
+    if let Some(level) = supports_color::on_cached(supports_color::Stream::Stdout) {
+        if level.has_16m {
+            return PaletteMode::Ansi256;
+        }
+    }
+    PaletteMode::Ansi16
+}
+
+fn is_light_theme_name(name: ThemeName) -> bool {
+    matches!(
+        name,
+        ThemeName::LightPhoton
+            | ThemeName::LightPhotonAnsi16
+            | ThemeName::LightPrismRainbow
+            | ThemeName::LightVividTriad
+            | ThemeName::LightPorcelain
+            | ThemeName::LightSandbar
+            | ThemeName::LightGlacier
+            | ThemeName::DarkPaperLightPro
+    )
+}
+
+pub(crate) fn map_theme_for_palette(
+    name: ThemeName,
+    custom_is_dark_hint: Option<bool>,
+) -> ThemeName {
+    match palette_mode() {
+        PaletteMode::Ansi16 => match name {
+            ThemeName::LightPhotonAnsi16 | ThemeName::DarkCarbonAnsi16 => name,
+            ThemeName::Custom => {
+                let is_dark = custom_is_dark_hint
+                    .or_else(|| custom_theme_is_dark())
+                    .unwrap_or(false);
+                if is_dark {
+                    ThemeName::DarkCarbonAnsi16
+                } else {
+                    ThemeName::LightPhotonAnsi16
+                }
+            }
+            other => {
+                if is_light_theme_name(other) {
+                    ThemeName::LightPhotonAnsi16
+                } else {
+                    ThemeName::DarkCarbonAnsi16
+                }
+            }
+        },
+        PaletteMode::Ansi256 => match name {
+            ThemeName::LightPhotonAnsi16 => ThemeName::LightPhoton,
+            ThemeName::DarkCarbonAnsi16 => ThemeName::DarkCarbonNight,
+            other => other,
+        },
+    }
+}
+
 fn quantize_theme_to_ansi256(theme: &mut Theme) {
     let original = theme.clone();
+    let palette = palette_mode();
     // Preserve exact white backgrounds as truecolor to avoid terminals whose
     // ANSI palette's "white" (15) is a light gray. This specifically fixes
     // macOS Terminal.app where bright white can appear gray.
@@ -333,16 +424,16 @@ fn quantize_theme_to_ansi256(theme: &mut Theme) {
         if !for_background { return None; }
         if let Color::Rgb(r, g, b) = c {
             if r >= 245 && g >= 245 && b >= 245 {
-                // On limited-color terminals we want a strong white for light themes.
-                // Use ANSI bright white (index 15), which maps to the profile's
-                // bright white and is reliably high‑contrast (unlike grayscale 231).
                 return Some(Color::Indexed(15));
             }
         }
         None
     }
 
-    let q = quantize_color_to_ansi256;
+    let q = match palette {
+        PaletteMode::Ansi256 => quantize_color_to_ansi256,
+        PaletteMode::Ansi16 => quantize_color_to_ansi16,
+    };
     theme.primary = q(theme.primary);
     theme.secondary = q(theme.secondary);
     theme.background = preserve_true_white(theme.background, true).unwrap_or_else(|| q(theme.background));
@@ -365,7 +456,10 @@ fn quantize_theme_to_ansi256(theme: &mut Theme) {
     theme.spinner = q(theme.spinner);
     theme.progress = q(theme.progress);
 
-    enforce_light_theme_contrast(&original, theme);
+    enforce_theme_contrast(&original, theme, palette);
+    if matches!(palette, PaletteMode::Ansi16) {
+        apply_ansi16_profile(theme, &original);
+    }
 }
 
 fn quantize_color_to_ansi256(c: Color) -> Color {
@@ -373,6 +467,34 @@ fn quantize_color_to_ansi256(c: Color) -> Color {
         Color::Rgb(r, g, b) => Color::Indexed(rgb_to_ansi256_index(r, g, b)),
         // Named colors already map to ANSI; keep as-is.
         other => other,
+    }
+}
+
+fn quantize_color_to_ansi16(c: Color) -> Color {
+    match c {
+        Color::Rgb(r, g, b) => {
+            let mut best = 0;
+            let mut best_dist = i32::MAX;
+            for (i, &(cr, cg, cb)) in ANSI16_COLORS.iter().enumerate() {
+                let dist = color_distance((r, g, b), (cr, cg, cb));
+                if dist < best_dist {
+                    best_dist = dist;
+                    best = i as u8;
+                }
+            }
+            Color::Indexed(best)
+        }
+        other => other,
+    }
+}
+
+pub(crate) fn quantize_color_for_palette(c: Color) -> Color {
+    match c {
+        Color::Indexed(_) | Color::Reset => c,
+        _ => match palette_mode() {
+            PaletteMode::Ansi16 => quantize_color_to_ansi16(c),
+            PaletteMode::Ansi256 => quantize_color_to_ansi256(c),
+        },
     }
 }
 
@@ -417,25 +539,6 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
 
     // Candidate 3: 16-color ANSI (0..15), includes true white (15) which the
     // grayscale ramp does not reach. This fixes near-white mapping to gray.
-    const ANSI16: [(u8, u8, u8); 16] = [
-        (0, 0, 0),       // 0 black
-        (205, 0, 0),     // 1 red
-        (0, 205, 0),     // 2 green
-        (205, 205, 0),   // 3 yellow
-        (0, 0, 205),     // 4 blue
-        (205, 0, 205),   // 5 magenta
-        (0, 205, 205),   // 6 cyan
-        (229, 229, 229), // 7 gray
-        (127, 127, 127), // 8 dark gray
-        (255, 102, 102), // 9 light red
-        (102, 255, 178), // 10 light green
-        (255, 255, 102), // 11 light yellow
-        (102, 153, 255), // 12 light blue
-        (255, 102, 255), // 13 light magenta
-        (102, 255, 255), // 14 light cyan
-        (255, 255, 255), // 15 white
-    ];
-
     let rgb = (r, g, b);
     let cube_rgb = (cube_r, cube_g, cube_b);
     let gray_rgb = (gray_value, gray_value, gray_value);
@@ -449,7 +552,7 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
         best_index = gray_index;
     }
 
-    for (i, &(ar, ag, ab)) in ANSI16.iter().enumerate() {
+    for (i, &(ar, ag, ab)) in ANSI16_COLORS.iter().enumerate() {
         let d = dist2(rgb, (ar, ag, ab));
         if d < best_dist {
             best_dist = d;
@@ -460,39 +563,87 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
     best_index
 }
 
-fn enforce_light_theme_contrast(original: &Theme, quantized: &mut Theme) {
-    if !is_light_color(original.background) {
-        return;
-    }
-    if !is_light_color(quantized.background) {
-        return;
-    }
+fn enforce_theme_contrast(original: &Theme, quantized: &mut Theme, palette: PaletteMode) {
+    align_background_classification(original, quantized, palette);
 
-    quantized.text = ensure_contrast(original.text, quantized.text, quantized.background, 7.0);
-    quantized.text_dim = ensure_contrast(original.text_dim, quantized.text_dim, quantized.background, 3.0);
-    quantized.text_bright = ensure_contrast(original.text_bright, quantized.text_bright, quantized.background, 4.5);
-    quantized.border = ensure_contrast(original.border, quantized.border, quantized.background, 1.4);
-    quantized.border_focused = ensure_contrast(original.border_focused, quantized.border_focused, quantized.background, 1.8);
-    quantized.comment = ensure_contrast(original.comment, quantized.comment, quantized.background, 2.0);
+    quantized.foreground = ensure_contrast(original.foreground, quantized.foreground, quantized.background, 7.0, palette);
+    quantized.text = ensure_contrast(original.text, quantized.text, quantized.background, 7.0, palette);
+    quantized.text_dim = ensure_contrast(original.text_dim, quantized.text_dim, quantized.background, 3.0, palette);
+    quantized.text_bright = ensure_contrast(original.text_bright, quantized.text_bright, quantized.background, 4.5, palette);
+    let border_min_ratio = if is_light_color(quantized.background) { 2.8 } else { 2.6 };
+    quantized.border = ensure_contrast(
+        original.border,
+        quantized.border,
+        quantized.background,
+        border_min_ratio,
+        palette,
+    );
+    quantized.border_focused = ensure_contrast(
+        original.border_focused,
+        quantized.border_focused,
+        quantized.background,
+        border_min_ratio + 0.8,
+        palette,
+    );
+    quantized.comment = ensure_contrast(original.comment, quantized.comment, quantized.background, 2.0, palette);
 }
 
-fn ensure_contrast(original: Color, current: Color, background: Color, min_ratio: f32) -> Color {
+fn ensure_contrast(
+    original: Color,
+    current: Color,
+    background: Color,
+    min_ratio: f32,
+    palette: PaletteMode,
+) -> Color {
     if contrast_ratio(current, background) >= min_ratio {
         return current;
     }
 
     let target = color_to_rgb(original);
     let prefer_grayscale = is_low_saturation(target);
-    if let Some(candidate) =
-        find_palette_match_with_contrast(target, background, min_ratio, prefer_grayscale)
-    {
+    let background_lum = relative_luminance_color(background);
+    let original_lum = relative_luminance_color(original);
+    let luminance_tolerance: f32 = 0.02;
+    let desired_relation = if (original_lum - background_lum).abs() <= luminance_tolerance {
+        None
+    } else if original_lum > background_lum {
+        Some(Ordering::Greater)
+    } else {
+        Some(Ordering::Less)
+    };
+
+    if let Some(candidate) = find_palette_match_with_contrast(
+        target,
+        background,
+        min_ratio,
+        prefer_grayscale,
+        desired_relation,
+        palette,
+    ) {
+        return candidate;
+    }
+
+    if let Some(candidate) = find_palette_match_with_contrast(
+        target,
+        background,
+        min_ratio,
+        prefer_grayscale,
+        None,
+        palette,
+    ) {
         return candidate;
     }
 
     if is_light_color(background) {
-        Color::Indexed(16)
+        match palette {
+            PaletteMode::Ansi16 => Color::Indexed(0),
+            PaletteMode::Ansi256 => Color::Indexed(16),
+        }
     } else {
-        Color::Indexed(231)
+        match palette {
+            PaletteMode::Ansi16 => Color::Indexed(15),
+            PaletteMode::Ansi256 => Color::Indexed(15),
+        }
     }
 }
 
@@ -501,12 +652,27 @@ fn find_palette_match_with_contrast(
     background: Color,
     min_ratio: f32,
     prefer_grayscale: bool,
+    desired_relation: Option<Ordering>,
+    palette: PaletteMode,
 ) -> Option<Color> {
     let mut best: Option<(i32, Color)> = None;
+    let background_lum = relative_luminance_color(background);
+    let luminance_epsilon: f32 = 0.02;
 
     let consider_candidate = |candidate: Color, best: &mut Option<(i32, Color)>| {
         if contrast_ratio(candidate, background) < min_ratio {
             return;
+        }
+        if let Some(relation) = desired_relation {
+            let candidate_lum = relative_luminance_color(candidate);
+            let matches = match relation {
+                Ordering::Less => candidate_lum + luminance_epsilon < background_lum,
+                Ordering::Equal => (candidate_lum - background_lum).abs() <= luminance_epsilon,
+                Ordering::Greater => candidate_lum > background_lum + luminance_epsilon,
+            };
+            if !matches {
+                return;
+            }
         }
         let rgb = color_to_rgb(candidate);
         let dist = color_distance(rgb, target);
@@ -518,22 +684,154 @@ fn find_palette_match_with_contrast(
     };
 
     if prefer_grayscale {
-        const GRAY_INDICES: [u8; 29] = [
-            0, 8, 7, 15, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245,
-            246, 247, 248, 249, 250, 251, 252, 253, 254, 255,
-        ];
-        for &idx in &GRAY_INDICES {
-            consider_candidate(Color::Indexed(idx), &mut best);
+        match palette {
+            PaletteMode::Ansi16 => {
+                const GRAYS: [u8; 4] = [0, 8, 7, 15];
+                for &idx in &GRAYS {
+                    consider_candidate(Color::Indexed(idx), &mut best);
+                }
+            }
+            PaletteMode::Ansi256 => {
+                const GRAY_INDICES: [u8; 29] = [
+                    0, 8, 7, 15, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243,
+                    244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255,
+                ];
+                for &idx in &GRAY_INDICES {
+                    consider_candidate(Color::Indexed(idx), &mut best);
+                }
+            }
         }
         if best.is_some() {
             return best.map(|(_, color)| color);
         }
     }
 
-    for idx in 0u16..=255 {
-        consider_candidate(Color::Indexed(idx as u8), &mut best);
+    match palette {
+        PaletteMode::Ansi16 => {
+            for idx in 0u8..=15 {
+                consider_candidate(Color::Indexed(idx), &mut best);
+            }
+        }
+        PaletteMode::Ansi256 => {
+            for idx in 0u16..=255 {
+                consider_candidate(Color::Indexed(idx as u8), &mut best);
+            }
+        }
     }
     best.map(|(_, color)| color)
+}
+
+fn align_background_classification(original: &Theme, quantized: &mut Theme, palette: PaletteMode) {
+    let should_be_light = is_light_color(original.background);
+    if is_light_color(quantized.background) == should_be_light {
+        return;
+    }
+
+    if let Some(candidate) = find_background_candidate(original.background, should_be_light, palette) {
+        quantized.background = candidate;
+    }
+}
+
+fn find_background_candidate(target: Color, require_light: bool, palette: PaletteMode) -> Option<Color> {
+    let mut best: Option<(i32, Color)> = None;
+    let target_rgb = color_to_rgb(target);
+
+    match palette {
+        PaletteMode::Ansi16 => {
+            for idx in 0u8..=15 {
+                let candidate = Color::Indexed(idx);
+                if is_light_color(candidate) != require_light {
+                    continue;
+                }
+                let candidate_rgb = color_to_rgb(candidate);
+                let dist = color_distance(candidate_rgb, target_rgb);
+                match best {
+                    None => best = Some((dist, candidate)),
+                    Some((best_dist, _)) if dist < best_dist => best = Some((dist, candidate)),
+                    _ => {}
+                }
+            }
+        }
+        PaletteMode::Ansi256 => {
+            for idx in 0u16..=255 {
+                let candidate = Color::Indexed(idx as u8);
+                if is_light_color(candidate) != require_light {
+                    continue;
+                }
+                let candidate_rgb = color_to_rgb(candidate);
+                let dist = color_distance(candidate_rgb, target_rgb);
+                match best {
+                    None => best = Some((dist, candidate)),
+                    Some((best_dist, _)) if dist < best_dist => best = Some((dist, candidate)),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    best.map(|(_, color)| color)
+}
+
+fn apply_ansi16_profile(theme: &mut Theme, original: &Theme) {
+    let is_light = is_light_color(original.background);
+    if is_light {
+        // Light profile
+        theme.background = Color::Indexed(15);
+        theme.foreground = Color::Indexed(0);
+        theme.text = Color::Indexed(0);
+        theme.text_dim = Color::Indexed(8);
+        theme.text_bright = Color::Indexed(0);
+        theme.border = Color::Indexed(8);
+        theme.border_focused = Color::Indexed(0);
+        theme.cursor = Color::Indexed(0);
+        theme.primary = Color::Indexed(12);
+        theme.secondary = Color::Indexed(13);
+        theme.selection = Color::Indexed(12);
+        theme.success = Color::Indexed(2);
+        theme.warning = Color::Indexed(3);
+        theme.error = Color::Indexed(1);
+        theme.info = Color::Indexed(12);
+        theme.keyword = Color::Indexed(12);
+        theme.string = Color::Indexed(10);
+        theme.comment = Color::Indexed(8);
+        theme.function = Color::Indexed(10);
+        theme.spinner = Color::Indexed(4);
+        theme.progress = Color::Indexed(12);
+    } else {
+        // Dark profile
+        theme.background = Color::Indexed(0);
+        theme.foreground = Color::Indexed(15);
+        theme.text = Color::Indexed(15);
+        theme.text_dim = Color::Indexed(7);
+        theme.text_bright = Color::Indexed(15);
+        theme.border = Color::Indexed(7);
+        theme.border_focused = Color::Indexed(15);
+        theme.cursor = Color::Indexed(15);
+        theme.primary = Color::Indexed(12);
+        theme.secondary = Color::Indexed(13);
+        theme.selection = Color::Indexed(4);
+        theme.success = Color::Indexed(2);
+        theme.warning = Color::Indexed(3);
+        theme.error = Color::Indexed(1);
+        theme.info = Color::Indexed(14);
+        theme.keyword = Color::Indexed(12);
+        theme.string = Color::Indexed(10);
+        theme.comment = Color::Indexed(7);
+        theme.function = Color::Indexed(10);
+        theme.spinner = Color::Indexed(7);
+        theme.progress = Color::Indexed(12);
+    }
+
+    // Ensure accent text retains readable contrast relative to the new palette.
+    if contrast_ratio(theme.keyword, theme.background) < 2.5 {
+        theme.keyword = if is_light { Color::Indexed(12) } else { Color::Indexed(13) };
+    }
+    if contrast_ratio(theme.string, theme.background) < 2.5 {
+        theme.string = if is_light { Color::Indexed(10) } else { Color::Indexed(10) };
+    }
+    if contrast_ratio(theme.comment, theme.background) < 2.0 {
+        theme.comment = if is_light { Color::Indexed(8) } else { Color::Indexed(8) };
+    }
 }
 
 fn color_distance(a: (u8, u8, u8), b: (u8, u8, u8)) -> i32 {
@@ -605,27 +903,8 @@ fn color_to_rgb(color: Color) -> (u8, u8, u8) {
 }
 
 fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
-    const ANSI16: [(u8, u8, u8); 16] = [
-        (0, 0, 0),
-        (205, 0, 0),
-        (0, 205, 0),
-        (205, 205, 0),
-        (0, 0, 205),
-        (205, 0, 205),
-        (0, 205, 205),
-        (229, 229, 229),
-        (127, 127, 127),
-        (255, 102, 102),
-        (102, 255, 178),
-        (255, 255, 102),
-        (102, 153, 255),
-        (255, 102, 255),
-        (102, 255, 255),
-        (255, 255, 255),
-    ];
-
     if idx < 16 {
-        return ANSI16[idx as usize];
+        return ANSI16_COLORS[idx as usize];
     }
     if (16..=231).contains(&idx) {
         let offset = idx - 16;
@@ -651,9 +930,12 @@ mod tests {
 
         assert!(contrast_ratio(theme.text, theme.background) >= 7.0);
         assert!(contrast_ratio(theme.text_dim, theme.background) >= 3.0);
-        assert!(contrast_ratio(theme.border, theme.background) >= 1.4);
-        assert!(contrast_ratio(theme.border_focused, theme.background) >= 1.8);
+        assert!(contrast_ratio(theme.border, theme.background) >= 2.8);
+        assert!(contrast_ratio(theme.border_focused, theme.background) >= 3.6);
         assert!(contrast_ratio(theme.comment, theme.background) >= 2.0);
+        assert_ne!(theme.border, theme.background, "border should differ from background");
+        assert_ne!(theme.text, theme.background, "text should differ from background");
+        assert_ne!(theme.text_dim, theme.background, "text_dim should differ from background");
 
         let (r_text_dim, g_text_dim, b_text_dim) = color_to_rgb(theme.text_dim);
         assert_eq!(r_text_dim, g_text_dim, "text_dim should remain neutral grayscale");
@@ -687,6 +969,29 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             spinner: Color::Rgb(59, 67, 79),          // #3B434F
             progress: Color::Rgb(37, 194, 255),       // #25C2FF
         },
+        ThemeName::DarkCarbonAnsi16 => Theme {
+            primary: Color::Indexed(12),
+            secondary: Color::Indexed(13),
+            background: Color::Indexed(0),
+            foreground: Color::Indexed(15),
+            border: Color::Indexed(7),
+            border_focused: Color::Indexed(15),
+            selection: Color::Indexed(4),
+            cursor: Color::Indexed(15),
+            success: Color::Indexed(2),
+            warning: Color::Indexed(3),
+            error: Color::Indexed(1),
+            info: Color::Indexed(14),
+            text: Color::Indexed(15),
+            text_dim: Color::Indexed(7),
+            text_bright: Color::Indexed(15),
+            keyword: Color::Indexed(12),
+            string: Color::Indexed(10),
+            comment: Color::Indexed(7),
+            function: Color::Indexed(10),
+            spinner: Color::Indexed(7),
+            progress: Color::Indexed(12),
+        },
 
         ThemeName::LightPhoton => Theme {
             // Light default - clean professional light theme
@@ -711,6 +1016,29 @@ fn get_predefined_theme(name: ThemeName) -> Theme {
             function: Color::Rgb(0, 95, 204),       // #005FCC
             spinner: Color::Rgb(156, 163, 175),     // #9CA3AF
             progress: Color::Rgb(0, 95, 204),       // #005FCC
+        },
+        ThemeName::LightPhotonAnsi16 => Theme {
+            primary: Color::Indexed(12),
+            secondary: Color::Indexed(13),
+            background: Color::Indexed(15),
+            foreground: Color::Indexed(0),
+            border: Color::Indexed(8),
+            border_focused: Color::Indexed(0),
+            selection: Color::Indexed(12),
+            cursor: Color::Indexed(0),
+            success: Color::Indexed(2),
+            warning: Color::Indexed(3),
+            error: Color::Indexed(1),
+            info: Color::Indexed(12),
+            text: Color::Indexed(0),
+            text_dim: Color::Indexed(8),
+            text_bright: Color::Indexed(0),
+            keyword: Color::Indexed(12),
+            string: Color::Indexed(10),
+            comment: Color::Indexed(8),
+            function: Color::Indexed(10),
+            spinner: Color::Indexed(4),
+            progress: Color::Indexed(12),
         },
 
         ThemeName::LightPrismRainbow => Theme {
