@@ -1,4 +1,4 @@
-use crate::theme::current_theme;
+use crate::theme::{current_theme, palette_mode, quantize_color_for_palette, PaletteMode};
 use ratatui::style::Color;
 
 // Legacy color constants - now redirect to theme
@@ -40,16 +40,31 @@ pub(crate) fn border() -> Color {
 /// Blends the theme border toward the background by 30% to reduce contrast
 /// while preserving the original hue relationship.
 pub(crate) fn border_dim() -> Color {
-    let b = current_theme().border;
-    let bg = current_theme().background;
-    let (br, bg_g, bb) = color_to_rgb(b);
-    let (rr, rg, rb) = color_to_rgb(bg);
-    let t: f32 = 0.30; // 30% toward background
-    let mix = |a: u8, b: u8| -> u8 { ((a as f32) * (1.0 - t) + (b as f32) * t).round() as u8 };
-    let r = mix(br, rr);
-    let g = mix(bg_g, rg);
-    let bl = mix(bb, rb);
-    Color::Rgb(r, g, bl)
+    match palette_mode() {
+        PaletteMode::Ansi16 => {
+            if is_dark_background(current_theme().background) {
+                Color::Indexed(8)
+            } else {
+                Color::Indexed(8)
+            }
+        }
+        PaletteMode::Ansi256 => {
+            let b = current_theme().border;
+            let bg = current_theme().background;
+            let (br, bg_g, bb) = color_to_rgb(b);
+            let (rr, rg, rb) = color_to_rgb(bg);
+            let t: f32 = 0.30; // 30% toward background
+            let mix = |a: u8, b: u8| -> u8 { ((a as f32) * (1.0 - t) + (b as f32) * t).round() as u8 };
+            let r = mix(br, rr);
+            let g = mix(bg_g, rg);
+            let bl = mix(bb, rb);
+            quantize_color_for_palette(Color::Rgb(r, g, bl))
+        }
+    }
+}
+
+fn is_dark_background(color: Color) -> bool {
+    matches!(color, Color::Indexed(0) | Color::Black)
 }
 
 #[allow(dead_code)]
@@ -75,9 +90,20 @@ pub(crate) fn spinner() -> Color {
 
 /// Midpoint color between `text` and `text_dim` for secondary list levels.
 pub(crate) fn text_mid() -> Color {
-    let a = current_theme().text;
-    let b = current_theme().text_dim;
-    mix_toward(a, b, 0.5)
+    match palette_mode() {
+        PaletteMode::Ansi16 => {
+            if is_dark_background(current_theme().background) {
+                Color::Indexed(7)
+            } else {
+                Color::Indexed(8)
+            }
+        }
+        PaletteMode::Ansi256 => {
+            let a = current_theme().text;
+            let b = current_theme().text_dim;
+            mix_toward(a, b, 0.5)
+        }
+    }
 }
 
 pub(crate) fn info() -> Color {
@@ -195,7 +221,7 @@ pub(crate) fn mix_toward(from: Color, to: Color, t: f32) -> Color {
     let a = color_to_rgb(from);
     let b = color_to_rgb(to);
     let (r, g, b) = blend_rgb(a, b, t.clamp(0.0, 1.0));
-    Color::Rgb(r, g, b)
+    quantize_color_for_palette(Color::Rgb(r, g, b))
 }
 
 fn blend_with_black(rgb: (u8, u8, u8), alpha: f32) -> (u8, u8, u8) {
@@ -222,14 +248,25 @@ pub(crate) fn overlay_scrim() -> Color {
     // For light themes, use a slightly stronger darkening; for dark themes, a gentler one.
     let alpha = if is_light(rgb) { 0.18 } else { 0.10 };
     let (r, g, b) = blend_with_black(rgb, alpha);
-    Color::Rgb(r, g, b)
+    quantize_color_for_palette(Color::Rgb(r, g, b))
 }
 
 /// Background for assistant messages: theme background moved 5% toward theme info.
 pub(crate) fn assistant_bg() -> Color {
-    let bg = current_theme().background;
-    let info = current_theme().info;
-    mix_toward(bg, info, 0.05)
+    match palette_mode() {
+        PaletteMode::Ansi16 => {
+            if is_dark_background(current_theme().background) {
+                Color::Indexed(4)
+            } else {
+                Color::Indexed(7)
+            }
+        }
+        PaletteMode::Ansi256 => {
+            let bg = current_theme().background;
+            let info = current_theme().info;
+            mix_toward(bg, info, 0.05)
+        }
+    }
 }
 
 /// Background for multiline code blocks rendered in assistant markdown.
@@ -245,21 +282,28 @@ pub(crate) fn code_block_bg() -> Color {
 /// Defined as halfway from the theme background toward the assistant background tint.
 /// This makes the rule more pronounced than the cell background while staying subtle.
 pub(crate) fn assistant_hr() -> Color {
-    let bg = current_theme().background;
-    let info = current_theme().info;
-    let cell = assistant_bg();
-    // Start with a stronger mix toward the theme's info color than the cell bg.
-    // Cell is bg→info at 5%; pick ~15% as a baseline so it is darker than cell on light themes.
-    let candidate = mix_toward(bg, info, 0.15);
-    let cand_l = relative_luminance(color_to_rgb(candidate));
-    let cell_l = relative_luminance(color_to_rgb(cell));
-    if cand_l < cell_l {
-        // Already darker than the cell background.
-        candidate
-    } else {
-        // Ensure the rule is darker than the cell even on dark themes where info is brighter.
-        // Darken the cell bg by ~12% for a subtle, theme-respecting separator.
-        let (r, g, b) = blend_with_black(color_to_rgb(cell), 0.12);
-        Color::Rgb(r, g, b)
+    match palette_mode() {
+        PaletteMode::Ansi16 => {
+            if is_dark_background(current_theme().background) {
+                Color::Indexed(8)
+            } else {
+                Color::Indexed(7)
+            }
+        }
+        PaletteMode::Ansi256 => {
+            let bg = current_theme().background;
+            let info = current_theme().info;
+            let cell = assistant_bg();
+            let candidate = mix_toward(bg, info, 0.15);
+            let cand_l = relative_luminance(color_to_rgb(candidate));
+            let cell_l = relative_luminance(color_to_rgb(cell));
+            let result = if cand_l < cell_l {
+                candidate
+            } else {
+                let (r, g, b) = blend_with_black(color_to_rgb(cell), 0.12);
+                Color::Rgb(r, g, b)
+            };
+            quantize_color_for_palette(result)
+        }
     }
 }

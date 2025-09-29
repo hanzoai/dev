@@ -574,8 +574,11 @@ impl BottomPane<'_> {
     }
 
     /// Show the theme selection UI
-    pub fn show_theme_selection(&mut self, current_theme: ThemeName) {
-        let view = ThemeSelectionView::new(current_theme, self.app_event_tx.clone());
+    pub fn show_theme_selection(&mut self, _current_theme: ThemeName) {
+        let view = ThemeSelectionView::new(
+            crate::theme::current_theme_name(),
+            self.app_event_tx.clone(),
+        );
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now

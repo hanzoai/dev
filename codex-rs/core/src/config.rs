@@ -623,12 +623,14 @@ pub fn set_tui_theme_name(codex_home: &Path, theme: ThemeName) -> anyhow::Result
     // Map enum to kebab-case string used in config
     let theme_str = match theme {
         ThemeName::LightPhoton => "light-photon",
+        ThemeName::LightPhotonAnsi16 => "light-photon-ansi16",
         ThemeName::LightPrismRainbow => "light-prism-rainbow",
         ThemeName::LightVividTriad => "light-vivid-triad",
         ThemeName::LightPorcelain => "light-porcelain",
         ThemeName::LightSandbar => "light-sandbar",
         ThemeName::LightGlacier => "light-glacier",
         ThemeName::DarkCarbonNight => "dark-carbon-night",
+        ThemeName::DarkCarbonAnsi16 => "dark-carbon-ansi16",
         ThemeName::DarkShinobiDusk => "dark-shinobi-dusk",
         ThemeName::DarkOledBlackPro => "dark-oled-black-pro",
         ThemeName::DarkAmberTerminal => "dark-amber-terminal",
