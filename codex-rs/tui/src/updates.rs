@@ -147,9 +147,15 @@ pub fn resolve_upgrade_resolution() -> UpgradeResolution {
     }
 }
 
-pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<String>> {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AutoUpgradeOutcome {
+    pub installed_version: Option<String>,
+    pub user_notice: Option<String>,
+}
+
+pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<AutoUpgradeOutcome> {
     if !config.auto_upgrade_enabled {
-        return Ok(None);
+        return Ok(AutoUpgradeOutcome::default());
     }
 
     let resolution = resolve_upgrade_resolution();
@@ -160,7 +166,7 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
         } if !command.is_empty() => (command, command_display),
         _ => {
             info!("auto-upgrade enabled but no managed installer detected; skipping");
-            return Ok(None);
+            return Ok(AutoUpgradeOutcome::default());
         }
     };
 
@@ -168,24 +174,24 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
         Ok(info) => info,
         Err(err) => {
             warn!("auto-upgrade: failed to check for updates: {err}");
-            return Ok(None);
+            return Ok(AutoUpgradeOutcome::default());
         }
     };
 
     let Some(latest_version) = info.latest_version.clone() else {
         // Already up to date
-        return Ok(None);
+        return Ok(AutoUpgradeOutcome::default());
     };
 
     let lock = match AutoUpgradeLock::acquire(&config.codex_home) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
             info!("auto-upgrade already in progress by another instance; skipping");
-            return Ok(None);
+            return Ok(AutoUpgradeOutcome::default());
         }
         Err(err) => {
             warn!("auto-upgrade: unable to acquire lock: {err}");
-            return Ok(None);
+            return Ok(AutoUpgradeOutcome::default());
         }
     };
 
@@ -194,17 +200,75 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<Option<S
         latest_version = latest_version.as_str(),
         "auto-upgrade: running managed installer"
     );
-    let result = run_upgrade_command(command).await;
+    let result = execute_upgrade_command(&command).await;
     drop(lock);
 
+    let mut outcome = AutoUpgradeOutcome {
+        installed_version: None,
+        user_notice: None,
+    };
+
     match result {
-        Ok(()) => {
-            info!("auto-upgrade: successfully installed {latest_version}");
-            Ok(Some(latest_version))
+        Ok(primary) => {
+            if primary.success {
+                info!("auto-upgrade: successfully installed {latest_version}");
+                outcome.installed_version = Some(latest_version);
+                return Ok(outcome);
+            }
+
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            {
+                if !starts_with_sudo(&command) {
+                    info!("auto-upgrade: retrying with sudo -n");
+                    let sudo_command = wrap_with_sudo(&command);
+                    match execute_upgrade_command(&sudo_command).await {
+                        Ok(fallback) if fallback.success => {
+                            info!("auto-upgrade: sudo retry succeeded; installed {latest_version}");
+                            outcome.installed_version = Some(latest_version);
+                            return Ok(outcome);
+                        }
+                        Ok(fallback) => {
+                            if sudo_requires_manual_intervention(&fallback.stderr, fallback.status)
+                            {
+                                outcome.user_notice = Some(format!(
+                                    "Automatic upgrade needs your attention. Run `/upgrade` to finish with `{}`.",
+                                    command_display
+                                ));
+                            }
+                            warn!(
+                                "auto-upgrade: sudo retry failed: status={:?} stderr={}",
+                                fallback.status,
+                                truncate_for_log(&fallback.stderr)
+                            );
+                            return Ok(outcome);
+                        }
+                        Err(err) => {
+                            warn!("auto-upgrade: sudo retry error: {err}");
+                            outcome.user_notice = Some(format!(
+                                "Automatic upgrade could not escalate permissions. Run `/upgrade` to finish with `{}`.",
+                                command_display
+                            ));
+                            return Ok(outcome);
+                        }
+                    }
+                }
+            }
+
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                let _ = primary; // suppress unused warning on non-Unix targets
+            }
+
+            warn!(
+                "auto-upgrade: upgrade command failed: status={:?} stderr={}",
+                primary.status,
+                truncate_for_log(&primary.stderr)
+            );
+            Ok(outcome)
         }
         Err(err) => {
-            warn!("auto-upgrade: upgrade command failed: {err}");
-            Ok(None)
+            warn!("auto-upgrade: failed to launch upgrade command: {err}");
+            Ok(outcome)
         }
     }
 }
@@ -288,7 +352,14 @@ impl Drop for AutoUpgradeLock {
     }
 }
 
-async fn run_upgrade_command(command: Vec<String>) -> anyhow::Result<()> {
+#[derive(Debug, Clone)]
+struct CommandCapture {
+    success: bool,
+    status: Option<i32>,
+    stderr: String,
+}
+
+async fn execute_upgrade_command(command: &[String]) -> anyhow::Result<CommandCapture> {
     if command.is_empty() {
         anyhow::bail!("upgrade command is empty");
     }
@@ -297,18 +368,111 @@ async fn run_upgrade_command(command: Vec<String>) -> anyhow::Result<()> {
     if command.len() > 1 {
         cmd.args(&command[1..]);
     }
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
 
-    let status = cmd.status().await?;
-    if !status.success() {
-        anyhow::bail!(
-            "upgrade command exited with status {}",
-            status.code().map_or_else(|| "signal".to_string(), |c| c.to_string())
-        );
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = cmd.output().await?;
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+    Ok(CommandCapture {
+        success: output.status.success(),
+        status: output.status.code(),
+        stderr,
+    })
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn wrap_with_sudo(command: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(command.len() + 3);
+    out.push("sudo".to_string());
+    out.push("-n".to_string());
+    out.push("--".to_string());
+    out.extend(command.iter().cloned());
+    out
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn starts_with_sudo(command: &[String]) -> bool {
+    command
+        .first()
+        .map(|c| c.eq_ignore_ascii_case("sudo"))
+        .unwrap_or(false)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn sudo_requires_manual_intervention(stderr: &str, status: Option<i32>) -> bool {
+    let lowered = stderr.to_ascii_lowercase();
+    let needs_password = lowered.contains("password is required")
+        || lowered.contains("a password is required")
+        || lowered.contains("no tty present and no askpass program specified")
+        || lowered.contains("must be run from a terminal")
+        || lowered.contains("may not run sudo")
+        || lowered.contains("permission denied");
+    needs_password && status == Some(1)
+}
+
+fn truncate_for_log(text: &str) -> String {
+    const LIMIT: usize = 256;
+    if text.len() <= LIMIT {
+        text.replace('\n', " ")
+    } else {
+        let mut truncated = text[..LIMIT].to_string();
+        truncated.push_str("…");
+        truncated.replace('\n', " ")
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn truncate_for_log_short_text_preserved() {
+        let text = "no issues";
+        assert_eq!(truncate_for_log(text), text);
+    }
+
+    #[test]
+    fn truncate_for_log_truncates_long_messages() {
+        let long = "a".repeat(300);
+        let truncated = truncate_for_log(&long);
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.len() <= 257);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn wrap_with_sudo_injects_dash_dash() {
+        let original = vec!["npm".to_string(), "install".to_string()];
+        let wrapped = wrap_with_sudo(&original);
+        assert_eq!(wrapped[0], "sudo");
+        assert_eq!(wrapped[1], "-n");
+        assert_eq!(wrapped[2], "--");
+        assert_eq!(&wrapped[3..], original);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn starts_with_sudo_detects_prefix_case_insensitive() {
+        assert!(starts_with_sudo(&["sudo".into(), "true".into()]));
+        assert!(starts_with_sudo(&["SUDO".into(), "true".into()]));
+        assert!(!starts_with_sudo(&["npm".into(), "install".into()]));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn sudo_requires_manual_intervention_matches_common_errors() {
+        let stderr = "sudo: a password is required";
+        assert!(sudo_requires_manual_intervention(stderr, Some(1)));
+
+        let stderr_case = "sudo: Permission denied";
+        assert!(sudo_requires_manual_intervention(stderr_case, Some(1)));
+
+        let stderr_other = "sudo: authentication succeeded";
+        assert!(!sudo_requires_manual_intervention(stderr_other, Some(0)));
+    }
 }
 
 fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
