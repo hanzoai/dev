@@ -1,7 +1,8 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use crate::colors;
 use crate::auto_drive_strings;
+use crate::colors;
+use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -10,7 +11,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DRIVE_SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const DRIVE_SPINNER_INTERVAL_MS: u64 = 120;
@@ -43,6 +44,7 @@ pub(crate) struct AutoCoordinatorViewModel {
     pub button: Option<AutoCoordinatorButton>,
     pub manual_hint: Option<String>,
     pub ctrl_switch_hint: String,
+    pub cli_running: bool,
 }
 
 struct VariantContext {
@@ -54,11 +56,29 @@ struct VariantContext {
 pub(crate) struct AutoCoordinatorView {
     model: AutoCoordinatorViewModel,
     app_event_tx: AppEventSender,
+    header_wave: HeaderWaveEffect,
+    header_border: HeaderBorderWeaveEffect,
 }
 
 impl AutoCoordinatorView {
     pub fn new(model: AutoCoordinatorViewModel, app_event_tx: AppEventSender) -> Self {
-        Self { model, app_event_tx }
+        let now = Instant::now();
+        let header_wave = {
+            let effect = HeaderWaveEffect::new();
+            effect.set_enabled(false, now);
+            effect
+        };
+        let header_border = {
+            let effect = HeaderBorderWeaveEffect::new();
+            effect.set_enabled(false, now);
+            effect
+        };
+        Self {
+            model,
+            app_event_tx,
+            header_wave,
+            header_border,
+        }
     }
 
     fn build_context(&self) -> VariantContext {
@@ -74,7 +94,7 @@ impl AutoCoordinatorView {
         }
     }
 
-    fn render_frame(&self, area: Rect, buf: &mut Buffer, title: &str) -> Option<Rect> {
+    fn render_frame(&self, area: Rect, buf: &mut Buffer, title: &str, now: Instant) -> Option<Rect> {
         if area.width < 3 || area.height < 3 {
             return None;
         }
@@ -89,6 +109,28 @@ impl AutoCoordinatorView {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(colors::border()))
             .render(area, buf);
+        if self.header_wave.is_enabled() {
+            self.header_wave.render(area, buf, now);
+        }
+        if self.header_border.is_enabled() {
+            self.header_border.render(area, buf, now);
+        }
+        // Reapply static title styling so animation never recolors it
+        let title_style = Style::default()
+            .fg(colors::text())
+            .add_modifier(Modifier::BOLD);
+        let title_y = area.y;
+        let title_start = area.x + 1;
+        for (offset, ch) in title.chars().enumerate() {
+            let x = title_start + offset as u16;
+            if x >= area.x && x < area.x.saturating_add(area.width) {
+                let mut ch_buf = [0u8; 4];
+                let symbol = ch.encode_utf8(&mut ch_buf);
+                let cell = &mut buf[(x, title_y)];
+                cell.set_symbol(symbol);
+                cell.set_style(title_style);
+            }
+        }
         Some(Rect {
             x: area.x + 1,
             y: area.y + 1,
@@ -290,7 +332,25 @@ impl AutoCoordinatorView {
     }
 
     fn render_classic(&self, area: Rect, buf: &mut Buffer, ctx: &VariantContext) {
-        let Some(inner) = self.render_frame(area, buf, " Auto Drive ") else {
+        let now = Instant::now();
+        let waiting = self.model.waiting_for_response;
+        let mut frame_needed = false;
+
+        let should_enable_border = waiting && !self.model.cli_running;
+        let mut border_enabled = self.header_border.is_enabled();
+        if should_enable_border && !border_enabled {
+            self.header_border.set_enabled(true, now);
+            border_enabled = true;
+        } else if !should_enable_border && border_enabled {
+            self.header_border.set_enabled(false, now);
+            border_enabled = false;
+        }
+
+        if border_enabled && self.header_border.schedule_if_needed(now) {
+            frame_needed = true;
+        }
+
+        let Some(inner) = self.render_frame(area, buf, " Auto Drive ", now) else {
             return;
         };
         let inner = self.apply_left_padding(inner, buf);
@@ -349,8 +409,12 @@ impl AutoCoordinatorView {
             .wrap(Wrap { trim: true })
             .render(inner, buf);
 
+        let mut next_interval = Duration::from_millis(DRIVE_SPINNER_INTERVAL_MS);
+        if frame_needed {
+            next_interval = next_interval.min(HeaderBorderWeaveEffect::FRAME_INTERVAL);
+        }
         self.app_event_tx
-            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(DRIVE_SPINNER_INTERVAL_MS)));
+            .send(AppEvent::ScheduleFrameIn(next_interval));
     }
 
     fn apply_left_padding(&self, area: Rect, buf: &mut Buffer) -> Rect {
