@@ -15,7 +15,6 @@ use codex_cli::login::run_login_with_chatgpt;
 use codex_cli::login::run_logout;
 use codex_cli::proto;
 mod llm;
-mod pre_main_hardening;
 use llm::{LlmCli, run_llm};
 use codex_common::CliConfigOverrides;
 use codex_core::find_conversation_path_by_id_str;
@@ -47,14 +46,7 @@ fn pre_main_hardening() {
     };
 
     if secure_mode == "1" {
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        crate::pre_main_hardening::pre_main_hardening_linux();
-
-        #[cfg(target_os = "macos")]
-        crate::pre_main_hardening::pre_main_hardening_macos();
-
-        #[cfg(windows)]
-        crate::pre_main_hardening::pre_main_hardening_windows();
+        codex_process_hardening::pre_main_hardening();
     }
 
     // Always clear this env var so child processes don't inherit it.
