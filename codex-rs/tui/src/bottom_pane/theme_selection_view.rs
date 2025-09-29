@@ -18,6 +18,7 @@ use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::theme::{custom_theme_is_dark, map_theme_for_palette, palette_mode, PaletteMode};
 
 use super::BottomPane;
 use super::bottom_pane_view::BottomPaneView;
@@ -46,6 +47,7 @@ pub(crate) struct ThemeSelectionView {
 
 impl ThemeSelectionView {
     pub fn new(current_theme: ThemeName, app_event_tx: AppEventSender) -> Self {
+        let current_theme = map_theme_for_palette(current_theme, custom_theme_is_dark());
         let themes = Self::get_theme_options();
         let selected_theme_index = themes
             .iter()
@@ -79,6 +81,21 @@ impl ThemeSelectionView {
     }
 
     fn get_theme_options() -> Vec<(ThemeName, &'static str, &'static str)> {
+        if matches!(palette_mode(), PaletteMode::Ansi16) {
+            return vec![
+                (
+                    ThemeName::LightPhotonAnsi16,
+                    "Light (16-color)",
+                    "High-contrast light palette for limited terminals",
+                ),
+                (
+                    ThemeName::DarkCarbonAnsi16,
+                    "Dark (16-color)",
+                    "High-contrast dark palette for limited terminals",
+                ),
+            ];
+        }
+
         let mut v = vec![
             // Light themes (at top)
             (
@@ -155,6 +172,9 @@ impl ThemeSelectionView {
         ];
         // Append custom theme if available (use saved label and light/dark prefix)
         if let Some(label0) = crate::theme::custom_theme_label() {
+            if matches!(palette_mode(), PaletteMode::Ansi16) {
+                return v;
+            }
             // Sanitize any leading Light/Dark prefix the model may have included
             let mut label = label0.trim().to_string();
             for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
@@ -175,6 +195,10 @@ impl ThemeSelectionView {
             ));
         }
         v
+    }
+
+    fn allow_custom_theme_generation() -> bool {
+        !matches!(palette_mode(), PaletteMode::Ansi16)
     }
 
     fn move_selection_up(&mut self) {
@@ -202,8 +226,13 @@ impl ThemeSelectionView {
     fn move_selection_down(&mut self) {
         if matches!(self.mode, Mode::Themes) {
             let options = Self::get_theme_options();
-            // Allow moving onto the extra pseudo-row
-            if self.selected_theme_index + 1 <= options.len() {
+            let allow_extra_row = Self::allow_custom_theme_generation();
+            let limit = if allow_extra_row {
+                options.len()
+            } else {
+                options.len().saturating_sub(1)
+            };
+            if self.selected_theme_index + 1 <= limit {
                 self.selected_theme_index += 1;
                 if self.selected_theme_index < options.len() {
                     self.current_theme = options[self.selected_theme_index].0;
@@ -918,7 +947,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             Mode::Overview => 8,
             // Detail lists: fixed 9 visible rows (max), shrink if fewer
             Mode::Themes => {
-                let n = (Self::get_theme_options().len() as u16) + 1; // +1 for "Generate your own…"
+                let extra = if Self::allow_custom_theme_generation() { 1 } else { 0 };
+                let n = (Self::get_theme_options().len() as u16) + extra;
                 // Border(2) + padding(2) + title(1)+space(1) + list
                 6 + n.min(9)
             }
@@ -1150,7 +1180,9 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     Mode::Themes => {
                         // If tail row selected (Generate your own…), open create form
                         let count = Self::get_theme_options().len();
-                        if self.selected_theme_index >= count {
+                        if Self::allow_custom_theme_generation()
+                            && self.selected_theme_index >= count
+                        {
                             // Revert preview to the theme before entering Themes list for better legibility
                             self.app_event_tx
                                 .send(AppEvent::PreviewTheme(self.revert_theme_on_back));
@@ -1692,7 +1724,8 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     .add_modifier(Modifier::BOLD),
             )));
             // Compute anchored window: top until middle, then center; bottom shows end
-            let count = options.len() + 1; // include pseudo-row for Generate your own…
+            let allow_custom = Self::allow_custom_theme_generation();
+            let count = options.len() + if allow_custom { 1 } else { 0 };
             let visible = available_height.saturating_sub(1).min(9).max(1);
             let (start, _vis, _mid) = crate::util::list_window::anchored_window(
                 self.selected_theme_index,
@@ -1702,7 +1735,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
             let end = (start + visible).min(count);
             for i in start..end {
                 let is_selected = i == self.selected_theme_index;
-                if i >= options.len() {
+                if allow_custom && i >= options.len() {
                     // Pseudo-row: Generate your own…
                     let mut spans = vec![Span::raw(" ")];
                     if is_selected {
