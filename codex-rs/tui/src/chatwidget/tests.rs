@@ -1106,6 +1106,7 @@ fn slash_agents_opens_overview() {
 
 #[test]
 fn slash_upgrade_opens_guided_terminal() {
+    crate::updates::reset_force_upgrade_preview_for_tests();
     let _npm_guard = EnvGuard::set("CODEX_MANAGED_BY_NPM", "1");
     let _upgrade_guard = EnvGuard::set("SHOW_UPGRADE", "1");
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
@@ -1139,6 +1140,7 @@ fn slash_upgrade_opens_guided_terminal() {
     }
 
     assert!(saw_open_terminal, "expected guided upgrade terminal to open");
+    crate::updates::reset_force_upgrade_preview_for_tests();
 }
 
 #[test]

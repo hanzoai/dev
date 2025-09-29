@@ -1,8 +1,8 @@
 use chrono::DateTime;
 use chrono::Utc;
-use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde::Serialize;
+use std::sync::OnceLock;
 use std::fs;
 use std::io::ErrorKind;
 use std::io::Write;
@@ -19,17 +19,26 @@ use codex_core::default_client::create_client;
 use tokio::process::Command;
 use tracing::{info, warn};
 
-static FORCE_UPGRADE_PREVIEW: Lazy<bool> = Lazy::new(|| {
-    std::env::var("SHOW_UPGRADE")
-        .map(|value| {
-            let normalized = value.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-});
+static FORCE_UPGRADE_PREVIEW: OnceLock<bool> = OnceLock::new();
+
+fn force_upgrade_preview_enabled() -> bool {
+    *FORCE_UPGRADE_PREVIEW.get_or_init(|| {
+        std::env::var("SHOW_UPGRADE")
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            })
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn reset_force_upgrade_preview_for_tests() {
+    FORCE_UPGRADE_PREVIEW.take();
+}
 
 pub fn upgrade_ui_enabled() -> bool {
-    !cfg!(debug_assertions) || *FORCE_UPGRADE_PREVIEW
+    !cfg!(debug_assertions) || force_upgrade_preview_enabled()
 }
 
 pub fn auto_upgrade_runtime_enabled() -> bool {
