@@ -33,7 +33,6 @@ mod exec_command;
 pub mod exec_env;
 mod flags;
 pub mod git_info;
-pub mod internal_storage;
 pub mod landlock;
 pub mod http_client;
 pub mod mcp_connection_manager;
