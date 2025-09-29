@@ -1803,7 +1803,7 @@ impl App<'_> {
                         }
                         SlashCommand::Update => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_update_command();
+                                widget.handle_update_command(command_args.trim());
                             }
                         }
                         SlashCommand::Notifications => {

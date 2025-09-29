@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
-use crate::header_wave::HeaderWaveEffect;
+use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::auto_drive_strings;
 
 use codex_common::elapsed::format_duration;
@@ -70,6 +70,7 @@ use self::agent_install::{
     start_agent_install_session,
     start_direct_terminal_session,
     start_prompt_terminal_session,
+    start_upgrade_terminal_session,
     wrap_command,
 };
 use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand};
@@ -117,6 +118,7 @@ use crate::bottom_pane::{
     AutoCoordinatorViewModel,
     CountdownState,
 };
+use crate::exec_command::strip_bash_lc_and_escape;
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -166,6 +168,7 @@ const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
 const AUTO_COUNTDOWN_SECONDS: u8 = 10;
+const ENABLE_WARP_STRIPES: bool = false;
 
 fn status_field_prefix(label: &str) -> String {
     let padding = STATUS_LABEL_GAP
@@ -522,12 +525,14 @@ pub(crate) struct ChatWidget<'a> {
     tools_state: ToolState,
     live_builder: RowBuilder,
     header_wave: HeaderWaveEffect,
+    header_border: HeaderBorderWeaveEffect,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
     welcome_shown: bool,
     // Path to the latest browser screenshot and URL for display
     latest_browser_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
+    browser_autofix_requested: Arc<AtomicBool>,
     // Cached image protocol to avoid recreating every frame (path, area, protocol)
     cached_image_protocol:
         std::cell::RefCell<Option<(PathBuf, Rect, ratatui_image::protocol::Protocol)>>,
@@ -2766,12 +2771,22 @@ impl ChatWidget<'_> {
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
                 let effect = HeaderWaveEffect::new();
+                if ENABLE_WARP_STRIPES {
+                    effect.set_enabled(true, Instant::now());
+                } else {
+                    effect.set_enabled(false, Instant::now());
+                }
+                effect
+            },
+            header_border: {
+                let effect = HeaderBorderWeaveEffect::new();
                 effect.set_enabled(false, Instant::now());
                 effect
             },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
+            browser_autofix_requested: Arc::new(AtomicBool::new(false)),
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
@@ -3010,12 +3025,22 @@ impl ChatWidget<'_> {
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
                 let effect = HeaderWaveEffect::new();
+                if ENABLE_WARP_STRIPES {
+                    effect.set_enabled(true, Instant::now());
+                } else {
+                    effect.set_enabled(false, Instant::now());
+                }
+                effect
+            },
+            header_border: {
+                let effect = HeaderBorderWeaveEffect::new();
                 effect.set_enabled(false, Instant::now());
                 effect
             },
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
+            browser_autofix_requested: Arc::new(AtomicBool::new(false)),
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
@@ -8608,16 +8633,48 @@ impl ChatWidget<'_> {
         }
     }
 
-    pub(crate) fn handle_update_command(&mut self) {
-        if crate::updates::upgrade_ui_enabled() {
+    pub(crate) fn handle_update_command(&mut self, command_args: &str) {
+        if !crate::updates::upgrade_ui_enabled() {
+            self.app_event_tx.send_background_event(
+                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
+                    to_string(),
+            );
+            return;
+        }
+
+        let trimmed = command_args.trim();
+        if trimmed.eq_ignore_ascii_case("settings")
+            || trimmed.eq_ignore_ascii_case("ui")
+            || trimmed.eq_ignore_ascii_case("config")
+        {
             self.show_update_settings_ui();
             return;
         }
 
-        self.app_event_tx.send_background_event(
-            "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
-                to_string(),
-        );
+        match crate::updates::resolve_upgrade_resolution() {
+            crate::updates::UpgradeResolution::Command { command, display } => {
+                if command.is_empty() {
+                    self.history_push(history_cell::new_error_event(
+                        "`/upgrade` — no upgrade command available for this install.".to_string(),
+                    ));
+                    self.request_redraw();
+                    return;
+                }
+
+                let latest = self.latest_upgrade_version.clone();
+                self.push_background_tail(
+                    "Opening a guided upgrade terminal to finish installing updates.".to_string(),
+                );
+                if let Some(launch) = self.launch_update_command(command, display, latest) {
+                    self.app_event_tx.send(AppEvent::OpenTerminal(launch));
+                }
+            }
+            crate::updates::UpgradeResolution::Manual { instructions } => {
+                self.show_update_settings_ui();
+                self.history_push(history_cell::new_background_event(instructions));
+                self.request_redraw();
+            }
+        }
     }
 
     pub(crate) fn handle_notifications_command(&mut self, args: String) {
@@ -9564,6 +9621,44 @@ impl ChatWidget<'_> {
         );
     }
 
+    fn is_cli_running(&self) -> bool {
+        if !self.exec.running_commands.is_empty() {
+            return true;
+        }
+        if !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty()
+        {
+            return true;
+        }
+        if self.stream.is_write_cycle_active() {
+            return true;
+        }
+        if !self.active_task_ids.is_empty() {
+            return true;
+        }
+        false
+    }
+
+    fn update_header_border_activation(&self) {
+        let now = Instant::now();
+        let should_enable_header = self.auto_state.active && self.is_cli_running();
+        let currently_enabled = self.header_border.is_enabled();
+        if should_enable_header && !currently_enabled {
+            self.header_border.set_enabled(true, now);
+        } else if !should_enable_header && currently_enabled {
+            self.header_border.set_enabled(false, now);
+        }
+    }
+
+    fn refresh_auto_drive_visuals(&mut self) {
+        self.update_header_border_activation();
+        if self.auto_state.active {
+            self.auto_rebuild_live_ring();
+        }
+    }
+
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
@@ -9592,10 +9687,10 @@ impl ChatWidget<'_> {
             self.bottom_pane.set_task_running(true);
             self.bottom_pane
                 .update_status_text("Auto Drive Goal".to_string());
-            self.header_wave.set_enabled(false, Instant::now());
             self.push_background_tail(
                 "Please enter the goal you would like to work autonomously towards.".to_string(),
             );
+            self.update_header_border_activation();
             self.request_redraw();
             return;
         }
@@ -9629,7 +9724,7 @@ impl ChatWidget<'_> {
                 self.auto_state.last_broadcast_thought = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
-                self.header_wave.set_enabled(true, Instant::now());
+                self.update_header_border_activation();
                 self.auto_rebuild_live_ring();
                 self.push_background_tail(format!("Auto Drive started: {goal_text}"));
                 self.request_redraw();
@@ -9663,6 +9758,7 @@ impl ChatWidget<'_> {
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
+            self.update_header_border_activation();
             self.auto_rebuild_live_ring();
             self.request_redraw();
         }
@@ -9684,6 +9780,7 @@ impl ChatWidget<'_> {
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = false;
+        self.update_header_border_activation();
 
         match status {
             AutoCoordinatorStatus::Continue => {
@@ -9876,6 +9973,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_task_running(true);
         self.bottom_pane
             .update_status_text("Auto Drive".to_string());
+        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -9906,7 +10004,10 @@ impl ChatWidget<'_> {
             self.bottom_pane.update_status_text(String::new());
         }
         self.bottom_pane.ensure_input_focus();
-        self.header_wave.set_enabled(false, Instant::now());
+        if ENABLE_WARP_STRIPES {
+            self.header_wave.set_enabled(false, Instant::now());
+        }
+        self.update_header_border_activation();
         self.request_redraw();
     }
 
@@ -9925,6 +10026,7 @@ impl ChatWidget<'_> {
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
         self.auto_state.last_decision_display = None;
+        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_send_conversation();
@@ -9982,6 +10084,7 @@ impl ChatWidget<'_> {
             }
             status_lines.push(telemetry_line);
         }
+        let cli_running = self.is_cli_running();
 
         let prompt = self
             .auto_state
@@ -10036,6 +10139,7 @@ impl ChatWidget<'_> {
             button,
             manual_hint,
             ctrl_switch_hint,
+            cli_running,
         };
 
         self.bottom_pane
@@ -10220,19 +10324,52 @@ impl ChatWidget<'_> {
             return None;
         }
 
-        let id = self.terminal.alloc_id();
-        if let Some(version) = latest_version {
-            self.pending_upgrade_notice = Some((id, version));
+        let command_text = if display.trim().is_empty() {
+            strip_bash_lc_and_escape(&command)
+        } else {
+            display.clone()
+        };
+
+        if command_text.trim().is_empty() {
+            self.history_push(history_cell::new_error_event(
+                "`/update` — unable to resolve upgrade command text.".to_string(),
+            ));
+            self.request_redraw();
+            return None;
         }
-        Some(TerminalLaunch {
+
+        let id = self.terminal.alloc_id();
+        if let Some(version) = &latest_version {
+            self.pending_upgrade_notice = Some((id, version.clone()));
+        }
+
+        let (controller_tx, controller_rx) = mpsc::channel();
+        let controller = TerminalRunController { tx: controller_tx };
+        let display_label = Self::truncate_with_ellipsis(&format!("Guided: {command_text}"), 128);
+
+        let launch = TerminalLaunch {
             id,
             title: "Upgrade Code".to_string(),
-            command,
-            command_display: display,
-            controller: None,
+            command: Vec::new(),
+            command_display: display_label,
+            controller: Some(controller.clone()),
             auto_close_on_success: false,
             start_running: true,
-        })
+        };
+
+        let cwd = self.config.cwd.to_string_lossy().to_string();
+        start_upgrade_terminal_session(
+            self.app_event_tx.clone(),
+            id,
+            command_text,
+            latest_version,
+            Some(cwd),
+            controller,
+            controller_rx,
+            self.config.debug,
+        );
+
+        Some(launch)
     }
 
     pub(crate) fn terminal_open(&mut self, launch: &TerminalLaunch) {
@@ -11811,10 +11948,17 @@ impl ChatWidget<'_> {
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             match crate::updates::auto_upgrade_if_enabled(&cfg).await {
-                Ok(Some(version)) => {
-                    tx.send(AppEvent::AutoUpgradeCompleted { version });
+                Ok(outcome) => {
+                    if let Some(version) = outcome.installed_version {
+                        tx.send(AppEvent::AutoUpgradeCompleted { version });
+                    }
+                    if let Some(message) = outcome.user_notice {
+                        tx.send(AppEvent::InsertBackgroundEvent {
+                            message,
+                            placement: BackgroundPlacement::Tail,
+                        });
+                    }
                 }
-                Ok(None) => {}
                 Err(err) => {
                     tracing::warn!("auto-upgrade: background task failed: {err:?}");
                 }
@@ -14000,6 +14144,56 @@ impl ChatWidget<'_> {
         ));
     }
 
+    fn schedule_browser_autofix(
+        app_event_tx: AppEventSender,
+        autofix_state: Arc<AtomicBool>,
+        failure_context: &str,
+        raw_error: String,
+    ) {
+        if autofix_state
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            tracing::info!(
+                "[/browser] auto-handoff already requested; skipping duplicate dispatch"
+            );
+            return;
+        }
+
+        let sanitized = raw_error.replace('\n', " ").replace('\r', " ");
+        let trimmed = sanitized.trim();
+        let truncated = if trimmed.len() > 220 {
+            let mut shortened = trimmed.chars().take(220).collect::<String>();
+            shortened.push('…');
+            shortened
+        } else {
+            trimmed.to_string()
+        };
+
+        tracing::info!(
+            "[/browser] scheduling Code autofix for context='{}', error='{}'",
+            failure_context,
+            truncated
+        );
+
+        let visible_message = format!(
+            "🤖 Handing /browser failure ({}) to Code. Error: {}",
+            failure_context,
+            truncated
+        );
+        app_event_tx.send_background_event(visible_message);
+
+        let command_text = format!(
+            "/code The /browser command failed to {context}. Recent error: {error}. Please diagnose and fix the environment (for example, install or configure Chrome) so /browser works in this workspace.",
+            context = failure_context,
+            error = truncated
+        );
+        app_event_tx.send(AppEvent::DispatchCommand(
+            SlashCommand::Code,
+            command_text,
+        ));
+    }
+
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
         // Parse the browser subcommand
         let trimmed = command_text.trim();
@@ -14015,6 +14209,7 @@ impl ChatWidget<'_> {
 
             // Toggle asynchronously: if internal browser is active, disable it; otherwise enable and open about:blank
             let app_event_tx = self.app_event_tx.clone();
+            let browser_autofix_flag = self.browser_autofix_requested.clone();
             tokio::spawn(async move {
                 let browser_manager = ChatWidget::get_browser_manager().await;
                 // Determine if internal browser is currently active
@@ -14047,13 +14242,25 @@ impl ChatWidget<'_> {
                     }
 
                     if let Err(e) = browser_manager.start().await {
-                        tracing::error!("[/browser] failed to start internal browser: {}", e);
+                        let error_text = e.to_string();
+                        tracing::error!(
+                            "[/browser] failed to start internal browser: {}",
+                            error_text
+                        );
                         app_event_tx.send_background_event(format!(
                             "❌ Failed to start internal browser: {}",
-                            e
+                            error_text
                         ));
+                        ChatWidget::schedule_browser_autofix(
+                            app_event_tx.clone(),
+                            browser_autofix_flag.clone(),
+                            "start the internal browser",
+                            error_text,
+                        );
                         return;
                     }
+
+                    browser_autofix_flag.store(false, Ordering::SeqCst);
 
                     // Set as global manager so core/session share the same instance
                     codex_browser::global::set_global_browser_manager(browser_manager.clone())
@@ -14096,6 +14303,7 @@ impl ChatWidget<'_> {
                 // Navigate to URL and wait for it to load
                 let latest_screenshot = self.latest_browser_screenshot.clone();
                 let app_event_tx = self.app_event_tx.clone();
+                let browser_autofix_flag = self.browser_autofix_requested.clone();
                 let url_for_goto = full_url.clone();
 
                 // Add status message
@@ -14124,9 +14332,25 @@ impl ChatWidget<'_> {
 
                     // IMPORTANT: Start the browser manager first before navigating
                     if let Err(e) = browser_manager.start().await {
-                        tracing::error!("Failed to start TUI browser manager: {}", e);
+                        let error_text = e.to_string();
+                        tracing::error!(
+                            "Failed to start TUI browser manager: {}",
+                            error_text
+                        );
+                        app_event_tx.send_background_event(format!(
+                            "❌ Failed to start internal browser: {}",
+                            error_text
+                        ));
+                        ChatWidget::schedule_browser_autofix(
+                            app_event_tx.clone(),
+                            browser_autofix_flag.clone(),
+                            "launch the internal browser",
+                            error_text,
+                        );
                         return;
                     }
+
+                    browser_autofix_flag.store(false, Ordering::SeqCst);
 
                     // Set up navigation callback to auto-capture screenshots
                     {
@@ -15856,20 +16080,33 @@ impl ChatWidget<'_> {
         let status_line = Line::from(status_spans);
 
         let now = Instant::now();
-        if self.header_wave.schedule_if_needed(now) {
+        self.update_header_border_activation();
+        let mut frame_needed = false;
+        if ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now) {
+            frame_needed = true;
+        }
+        if self.header_border.schedule_if_needed(now) {
+            frame_needed = true;
+        }
+        if frame_needed {
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
+                .send(AppEvent::ScheduleFrameIn(HeaderBorderWeaveEffect::FRAME_INTERVAL));
         }
 
         // Render the block first
         status_block.render(padded_area, buf);
         let wave_enabled = self.header_wave.is_enabled();
+        let border_enabled = self.header_border.is_enabled();
         if wave_enabled {
             self.header_wave.render(padded_area, buf, now);
         }
+        if border_enabled {
+            self.header_border.render(padded_area, buf, now);
+        }
 
         // Then render the text inside with padding, centered
-        let status_style = if wave_enabled {
+        let effect_enabled = wave_enabled || border_enabled;
+        let status_style = if effect_enabled {
             Style::default().fg(crate::colors::text())
         } else {
             Style::default()
