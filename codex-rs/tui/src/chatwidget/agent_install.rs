@@ -36,6 +36,10 @@ enum GuidedTerminalMode {
     },
     Prompt { user_prompt: String },
     DirectCommand { command: String },
+    Upgrade {
+        initial_command: String,
+        latest_version: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +116,45 @@ pub(super) fn start_direct_terminal_session(
     );
 }
 
+pub(super) fn start_upgrade_terminal_session(
+    app_event_tx: AppEventSender,
+    terminal_id: u64,
+    initial_command: String,
+    latest_version: Option<String>,
+    cwd: Option<String>,
+    controller: TerminalRunController,
+    controller_rx: Receiver<TerminalRunEvent>,
+    debug_enabled: bool,
+) {
+    #[cfg(test)]
+    {
+        let _ = (
+            app_event_tx,
+            terminal_id,
+            initial_command,
+            latest_version,
+            cwd,
+            controller,
+            controller_rx,
+            debug_enabled,
+        );
+        return;
+    }
+
+    start_guided_terminal_session(
+        app_event_tx,
+        terminal_id,
+        GuidedTerminalMode::Upgrade {
+            initial_command,
+            latest_version,
+        },
+        cwd,
+        controller,
+        controller_rx,
+        debug_enabled,
+    );
+}
+
 fn start_guided_terminal_session(
     app_event_tx: AppEventSender,
     terminal_id: u64,
@@ -130,9 +173,9 @@ fn start_guided_terminal_session(
             Err(err) => {
                 let helper = match &mode {
                     GuidedTerminalMode::AgentInstall { .. } => "Install helper",
-                    GuidedTerminalMode::Prompt { .. } | GuidedTerminalMode::DirectCommand { .. } => {
-                        "Terminal helper"
-                    }
+                    GuidedTerminalMode::Prompt { .. }
+                    | GuidedTerminalMode::DirectCommand { .. } => "Terminal helper",
+                    GuidedTerminalMode::Upgrade { .. } => "Upgrade helper",
                 };
                 let msg = format!("Failed to start {helper} runtime: {err}");
                 app_event_tx.send(AppEvent::TerminalChunk {
@@ -161,9 +204,9 @@ fn start_guided_terminal_session(
         ) {
             let helper = match &mode {
                 GuidedTerminalMode::AgentInstall { .. } => "Install helper",
-                GuidedTerminalMode::Prompt { .. } | GuidedTerminalMode::DirectCommand { .. } => {
-                    "Terminal helper"
-                }
+                GuidedTerminalMode::Prompt { .. }
+                | GuidedTerminalMode::DirectCommand { .. } => "Terminal helper",
+                GuidedTerminalMode::Upgrade { .. } => "Upgrade helper",
             };
             let msg = if debug_enabled {
                 format!("{helper} error: {err:#}")
@@ -262,6 +305,25 @@ fn run_guided_loop(
             ),
             "direct_terminal_flow",
         ),
+        GuidedTerminalMode::Upgrade {
+            initial_command,
+            latest_version,
+        } => {
+            let latest = latest_version
+                .as_ref()
+                .map(String::as_str)
+                .unwrap_or("unknown");
+            (
+                "Upgrade helper",
+                format!(
+                    "You are helping the user upgrade Code to the latest available version. The preferred upgrade command is `{initial_command}`. Prioritize resolving permission prompts (including sudo password requests) and confirm the upgrade succeeds."
+                ),
+                format!(
+                    "Upgrade target: Code (latest version: {latest}).\nPrimary command: {initial_command}.\nPlatform: {platform}.\nSandbox: {sandbox}.\nWorking directory: {cwd_text}.\nRun the command, diagnose any failures (especially permissions), and guide the user until the upgrade completes."
+                ),
+                "upgrade_terminal_flow",
+            )
+        }
     };
 
     if debug_enabled {
@@ -296,6 +358,20 @@ fn run_guided_loop(
                     "[{}] Starting direct terminal session: command={} platform={} sandbox={} cwd={}",
                     helper_label,
                     command,
+                    platform,
+                    sandbox,
+                    cwd_text,
+                );
+            }
+            GuidedTerminalMode::Upgrade {
+                initial_command,
+                latest_version,
+            } => {
+                debug!(
+                    "[{}] Starting upgrade session: command={} latest_version={:?} platform={} sandbox={} cwd={}",
+                    helper_label,
+                    initial_command,
+                    latest_version,
                     platform,
                     sandbox,
                     cwd_text,
@@ -343,7 +419,7 @@ fn run_guided_loop(
     conversation.push(make_message("user", initial_user));
 
     let mut steps = match mode {
-        GuidedTerminalMode::DirectCommand { .. } => 1,
+        GuidedTerminalMode::DirectCommand { .. } | GuidedTerminalMode::Upgrade { .. } => 1,
         _ => 0,
     };
 
@@ -380,6 +456,50 @@ fn run_guided_loop(
         let truncated = tail_chars(&output, MAX_OUTPUT_CHARS);
         let summary = format!(
             "Command: {command}\nExit code: {}\nOutput (last {} chars):\n{}",
+            exit_code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            truncated.chars().count(),
+            truncated
+        );
+        conversation.push(make_message("user", summary));
+        app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+            id: terminal_id,
+            message: "Analyzing output…".to_string(),
+        });
+    } else if let GuidedTerminalMode::Upgrade { initial_command, .. } = mode {
+        let wrapped = wrap_command(initial_command);
+        if wrapped.is_empty() {
+            app_event_tx.send(AppEvent::TerminalChunk {
+                id: terminal_id,
+                chunk: b"Unable to build upgrade command for execution.\n".to_vec(),
+                _is_stderr: true,
+            });
+            app_event_tx.send(AppEvent::TerminalUpdateMessage {
+                id: terminal_id,
+                message: "Upgrade command could not be constructed.".to_string(),
+            });
+            return Ok(());
+        }
+        app_event_tx.send(AppEvent::TerminalRunCommand {
+            id: terminal_id,
+            command: wrapped,
+            command_display: initial_command.clone(),
+            controller: Some(controller.clone()),
+        });
+
+        let Some((output, exit_code)) = collect_command_output(controller_rx)
+            .context("collecting upgrade command output")?
+        else {
+            if debug_enabled {
+                debug!("[Upgrade helper] Initial command cancelled by user");
+            }
+            return Ok(());
+        };
+
+        let truncated = tail_chars(&output, MAX_OUTPUT_CHARS);
+        let summary = format!(
+            "Command: {initial_command}\nExit code: {}\nOutput (last {} chars):\n{}",
             exit_code
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
@@ -452,7 +572,9 @@ fn run_guided_loop(
                 let require_confirmation = match mode {
                     GuidedTerminalMode::AgentInstall { .. } => steps > 1,
                     GuidedTerminalMode::Prompt { .. } => steps > 1,
-                    GuidedTerminalMode::DirectCommand { .. } => true,
+                    GuidedTerminalMode::DirectCommand { .. } | GuidedTerminalMode::Upgrade { .. } => {
+                        true
+                    }
                 };
                 let final_command = if require_confirmation {
                     let (gate_tx, gate_rx) = channel();
