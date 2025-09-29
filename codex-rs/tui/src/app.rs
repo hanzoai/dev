@@ -1874,7 +1874,7 @@ impl App<'_> {
                         SlashCommand::Plan | SlashCommand::Solve | SlashCommand::Code => {
                             // These should have been expanded already, but handle them anyway
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                let expanded = command.expand_prompt(&command_args);
+                                let expanded = command.expand_prompt(command_args.trim());
                                 if let Some(prompt) = expanded {
                                     widget.submit_prompt_with_display(command_text.clone(), prompt);
                                 }
