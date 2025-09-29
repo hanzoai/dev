@@ -1008,25 +1008,25 @@ fn auto_thinking_keeps_previous_display_until_decision() {
     chat.auto_state.active = true;
     chat.auto_state.waiting_for_response = true;
     chat.auto_state.coordinator_waiting = true;
-    chat.auto_state.current_display_line = Some("Prev thought".to_string());
-    chat.auto_state.current_thoughts = Some("Prev thought".to_string());
+    chat.auto_state.current_display_line = Some("Prev summary".to_string());
+    chat.auto_state.current_summary = Some("Prev summary".to_string());
 
     chat.auto_handle_thinking("**Next:** run lint".to_string(), Some(3));
     assert_eq!(chat.auto_state.current_summary_index, Some(3));
     assert_eq!(
         chat.auto_state.current_display_line.as_deref(),
-        Some("Prev thought")
+        Some("Prev summary")
     );
 
     chat.auto_handle_thinking("extra detail".to_string(), None);
     assert_eq!(
         chat.auto_state.current_display_line.as_deref(),
-        Some("Prev thought")
+        Some("Prev summary")
     );
 }
 
 #[test]
-fn auto_decision_persists_thought_through_cli_cycle() {
+fn auto_decision_persists_summary_through_cli_cycle() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
     chat.auto_state.active = true;
     chat.auto_state.waiting_for_response = true;
@@ -1041,11 +1041,19 @@ fn auto_decision_persists_thought_through_cli_cycle() {
     assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
     assert!(!chat.auto_state.coordinator_waiting, "spinner should stop");
     assert!(!chat.auto_state.waiting_for_response, "coordinator finished");
+    assert_eq!(
+        chat.auto_state.last_decision_summary.as_deref(),
+        Some("**Plan:** run tests")
+    );
 
     chat.auto_submit_prompt();
     assert!(chat.auto_state.waiting_for_response, "waiting on CLI");
     assert!(!chat.auto_state.coordinator_waiting, "spinner stays off during CLI");
     assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.last_decision_summary.as_deref(),
+        Some("**Plan:** run tests")
+    );
 
     chat.auto_state.placeholder_phrase = None;
     let (tx, _rx_handle) = channel();
