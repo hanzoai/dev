@@ -1,6 +1,7 @@
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use codex_core::config::Config;
@@ -9,16 +10,24 @@ use codex_core::debug_logger::DebugLogger;
 use codex_core::model_family::{derive_default_model_family, find_family_for_model};
 use codex_core::protocol::SandboxPolicy;
 use codex_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
+use codex_core::error::CodexErr;
 use codex_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 use uuid::Uuid;
 
 use crate::app_event::{AppEvent, AutoCoordinatorStatus};
 use crate::app_event_sender::AppEventSender;
-
+use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
+#[cfg(feature = "dev-faults")]
+use crate::chatwidget::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
+use codex_common::elapsed::format_duration;
+use chrono::{DateTime, Local, Utc};
+use rand::Rng;
 use super::auto_observer::{
     build_observer_conversation,
     start_auto_observer,
@@ -27,12 +36,34 @@ use super::auto_observer::{
     ObserverTrigger,
 };
 
+const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
+const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
+const MAX_RETRY_ELAPSED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+#[derive(Debug, thiserror::Error)]
+#[error("auto coordinator cancelled")]
+struct AutoCoordinatorCancelled;
+
 pub(super) const MODEL_SLUG: &str = "gpt-5";
 const SCHEMA_NAME: &str = "auto_coordinator_flow";
 
 #[derive(Debug, Clone)]
 pub(super) struct AutoCoordinatorHandle {
     pub tx: Sender<AutoCoordinatorCommand>,
+    cancel_token: CancellationToken,
+}
+
+impl AutoCoordinatorHandle {
+    pub fn send(
+        &self,
+        command: AutoCoordinatorCommand,
+    ) -> std::result::Result<(), mpsc::SendError<AutoCoordinatorCommand>> {
+        self.tx.send(command)
+    }
+
+    pub fn cancel(&self) {
+        self.cancel_token.cancel();
+    }
 }
 
 #[derive(Debug)]
@@ -61,6 +92,8 @@ pub(super) fn start_auto_coordinator(
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let thread_tx = cmd_tx.clone();
     let loop_tx = cmd_tx.clone();
+    let cancel_token = CancellationToken::new();
+    let thread_cancel = cancel_token.clone();
 
     std::thread::spawn(move || {
         if let Err(err) = run_auto_loop(
@@ -72,12 +105,16 @@ pub(super) fn start_auto_coordinator(
             loop_tx,
             debug_enabled,
             observer_cadence,
+            thread_cancel,
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
         }
     });
 
-    Ok(AutoCoordinatorHandle { tx: thread_tx })
+    Ok(AutoCoordinatorHandle {
+        tx: thread_tx,
+        cancel_token,
+    })
 }
 
 fn run_auto_loop(
@@ -89,6 +126,7 @@ fn run_auto_loop(
     cmd_tx: Sender<AutoCoordinatorCommand>,
     debug_enabled: bool,
     observer_cadence: u32,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     let preferred_auth = if config.using_chatgpt_auth {
         codex_protocol::mcp_protocol::AuthMode::ChatGPT
@@ -163,8 +201,14 @@ fn run_auto_loop(
         }
 
         if let Some(conv) = pending_conversation.take() {
+            if cancel_token.is_cancelled() {
+                stopped = true;
+                continue;
+            }
+
             let conv_for_observer = conv.clone();
-            let developer_intro = compose_developer_intro(&base_developer_intro, &observer_guidance);
+            let developer_intro =
+                compose_developer_intro(&base_developer_intro, &observer_guidance);
             match request_coordinator_decision(
                 &runtime,
                 &client,
@@ -173,6 +217,7 @@ fn run_auto_loop(
                 &schema,
                 conv,
                 &app_event_tx,
+                &cancel_token,
             ) {
                 Ok((status, thoughts, prompt_opt)) => {
                     let prompt_clone = prompt_opt.clone();
@@ -208,6 +253,10 @@ fn run_auto_loop(
                     }
                 }
                 Err(err) => {
+                    if err.downcast_ref::<AutoCoordinatorCancelled>().is_some() {
+                        stopped = true;
+                        continue;
+                    }
                     let event = AppEvent::AutoCoordinatorDecision {
                         status: AutoCoordinatorStatus::Failed,
                         thoughts: format!("Coordinator error: {err}"),
@@ -353,28 +402,20 @@ fn request_coordinator_decision(
     developer_intro: &str,
     primary_goal: &str,
     schema: &Value,
-    mut conversation: Vec<ResponseItem>,
+    conversation: Vec<ResponseItem>,
     app_event_tx: &AppEventSender,
+    cancel_token: &CancellationToken,
 ) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
-    let mut prompt = Prompt::default();
-    prompt.store = true;
-    prompt.input.push(make_message("developer", developer_intro.to_string()));
-    prompt
-        .input
-        .push(make_message("developer", primary_goal.to_string()));
-    prompt.input.append(&mut conversation);
-    prompt.text_format = Some(TextFormat {
-        r#type: "json_schema".to_string(),
-        name: Some(SCHEMA_NAME.to_string()),
-        strict: Some(true),
-        schema: Some(schema.clone()),
-    });
-    prompt.model_override = Some(MODEL_SLUG.to_string());
-    let family = find_family_for_model(MODEL_SLUG)
-        .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
-    prompt.model_family_override = Some(family);
-
-    let raw = request_decision(runtime, client, &prompt, app_event_tx)?;
+    let raw = request_decision(
+        runtime,
+        client,
+        developer_intro,
+        primary_goal,
+        schema,
+        &conversation,
+        app_event_tx,
+        cancel_token,
+    )?;
     let (decision, value) = parse_decision(&raw)?;
     debug!("[Auto coordinator] model decision: {:?}", value);
 
@@ -407,50 +448,464 @@ fn request_coordinator_decision(
 fn request_decision(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
-    prompt: &Prompt,
+    developer_intro: &str,
+    primary_goal: &str,
+    schema: &Value,
+    conversation: &[ResponseItem],
     app_event_tx: &AppEventSender,
+    cancel_token: &CancellationToken,
 ) -> Result<String> {
+    let developer_intro = developer_intro.to_string();
+    let primary_goal = primary_goal.to_string();
+    let schema = schema.clone();
+    let conversation: Vec<ResponseItem> = conversation.to_vec();
     let tx = app_event_tx.clone();
-    runtime.block_on(async move {
-        let mut stream = client.stream(prompt).await?;
-        let mut out = String::new();
-        while let Some(ev) = stream.next().await {
-            match ev {
-                Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
-                Ok(ResponseEvent::OutputItemDone { item, .. }) => {
-                    if let ResponseItem::Message { content, .. } = item {
-                        for c in content {
-                            if let ContentItem::OutputText { text } = c {
-                                out.push_str(&text);
+    let cancel = cancel_token.clone();
+    let classify = |error: &anyhow::Error| classify_model_error(error);
+    let options = RetryOptions::with_defaults(MAX_RETRY_ELAPSED);
+
+    let result = runtime.block_on(async move {
+        retry_with_backoff(
+            || {
+                let prompt = build_prompt(
+                    &developer_intro,
+                    &primary_goal,
+                    &schema,
+                    &conversation,
+                );
+                let tx_inner = tx.clone();
+                async move {
+                    #[cfg(feature = "dev-faults")]
+                    if let Some(fault) = next_fault(FaultScope::AutoDrive) {
+                        let err = fault_to_error(fault);
+                        return Err(err);
+                    }
+                    let mut stream = client.stream(&prompt).await?;
+                    let mut out = String::new();
+                    while let Some(ev) = stream.next().await {
+                        match ev {
+                            Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
+                            Ok(ResponseEvent::OutputItemDone { item, .. }) => {
+                                if let ResponseItem::Message { content, .. } = item {
+                                    for c in content {
+                                        if let ContentItem::OutputText { text } = c {
+                                            out.push_str(&text);
+                                        }
+                                    }
+                                }
                             }
+                            Ok(ResponseEvent::ReasoningSummaryDelta {
+                                delta,
+                                summary_index,
+                                ..
+                            }) => {
+                                let message = strip_role_prefix(&delta).to_string();
+                                tx_inner.send(AppEvent::AutoCoordinatorThinking {
+                                    delta: message,
+                                    summary_index,
+                                });
+                            }
+                            Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                                let message = strip_role_prefix(&delta).to_string();
+                                tx_inner.send(AppEvent::AutoCoordinatorThinking {
+                                    delta: message,
+                                    summary_index: None,
+                                });
+                            }
+                            Ok(ResponseEvent::Completed { .. }) => break,
+                            Err(err) => return Err(err.into()),
+                            _ => {}
                         }
                     }
+                    Ok(out)
                 }
-                Ok(ResponseEvent::ReasoningSummaryDelta {
-                    delta,
-                    summary_index,
-                    ..
-                }) => {
-                    let message = strip_role_prefix(&delta).to_string();
-                    tx.send(AppEvent::AutoCoordinatorThinking {
-                        delta: message,
-                        summary_index,
-                    });
+            },
+            classify,
+            options,
+            &cancel,
+            |status| {
+                let human_delay = status
+                    .sleep
+                    .map(format_duration)
+                    .unwrap_or_else(|| "0s".to_string());
+                let elapsed = format_duration(status.elapsed);
+                let prefix = if status.is_rate_limit {
+                    "Rate limit"
+                } else {
+                    "Transient error"
+                };
+                let attempt = status.attempt;
+                let resume_str = status.resume_at.and_then(|resume| {
+                    let now = Instant::now();
+                    if resume <= now {
+                        Some("now".to_string())
+                    } else {
+                        let remaining = resume.duration_since(now);
+                        SystemTime::now()
+                            .checked_add(remaining)
+                            .map(|time| {
+                                let local: DateTime<Local> = time.into();
+                                local.format("%Y-%m-%d %H:%M:%S").to_string()
+                            })
+                    }
+                });
+                let message = format!(
+                    "{prefix} (attempt {attempt}): {}; retrying in {human_delay} (elapsed {elapsed}){}",
+                    status.reason,
+                    resume_str
+                        .map(|s| format!("; next attempt at {s}"))
+                        .unwrap_or_default()
+                );
+                let _ = tx.send(AppEvent::AutoCoordinatorThinking {
+                    delta: message,
+                    summary_index: None,
+                });
+            },
+        )
+        .await
+    });
+
+    match result {
+        Ok(output) => Ok(output),
+        Err(RetryError::Aborted) => Err(anyhow!(AutoCoordinatorCancelled)),
+        Err(RetryError::Fatal(err)) => Err(err),
+        Err(RetryError::Timeout { elapsed, last_error }) => Err(last_error.context(format!(
+            "auto coordinator retry window exceeded after {}",
+            format_duration(elapsed)
+        ))),
+    }
+}
+
+fn build_prompt(
+    developer_intro: &str,
+    primary_goal: &str,
+    schema: &Value,
+    conversation: &[ResponseItem],
+) -> Prompt {
+    let mut prompt = Prompt::default();
+    prompt.store = true;
+    prompt
+        .input
+        .push(make_message("developer", developer_intro.to_string()));
+    prompt
+        .input
+        .push(make_message("developer", primary_goal.to_string()));
+    prompt.input.extend(conversation.iter().cloned());
+    prompt.text_format = Some(TextFormat {
+        r#type: "json_schema".to_string(),
+        name: Some(SCHEMA_NAME.to_string()),
+        strict: Some(true),
+        schema: Some(schema.clone()),
+    });
+    prompt.model_override = Some(MODEL_SLUG.to_string());
+    let family = find_family_for_model(MODEL_SLUG)
+        .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
+    prompt.model_family_override = Some(family);
+    prompt
+}
+
+fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
+    if let Some(codex_err) = find_in_chain::<CodexErr>(error) {
+        match codex_err {
+            CodexErr::Stream(message, _) => {
+                return RetryDecision::RetryAfterBackoff {
+                    reason: format!("model stream error: {message}"),
+                };
+            }
+            CodexErr::Timeout => {
+                return RetryDecision::RetryAfterBackoff {
+                    reason: "model request timed out".to_string(),
+                };
+            }
+            CodexErr::UnexpectedStatus(status, body) => {
+                if *status == StatusCode::REQUEST_TIMEOUT || status.as_u16() == 408 {
+                    return RetryDecision::RetryAfterBackoff {
+                        reason: format!("provider returned {status}"),
+                    };
                 }
-                Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
-                    let message = strip_role_prefix(&delta).to_string();
-                    tx.send(AppEvent::AutoCoordinatorThinking {
-                        delta: message,
-                        summary_index: None,
-                    });
+                if status.as_u16() == 499 {
+                    return RetryDecision::RetryAfterBackoff {
+                        reason: "client closed request (499)".to_string(),
+                    };
                 }
-                Ok(ResponseEvent::Completed { .. }) => break,
-                Err(err) => return Err(anyhow!("model stream error: {err}")),
-                _ => {}
+                if *status == StatusCode::TOO_MANY_REQUESTS {
+                    if let Some(wait_until) = parse_rate_limit_hint(body) {
+                        return RetryDecision::RateLimited {
+                            wait_until,
+                            reason: "rate limited; waiting for reset".to_string(),
+                        };
+                    }
+                    return RetryDecision::RetryAfterBackoff {
+                        reason: "rate limited (429)".to_string(),
+                    };
+                }
+                if status.is_client_error() {
+                    return RetryDecision::Fatal(anyhow!(error.to_string()));
+                }
+                if status.is_server_error() {
+                    return RetryDecision::RetryAfterBackoff {
+                        reason: format!("server error {status}"),
+                    };
+                }
+            }
+            CodexErr::UsageLimitReached(limit) => {
+                if let Some(seconds) = limit.resets_in_seconds {
+                    let wait_until = compute_rate_limit_wait(Duration::from_secs(seconds));
+                    return RetryDecision::RateLimited {
+                        wait_until,
+                        reason: "usage limit reached".to_string(),
+                    };
+                }
+                return RetryDecision::RetryAfterBackoff {
+                    reason: "usage limit reached".to_string(),
+                };
+            }
+            CodexErr::UsageNotIncluded => {
+                return RetryDecision::Fatal(anyhow!(error.to_string()));
+            }
+            CodexErr::ServerError(_) => {
+                return RetryDecision::RetryAfterBackoff {
+                    reason: error.to_string(),
+                };
+            }
+            CodexErr::RetryLimit(status) => {
+                return RetryDecision::Fatal(anyhow!("retry limit exceeded (status {status})"));
+            }
+            CodexErr::Reqwest(req_err) => {
+                return classify_reqwest_error(req_err);
+            }
+            CodexErr::Io(io_err) => {
+                if io_err.kind() == std::io::ErrorKind::TimedOut {
+                    return RetryDecision::RetryAfterBackoff {
+                        reason: "network timeout".to_string(),
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(req_err) = find_in_chain::<reqwest::Error>(error) {
+        return classify_reqwest_error(req_err);
+    }
+
+    if let Some(io_err) = find_in_chain::<std::io::Error>(error) {
+        if io_err.kind() == std::io::ErrorKind::TimedOut {
+            return RetryDecision::RetryAfterBackoff {
+                reason: "network timeout".to_string(),
+            };
+        }
+    }
+
+    RetryDecision::Fatal(anyhow!(error.to_string()))
+}
+
+fn classify_reqwest_error(err: &reqwest::Error) -> RetryDecision {
+    if err.is_timeout() || err.is_connect() || err.is_request() && err.status().is_none() {
+        return RetryDecision::RetryAfterBackoff {
+            reason: format!("network error: {err}"),
+        };
+    }
+
+    if let Some(status) = err.status() {
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            return RetryDecision::RetryAfterBackoff {
+                reason: "rate limited (429)".to_string(),
+            };
+        }
+        if status == StatusCode::REQUEST_TIMEOUT || status.as_u16() == 408 {
+            return RetryDecision::RetryAfterBackoff {
+                reason: format!("provider returned {status}"),
+            };
+        }
+        if status.as_u16() == 499 {
+            return RetryDecision::RetryAfterBackoff {
+                reason: "client closed request (499)".to_string(),
+            };
+        }
+        if status.is_server_error() {
+            return RetryDecision::RetryAfterBackoff {
+                reason: format!("server error {status}"),
+            };
+        }
+        if status.is_client_error() {
+            return RetryDecision::Fatal(anyhow!(err.to_string()));
+        }
+    }
+
+    RetryDecision::Fatal(anyhow!(err.to_string()))
+}
+
+fn parse_rate_limit_hint(body: &str) -> Option<Instant> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let error_obj = value.get("error").unwrap_or(&value);
+
+    if let Some(seconds) = extract_seconds(error_obj) {
+        return Some(compute_rate_limit_wait(seconds));
+    }
+
+    if let Some(reset_at) = extract_reset_at(error_obj) {
+        return Some(reset_at);
+    }
+
+    None
+}
+
+fn extract_seconds(value: &serde_json::Value) -> Option<Duration> {
+    let fields = [
+        "reset_seconds",
+        "reset_in_seconds",
+        "resets_in_seconds",
+        "x-ratelimit-reset",
+        "x-ratelimit-reset-requests",
+    ];
+    for key in fields {
+        if let Some(seconds) = value.get(key) {
+            if let Some(num) = seconds.as_f64() {
+                if num.is_sign_negative() {
+                    continue;
+                }
+                return Some(Duration::from_secs_f64(num));
+            }
+            if let Some(text) = seconds.as_str() {
+                if let Ok(num) = text.parse::<f64>() {
+                    if num.is_sign_negative() {
+                        continue;
+                    }
+                    return Some(Duration::from_secs_f64(num));
+                }
             }
         }
-        Ok(out)
-    })
+    }
+    None
+}
+
+fn extract_reset_at(value: &serde_json::Value) -> Option<Instant> {
+    let reset_at = value.get("reset_at").and_then(|v| v.as_str())?;
+    let parsed = DateTime::parse_from_rfc3339(reset_at)
+        .or_else(|_| DateTime::parse_from_str(reset_at, "%+"))
+        .ok()?;
+    let reset_utc = parsed.with_timezone(&Utc);
+    let now = Utc::now();
+    let duration = reset_utc.signed_duration_since(now).to_std().unwrap_or_default();
+    Some(compute_rate_limit_wait(duration))
+}
+
+fn compute_rate_limit_wait(base: Duration) -> Instant {
+    let mut wait = if base > Duration::ZERO { base } else { Duration::ZERO };
+    wait += RATE_LIMIT_BUFFER;
+    wait += random_jitter(RATE_LIMIT_JITTER_MAX);
+    Instant::now() + wait
+}
+
+fn random_jitter(max: Duration) -> Duration {
+    if max.is_zero() {
+        return Duration::ZERO;
+    }
+    let mut rng = rand::rng();
+    let jitter = rng.random_range(0.0..max.as_secs_f64());
+    Duration::from_secs_f64(jitter)
+}
+
+fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -> Option<&'a T> {
+    for cause in error.chain() {
+        if let Some(specific) = cause.downcast_ref::<T>() {
+            return Some(specific);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+pub(crate) use classify_model_error as test_classify_model_error;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_core::error::UsageLimitReachedError;
+
+    #[test]
+    fn rate_limit_hint_uses_reset_seconds() {
+        let body = r#"{"error":{"reset_seconds":5}}"#;
+        let start = Instant::now();
+        let wait = parse_rate_limit_hint(body).expect("expected wait instant");
+        let remaining = wait
+            .checked_duration_since(start)
+            .expect("wait should be in the future");
+        let rem_secs = remaining.as_secs_f64();
+        let min_expected = (RATE_LIMIT_BUFFER + Duration::from_secs(5)).as_secs_f64() - 0.5;
+        let max_expected =
+            (RATE_LIMIT_BUFFER + Duration::from_secs(5) + RATE_LIMIT_JITTER_MAX).as_secs_f64() + 1.0;
+        assert!(rem_secs >= min_expected, "remaining {rem_secs}, min {min_expected}");
+        assert!(rem_secs <= max_expected, "remaining {rem_secs}, max {max_expected}");
+    }
+
+    #[test]
+    fn rate_limit_hint_uses_reset_at() {
+        let reset_at = (Utc::now() + chrono::Duration::seconds(10)).to_rfc3339();
+        let body = format!("{{\"error\":{{\"reset_at\":\"{reset_at}\"}}}}");
+        let wait = parse_rate_limit_hint(&body).expect("expected wait instant");
+        let remaining = wait
+            .checked_duration_since(Instant::now())
+            .expect("wait should be in the future");
+        assert!(
+            remaining.as_secs_f64()
+                >= (RATE_LIMIT_BUFFER + Duration::from_secs(10)).as_secs_f64() - 1.0
+        );
+    }
+
+    #[test]
+    fn classify_identifies_stream_disconnect() {
+        let err = anyhow!(CodexErr::Stream("disconnect".into(), None));
+        match classify_model_error(&err) {
+            RetryDecision::RetryAfterBackoff { reason } => {
+                assert!(reason.contains("disconnect"));
+            }
+            other => panic!("unexpected decision: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_usage_limit_returns_rate_limit() {
+        let err = anyhow!(CodexErr::UsageLimitReached(UsageLimitReachedError {
+            plan_type: None,
+            resets_in_seconds: Some(10),
+        }));
+        match classify_model_error(&err) {
+            RetryDecision::RateLimited { .. } => {}
+            other => panic!("expected rate limit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_fatal_on_bad_request() {
+        let err = anyhow!(CodexErr::UnexpectedStatus(StatusCode::BAD_REQUEST, "bad".to_string()));
+        match classify_model_error(&err) {
+            RetryDecision::Fatal(_) => {}
+            other => panic!("expected fatal, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn observer_cadence_triggers_every_n_requests() {
+        assert!(!should_trigger_observer(0, 5));
+        assert!(!should_trigger_observer(1, 5));
+        assert!(should_trigger_observer(5, 5));
+        assert!(should_trigger_observer(10, 5));
+        assert!(!should_trigger_observer(11, 5));
+        assert!(!should_trigger_observer(3, 0));
+    }
+
+    #[test]
+    fn compose_intro_appends_guidance_section() {
+        let base = "Intro";
+        let guidance = vec!["First".to_string(), "Second".to_string()];
+        let combined = compose_developer_intro(base, &guidance);
+        assert!(combined.contains("Intro"));
+        assert!(combined.contains("**Observer Guidance**"));
+        assert!(combined.contains("- First"));
+        assert!(combined.contains("- Second"));
+    }
 }
 
 fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
@@ -537,30 +992,4 @@ fn strip_role_prefix(input: &str) -> &str {
         }
     }
     input
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn observer_cadence_triggers_every_n_requests() {
-        assert!(!should_trigger_observer(0, 5));
-        assert!(!should_trigger_observer(1, 5));
-        assert!(should_trigger_observer(5, 5));
-        assert!(should_trigger_observer(10, 5));
-        assert!(!should_trigger_observer(11, 5));
-        assert!(!should_trigger_observer(3, 0));
-    }
-
-    #[test]
-    fn compose_intro_appends_guidance_section() {
-        let base = "Intro";
-        let guidance = vec!["First".to_string(), "Second".to_string()];
-        let combined = compose_developer_intro(base, &guidance);
-        assert!(combined.contains("Intro"));
-        assert!(combined.contains("**Observer Guidance**"));
-        assert!(combined.contains("- First"));
-        assert!(combined.contains("- Second"));
-    }
 }
