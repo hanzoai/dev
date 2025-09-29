@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
-use crate::header_wave::HeaderWaveEffect;
+use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::auto_drive_strings;
 
 use codex_common::elapsed::format_duration;
@@ -164,6 +164,7 @@ const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
 const AUTO_COUNTDOWN_SECONDS: u8 = 10;
+const ENABLE_WARP_STRIPES: bool = false;
 
 fn status_field_prefix(label: &str) -> String {
     let padding = STATUS_LABEL_GAP
@@ -516,6 +517,7 @@ pub(crate) struct ChatWidget<'a> {
     tools_state: ToolState,
     live_builder: RowBuilder,
     header_wave: HeaderWaveEffect,
+    header_border: HeaderBorderWeaveEffect,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
@@ -2760,6 +2762,15 @@ impl ChatWidget<'_> {
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
                 let effect = HeaderWaveEffect::new();
+                if ENABLE_WARP_STRIPES {
+                    effect.set_enabled(true, Instant::now());
+                } else {
+                    effect.set_enabled(false, Instant::now());
+                }
+                effect
+            },
+            header_border: {
+                let effect = HeaderBorderWeaveEffect::new();
                 effect.set_enabled(false, Instant::now());
                 effect
             },
@@ -3004,6 +3015,15 @@ impl ChatWidget<'_> {
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
                 let effect = HeaderWaveEffect::new();
+                if ENABLE_WARP_STRIPES {
+                    effect.set_enabled(true, Instant::now());
+                } else {
+                    effect.set_enabled(false, Instant::now());
+                }
+                effect
+            },
+            header_border: {
+                let effect = HeaderBorderWeaveEffect::new();
                 effect.set_enabled(false, Instant::now());
                 effect
             },
@@ -9558,6 +9578,44 @@ impl ChatWidget<'_> {
         );
     }
 
+    fn is_cli_running(&self) -> bool {
+        if !self.exec.running_commands.is_empty() {
+            return true;
+        }
+        if !self.tools_state.running_custom_tools.is_empty()
+            || !self.tools_state.running_web_search.is_empty()
+            || !self.tools_state.running_wait_tools.is_empty()
+            || !self.tools_state.running_kill_tools.is_empty()
+        {
+            return true;
+        }
+        if self.stream.is_write_cycle_active() {
+            return true;
+        }
+        if !self.active_task_ids.is_empty() {
+            return true;
+        }
+        false
+    }
+
+    fn update_header_border_activation(&self) {
+        let now = Instant::now();
+        let should_enable_header = self.auto_state.active && self.is_cli_running();
+        let currently_enabled = self.header_border.is_enabled();
+        if should_enable_header && !currently_enabled {
+            self.header_border.set_enabled(true, now);
+        } else if !should_enable_header && currently_enabled {
+            self.header_border.set_enabled(false, now);
+        }
+    }
+
+    fn refresh_auto_drive_visuals(&mut self) {
+        self.update_header_border_activation();
+        if self.auto_state.active {
+            self.auto_rebuild_live_ring();
+        }
+    }
+
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
@@ -9572,10 +9630,10 @@ impl ChatWidget<'_> {
             self.bottom_pane.set_task_running(true);
             self.bottom_pane
                 .update_status_text("Auto Drive Goal".to_string());
-            self.header_wave.set_enabled(false, Instant::now());
             self.push_background_tail(
                 "Please enter the goal you would like to work autonomously towards.".to_string(),
             );
+            self.update_header_border_activation();
             self.request_redraw();
             return;
         }
@@ -9608,7 +9666,7 @@ impl ChatWidget<'_> {
                 self.auto_state.last_broadcast_thought = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
-                self.header_wave.set_enabled(true, Instant::now());
+                self.update_header_border_activation();
                 self.auto_rebuild_live_ring();
                 self.push_background_tail(format!("Auto Drive started: {goal_text}"));
                 self.request_redraw();
@@ -9642,6 +9700,7 @@ impl ChatWidget<'_> {
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
+            self.update_header_border_activation();
             self.auto_rebuild_live_ring();
             self.request_redraw();
         }
@@ -9663,6 +9722,7 @@ impl ChatWidget<'_> {
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = false;
+        self.update_header_border_activation();
 
         match status {
             AutoCoordinatorStatus::Continue => {
@@ -9805,6 +9865,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_task_running(true);
         self.bottom_pane
             .update_status_text("Auto Drive".to_string());
+        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -9835,7 +9896,10 @@ impl ChatWidget<'_> {
             self.bottom_pane.update_status_text(String::new());
         }
         self.bottom_pane.ensure_input_focus();
-        self.header_wave.set_enabled(false, Instant::now());
+        if ENABLE_WARP_STRIPES {
+            self.header_wave.set_enabled(false, Instant::now());
+        }
+        self.update_header_border_activation();
         self.request_redraw();
     }
 
@@ -9854,6 +9918,7 @@ impl ChatWidget<'_> {
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
         self.auto_state.last_decision_display = None;
+        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_send_conversation();
@@ -9890,6 +9955,7 @@ impl ChatWidget<'_> {
         };
 
         let status_lines: Vec<String> = vec![append_thought_ellipsis(&status_text)];
+        let cli_running = self.is_cli_running();
 
         let prompt = self
             .auto_state
@@ -9944,6 +10010,7 @@ impl ChatWidget<'_> {
             button,
             manual_hint,
             ctrl_switch_hint,
+            cli_running,
         };
 
         self.bottom_pane
@@ -15764,20 +15831,33 @@ impl ChatWidget<'_> {
         let status_line = Line::from(status_spans);
 
         let now = Instant::now();
-        if self.header_wave.schedule_if_needed(now) {
+        self.update_header_border_activation();
+        let mut frame_needed = false;
+        if ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now) {
+            frame_needed = true;
+        }
+        if self.header_border.schedule_if_needed(now) {
+            frame_needed = true;
+        }
+        if frame_needed {
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
+                .send(AppEvent::ScheduleFrameIn(HeaderBorderWeaveEffect::FRAME_INTERVAL));
         }
 
         // Render the block first
         status_block.render(padded_area, buf);
         let wave_enabled = self.header_wave.is_enabled();
+        let border_enabled = self.header_border.is_enabled();
         if wave_enabled {
             self.header_wave.render(padded_area, buf, now);
         }
+        if border_enabled {
+            self.header_border.render(padded_area, buf, now);
+        }
 
         // Then render the text inside with padding, centered
-        let status_style = if wave_enabled {
+        let effect_enabled = wave_enabled || border_enabled;
+        let status_style = if effect_enabled {
             Style::default().fg(crate::colors::text())
         } else {
             Style::default()
