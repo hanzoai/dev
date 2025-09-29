@@ -3222,6 +3222,48 @@ impl ChatWidget<'_> {
                         content: vec![content],
                     });
                 }
+                crate::history_cell::HistoryCellType::PlanUpdate => {
+                    if let Some(plan) = cell
+                        .as_any()
+                        .downcast_ref::<crate::history_cell::PlanUpdateCell>()
+                    {
+                        let state = plan.state();
+                        let mut lines: Vec<String> = Vec::new();
+                        if !state.name.trim().is_empty() {
+                            lines.push(format!("Plan update: {}", state.name.trim()));
+                        } else {
+                            lines.push("Plan update".to_string());
+                        }
+
+                        if state.progress.total > 0 {
+                            lines.push(format!(
+                                "Progress: {}/{}",
+                                state.progress.completed, state.progress.total
+                            ));
+                        }
+
+                        if state.steps.is_empty() {
+                            lines.push("(no steps recorded)".to_string());
+                        } else {
+                            for step in &state.steps {
+                                let status_label = match step.status {
+                                    StepStatus::Completed => "[completed]",
+                                    StepStatus::InProgress => "[in_progress]",
+                                    StepStatus::Pending => "[pending]",
+                                };
+                                lines.push(format!("- {} {}", status_label, step.description));
+                            }
+                        }
+
+                        let text = lines.join("\n");
+                        let content = ContentItem::OutputText { text };
+                        items.push(ResponseItem::Message {
+                            id: None,
+                            role: "assistant".to_string(),
+                            content: vec![content],
+                        });
+                    }
+                }
                 _ => {}
             }
         }
