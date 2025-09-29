@@ -244,6 +244,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
         chat.bottom_pane.set_task_running(false);
     }
     chat.maybe_hide_spinner();
+    chat.refresh_auto_drive_visuals();
 }
 
 pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
@@ -364,6 +365,8 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
             chat.tools_state.running_web_search.remove(&call_id);
         }
     }
+
+    chat.refresh_auto_drive_visuals();
 }
 
 pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize) {
@@ -579,6 +582,7 @@ pub(super) fn handle_exec_begin_now(
                         _ => "exploring…",
                     };
                     chat.bottom_pane.update_status_text(status_text.to_string());
+                    chat.refresh_auto_drive_visuals();
                     return;
                 }
             }
@@ -633,6 +637,7 @@ pub(super) fn handle_exec_begin_now(
         chat.bottom_pane
             .update_status_text(format!("running command: {}", preview_short));
     }
+    chat.refresh_auto_drive_visuals();
 }
 
 pub(super) fn handle_exec_end_now(
@@ -645,6 +650,7 @@ pub(super) fn handle_exec_end_now(
         chat.exec.unsuppress_exec_end(&call_id);
         chat.ended_call_ids.insert(call_id);
         chat.maybe_hide_spinner();
+        chat.refresh_auto_drive_visuals();
         return;
     }
     chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
@@ -655,6 +661,7 @@ pub(super) fn handle_exec_end_now(
         .remove(&super::ExecCallId(ev.call_id.clone()))
     {
         chat.maybe_hide_spinner();
+        chat.refresh_auto_drive_visuals();
         return;
     }
     let ExecCommandEndEvent {
@@ -738,6 +745,7 @@ pub(super) fn handle_exec_end_now(
         };
         chat.bottom_pane.update_status_text(status_text);
         chat.maybe_hide_spinner();
+        chat.refresh_auto_drive_visuals();
         return;
     }
 
@@ -829,6 +837,7 @@ pub(super) fn handle_exec_end_now(
             .update_status_text(format!("command failed (exit {})", exit_code));
     }
     chat.maybe_hide_spinner();
+    chat.refresh_auto_drive_visuals();
 }
 
 // Stable ordering now inserts at the correct position; these helpers are removed.
