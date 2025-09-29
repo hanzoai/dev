@@ -169,6 +169,9 @@ pub struct Config {
     /// and turn completions when not focused.
     pub tui_notifications: Notifications,
 
+    /// Cadence (in requests) for running the Auto Drive observer thread.
+    pub auto_drive_observer_cadence: u32,
+
     /// The directory that should be treated as the current working directory
     /// for the session. All relative paths inside the business-logic layer are
     /// resolved against this path.
@@ -1579,6 +1582,9 @@ pub struct ConfigToml {
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
 
+    #[serde(default)]
+    pub auto_drive_observer_cadence: Option<u32>,
+
     /// Browser configuration for integrated screenshot capabilities.
     pub browser: Option<BrowserConfig>,
 
@@ -2159,6 +2165,7 @@ impl Config {
                 .as_ref()
                 .map(|t| t.notifications.clone())
                 .unwrap_or_default(),
+            auto_drive_observer_cadence: cfg.auto_drive_observer_cadence.unwrap_or(5),
         };
         Ok(config)
     }
@@ -2919,6 +2926,7 @@ model_verbosity = "high"
             validation: ValidationConfig::default(),
             experimental_resume: None,
             tui_notifications: Default::default(),
+            auto_drive_observer_cadence: 5,
         };
 
         assert_eq!(expected_gpt3_profile_config, gpt3_profile_config);
@@ -3004,6 +3012,7 @@ model_verbosity = "high"
             github: GithubConfig::default(),
             experimental_resume: None,
             tui_notifications: Default::default(),
+            auto_drive_observer_cadence: 5,
         };
 
         assert_eq!(expected_zdr_profile_config, zdr_profile_config);
@@ -3073,6 +3082,7 @@ model_verbosity = "high"
             github: GithubConfig::default(),
             experimental_resume: None,
             tui_notifications: Default::default(),
+            auto_drive_observer_cadence: 5,
         };
 
         assert_eq!(expected_gpt5_profile_config, gpt5_profile_config);

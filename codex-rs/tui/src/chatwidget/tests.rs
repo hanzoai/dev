@@ -1,7 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, unnameable_test_items)]
 
 use super::*;
-use crate::app_event::{AppEvent, BackgroundPlacement};
+use crate::app_event::{
+    AppEvent,
+    AutoObserverStatus,
+    AutoObserverTelemetry,
+    BackgroundPlacement,
+};
 use crate::app_event_sender::AppEventSender;
 use crate::history::state::{ExecStatus, ExploreEntryStatus, HistoryId, HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
@@ -198,6 +203,48 @@ fn background_events_append_in_arrival_order() {
 
     let texts = cell_texts(&chat);
     assert_eq!(texts, vec!["first background".to_string(), "second background".to_string()]);
+}
+
+#[test]
+fn observer_report_replaces_prompt_and_resets_countdown() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.auto_state.active = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_prompt = Some("old prompt".to_string());
+    chat.auto_state.countdown_id = 7;
+    chat.auto_state.seconds_remaining = 3;
+
+    let telemetry = AutoObserverTelemetry {
+        trigger_count: 5,
+        last_status: AutoObserverStatus::Failing,
+        last_intervention: Some("replaced".to_string()),
+    };
+
+    chat.auto_handle_observer_report(
+        AutoObserverStatus::Failing,
+        telemetry.clone(),
+        Some("new prompt".to_string()),
+        Some("double-check the failing command".to_string()),
+    );
+
+    assert_eq!(chat.auto_state.current_prompt.as_deref(), Some("new prompt"));
+    assert_eq!(chat.auto_state.observer_status, AutoObserverStatus::Failing);
+    assert_eq!(
+        chat
+            .auto_state
+            .observer_telemetry
+            .as_ref()
+            .unwrap()
+            .trigger_count,
+        telemetry.trigger_count
+    );
+    assert_eq!(chat.auto_state.countdown_id, 8);
+    assert_eq!(chat.auto_state.seconds_remaining, AUTO_COUNTDOWN_SECONDS);
+
+    let texts = cell_texts(&chat);
+    assert!(texts.iter().any(|line| line.contains("Observer guidance")));
+    assert!(texts.iter().any(|line| line.contains("Observer replaced prompt")));
 }
 
 #[test]
