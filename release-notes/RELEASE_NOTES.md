@@ -1,11 +1,12 @@
-## @just-every/code v0.2.174
+## @just-every/code v0.2.175
 
-This release calms idle auto-drive visuals and clarifies when full automation is active.
+This release hardens auto-drive with smarter recovery and new developer tooling for rehearsing faults.
 
 ### Changes
 
-- TUI/Auto-drive: gate weave animations to the active phase so idle sessions stay calm.
-- TUI/Auto: require full auto mode and show env context to clarify coordinator state.
+- TUI/Auto-drive: add retry/backoff orchestration so coordinator runs recover after transient failures.
+- TUI/Auto-drive: honor rate-limit reset hints and jittered buffers to resume safely after 429 responses.
+- Docs: outline dev fault injection knobs for rehearsing auto-drive failure scenarios.
 
 ### Install
 
@@ -14,4 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.173...v0.2.174
+Compare: https://github.com/just-every/code/compare/v0.2.174...v0.2.175
