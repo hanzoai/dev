@@ -8655,7 +8655,7 @@ impl ChatWidget<'_> {
             crate::updates::UpgradeResolution::Command { command, display } => {
                 if command.is_empty() {
                     self.history_push(history_cell::new_error_event(
-                        "`/upgrade` — no upgrade command available for this install.".to_string(),
+                        "`/update` — no upgrade command available for this install.".to_string(),
                     ));
                     self.request_redraw();
                     return;
@@ -10366,6 +10366,7 @@ impl ChatWidget<'_> {
             Some(cwd),
             controller,
             controller_rx,
+            self.config.clone(),
             self.config.debug,
         );
 
@@ -10732,6 +10733,7 @@ impl ChatWidget<'_> {
                     if pending_id == id {
                         self.bottom_pane
                             .flash_footer_notice(format!("Upgraded to {version}"));
+                        self.latest_upgrade_version = None;
                     } else {
                         self.pending_upgrade_notice = Some((pending_id, version));
                     }

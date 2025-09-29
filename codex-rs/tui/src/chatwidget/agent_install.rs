@@ -1,5 +1,6 @@
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use codex_core::config::Config;
@@ -72,6 +73,7 @@ pub(super) fn start_agent_install_session(
         cwd,
         controller,
         controller_rx,
+        None,
         debug_enabled,
     );
 }
@@ -92,6 +94,7 @@ pub(super) fn start_prompt_terminal_session(
         cwd,
         controller,
         controller_rx,
+        None,
         debug_enabled,
     );
 }
@@ -112,6 +115,7 @@ pub(super) fn start_direct_terminal_session(
         cwd,
         controller,
         controller_rx,
+        None,
         debug_enabled,
     );
 }
@@ -124,6 +128,7 @@ pub(super) fn start_upgrade_terminal_session(
     cwd: Option<String>,
     controller: TerminalRunController,
     controller_rx: Receiver<TerminalRunEvent>,
+    config: Config,
     debug_enabled: bool,
 ) {
     #[cfg(test)]
@@ -136,6 +141,7 @@ pub(super) fn start_upgrade_terminal_session(
             cwd,
             controller,
             controller_rx,
+            config,
             debug_enabled,
         );
         return;
@@ -151,6 +157,7 @@ pub(super) fn start_upgrade_terminal_session(
         cwd,
         controller,
         controller_rx,
+        Some(config),
         debug_enabled,
     );
 }
@@ -162,6 +169,7 @@ fn start_guided_terminal_session(
     cwd: Option<String>,
     controller: TerminalRunController,
     controller_rx: Receiver<TerminalRunEvent>,
+    config: Option<Config>,
     debug_enabled: bool,
 ) {
     std::thread::spawn(move || {
@@ -200,6 +208,7 @@ fn start_guided_terminal_session(
             cwd.as_deref(),
             controller,
             &mut controller_rx,
+            config,
             debug_enabled,
         ) {
             let helper = match &mode {
@@ -234,10 +243,14 @@ fn run_guided_loop(
     cwd: Option<&str>,
     controller: TerminalRunController,
     controller_rx: &mut Receiver<TerminalRunEvent>,
+    provided_config: Option<Config>,
     debug_enabled: bool,
 ) -> Result<()> {
-    let cfg = Config::load_with_cli_overrides(vec![], ConfigOverrides::default())
-        .context("loading config")?;
+    let cfg = match provided_config {
+        Some(cfg) => cfg,
+        None => Config::load_with_cli_overrides(vec![], ConfigOverrides::default())
+            .context("loading config")?,
+    };
     let preferred_auth = if cfg.using_chatgpt_auth {
         codex_protocol::mcp_protocol::AuthMode::ChatGPT
     } else {
@@ -423,6 +436,8 @@ fn run_guided_loop(
         _ => 0,
     };
 
+    let sandbox_restricted = !matches!(cfg.sandbox_policy, SandboxPolicy::DangerFullAccess);
+
     if let GuidedTerminalMode::DirectCommand { command } = mode {
         let wrapped = wrap_command(command);
         if wrapped.is_empty() {
@@ -468,6 +483,35 @@ fn run_guided_loop(
             message: "Analyzing output…".to_string(),
         });
     } else if let GuidedTerminalMode::Upgrade { initial_command, .. } = mode {
+        if sandbox_restricted {
+            let notice = format!(
+                "Automatic upgrades require Full Access. Run `{initial_command}` manually in your own shell, then re-run `/update` once it finishes.\n"
+            );
+            app_event_tx.send(AppEvent::TerminalChunk {
+                id: terminal_id,
+                chunk: notice.clone().into_bytes(),
+                _is_stderr: true,
+            });
+            app_event_tx.send(AppEvent::TerminalUpdateMessage {
+                id: terminal_id,
+                message: notice.trim().to_string(),
+            });
+            app_event_tx.send(AppEvent::TerminalSetAssistantMessage {
+                id: terminal_id,
+                message: "Waiting for manual upgrade…".to_string(),
+            });
+            conversation.push(make_message(
+                "user",
+                "Automatic execution blocked by sandbox. Await user's manual upgrade before continuing.".to_string(),
+            ));
+            app_event_tx.send(AppEvent::TerminalExit {
+                id: terminal_id,
+                exit_code: None,
+                _duration: Duration::from_millis(0),
+            });
+            return Ok(());
+        }
+
         let wrapped = wrap_command(initial_command);
         if wrapped.is_empty() {
             app_event_tx.send(AppEvent::TerminalChunk {
