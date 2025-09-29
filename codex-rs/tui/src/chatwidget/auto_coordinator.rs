@@ -1,3 +1,4 @@
+use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -105,10 +106,10 @@ fn run_auto_loop(
         )),
     );
 
-    let developer_intro = build_developer_message(&goal_text, matches!(
-        sandbox_policy,
-        SandboxPolicy::DangerFullAccess
-    ));
+    let (developer_intro, primary_goal_message) = build_developer_message(
+        &goal_text,
+        matches!(sandbox_policy, SandboxPolicy::DangerFullAccess),
+    );
     let schema = build_schema();
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
@@ -131,6 +132,7 @@ fn run_auto_loop(
                 &runtime,
                 &client,
                 &developer_intro,
+                &primary_goal_message,
                 &schema,
                 conv,
                 &app_event_tx,
@@ -173,11 +175,44 @@ fn run_auto_loop(
     Ok(())
 }
 
-fn build_developer_message(goal_text: &str, full_access: bool) -> String {
+fn build_developer_message(goal_text: &str, full_access: bool) -> (String, String) {
     let sandbox = if full_access { "full access" } else { "limited sandbox" };
+    let environment_details = format_environment_details(sandbox);
+    let intro = format!(
+        "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**Rules**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in it's entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely can not be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `thoughts`: short status (<= 160 characters) describing you thought process around what the next prompt will do\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n- First plan, then execute. Allow the CLI to plan for you. You should get it to do the thinking for you.\n- Keep the prompt minimal to give the CLI room to make independent decision.\n- Don't repeat yourself. You will see past prompts and outputs showing current progress. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nUseful commands:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n`/reasoning <high|medium|low>` e.g. set `/reasoning high` if the CLI makes a poor decision or `/reasoning low` to move faster on simple tasks\n\nEnvironment:\\n{environment_details}"
+    );
+    let primary_goal = format!("**Primary Goal**\n{goal_text}");
+    (intro, primary_goal)
+}
+
+fn format_environment_details(sandbox: &str) -> String {
+    let cwd = std::env::current_dir()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_else(|_| "<unknown>".to_string());
+    let branch = run_git_command(["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "<unknown>".to_string());
+    let git_status_raw = run_git_command(["status", "--short"]);
+    let git_status = match git_status_raw {
+        Some(raw) if raw.trim().is_empty() => "  clean".to_string(),
+        Some(raw) => raw
+            .lines()
+            .map(|line| format!("  {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => "  <git status unavailable>".to_string(),
+    };
     format!(
-        "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act.\n\n**Primary Goal**\n{goal_text}\n\n**Rules**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in it's entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely can not be satisfied. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `thoughts`: short status (<= 160 characters) describing you thought process around what the next prompt should be\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n- First plan, then execute. Allow the CLI to plan for you. You should get it to do the thinking for you.\n- Don't repeat yourself. You will see past prompts and outputs. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want it to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nEnvironment: {sandbox}"
+        "- Access: {sandbox}\n- Working directory: {cwd}\n- Git branch: {branch}\n- Git status:\n{git_status}"
     )
+}
+
+fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
+    let output = Command::new("git").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|text| text.trim_end().to_string())
 }
 
 fn build_schema() -> Value {
@@ -205,6 +240,7 @@ fn request_coordinator_decision(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
     developer_intro: &str,
+    primary_goal: &str,
     schema: &Value,
     mut conversation: Vec<ResponseItem>,
     app_event_tx: &AppEventSender,
@@ -212,6 +248,9 @@ fn request_coordinator_decision(
     let mut prompt = Prompt::default();
     prompt.store = true;
     prompt.input.push(make_message("developer", developer_intro.to_string()));
+    prompt
+        .input
+        .push(make_message("developer", primary_goal.to_string()));
     prompt.input.append(&mut conversation);
     prompt.text_format = Some(TextFormat {
         r#type: "json_schema".to_string(),
