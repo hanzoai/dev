@@ -137,6 +137,14 @@ impl ModelClient {
         })
     }
 
+    pub fn default_model_slug(&self) -> &str {
+        self.config.model.as_str()
+    }
+
+    pub fn default_model_family(&self) -> &ModelFamily {
+        &self.config.model_family
+    }
+
     /// Dispatches to either the Responses or Chat implementation depending on
     /// the provider config.  Public callers always invoke `stream()` – the
     /// specialised helpers are private to avoid accidental misuse.
