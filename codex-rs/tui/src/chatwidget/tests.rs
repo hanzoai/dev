@@ -13,6 +13,7 @@ use crate::slash_command::SlashCommand;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
+use codex_core::config_types::ReasoningEffort;
 use codex_core::plan_tool::PlanItemArg;
 use codex_core::plan_tool::StepStatus;
 use codex_core::plan_tool::UpdatePlanArgs;
@@ -38,6 +39,8 @@ use codex_core::protocol::RateLimitSnapshotEvent;
 use codex_core::protocol::PatchApplyBeginEvent;
 use codex_core::protocol::PatchApplyEndEvent;
 use codex_core::protocol::OrderMeta;
+use codex_core::protocol::InputItem;
+use codex_core::protocol::Op;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use crossterm::event::KeyCode;
@@ -1183,6 +1186,59 @@ fn slash_undo_shows_no_snapshot_state() {
     assert!(
         lower.contains("chat history stays unchanged"),
         "expected scope hint to mention chat history\n{plain}"
+    );
+}
+
+#[test]
+fn slash_command_prefix_processes_followup_message() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = runtime.enter();
+    let (mut chat, rx, mut op_rx) = make_chatwidget_manual();
+
+    let text = "/reasoning high\nContinue with the next step.";
+    let message = crate::chatwidget::message::UserMessage {
+        display_text: text.to_string(),
+        ordered_items: vec![InputItem::Text {
+            text: text.to_string(),
+        }],
+    };
+
+    chat.submit_user_message(message);
+
+    assert_eq!(
+        chat.config.model_reasoning_effort,
+        ReasoningEffort::High,
+        "slash command should update reasoning effort"
+    );
+
+    let op = op_rx
+        .try_recv()
+        .expect("follow-up message sent to agent");
+    match op {
+        Op::UserInput { items } => {
+            assert_eq!(
+                items,
+                vec![InputItem::Text {
+                    text: "Continue with the next step.".to_string()
+                }],
+                "expected follow-up text to be forwarded without the slash command"
+            );
+        }
+        other => panic!("expected user input op, got {other:?}"),
+    }
+
+    let history_cells = drain_insert_history(&rx);
+    let mut saw_follow_up = false;
+    for lines in &history_cells {
+        let combined = lines_to_single_string(lines);
+        if combined.contains("Continue with the next step.") {
+            saw_follow_up = true;
+            break;
+        }
+    }
+    assert!(
+        saw_follow_up,
+        "expected follow-up text to appear in the queued history entry"
     );
 }
 

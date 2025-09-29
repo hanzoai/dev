@@ -250,7 +250,7 @@ use crate::history::state::{
     RateLimitsRecord,
     TextTone,
 };
-use crate::slash_command::SlashCommand;
+use crate::slash_command::{ProcessedCommand, SlashCommand};
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
 use crate::streaming::controller::AppEventHistorySink;
@@ -2638,7 +2638,7 @@ impl ChatWidget<'_> {
         self.stream_order_seq.get(&(kind, id.to_string())).copied()
     }
     pub(crate) fn new(
-        config: Config,
+        mut config: Config,
         app_event_tx: AppEventSender,
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
@@ -2647,6 +2647,12 @@ impl ChatWidget<'_> {
         show_order_overlay: bool,
         latest_upgrade_version: Option<String>,
     ) -> Self {
+        let mapped_theme = crate::theme::map_theme_for_palette(
+            config.tui.theme.name,
+            config.tui.theme.is_dark,
+        );
+        config.tui.theme.name = mapped_theme;
+
         let (codex_op_tx, codex_op_rx) = unbounded_channel::<Op>();
 
         let auth_manager = AuthManager::shared(
@@ -5512,6 +5518,26 @@ impl ChatWidget<'_> {
             return;
         }
         let original_text = message.display_text.clone();
+        let only_text_items = message
+            .ordered_items
+            .iter()
+            .all(|item| matches!(item, InputItem::Text { .. }));
+        if only_text_items {
+            if let Some((command_line, rest_text)) =
+                Self::split_leading_slash_command(&original_text)
+            {
+                let preview = crate::slash_command::process_slash_command_message(
+                    command_line.as_str(),
+                );
+                if !matches!(preview, ProcessedCommand::NotCommand(_)) {
+                    self.submit_user_message(command_line.clone().into());
+                    if !rest_text.trim().is_empty() {
+                        self.submit_user_message(rest_text.into());
+                    }
+                    return;
+                }
+            }
+        }
         // Build a combined string view of the text-only parts to process slash commands
         let mut text_only = String::new();
         for it in &message.ordered_items {
@@ -5884,6 +5910,26 @@ impl ChatWidget<'_> {
         }
 
         // (debug watchdog removed)
+    }
+
+    fn split_leading_slash_command(text: &str) -> Option<(String, String)> {
+        if !text.starts_with('/') {
+            return None;
+        }
+        let mut parts = text.splitn(2, '\n');
+        let first_line = parts.next().unwrap_or_default();
+        let rest = parts.next().unwrap_or("");
+        if rest.is_empty() {
+            return None;
+        }
+        let command = first_line.trim_end_matches('\r');
+        if command.is_empty() {
+            return None;
+        }
+        if rest.trim().is_empty() {
+            return None;
+        }
+        Some((command.to_string(), rest.to_string()))
     }
 
     fn capture_ghost_snapshot(&mut self, summary: Option<String>) -> GhostSnapshotJobHandle {
@@ -11928,7 +11974,7 @@ impl ChatWidget<'_> {
 
     pub(crate) fn show_theme_selection(&mut self) {
         self.bottom_pane
-            .show_theme_selection(self.config.tui.theme.name);
+            .show_theme_selection(crate::theme::current_theme_name());
     }
 
     // Ctrl+Y syntax cycling disabled intentionally.
@@ -11971,19 +12017,38 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn set_theme(&mut self, new_theme: codex_core::config_types::ThemeName) {
+        let custom_hint = if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
+            self.config
+                .tui
+                .theme
+                .is_dark
+                .or_else(|| crate::theme::custom_theme_is_dark())
+        } else {
+            None
+        };
+        let mapped_theme = crate::theme::map_theme_for_palette(new_theme, custom_hint);
+
         // Update the config
-        self.config.tui.theme.name = new_theme;
+        self.config.tui.theme.name = mapped_theme;
+        if matches!(new_theme, codex_core::config_types::ThemeName::Custom) {
+            self.config.tui.theme.is_dark = custom_hint;
+        } else {
+            self.config.tui.theme.is_dark = None;
+        }
 
         // Save the theme to config file
-        self.save_theme_to_config(new_theme);
+        self.save_theme_to_config(mapped_theme);
 
         // Retint pre-rendered history cell lines to the new palette
         self.restyle_history_after_theme_change();
 
         // Add confirmation message to history (replaceable system notice)
-        let theme_name = match new_theme {
+        let theme_name = match mapped_theme {
             // Light themes
             codex_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
+            codex_core::config_types::ThemeName::LightPhotonAnsi16 => {
+                "Light - Photon (16-color)".to_string()
+            }
             codex_core::config_types::ThemeName::LightPrismRainbow => {
                 "Light - Prism Rainbow".to_string()
             }
@@ -11996,6 +12061,9 @@ impl ChatWidget<'_> {
             // Dark themes
             codex_core::config_types::ThemeName::DarkCarbonNight => {
                 "Dark - Carbon Night".to_string()
+            }
+            codex_core::config_types::ThemeName::DarkCarbonAnsi16 => {
+                "Dark - Carbon (16-color)".to_string()
             }
             codex_core::config_types::ThemeName::DarkShinobiDusk => {
                 "Dark - Shinobi Dusk".to_string()
@@ -12015,10 +12083,8 @@ impl ChatWidget<'_> {
                 "Dark - Paper Light Pro".to_string()
             }
             codex_core::config_types::ThemeName::Custom => {
-                // Use saved custom name and is_dark to show a friendly label
                 let mut label =
                     crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
-                // Sanitize leading Light/Dark if present
                 for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
                     if label.starts_with(pref) {
                         label = label[pref.len()..].trim().to_string();
