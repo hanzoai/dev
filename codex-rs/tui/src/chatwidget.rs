@@ -47,6 +47,9 @@ use codex_protocol::num_format::format_with_separators;
 
 
 mod auto_coordinator;
+#[cfg(feature = "dev-faults")]
+mod faults;
+mod retry;
 mod diff_handlers;
 mod agent_install;
 mod diff_ui;
@@ -65,6 +68,8 @@ mod streaming;
 mod terminal_handlers;
 mod terminal;
 mod tools;
+#[cfg(test)]
+mod tests_retry;
 use self::agent_install::{
     start_agent_install_session,
     start_direct_terminal_session,
@@ -72,7 +77,7 @@ use self::agent_install::{
     start_upgrade_terminal_session,
     wrap_command,
 };
-use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand};
+use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand, AutoCoordinatorHandle};
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{CachedLayout, HistoryRenderState, LayoutRef};
@@ -637,7 +642,7 @@ pub(crate) struct ChatWidget<'a> {
     pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
     auto_state: AutoCoordinatorUiState,
-    auto_tx: Option<Sender<AutoCoordinatorCommand>>,
+    auto_handle: Option<AutoCoordinatorHandle>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2865,7 +2870,7 @@ impl ChatWidget<'_> {
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
             auto_state: AutoCoordinatorUiState::default(),
-            auto_tx: None,
+            auto_handle: None,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3119,7 +3124,7 @@ impl ChatWidget<'_> {
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
             auto_state: AutoCoordinatorUiState::default(),
-            auto_tx: None,
+            auto_handle: None,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3178,12 +3183,10 @@ impl ChatWidget<'_> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     let prefixed = format!("Coordinator: {text}");
-                    let content = ContentItem::OutputText {
-                        text: prefixed.clone(),
-                    };
+                    let content = ContentItem::InputText { text: prefixed };
                     items.push(ResponseItem::Message {
                         id: None,
-                        role: "assistant".to_string(),
+                        role: "user".to_string(),
                         content: vec![content],
                     });
                 }
@@ -3200,12 +3203,10 @@ impl ChatWidget<'_> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     let prefixed = format!("CLI: {text}");
-                    let content = ContentItem::InputText {
-                        text: prefixed.clone(),
-                    };
+                    let content = ContentItem::OutputText { text: prefixed };
                     items.push(ResponseItem::Message {
                         id: None,
-                        role: "user".to_string(),
+                        role: "assistant".to_string(),
                         content: vec![content],
                     });
                 }
@@ -9705,7 +9706,7 @@ impl ChatWidget<'_> {
             self.config.debug,
         ) {
             Ok(handle) => {
-                self.auto_tx = Some(handle.tx);
+                self.auto_handle = Some(handle);
                 self.auto_state.reset();
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
@@ -9733,11 +9734,11 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || self.auto_state.waiting_for_response {
             return;
         }
-        let Some(tx) = self.auto_tx.as_ref() else {
+        let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
         let conversation = self.export_response_items();
-        if tx
+        if handle
             .send(AutoCoordinatorCommand::UpdateConversation(conversation))
             .is_err()
         {
@@ -9923,8 +9924,9 @@ impl ChatWidget<'_> {
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
-        if let Some(tx) = self.auto_tx.take() {
-            let _ = tx.send(AutoCoordinatorCommand::Stop);
+        if let Some(handle) = self.auto_handle.take() {
+            handle.cancel();
+            let _ = handle.send(AutoCoordinatorCommand::Stop);
         }
         if let Some(msg) = message {
             self.push_background_tail(msg);
