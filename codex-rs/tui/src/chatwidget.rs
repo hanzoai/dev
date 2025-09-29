@@ -456,7 +456,7 @@ pub(crate) struct GhostState {
 struct AutoCoordinatorUiState {
     active: bool,
     goal: Option<String>,
-    current_thoughts: Option<String>,
+    current_summary: Option<String>,
     current_prompt: Option<String>,
     current_display_line: Option<String>,
     placeholder_phrase: Option<String>,
@@ -469,7 +469,8 @@ struct AutoCoordinatorUiState {
     countdown_id: u64,
     seconds_remaining: u8,
     awaiting_goal_input: bool,
-    last_broadcast_thought: Option<String>,
+    last_broadcast_summary: Option<String>,
+    last_decision_summary: Option<String>,
     last_decision_display: Option<String>,
     observer_telemetry: Option<AutoObserverTelemetry>,
     observer_status: AutoObserverStatus,
@@ -9805,13 +9806,13 @@ impl ChatWidget<'_> {
                 self.auto_state.reset();
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
-                self.auto_state.current_thoughts = None;
+                self.auto_state.current_summary = None;
                 self.auto_state.current_display_line = None;
                 self.auto_state.current_summary_index = None;
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_state.thinking_prefix_stripped = false;
-                self.auto_state.last_broadcast_thought = None;
+                self.auto_state.last_broadcast_summary = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
@@ -9842,8 +9843,8 @@ impl ChatWidget<'_> {
         } else {
             self.auto_state.waiting_for_response = true;
             self.auto_state.coordinator_waiting = true;
-            self.auto_state.current_thoughts = None;
-            self.auto_state.last_broadcast_thought = None;
+            self.auto_state.current_summary = None;
+            self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
@@ -9857,15 +9858,17 @@ impl ChatWidget<'_> {
     pub(crate) fn auto_handle_decision(
         &mut self,
         status: AutoCoordinatorStatus,
-        thoughts: String,
+        summary: String,
         prompt: Option<String>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
+        let summary = summary.trim().to_string();
+        self.auto_state.last_decision_summary = Some(summary.clone());
         self.auto_state.coordinator_waiting = false;
-        self.auto_on_reasoning_final(&thoughts);
+        self.auto_on_reasoning_final(&summary);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
@@ -9889,21 +9892,21 @@ impl ChatWidget<'_> {
                 self.auto_start_countdown(countdown_id);
             }
             AutoCoordinatorStatus::Success => {
-                let lower = thoughts.to_ascii_lowercase();
+                let lower = summary.to_ascii_lowercase();
                 let message = if lower.starts_with("coordinator success:") {
-                    thoughts
+                    summary
                 } else {
-                    format!("Coordinator success: {thoughts}")
+                    format!("Coordinator success: {summary}")
                 };
                 self.auto_stop(Some(message));
                 return;
             }
             AutoCoordinatorStatus::Failed => {
-                let lower = thoughts.to_ascii_lowercase();
+                let lower = summary.to_ascii_lowercase();
                 let message = if lower.starts_with("coordinator error:") {
-                    thoughts
+                    summary
                 } else {
-                    format!("Coordinator error: {thoughts}")
+                    format!("Coordinator error: {summary}")
                 };
                 self.auto_stop(Some(message));
                 return;
@@ -10032,8 +10035,8 @@ impl ChatWidget<'_> {
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
-        self.auto_state.current_thoughts = None;
-        self.auto_state.last_broadcast_thought = None;
+        self.auto_state.current_summary = None;
+        self.auto_state.last_broadcast_summary = None;
         self.auto_state.current_display_line = post_submit_display.clone();
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
@@ -10114,7 +10117,7 @@ impl ChatWidget<'_> {
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
-        self.auto_state.current_thoughts = Some(String::new());
+        self.auto_state.current_summary = Some(String::new());
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
@@ -10155,6 +10158,24 @@ impl ChatWidget<'_> {
         };
 
         let mut status_lines = vec![append_thought_ellipsis(&status_text)];
+        if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
+            if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
+                let trimmed = summary.trim();
+                if !trimmed.is_empty() {
+                    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+                    if !collapsed.is_empty() {
+                        let current_line = status_lines
+                            .first()
+                            .map(|line| line.trim_end_matches('…').trim())
+                            .unwrap_or("");
+                        if collapsed != current_line {
+                            let display = Self::truncate_with_ellipsis(&collapsed, 160);
+                            status_lines.push(display);
+                        }
+                    }
+                }
+            }
+        }
         if let Some(telemetry) = self.auto_state.observer_telemetry.as_ref() {
             let status_label = match self.auto_state.observer_status {
                 AutoObserverStatus::Ok => "ok",
@@ -10255,11 +10276,11 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let Some(thoughts) = self.auto_state.current_thoughts.as_ref() else {
+        let Some(summary) = self.auto_state.current_summary.as_ref() else {
             return;
         };
 
-        if let Some(title) = extract_latest_bold_title(thoughts) {
+        if let Some(title) = extract_latest_bold_title(summary) {
             let needs_update = self
                 .auto_state
                 .current_display_line
@@ -10274,7 +10295,7 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn auto_broadcast_thoughts(&mut self, raw: &str) {
+    fn auto_broadcast_summary(&mut self, raw: &str) {
         if !self.auto_state.active {
             return;
         }
@@ -10292,7 +10313,7 @@ impl ChatWidget<'_> {
 
         if self
             .auto_state
-            .last_broadcast_thought
+            .last_broadcast_summary
             .as_ref()
             .map(|prev| prev == &display_text)
             .unwrap_or(false)
@@ -10300,7 +10321,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.auto_state.last_broadcast_thought = Some(display_text);
+        self.auto_state.last_broadcast_summary = Some(display_text);
     }
 
     fn auto_on_reasoning_delta(&mut self, delta: &str, summary_index: Option<u32>) {
@@ -10311,7 +10332,7 @@ impl ChatWidget<'_> {
         if let Some(idx) = summary_index {
             if self.auto_state.current_summary_index != Some(idx) {
                 self.auto_state.current_summary_index = Some(idx);
-                self.auto_state.current_thoughts = Some(String::new());
+                self.auto_state.current_summary = Some(String::new());
                 self.auto_state.thinking_prefix_stripped = false;
             }
         }
@@ -10333,7 +10354,7 @@ impl ChatWidget<'_> {
         {
             let entry = self
                 .auto_state
-                .current_thoughts
+                .current_summary
                 .get_or_insert_with(String::new);
 
             if auto_drive_strings::is_auto_drive_phrase(entry) {
@@ -10349,11 +10370,11 @@ impl ChatWidget<'_> {
             return;
         }
 
-        self.auto_state.current_thoughts = Some(text.to_string());
+        self.auto_state.current_summary = Some(text.to_string());
         self.auto_state.thinking_prefix_stripped = true;
         self.auto_state.current_summary_index = None;
         self.auto_update_display_title();
-        self.auto_broadcast_thoughts(text);
+        self.auto_broadcast_summary(text);
 
         if self.auto_state.waiting_for_response {
             self.auto_rebuild_live_ring();
