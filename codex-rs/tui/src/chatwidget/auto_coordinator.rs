@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::debug_logger::DebugLogger;
-use codex_core::model_family::{find_family_for_model, derive_default_model_family};
+use codex_core::model_family::{derive_default_model_family, find_family_for_model};
 use codex_core::protocol::SandboxPolicy;
 use codex_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use codex_core::error::CodexErr;
@@ -28,6 +28,13 @@ use crate::chatwidget::faults::{fault_to_error, next_fault, FaultScope, Injected
 use codex_common::elapsed::format_duration;
 use chrono::{DateTime, Local, Utc};
 use rand::Rng;
+use super::auto_observer::{
+    build_observer_conversation,
+    start_auto_observer,
+    AutoObserverCommand,
+    ObserverOutcome,
+    ObserverTrigger,
+};
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
@@ -37,7 +44,7 @@ const MAX_RETRY_ELAPSED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 #[error("auto coordinator cancelled")]
 struct AutoCoordinatorCancelled;
 
-const MODEL_SLUG: &str = "gpt-5";
+pub(super) const MODEL_SLUG: &str = "gpt-5";
 const SCHEMA_NAME: &str = "auto_coordinator_flow";
 
 #[derive(Debug, Clone)]
@@ -62,6 +69,7 @@ impl AutoCoordinatorHandle {
 #[derive(Debug)]
 pub(super) enum AutoCoordinatorCommand {
     UpdateConversation(Vec<ResponseItem>),
+    ObserverResult(ObserverOutcome),
     Stop,
 }
 
@@ -79,9 +87,11 @@ pub(super) fn start_auto_coordinator(
     conversation: Vec<ResponseItem>,
     config: Config,
     debug_enabled: bool,
+    observer_cadence: u32,
 ) -> Result<AutoCoordinatorHandle> {
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let thread_tx = cmd_tx.clone();
+    let loop_tx = cmd_tx.clone();
     let cancel_token = CancellationToken::new();
     let thread_cancel = cancel_token.clone();
 
@@ -92,7 +102,9 @@ pub(super) fn start_auto_coordinator(
             conversation,
             config,
             cmd_rx,
+            loop_tx,
             debug_enabled,
+            observer_cadence,
             thread_cancel,
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
@@ -111,7 +123,9 @@ fn run_auto_loop(
     initial_conversation: Vec<ResponseItem>,
     config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
+    cmd_tx: Sender<AutoCoordinatorCommand>,
     debug_enabled: bool,
+    observer_cadence: u32,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let preferred_auth = if config.using_chatgpt_auth {
@@ -145,10 +159,14 @@ fn run_auto_loop(
         )),
     );
 
-    let (developer_intro, primary_goal_message) = build_developer_message(
-        &goal_text,
-        matches!(sandbox_policy, SandboxPolicy::DangerFullAccess),
-    );
+    let sandbox_label = if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
+        "full access"
+    } else {
+        "limited sandbox"
+    };
+    let environment_details = format_environment_details(sandbox_label);
+    let (base_developer_intro, primary_goal_message) =
+        build_developer_message(&goal_text, &environment_details);
     let schema = build_schema();
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
@@ -160,6 +178,22 @@ fn run_auto_loop(
 
     let mut pending_conversation = Some(initial_conversation);
     let mut stopped = false;
+    let mut requests_completed: u64 = 0;
+    let mut observer_guidance: Vec<String> = Vec::new();
+    let mut observer_handle = if observer_cadence == 0 {
+        None
+    } else {
+        match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                tracing::error!("failed to start auto observer: {err:#}");
+                None
+            }
+        }
+    };
+    let observer_cadence = observer_handle
+        .as_ref()
+        .map(|handle| handle.cadence() as u64);
 
     loop {
         if stopped {
@@ -172,10 +206,13 @@ fn run_auto_loop(
                 continue;
             }
 
+            let conv_for_observer = conv.clone();
+            let developer_intro =
+                compose_developer_intro(&base_developer_intro, &observer_guidance);
             match request_coordinator_decision(
                 &runtime,
                 &client,
-                &developer_intro,
+                developer_intro.as_str(),
                 &primary_goal_message,
                 &schema,
                 conv,
@@ -183,13 +220,34 @@ fn run_auto_loop(
                 &cancel_token,
             ) {
                 Ok((status, thoughts, prompt_opt)) => {
+                    let prompt_clone = prompt_opt.clone();
                     let event = AppEvent::AutoCoordinatorDecision {
                         status,
                         thoughts,
                         prompt: prompt_opt,
                     };
                     app_event_tx.send(event);
-                    if !matches!(status, AutoCoordinatorStatus::Continue) {
+
+                    if matches!(status, AutoCoordinatorStatus::Continue) {
+                        if let (Some(handle), Some(cadence)) =
+                            (observer_handle.as_ref(), observer_cadence)
+                        {
+                            if should_trigger_observer(requests_completed, cadence) {
+                                let conversation = build_observer_conversation(
+                                    conv_for_observer,
+                                    prompt_clone.as_deref(),
+                                );
+                                let trigger = ObserverTrigger {
+                                    conversation,
+                                    goal_text: goal_text.clone(),
+                                    environment_details: environment_details.clone(),
+                                };
+                                if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
+                                    tracing::warn!("failed to trigger auto observer");
+                                }
+                            }
+                        }
+                    } else {
                         stopped = true;
                         continue;
                     }
@@ -213,7 +271,34 @@ fn run_auto_loop(
 
         match cmd_rx.recv() {
             Ok(AutoCoordinatorCommand::UpdateConversation(conv)) => {
+                requests_completed = requests_completed.saturating_add(1);
                 pending_conversation = Some(conv);
+            }
+            Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
+                let ObserverOutcome {
+                    status,
+                    replace_message,
+                    additional_instructions,
+                    telemetry,
+                } = outcome;
+
+                if let Some(instr) = additional_instructions
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    if !observer_guidance.iter().any(|existing| existing == instr) {
+                        observer_guidance.push(instr.to_string());
+                    }
+                }
+
+                let event = AppEvent::AutoObserverReport {
+                    status,
+                    telemetry,
+                    replace_message,
+                    additional_instructions,
+                };
+                app_event_tx.send(event);
             }
             Ok(AutoCoordinatorCommand::Stop) | Err(_) => {
                 stopped = true;
@@ -221,12 +306,38 @@ fn run_auto_loop(
         }
     }
 
+    if let Some(handle) = observer_handle.take() {
+        let _ = handle.tx.send(AutoObserverCommand::Stop);
+    }
+
     Ok(())
 }
 
-fn build_developer_message(goal_text: &str, full_access: bool) -> (String, String) {
-    let sandbox = if full_access { "full access" } else { "limited sandbox" };
-    let environment_details = format_environment_details(sandbox);
+fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
+    if guidance.is_empty() {
+        return base.to_string();
+    }
+
+    let mut intro = String::with_capacity(base.len() + guidance.len() * 64);
+    intro.push_str(base);
+    intro.push_str("\n\n**Observer Guidance**\n");
+    for hint in guidance {
+        let trimmed = hint.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        intro.push_str("- ");
+        intro.push_str(trimmed);
+        intro.push('\n');
+    }
+    intro
+}
+
+fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
+    cadence != 0 && requests_completed > 0 && requests_completed % cadence == 0
+}
+
+fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
     let intro = format!(
         "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**Rules**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in it's entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely can not be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `thoughts`: short status (<= 160 characters) describing you thought process around what the next prompt will do\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n- First plan, then execute. Allow the CLI to plan for you. You should get it to do the thinking for you.\n- Keep the prompt minimal to give the CLI room to make independent decision.\n- Don't repeat yourself. You will see past prompts and outputs showing current progress. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nUseful commands:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n`/reasoning <high|medium|low>` e.g. set `/reasoning high` if the CLI makes a poor decision or `/reasoning low` to move faster on simple tasks\n\nEnvironment:\\n{environment_details}"
     );
@@ -774,6 +885,27 @@ mod tests {
             other => panic!("expected fatal, got {:?}", other),
         }
     }
+
+    #[test]
+    fn observer_cadence_triggers_every_n_requests() {
+        assert!(!should_trigger_observer(0, 5));
+        assert!(!should_trigger_observer(1, 5));
+        assert!(should_trigger_observer(5, 5));
+        assert!(should_trigger_observer(10, 5));
+        assert!(!should_trigger_observer(11, 5));
+        assert!(!should_trigger_observer(3, 0));
+    }
+
+    #[test]
+    fn compose_intro_appends_guidance_section() {
+        let base = "Intro";
+        let guidance = vec!["First".to_string(), "Second".to_string()];
+        let combined = compose_developer_intro(base, &guidance);
+        assert!(combined.contains("Intro"));
+        assert!(combined.contains("**Observer Guidance**"));
+        assert!(combined.contains("- First"));
+        assert!(combined.contains("- Second"));
+    }
 }
 
 fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
@@ -791,7 +923,7 @@ fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
     Ok((decision, value))
 }
 
-fn extract_first_json_object(input: &str) -> Option<String> {
+pub(super) fn extract_first_json_object(input: &str) -> Option<String> {
     let mut depth = 0usize;
     let mut in_str = false;
     let mut escape = false;
@@ -833,7 +965,7 @@ fn extract_first_json_object(input: &str) -> Option<String> {
     None
 }
 
-fn make_message(role: &str, text: String) -> ResponseItem {
+pub(super) fn make_message(role: &str, text: String) -> ResponseItem {
     let content = if role.eq_ignore_ascii_case("assistant") {
         ContentItem::OutputText { text }
     } else {
