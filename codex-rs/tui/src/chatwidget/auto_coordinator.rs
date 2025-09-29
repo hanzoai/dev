@@ -64,6 +64,14 @@ impl AutoCoordinatorHandle {
     pub fn cancel(&self) {
         self.cancel_token.cancel();
     }
+
+    #[cfg(test)]
+    pub(super) fn for_tests(tx: Sender<AutoCoordinatorCommand>) -> Self {
+        Self {
+            tx,
+            cancel_token: CancellationToken::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
