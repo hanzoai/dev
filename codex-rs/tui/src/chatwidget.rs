@@ -78,6 +78,7 @@ use self::history_render::{CachedLayout, HistoryRenderState, LayoutRef};
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
 use codex_core::protocol::ApprovedCommandMatchKind;
+use codex_core::protocol::AskForApproval;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::protocol::AgentMessageEvent;
 use codex_core::protocol::AgentReasoningDeltaEvent;
@@ -3152,12 +3153,12 @@ impl ChatWidget<'_> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     let prefixed = format!("Coordinator: {text}");
-                    let content = ContentItem::InputText {
+                    let content = ContentItem::OutputText {
                         text: prefixed.clone(),
                     };
                     items.push(ResponseItem::Message {
                         id: None,
-                        role: "user".to_string(),
+                        role: "assistant".to_string(),
                         content: vec![content],
                     });
                 }
@@ -9561,6 +9562,20 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
+
+        let full_auto_enabled = matches!(
+            (&self.config.sandbox_policy, self.config.approval_policy),
+            (SandboxPolicy::DangerFullAccess, AskForApproval::Never)
+        );
+
+        if !full_auto_enabled && !(trimmed.is_empty() && self.auto_state.active) {
+            self.push_background_tail(
+                "Please use Shift+Tab to switch to Full Auto before using Auto Drive"
+                    .to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
         if trimmed.is_empty() {
             if self.auto_state.active {
                 self.auto_stop(None);
