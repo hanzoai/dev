@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.176] - 2025-09-29
+
+- Auto-drive: add an observer thread and telemetry stream to watch automation health in real time. (fd7d3a71)
+- TUI/Update: harden guided upgrade flows to recover cleanly from partial runs. (4a4b70dd)
+- TUI/Theme: introduce dedicated 16-color palettes so limited terminals render accurately. (5efc9e0a)
+- TUI: trim fallback prompt copy and reset upgrade flags after completion. (79f02a18)
+
 ## [0.2.175] - 2025-09-29
 
 - TUI/Auto-drive: add retry/backoff orchestration so coordinator runs recover after transient failures. (6c5856e8)
