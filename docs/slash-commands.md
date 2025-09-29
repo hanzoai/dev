@@ -47,8 +47,8 @@ Notes
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
 - `/limits`: visualize current hourly and weekly rate-limit usage.
-- `/update`: check the installed version, detect available upgrades, and run the
-  appropriate installer when possible.
+- `/update`: check the installed version, detect available upgrades, and open a
+  guided upgrade terminal that runs the installer interactively when possible.
 - `/notifications`: inspect and toggle TUI notifications.
 - `/mcp`: manage MCP servers (status/on/off/add).
 - `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
