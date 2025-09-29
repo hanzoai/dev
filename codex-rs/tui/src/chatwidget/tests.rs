@@ -2245,6 +2245,63 @@ fn two_final_answers_append_not_overwrite_when_no_deltas() {
 }
 
 #[test]
+fn export_preserves_user_role_and_content_type() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.submit_text_message("Run the integration tests".to_string());
+
+    // Drain any synthetic history updates generated during submission.
+    let _ = drain_insert_history(&rx);
+
+    let items = chat.export_response_items();
+    let mut user_items = items.iter().filter_map(|item| match item {
+        codex_protocol::models::ResponseItem::Message { role, content, .. }
+            if role == "user" =>
+        {
+            Some(content)
+        }
+        _ => None,
+    });
+
+    let content = user_items
+        .next()
+        .expect("expected at least one exported user item");
+
+    assert!(matches!(
+        content.first(),
+        Some(codex_protocol::models::ContentItem::InputText { .. })
+    ));
+}
+
+#[test]
+fn export_last_user_turn_detectable_after_assistant_reply() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.submit_text_message("Please summarize the diff".to_string());
+    chat.insert_final_answer_with_id(None, Vec::new(), "Sure, here's the summary.".to_string());
+
+    let _ = drain_insert_history(&rx);
+
+    let items = chat.export_response_items();
+    let last_user_index = items
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, item)| matches!(
+            item,
+            codex_protocol::models::ResponseItem::Message { role, content, .. }
+                if role == "user"
+                    && content.iter().any(|c| matches!(
+                        c,
+                        codex_protocol::models::ContentItem::InputText { .. }
+                    ))
+        ))
+        .map(|(idx, _)| idx);
+
+    assert_eq!(last_user_index, Some(0), "expected latest user prompt index");
+}
+
+#[test]
 fn second_final_that_is_superset_replaces_first() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
 
