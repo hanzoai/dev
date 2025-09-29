@@ -231,7 +231,7 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<AutoUpgr
                             if sudo_requires_manual_intervention(&fallback.stderr, fallback.status)
                             {
                                 outcome.user_notice = Some(format!(
-                                    "Automatic upgrade needs your attention. Run `/upgrade` to finish with `{}`.",
+                                "Automatic upgrade needs your attention. Run `/update` to finish with `{}`.",
                                     command_display
                                 ));
                             }
@@ -245,7 +245,7 @@ pub async fn auto_upgrade_if_enabled(config: &Config) -> anyhow::Result<AutoUpgr
                         Err(err) => {
                             warn!("auto-upgrade: sudo retry error: {err}");
                             outcome.user_notice = Some(format!(
-                                "Automatic upgrade could not escalate permissions. Run `/upgrade` to finish with `{}`.",
+                                "Automatic upgrade could not escalate permissions. Run `/update` to finish with `{}`.",
                                 command_display
                             ));
                             return Ok(outcome);
@@ -415,13 +415,24 @@ fn sudo_requires_manual_intervention(stderr: &str, status: Option<i32>) -> bool 
 
 fn truncate_for_log(text: &str) -> String {
     const LIMIT: usize = 256;
+    const ELLIPSIS_BYTES: usize = '…'.len_utf8();
     if text.len() <= LIMIT {
-        text.replace('\n', " ")
-    } else {
-        let mut truncated = text[..LIMIT].to_string();
-        truncated.push_str("…");
-        truncated.replace('\n', " ")
+        return text.replace('\n', " ");
     }
+
+    let slice_limit = LIMIT.saturating_sub(ELLIPSIS_BYTES);
+    let safe_boundary = text
+        .char_indices()
+        .map(|(idx, _)| idx)
+        .chain(std::iter::once(text.len()))
+        .take_while(|idx| *idx <= slice_limit)
+        .last()
+        .unwrap_or(0);
+
+    let safe_slice = text.get(..safe_boundary).unwrap_or("");
+    let mut truncated = safe_slice.to_string();
+    truncated.push('…');
+    truncated.replace('\n', " ")
 }
 
 #[cfg(test)]
@@ -440,6 +451,16 @@ mod unit_tests {
         let truncated = truncate_for_log(&long);
         assert!(truncated.ends_with('…'));
         assert!(truncated.len() <= 257);
+    }
+
+    #[test]
+    fn truncate_for_log_handles_multibyte_characters() {
+        let long = "漢字".repeat(200);
+        let truncated = truncate_for_log(&long);
+        assert!(truncated.ends_with('…'));
+        let prefix = truncated.trim_end_matches('…');
+        assert!(prefix.len() <= 256);
+        assert!(long.starts_with(prefix));
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
