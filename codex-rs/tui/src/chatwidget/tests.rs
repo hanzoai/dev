@@ -1,7 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, unnameable_test_items)]
 
 use super::*;
-use crate::app_event::{AppEvent, BackgroundPlacement};
+use crate::app_event::{
+    AppEvent,
+    AutoObserverStatus,
+    AutoObserverTelemetry,
+    BackgroundPlacement,
+};
 use crate::app_event_sender::AppEventSender;
 use crate::history::state::{ExecStatus, ExploreEntryStatus, HistoryId, HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
@@ -204,6 +209,48 @@ fn background_events_append_in_arrival_order() {
 }
 
 #[test]
+fn observer_report_replaces_prompt_and_resets_countdown() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.auto_state.active = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_prompt = Some("old prompt".to_string());
+    chat.auto_state.countdown_id = 7;
+    chat.auto_state.seconds_remaining = 3;
+
+    let telemetry = AutoObserverTelemetry {
+        trigger_count: 5,
+        last_status: AutoObserverStatus::Failing,
+        last_intervention: Some("replaced".to_string()),
+    };
+
+    chat.auto_handle_observer_report(
+        AutoObserverStatus::Failing,
+        telemetry.clone(),
+        Some("new prompt".to_string()),
+        Some("double-check the failing command".to_string()),
+    );
+
+    assert_eq!(chat.auto_state.current_prompt.as_deref(), Some("new prompt"));
+    assert_eq!(chat.auto_state.observer_status, AutoObserverStatus::Failing);
+    assert_eq!(
+        chat
+            .auto_state
+            .observer_telemetry
+            .as_ref()
+            .unwrap()
+            .trigger_count,
+        telemetry.trigger_count
+    );
+    assert_eq!(chat.auto_state.countdown_id, 8);
+    assert_eq!(chat.auto_state.seconds_remaining, AUTO_COUNTDOWN_SECONDS);
+
+    let texts = cell_texts(&chat);
+    assert!(texts.iter().any(|line| line.contains("Observer guidance")));
+    assert!(texts.iter().any(|line| line.contains("Observer replaced prompt")));
+}
+
+#[test]
 fn background_event_before_next_output_precedes_later_cells() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
 
@@ -241,7 +288,7 @@ fn wait_tool_updates_exec_record_via_history_state() {
         }),
         order: Some(order_meta(0)),
     });
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     let _ = drain_insert_history(&rx);
 
     let wait_params = json!({
@@ -259,7 +306,7 @@ fn wait_tool_updates_exec_record_via_history_state() {
         }),
         order: Some(order_meta(1)),
     });
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     let _ = drain_insert_history(&rx);
 
     chat.handle_codex_event(Event {
@@ -274,7 +321,7 @@ fn wait_tool_updates_exec_record_via_history_state() {
         }),
         order: Some(order_meta(2)),
     });
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     let _ = drain_insert_history(&rx);
 
     let exec_record = chat
@@ -325,7 +372,7 @@ fn explore_updates_history_state_via_domain_events() {
         }),
         order: Some(order_meta(0)),
     });
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     let _ = drain_insert_history(&rx);
 
     let explore_id = chat
@@ -363,7 +410,7 @@ fn explore_updates_history_state_via_domain_events() {
         }),
         order: Some(order_meta(1)),
     });
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     let _ = drain_insert_history(&rx);
 
     let explore_state = chat
@@ -737,14 +784,20 @@ impl ScriptStep {
     }
 }
 
-fn run_script(chat: &mut ChatWidget<'_>, steps: &[ScriptStep], rx: &std::sync::mpsc::Receiver<AppEvent>) {
+fn run_script(
+    chat: &mut ChatWidget<'_>,
+    steps: &[ScriptStep],
+    rx: &std::sync::mpsc::Receiver<AppEvent>,
+) -> Vec<AppEvent> {
+    let mut captured = Vec::new();
     for step in steps {
         if let ScriptStep::Key(code, modifiers) = step {
             chat.handle_key_event(KeyEvent::new(*code, *modifiers));
-            pump_app_events(chat, rx);
+            captured.extend(pump_app_events(chat, rx));
         }
     }
-    pump_app_events(chat, rx);
+    captured.extend(pump_app_events(chat, rx));
+    captured
 }
 
 #[test]
@@ -853,12 +906,12 @@ fn agents_terminal_toggle_via_shortcuts() {
     assert!(!chat.agents_terminal.active);
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert!(chat.agents_terminal.active, "Ctrl+A should open terminal");
 
     // Esc should exit the terminal view
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert!(!chat.agents_terminal.active, "Esc should exit terminal");
 }
 
@@ -888,27 +941,27 @@ fn agents_terminal_focus_and_scroll_controls() {
     });
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
 
     chat.layout.last_history_viewport_height.set(5);
     chat.layout.last_max_scroll.set(5);
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Detail);
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert_eq!(chat.layout.scroll_offset, 1, "Up should scroll output when focused");
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert!(chat.agents_terminal.active, "Overlay should remain open after first Esc");
     assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert!(!chat.agents_terminal.active, "Second Esc should close overlay");
 }
 
@@ -938,16 +991,20 @@ fn agents_terminal_esc_closes_from_sidebar() {
     });
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert!(chat.agents_terminal.active, "overlay should open");
     assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    pump_app_events(&mut chat, &rx);
+    let _ = pump_app_events(&mut chat, &rx);
     assert!(!chat.agents_terminal.active, "Esc should close from sidebar focus");
 }
 
-fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
+fn pump_app_events(
+    chat: &mut ChatWidget<'_>,
+    rx: &std::sync::mpsc::Receiver<AppEvent>,
+) -> Vec<AppEvent> {
+    let mut captured = Vec::new();
     while let Ok(event) = rx.try_recv() {
         match event {
             AppEvent::PrepareAgents => chat.prepare_agents(),
@@ -968,9 +1025,13 @@ fn pump_app_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<App
             }
             AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
             AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
+            AppEvent::OpenTerminal(_) => {
+                captured.push(event);
+            }
             _ => {}
         }
     }
+    captured
 }
 
 fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
@@ -1026,7 +1087,7 @@ fn slash_agents_opens_overview() {
         ScriptStep::key_char('s'),
         ScriptStep::enter(),
     ];
-    run_script(&mut chat, &script, &rx);
+    let _ = run_script(&mut chat, &script, &rx);
 
     let width: u16 = 120;
     let height = chat.desired_height(width).max(40);
@@ -1048,7 +1109,9 @@ fn slash_agents_opens_overview() {
 
 #[test]
 fn slash_upgrade_opens_guided_terminal() {
-    let _guard = EnvGuard::set("CODEX_MANAGED_BY_NPM", "1");
+    crate::updates::reset_force_upgrade_preview_for_tests();
+    let _npm_guard = EnvGuard::set("CODEX_MANAGED_BY_NPM", "1");
+    let _upgrade_guard = EnvGuard::set("SHOW_UPGRADE", "1");
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
     chat.latest_upgrade_version = Some("9.9.9".to_string());
 
@@ -1063,10 +1126,11 @@ fn slash_upgrade_opens_guided_terminal() {
         ScriptStep::key_char('e'),
         ScriptStep::enter(),
     ];
-    run_script(&mut chat, &script, &rx);
+    let mut events = run_script(&mut chat, &script, &rx);
+    events.extend(rx.try_iter());
 
     let mut saw_open_terminal = false;
-    while let Ok(event) = rx.try_recv() {
+    for event in events {
         if let AppEvent::OpenTerminal(launch) = event {
             saw_open_terminal = true;
             assert_eq!(launch.title, "Upgrade Code");
@@ -1079,6 +1143,7 @@ fn slash_upgrade_opens_guided_terminal() {
     }
 
     assert!(saw_open_terminal, "expected guided upgrade terminal to open");
+    crate::updates::reset_force_upgrade_preview_for_tests();
 }
 
 #[test]
@@ -1093,7 +1158,7 @@ fn slash_undo_shows_no_snapshot_state() {
         ScriptStep::key_char('o'),
         ScriptStep::enter(),
     ];
-    run_script(&mut chat, &script, &rx);
+    let _ = run_script(&mut chat, &script, &rx);
 
     assert!(
         chat.bottom_pane.has_active_modal_view(),
