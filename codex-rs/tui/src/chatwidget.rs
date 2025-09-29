@@ -47,6 +47,7 @@ use codex_protocol::num_format::format_with_separators;
 
 
 mod auto_coordinator;
+mod auto_observer;
 mod diff_handlers;
 mod agent_install;
 mod diff_ui;
@@ -189,6 +190,8 @@ use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
     AutoCoordinatorStatus,
+    AutoObserverStatus,
+    AutoObserverTelemetry,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -460,6 +463,8 @@ struct AutoCoordinatorUiState {
     awaiting_goal_input: bool,
     last_broadcast_thought: Option<String>,
     last_decision_display: Option<String>,
+    observer_telemetry: Option<AutoObserverTelemetry>,
+    observer_status: AutoObserverStatus,
 }
 
 impl AutoCoordinatorUiState {
@@ -9608,6 +9613,7 @@ impl ChatWidget<'_> {
             conversation,
             self.config.clone(),
             self.config.debug,
+            self.config.auto_drive_observer_cadence,
         ) {
             Ok(handle) => {
                 self.auto_tx = Some(handle.tx);
@@ -9760,6 +9766,56 @@ impl ChatWidget<'_> {
         }
     }
 
+    pub(crate) fn auto_handle_observer_report(
+        &mut self,
+        status: AutoObserverStatus,
+        telemetry: AutoObserverTelemetry,
+        replace_message: Option<String>,
+        additional_instructions: Option<String>,
+    ) {
+        if !self.auto_state.active {
+            return;
+        }
+
+        self.auto_state.observer_status = status;
+        self.auto_state.observer_telemetry = Some(telemetry);
+
+        if matches!(status, AutoObserverStatus::Failing) {
+            let guidance = additional_instructions
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let banner = guidance
+                .map(|text| format!("Observer guidance: {text}"))
+                .unwrap_or_else(|| "Observer flagged the last Auto Drive step.".to_string());
+            self.push_background_tail(banner);
+
+            if let Some(message) = replace_message
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                self.auto_state.current_prompt = Some(message.to_string());
+                if self.auto_state.awaiting_submission {
+                    self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+                    self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                    self.auto_start_countdown(self.auto_state.countdown_id);
+                }
+                let summary = Self::truncate_with_ellipsis(message, 160);
+                self.push_background_tail(format!("Observer replaced prompt with: {summary}"));
+            }
+        } else if let Some(note) = additional_instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            self.push_background_tail(format!("Observer note: {note}"));
+        }
+
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
     pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
         if !self.auto_state.active {
             return;
@@ -9904,7 +9960,28 @@ impl ChatWidget<'_> {
                 .clone()
         };
 
-        let status_lines: Vec<String> = vec![append_thought_ellipsis(&status_text)];
+        let mut status_lines = vec![append_thought_ellipsis(&status_text)];
+        if let Some(telemetry) = self.auto_state.observer_telemetry.as_ref() {
+            let status_label = match self.auto_state.observer_status {
+                AutoObserverStatus::Ok => "ok",
+                AutoObserverStatus::Failing => "failing",
+            };
+            let mut telemetry_line = format!(
+                "Observer: {status_label} (triggers: {})",
+                telemetry.trigger_count
+            );
+            if let Some(intervention) = telemetry
+                .last_intervention
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                let display = Self::truncate_with_ellipsis(intervention, 80);
+                telemetry_line.push_str(" — ");
+                telemetry_line.push_str(&display);
+            }
+            status_lines.push(telemetry_line);
+        }
 
         let prompt = self
             .auto_state

@@ -1629,6 +1629,21 @@ impl App<'_> {
                         widget.auto_handle_countdown(countdown_id, seconds_left);
                     }
                 }
+                AppEvent::AutoObserverReport {
+                    status,
+                    telemetry,
+                    replace_message,
+                    additional_instructions,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_observer_report(
+                            status,
+                            telemetry,
+                            replace_message,
+                            additional_instructions,
+                        );
+                    }
+                }
                 AppEvent::ShowUndoOptions { index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.show_undo_restore_options(index);
