@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_event::{
     AppEvent,
+    AutoCoordinatorStatus,
     AutoObserverStatus,
     AutoObserverTelemetry,
     BackgroundPlacement,
@@ -10,6 +11,7 @@ use crate::app_event::{
 use crate::app_event_sender::AppEventSender;
 use crate::history::state::{ExecStatus, ExploreEntryStatus, HistoryId, HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
+use super::auto_coordinator::AutoCoordinatorHandle;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
@@ -998,6 +1000,61 @@ fn agents_terminal_esc_closes_from_sidebar() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     let _ = pump_app_events(&mut chat, &rx);
     assert!(!chat.agents_terminal.active, "Esc should close from sidebar focus");
+}
+
+#[test]
+fn auto_thinking_keeps_previous_display_until_decision() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.current_display_line = Some("Prev thought".to_string());
+    chat.auto_state.current_thoughts = Some("Prev thought".to_string());
+
+    chat.auto_handle_thinking("**Next:** run lint".to_string(), Some(3));
+    assert_eq!(chat.auto_state.current_summary_index, Some(3));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Prev thought")
+    );
+
+    chat.auto_handle_thinking("extra detail".to_string(), None);
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Prev thought")
+    );
+}
+
+#[test]
+fn auto_decision_persists_thought_through_cli_cycle() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+
+    chat.auto_handle_decision(
+        AutoCoordinatorStatus::Continue,
+        "**Plan:** run tests".to_string(),
+        Some("run tests".to_string()),
+    );
+
+    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert!(!chat.auto_state.coordinator_waiting, "spinner should stop");
+    assert!(!chat.auto_state.waiting_for_response, "coordinator finished");
+
+    chat.auto_submit_prompt();
+    assert!(chat.auto_state.waiting_for_response, "waiting on CLI");
+    assert!(!chat.auto_state.coordinator_waiting, "spinner stays off during CLI");
+    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+
+    chat.auto_state.placeholder_phrase = None;
+    let (tx, _rx_handle) = channel();
+    chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
+    chat.auto_on_assistant_final();
+
+    assert!(chat.auto_state.waiting_for_response, "next JSON in flight");
+    assert!(chat.auto_state.coordinator_waiting, "spinner resumes for JSON");
+    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
 }
 
 fn pump_app_events(
