@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use codex_core::{ModelClient, Prompt, ResponseEvent, TextFormat};
+use codex_core::{error::CodexErr, ModelClient, Prompt, ResponseEvent, TextFormat};
 use codex_core::model_family::{derive_default_model_family, find_family_for_model};
 use codex_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
@@ -148,27 +148,36 @@ fn evaluate_observer(
     client: Arc<ModelClient>,
     trigger: ObserverTrigger,
 ) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
-    let mut prompt = Prompt::default();
-    prompt.store = true;
+    let prompt = build_observer_prompt(&trigger, MODEL_SLUG);
+    match run_observer_prompt(runtime, client.clone(), prompt) {
+        Ok(result) => Ok(result),
+        Err(err) => {
+            let fallback_slug = client.default_model_slug().to_string();
+            if should_retry_with_default_model(&err) && fallback_slug != MODEL_SLUG {
+                debug!(
+                    preferred = %MODEL_SLUG,
+                    fallback = %fallback_slug,
+                    "auto observer falling back to configured model after invalid model error"
+                );
+                let fallback_prompt = build_observer_prompt(&trigger, &fallback_slug);
+                let original_error = err.to_string();
+                return run_observer_prompt(runtime, client, fallback_prompt).map_err(|fallback_err| {
+                    fallback_err.context(format!(
+                        "observer fallback with model '{}' failed after original error: {}",
+                        fallback_slug, original_error
+                    ))
+                });
+            }
+            Err(err)
+        }
+    }
+}
 
-    let instructions = build_observer_instructions(&trigger.environment_details);
-    prompt.input.push(make_message("developer", instructions));
-    let goal = format!("Primary Goal\n{}", trigger.goal_text);
-    prompt.input.push(make_message("developer", goal));
-    prompt.input.extend(trigger.conversation);
-
-    let schema = build_observer_schema();
-    prompt.text_format = Some(TextFormat {
-        r#type: "json_schema".to_string(),
-        name: Some(OBSERVER_SCHEMA_NAME.to_string()),
-        strict: Some(true),
-        schema: Some(schema),
-    });
-    prompt.model_override = Some(MODEL_SLUG.to_string());
-    let family = find_family_for_model(MODEL_SLUG)
-        .unwrap_or_else(|| derive_default_model_family(MODEL_SLUG));
-    prompt.model_family_override = Some(family);
-
+fn run_observer_prompt(
+    runtime: &tokio::runtime::Runtime,
+    client: Arc<ModelClient>,
+    prompt: Prompt,
+) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
     let raw = runtime.block_on(async {
         request_observer_response(client.clone(), &prompt).await
     })?;
@@ -204,6 +213,48 @@ fn evaluate_observer(
     );
 
     Ok((status, replace_message, additional_instructions))
+}
+
+fn build_observer_prompt(trigger: &ObserverTrigger, model_slug: &str) -> Prompt {
+    let mut prompt = Prompt::default();
+    prompt.store = true;
+
+    let instructions = build_observer_instructions(&trigger.environment_details);
+    prompt.input.push(make_message("developer", instructions));
+    let goal = format!("Primary Goal\n{}", trigger.goal_text);
+    prompt.input.push(make_message("developer", goal));
+    prompt.input.extend(trigger.conversation.clone());
+
+    let schema = build_observer_schema();
+    prompt.text_format = Some(TextFormat {
+        r#type: "json_schema".to_string(),
+        name: Some(OBSERVER_SCHEMA_NAME.to_string()),
+        strict: Some(true),
+        schema: Some(schema),
+    });
+    prompt.model_override = Some(model_slug.to_string());
+    let family = find_family_for_model(model_slug)
+        .unwrap_or_else(|| derive_default_model_family(model_slug));
+    prompt.model_family_override = Some(family);
+    prompt
+}
+
+fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(codex_err) = cause.downcast_ref::<CodexErr>() {
+            if let CodexErr::UnexpectedStatus(status, body) = codex_err {
+                if !status.is_client_error() {
+                    return false;
+                }
+                let body_lower = body.to_lowercase();
+                return body_lower.contains("invalid model")
+                    || body_lower.contains("unknown model")
+                    || body_lower.contains("model_not_found")
+                    || body_lower.contains("model does not exist");
+            }
+        }
+        false
+    })
 }
 
 async fn request_observer_response(
