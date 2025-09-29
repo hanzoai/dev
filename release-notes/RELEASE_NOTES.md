@@ -1,13 +1,11 @@
-## @just-every/code v0.2.172
+## @just-every/code v0.2.173
 
-This release expands auto-drive guidance, rounds out MCP connectivity, and adds a proxy command for Responses API workflows.
+This release tightens the TUI browser loop so failures hand off to Code with clearer diagnostics.
 
 ### Changes
 
-- CLI: introduce a responses API proxy command so shared hosts can forward Responses calls securely.
-- MCP: add streamable HTTP client support and tighten per-call timeout handling.
-- Auto-drive: stream coordinator reasoning, keep plan context, and smooth heading presentation.
-- TUI/History: route diff and explore cells through domain events for consistent playback.
+- TUI/Browser: auto hand off /browser startup failures to Code so sessions self-heal.
+- TUI/Browser: sanitize and surface error details when handoff triggers for faster diagnosis.
 
 ### Install
 
@@ -16,4 +14,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.171...v0.2.172
+Compare: https://github.com/just-every/code/compare/v0.2.172...v0.2.173
