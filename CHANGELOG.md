@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.178] - 2025-09-30
+
+- Auto-drive: restructure coordinator transcript to clarify CLI roles and context. (4733856)
+- Auto-drive: show coordinator summary while CLI commands execute so guidance stays visible. (5e273dc)
+- Auto-drive: require mandatory observer fields to avoid partial telemetry updates. (962e482)
+- TUI: round rate-limit windows with local reset times for accurate throttling feedback. (0b13c26)
+- TUI/Theme: preserve assistant tint across palettes to keep colors consistent across terminals. (87817ae)
+
 ## [0.2.177] - 2025-09-29
 
 - Core/CLI: centralize pre-main process hardening into `codex-process-hardening` and invoke it automatically when secure mode is enabled. (bacba3f)

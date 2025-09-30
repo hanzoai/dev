@@ -1,13 +1,14 @@
-## @just-every/code v0.2.177
+## @just-every/code v0.2.178
 
-This release hardens secure-mode startup and keeps auto-drive guidance in sync with the latest plan.
+This release clarifies automation transcripts, improves rate-limit feedback, and keeps colors consistent across terminals.
 
 ### Changes
 
-- Core/CLI: centralize pre-main process hardening into codex-process-hardening and invoke it automatically when secure mode is enabled.
-- CLI/Proxy: rename the responses proxy binary to codex-responses-api-proxy, harden startup, and remove request timeouts so streaming stays reliable.
-- Auto-drive: relay plan updates to the coordinator so guidance stays aligned with the latest steps.
-- TUI/Auto-drive: show the waiting spinner only while the coordinator is active to avoid idle animation churn.
+- Auto-drive: restructure coordinator transcript to clarify CLI roles and context.
+- Auto-drive: show coordinator summary while CLI commands execute so guidance stays visible.
+- Auto-drive: require mandatory observer fields to avoid partial telemetry updates.
+- TUI: round rate-limit windows with local reset times for accurate throttling feedback.
+- TUI/Theme: preserve assistant tint across palettes to keep colors consistent across terminals.
 
 ### Install
 
@@ -16,4 +17,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.176...v0.2.177
+Compare: https://github.com/just-every/code/compare/v0.2.177...v0.2.178
