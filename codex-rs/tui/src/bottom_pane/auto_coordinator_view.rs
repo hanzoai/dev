@@ -577,20 +577,18 @@ impl AutoCoordinatorView {
             }
         }
 
-        if !content_lines.is_empty()
-            && !footer_lines.is_empty()
-            && has_button_block
-            && footer_lines
+        if !content_lines.is_empty() && !footer_lines.is_empty() {
+            if has_button_block {
+                // keep the button snug against the prompt/status text
+            } else if footer_lines
                 .first()
                 .map(|line| line.width() == 0)
                 .unwrap_or(false)
-        {
-            // Already have leading spacer
-        } else if !content_lines.is_empty()
-            && !footer_lines.is_empty()
-            && has_button_block
-        {
-            footer_lines.insert(0, Line::default());
+            {
+                // already spaced
+            } else {
+                footer_lines.insert(0, Line::default());
+            }
         }
 
         let available_height = inner.height as usize;
