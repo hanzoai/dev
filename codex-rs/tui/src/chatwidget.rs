@@ -10402,7 +10402,8 @@ impl ChatWidget<'_> {
                 .clone()
         };
 
-        let mut status_lines = vec![append_thought_ellipsis(&status_text)];
+        let headline = self.auto_format_status_headline(&status_text);
+        let mut status_lines = vec![headline];
         if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
             if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
                 let trimmed = summary.trim();
@@ -10514,6 +10515,28 @@ impl ChatWidget<'_> {
         let interval = crate::spinner::current_spinner().interval_ms.max(80);
         self.app_event_tx
             .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+    }
+
+    fn auto_format_status_headline(&self, text: &str) -> String {
+        let trimmed = text.trim_end();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        let show_summary_without_ellipsis = self.auto_state.awaiting_submission
+            && self.auto_state.current_reasoning_title.is_none()
+            && self
+                .auto_state
+                .current_summary
+                .as_ref()
+                .map(|summary| !summary.trim().is_empty())
+                .unwrap_or(false);
+
+        if show_summary_without_ellipsis {
+            trimmed.to_string()
+        } else {
+            append_thought_ellipsis(trimmed)
+        }
     }
 
     fn auto_update_display_title(&mut self) {
