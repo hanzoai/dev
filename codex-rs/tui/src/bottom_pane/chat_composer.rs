@@ -92,6 +92,16 @@ fn format_with_thousands(n: u64) -> String {
     out.chars().rev().collect()
 }
 
+enum PromptSelectionMode {
+    Completion,
+    Submit,
+}
+
+enum PromptSelectionAction {
+    Insert { text: String, cursor: Option<usize> },
+    Submit { text: String },
+}
+
 pub(crate) struct ChatComposer {
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
@@ -1497,6 +1507,7 @@ impl ChatComposer {
                 let original_text = self.textarea.text().to_string();
 
                 let mut text = self.textarea.text().to_string();
+                let original_input = text.clone();
                 self.textarea.set_text("");
 
                 // Replace all pending pastes in the text
