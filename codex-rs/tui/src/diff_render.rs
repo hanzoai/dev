@@ -9,7 +9,6 @@ use std::path::PathBuf;
 
 use codex_core::protocol::FileChange;
 
-use crate::colors::color_to_rgb;
 use crate::history_cell::PatchEventType;
 use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
 
@@ -634,10 +633,6 @@ fn style_del() -> Style {
 // --- Very light tinted backgrounds for insert/delete lines ------------------
 use ratatui::style::Color;
 
-fn color_to_rgb(c: Color) -> (u8, u8, u8) {
-    crate::colors::color_to_rgb(c)
-}
-
 fn blend(bg: (u8, u8, u8), fg: (u8, u8, u8), alpha: f32) -> (u8, u8, u8) {
     let inv = 1.0 - alpha;
     let r = (bg.0 as f32 * inv + fg.0 as f32 * alpha).round() as u8;
@@ -652,8 +647,8 @@ fn is_dark(rgb: (u8, u8, u8)) -> bool {
 }
 
 fn tinted_bg_toward(accent: Color) -> Color {
-    let bg = color_to_rgb(crate::colors::background());
-    let fg = color_to_rgb(accent);
+    let bg = crate::colors::color_to_rgb(crate::colors::background());
+    let fg = crate::colors::color_to_rgb(accent);
     // Slightly stronger tint on dark themes, lighter on light themes
     let alpha = if is_dark(bg) { 0.20 } else { 0.10 };
     let (r, g, b) = blend(bg, fg, alpha);
