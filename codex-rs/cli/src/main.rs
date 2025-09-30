@@ -22,6 +22,8 @@ use codex_core::find_conversation_path_by_id_str;
 use codex_core::RolloutRecorder;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
+use codex_responses_api_proxy::Args as ResponsesApiProxyArgs;
+use codex_tui::AppExitInfo;
 use codex_tui::Cli as TuiCli;
 use codex_tui::ExitSummary;
 use codex_tui::RESUME_COMMAND_NAME;
@@ -132,6 +134,10 @@ enum Subcommand {
     /// [EXPERIMENTAL] Browse tasks from Codex Cloud and apply changes locally.
     #[clap(name = "cloud", alias = "cloud-tasks")]
     Cloud(CloudTasksCli),
+
+    /// Internal: run the responses API proxy.
+    #[clap(hide = true)]
+    ResponsesApiProxy(ResponsesApiProxyArgs),
 
     /// Diagnose PATH, binary collisions, and versions.
     Doctor,
@@ -422,6 +428,10 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 root_config_overrides.clone(),
             );
             run_apply_command(apply_cli, None).await?;
+        }
+        Some(Subcommand::ResponsesApiProxy(args)) => {
+            tokio::task::spawn_blocking(move || codex_responses_api_proxy::run_main(args))
+                .await??;
         }
         Some(Subcommand::GenerateTs(gen_cli)) => {
             codex_protocol_ts::generate_ts(&gen_cli.out_dir, gen_cli.prettier.as_deref())?;
