@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -94,6 +94,88 @@ impl AutoCoordinatorView {
         }
     }
 
+    fn build_title(
+        &self,
+        area_width: u16,
+        spinner_symbol: Option<&str>,
+        status_text: Option<&str>,
+    ) -> String {
+        const BASE_TITLE: &str = " Auto Drive ";
+        let base_width = UnicodeWidthStr::width(BASE_TITLE);
+        let mut title = String::from(BASE_TITLE);
+
+        let Some(spinner) = spinner_symbol else {
+            return title;
+        };
+        let Some(status) = status_text.map(str::trim) else {
+            return title;
+        };
+        if status.is_empty() {
+            return title;
+        }
+
+        let inner_width = area_width.saturating_sub(2) as usize;
+        if inner_width <= base_width {
+            return title;
+        }
+
+        let spinner_width = UnicodeWidthStr::width(spinner);
+        let max_segment_width = inner_width.saturating_sub(base_width);
+        if max_segment_width <= spinner_width + 1 {
+            return title;
+        }
+
+        let mut final_status = String::new();
+        let mut truncated = false;
+        let mut used_width = spinner_width + 1; // spinner + single separating space
+
+        for ch in status.chars() {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if ch_width == 0 {
+                continue;
+            }
+            if used_width + ch_width > max_segment_width {
+                truncated = true;
+                break;
+            }
+            final_status.push(ch);
+            used_width += ch_width;
+        }
+
+        if final_status.is_empty() {
+            // Nothing fit besides the spinner – keep default title.
+            return title;
+        }
+
+        if truncated {
+            // Attempt to append an ellipsis without exceeding the available width.
+            let ellipsis_width = UnicodeWidthStr::width("…");
+            if used_width + ellipsis_width <= max_segment_width {
+                final_status.push('…');
+            } else if let Some(last) = final_status.pop() {
+                // Replace last character if adding ellipsis would overflow.
+                let last_width = UnicodeWidthChar::width(last).unwrap_or(0);
+                let used_without_last = used_width.saturating_sub(last_width);
+                if used_without_last + ellipsis_width <= max_segment_width {
+                    final_status.push('…');
+                } else {
+                    // No room for ellipsis; restore last char to avoid dropping information.
+                    final_status.push(last);
+                }
+            }
+        }
+
+        let segment = format!("{spinner} {final_status}");
+        let segment_width = UnicodeWidthStr::width(segment.as_str());
+        let inner_center = inner_width.saturating_sub(segment_width) / 2;
+        let spinner_start = inner_center.max(base_width + 1);
+        let pad_width = spinner_start.saturating_sub(base_width);
+        title.push_str(&" ".repeat(pad_width));
+        title.push_str(&segment);
+        title.push(' ');
+        title
+    }
+
     fn render_frame(&self, area: Rect, buf: &mut Buffer, title: &str, now: Instant) -> Option<Rect> {
         if area.width < 3 || area.height < 3 {
             return None;
@@ -172,36 +254,33 @@ impl AutoCoordinatorView {
         entries
     }
 
-    fn status_lines(&self) -> Vec<Line<'static>> {
-        let spinner_symbol = if self.model.coordinator_waiting {
-            let frame_idx = DRIVE_SPINNER_TICK.fetch_add(1, Ordering::Relaxed);
-            Some(DRIVE_SPINNER_FRAMES[frame_idx % DRIVE_SPINNER_FRAMES.len()].to_string())
-        } else {
-            None
-        };
-
+    fn status_lines_with_entries(
+        &self,
+        entries: &[(String, Style)],
+        spinner_symbol: Option<&str>,
+    ) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        for (index, (text, style)) in self.derived_status_entries().into_iter().enumerate() {
+        for (index, (text, style)) in entries.iter().enumerate() {
             if index == 0 {
-                if let Some(symbol) = spinner_symbol.as_ref() {
+                if let Some(symbol) = spinner_symbol {
                     lines.push(Line::from(vec![
                         Span::styled(
-                            symbol.clone(),
+                            symbol.to_string(),
                             Style::default()
                                 .fg(colors::spinner())
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::raw("  "),
-                        Span::styled(text, style),
+                        Span::styled(text.clone(), *style),
                     ]));
                 } else {
                     lines.push(Line::from(vec![
                         Span::raw("   "),
-                        Span::styled(text, style),
+                        Span::styled(text.clone(), *style),
                     ]));
                 }
             } else {
-                lines.push(Line::from(Span::styled(text, style)));
+                lines.push(Line::from(Span::styled(text.clone(), *style)));
             }
         }
         lines
@@ -366,15 +445,26 @@ impl AutoCoordinatorView {
             frame_needed = true;
         }
 
-        let Some(inner) = self.render_frame(area, buf, " Auto Drive ", now) else {
+        let spinner_active = !self.model.awaiting_submission && self.model.coordinator_waiting;
+        let spinner_symbol = spinner_active.then(|| {
+            let frame_idx = DRIVE_SPINNER_TICK.fetch_add(1, Ordering::Relaxed);
+            DRIVE_SPINNER_FRAMES[frame_idx % DRIVE_SPINNER_FRAMES.len()].to_string()
+        });
+        let status_entries = self.derived_status_entries();
+        let status_title_text = status_entries.first().map(|(text, _)| text.clone());
+        let title = self.build_title(
+            area.width,
+            spinner_symbol.as_deref(),
+            status_title_text.as_deref(),
+        );
+
+        let Some(inner) = self.render_frame(area, buf, &title, now) else {
             return;
         };
         let inner = self.apply_left_padding(inner, buf);
         if inner.height == 0 {
             return;
         }
-
-        let spinner_active = !self.model.awaiting_submission && self.model.coordinator_waiting;
 
         let mut lines: Vec<Line<'static>> = Vec::new();
 
@@ -399,7 +489,8 @@ impl AutoCoordinatorView {
                 lines.push(ctrl_hint_line);
             }
         } else {
-            let status_lines = self.status_lines();
+            let status_lines =
+                self.status_lines_with_entries(&status_entries, spinner_symbol.as_deref());
             lines.extend(status_lines);
 
             if let Some(button_line) = self.button_line(ctx) {
