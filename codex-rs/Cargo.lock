@@ -1017,6 +1017,7 @@ dependencies = [
  "codex-process-hardening",
  "codex-protocol",
  "codex-protocol-ts",
+ "codex-responses-api-proxy",
  "codex-tui",
  "codex-version",
  "ctor 0.5.0",
