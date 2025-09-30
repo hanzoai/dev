@@ -292,6 +292,15 @@ impl ChatComposer {
         self.status_message = Self::map_status_message(&message);
     }
 
+    pub fn status_message(&self) -> Option<&str> {
+        let trimmed = self.status_message.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }
+
     pub fn flash_footer_notice(&mut self, text: String) {
         let expiry = std::time::Instant::now() + std::time::Duration::from_secs(2);
         self.footer_notice = Some((text, expiry));
@@ -336,7 +345,7 @@ impl ChatComposer {
     }
 
     // Map technical status messages to user-friendly ones
-    fn map_status_message(technical_message: &str) -> String {
+    pub(crate) fn map_status_message(technical_message: &str) -> String {
         if technical_message.trim().is_empty() {
             return String::new();
         }
