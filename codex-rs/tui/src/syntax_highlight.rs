@@ -10,6 +10,10 @@ use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::parsing::SyntaxSetBuilder;
 use syntect::util::LinesWithEndings;
 
+// Convert a ratatui `Color` into an RGB tuple using the shared theme helper so
+// ANSI-256 indexed colors resolve to the correct palette entries instead of a
+// flat grayscale fallback. This keeps luminance-detection accurate even on
+// terminals without truecolor support.
 fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
     (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0
 }

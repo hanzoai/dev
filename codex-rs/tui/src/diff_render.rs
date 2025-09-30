@@ -634,6 +634,10 @@ fn style_del() -> Style {
 // --- Very light tinted backgrounds for insert/delete lines ------------------
 use ratatui::style::Color;
 
+fn color_to_rgb(c: Color) -> (u8, u8, u8) {
+    crate::colors::color_to_rgb(c)
+}
+
 fn blend(bg: (u8, u8, u8), fg: (u8, u8, u8), alpha: f32) -> (u8, u8, u8) {
     let inv = 1.0 - alpha;
     let r = (bg.0 as f32 * inv + fg.0 as f32 * alpha).round() as u8;
