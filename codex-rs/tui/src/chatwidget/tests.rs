@@ -12,6 +12,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::history::state::{ExecStatus, ExploreEntryStatus, HistoryId, HistoryRecord, HistoryState};
 use crate::slash_command::SlashCommand;
 use super::auto_coordinator::AutoCoordinatorHandle;
+use super::auto_observer::build_observer_conversation;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::ConfigToml;
@@ -45,6 +46,7 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
+use codex_protocol::models::{ContentItem, ResponseItem};
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -2363,6 +2365,149 @@ fn two_final_answers_append_not_overwrite_when_no_deltas() {
     assert_eq!(assistants.len(), 2, "expected two assistant messages, got {}", assistants.len());
     assert!(assistants.iter().any(|s| s.contains("First message")), "missing first message");
     assert!(assistants.iter().any(|s| s.contains("Second message")), "missing second message");
+}
+
+fn message_text(item: &ResponseItem) -> Option<String> {
+    if let ResponseItem::Message { content, .. } = item {
+        let mut out = String::new();
+        for chunk in content {
+            match chunk {
+                ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                    out.push_str(text);
+                }
+                _ => {}
+            }
+        }
+        Some(out)
+    } else {
+        None
+    }
+}
+
+#[test]
+fn export_auto_drive_items_includes_cli_outputs() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push(history_cell::new_user_prompt("Run integration tests".to_string()));
+
+    chat.insert_final_answer_with_id(None, Vec::new(), "{\"status\":\"ok\"}".to_string());
+    let _ = drain_insert_history(&rx);
+
+    let mut reasoning_cell = history_cell::CollapsibleReasoningCell::new_with_id(
+        vec![ratatui::text::Line::from("Considering optimal workflow")],
+        Some("reasoning-test".to_string()),
+    );
+    reasoning_cell.set_collapsed(false);
+    reasoning_cell.set_in_progress(false);
+    chat.history_push(reasoning_cell);
+
+    let plan_update = UpdatePlanArgs {
+        name: Some("Stabilize build".to_string()),
+        plan: vec![
+            PlanItemArg {
+                step: "Install dependencies".to_string(),
+                status: StepStatus::Completed,
+            },
+            PlanItemArg {
+                step: "Run integration tests".to_string(),
+                status: StepStatus::InProgress,
+            },
+        ],
+    };
+    chat.history_push(history_cell::new_plan_update(plan_update));
+
+    let diff = "diff --git a/foo.rs b/foo.rs\n--- a/foo.rs\n+++ b/foo.rs\n@@ -1 +1,2 @@\n-println!(\"old\");\n+println!(\"new\");\n+println!(\"extra\");\n";
+    chat.add_diff_output(diff.to_string());
+
+    let items = chat.export_auto_drive_items();
+
+    let coordinator = items
+        .iter()
+        .find(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
+        .and_then(message_text)
+        .expect("coordinator message present");
+    assert!(
+        coordinator.contains("Run integration tests"),
+        "coordinator text missing"
+    );
+
+    let cli = items
+        .iter()
+        .find(|item| {
+            matches!(
+                item,
+                ResponseItem::Message { role, content, .. }
+                    if role == "user"
+                        && content.iter().any(|c| matches!(
+                            c,
+                            ContentItem::InputText { text }
+                                if text.contains("\"status\":\"ok\"")
+                        ))
+            )
+        })
+        .expect("cli response included");
+    assert!(matches!(cli, ResponseItem::Message { .. }));
+
+    assert!(items.iter().any(|item| {
+        matches!(item, ResponseItem::Message { id, .. } if id.as_deref() == Some("auto-drive-reasoning"))
+    }), "reasoning message tagged");
+
+    assert!(items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Plan update") && text.contains("[in_progress]"))
+            .unwrap_or(false)
+    }), "plan update summary present");
+
+    assert!(items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Files changed") && text.contains("foo.rs"))
+            .unwrap_or(false)
+    }), "diff summary present");
+}
+
+#[test]
+fn observer_conversation_filters_reasoning_and_prefixes() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push(history_cell::new_user_prompt("Summarize recent commits".to_string()));
+    chat.insert_final_answer_with_id(None, Vec::new(), "CLI summary".to_string());
+    let _ = drain_insert_history(&rx);
+
+    let mut reasoning_cell = history_cell::CollapsibleReasoningCell::new_with_id(
+        vec![ratatui::text::Line::from("Inspecting commit history")],
+        Some("reasoning-test".to_string()),
+    );
+    reasoning_cell.set_collapsed(false);
+    reasoning_cell.set_in_progress(false);
+    chat.history_push(reasoning_cell);
+
+    let items = chat.export_auto_drive_items();
+    assert!(items.iter().any(|item| matches!(
+        item,
+        ResponseItem::Message { role, .. } if role == "assistant"
+    )));
+
+    let observer_items = build_observer_conversation(items, Some("Queue next review"));
+
+    assert!(observer_items.iter().all(|item| {
+        !matches!(item, ResponseItem::Message { role, .. } if role == "assistant")
+    }), "assistant roles converted to user");
+
+    assert!(observer_items.iter().all(|item| {
+        !matches!(item, ResponseItem::Message { id, .. } if id.as_deref() == Some("auto-drive-reasoning"))
+    }), "reasoning entries removed");
+
+    assert!(observer_items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Coordinator: Summarize recent commits"))
+            .unwrap_or(false)
+    }), "coordinator text prefixed");
+
+    assert!(observer_items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Coordinator: Queue next review"))
+            .unwrap_or(false)
+    }), "appended prompt prefixed");
 }
 
 #[test]
