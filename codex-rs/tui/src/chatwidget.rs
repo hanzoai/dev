@@ -2664,7 +2664,7 @@ impl ChatWidget<'_> {
 
         let (codex_op_tx, codex_op_rx) = unbounded_channel::<Op>();
 
-        let auth_manager = AuthManager::shared(
+        let auth_manager = AuthManager::shared_with_mode_and_originator(
             config.codex_home.clone(),
             AuthMode::ApiKey,
             config.responses_originator_header.clone(),

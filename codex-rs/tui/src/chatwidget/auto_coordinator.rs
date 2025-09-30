@@ -144,7 +144,7 @@ fn run_auto_loop(
     };
     let codex_home = config.codex_home.clone();
     let responses_originator_header = config.responses_originator_header.clone();
-    let auth_mgr = AuthManager::shared(
+    let auth_mgr = AuthManager::shared_with_mode_and_originator(
         codex_home,
         preferred_auth,
         responses_originator_header,
@@ -157,6 +157,7 @@ fn run_auto_loop(
     let client = ModelClient::new(
         config.clone(),
         Some(auth_mgr),
+        None,
         model_provider,
         ReasoningEffort::Medium,
         model_reasoning_summary,
