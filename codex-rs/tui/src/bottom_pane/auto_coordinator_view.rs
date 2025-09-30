@@ -43,8 +43,13 @@ pub(crate) struct AutoCoordinatorViewModel {
     pub cli_running: bool,
 }
 
+struct ButtonContext {
+    label: String,
+    enabled: bool,
+}
+
 struct VariantContext {
-    button: Option<(String, bool)>,
+    button: Option<ButtonContext>,
     ctrl_hint: String,
     manual_hint: Option<String>,
 }
@@ -88,7 +93,10 @@ impl AutoCoordinatorView {
             .model
             .button
             .as_ref()
-            .map(|btn| (format_button_text(btn), btn.enabled));
+            .map(|btn| ButtonContext {
+                label: btn.label.clone(),
+                enabled: btn.enabled,
+            });
         VariantContext {
             button,
             ctrl_hint: self.model.ctrl_switch_hint.clone(),
@@ -316,19 +324,6 @@ impl AutoCoordinatorView {
         })
     }
 
-    fn button_line(&self, ctx: &VariantContext) -> Option<Line<'static>> {
-        ctx.button.as_ref().map(|(text, enabled)| {
-            let style = if *enabled {
-                Style::default()
-                    .fg(colors::primary())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(colors::text_dim())
-            };
-            Line::from(Span::styled(text.clone(), style))
-        })
-    }
-
     fn manual_hint_line(&self, ctx: &VariantContext) -> Option<Line<'static>> {
         ctx.manual_hint.as_ref().map(|hint| {
             Line::from(Span::styled(
@@ -338,16 +333,84 @@ impl AutoCoordinatorView {
         })
     }
 
-    fn ctrl_hint_line(&self, ctx: &VariantContext) -> Option<Line<'static>> {
-        if ctx.ctrl_hint.trim().is_empty() {
+    fn button_block_lines(&self, ctx: &VariantContext) -> Option<Vec<Line<'static>>> {
+        let button = ctx.button.as_ref()?;
+        let label = button.label.trim();
+        if label.is_empty() {
             return None;
         }
-        Some(Line::from(Span::styled(
-            ctx.ctrl_hint.clone(),
+
+        let inner = format!(" {label} ");
+        let inner_width = UnicodeWidthStr::width(inner.as_str());
+        let horizontal = "─".repeat(inner_width);
+        let top = format!("╭{horizontal}╮");
+        let middle = format!("│{inner}│");
+        let bottom = format!("╰{horizontal}╯");
+
+        let base_style = if button.enabled {
             Style::default()
-                .fg(colors::text_dim())
-                .add_modifier(Modifier::ITALIC),
-        )))
+                .fg(colors::primary())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(colors::text_dim())
+        };
+
+        let mut lines = Vec::with_capacity(3);
+        lines.push(Line::from(Span::styled(top, base_style)));
+
+        let mut middle_spans: Vec<Span<'static>> = vec![Span::styled(middle, base_style)];
+        if let Some(mut hint_spans) = Self::ctrl_hint_spans(ctx.ctrl_hint.as_str()) {
+            if !hint_spans.is_empty() {
+                middle_spans.push(Span::raw("   "));
+                middle_spans.append(&mut hint_spans);
+            }
+        }
+        lines.push(Line::from(middle_spans));
+
+        lines.push(Line::from(Span::styled(bottom, base_style)));
+        Some(lines)
+    }
+
+    fn ctrl_hint_spans(hint: &str) -> Option<Vec<Span<'static>>> {
+        let trimmed = hint.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let normal_style = Style::default().fg(colors::text());
+        let bold_style = Style::default()
+            .fg(colors::text())
+            .add_modifier(Modifier::BOLD);
+
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("esc") {
+            let rest = &trimmed[3..];
+            let mut use_prefix = rest.is_empty();
+            if let Some(ch) = rest.chars().next() {
+                if ch.is_whitespace() || matches!(ch, ':' | '-' | ',' | ';') {
+                    use_prefix = true;
+                }
+            }
+
+            if use_prefix {
+                let prefix = &trimmed[..3];
+                let mut spans = Vec::new();
+                spans.push(Span::styled(prefix.to_string(), bold_style));
+                if !rest.is_empty() {
+                    spans.push(Span::styled(rest.to_string(), normal_style));
+                }
+                return Some(spans);
+            }
+        }
+
+        Some(vec![Span::styled(trimmed.to_string(), normal_style)])
+    }
+
+    fn ctrl_hint_line(&self, ctx: &VariantContext) -> Option<Line<'static>> {
+        if ctx.button.is_some() {
+            return None;
+        }
+        Self::ctrl_hint_spans(ctx.ctrl_hint.as_str()).map(Line::from)
     }
 
     fn inner_width(&self, width: u16) -> u16 {
@@ -377,18 +440,16 @@ impl AutoCoordinatorView {
 
     fn estimated_height(&self, width: u16, ctx: &VariantContext) -> u16 {
         let inner_width = self.inner_width(width);
-        let button_height = ctx
-            .button
-            .as_ref()
-            .map(|(text, _)| Self::wrap_count(text, inner_width))
-            .unwrap_or(0);
+        let button_height = if ctx.button.is_some() { 3 } else { 0 };
         let hint_height = ctx
             .manual_hint
             .as_ref()
             .map(|text| Self::wrap_count(text, inner_width))
             .unwrap_or(0);
         let ctrl_hint = ctx.ctrl_hint.trim();
-        let ctrl_height = if ctrl_hint.is_empty() {
+        let ctrl_height = if ctx.button.is_some() {
+            0
+        } else if ctrl_hint.is_empty() {
             0
         } else {
             Self::wrap_count(ctrl_hint, inner_width)
@@ -403,8 +464,8 @@ impl AutoCoordinatorView {
                 total += Self::wrap_count(prompt, inner_width).max(1);
             }
             if ctx.button.is_some() {
-                total += 1; // spacer before button
-                total += button_height.max(1);
+                total += 1; // spacer before button block
+                total += button_height;
             }
             if ctrl_height > 0 {
                 total += 1; // spacer before ctrl hint
@@ -416,8 +477,8 @@ impl AutoCoordinatorView {
                 total += Self::wrap_count(text, inner_width);
             }
             if ctx.button.is_some() {
-                total += 1; // spacer before button
-                total += button_height.max(1);
+                total += 1; // spacer before button block
+                total += button_height;
             }
             if ctx.manual_hint.is_some() {
                 total += hint_height.max(1);
@@ -480,46 +541,96 @@ impl AutoCoordinatorView {
         }
 
         let status_entries = self.derived_status_entries();
-        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut content_lines: Vec<Line<'static>> = Vec::new();
+        let mut footer_lines: Vec<Line<'static>> = Vec::new();
+        let mut has_button_block = false;
 
         if self.model.awaiting_submission {
             if let Some(prompt_lines) =
                 self.prompt_lines(Style::default().fg(colors::text_dim()))
             {
-                lines.extend(prompt_lines);
+                content_lines.extend(prompt_lines);
             }
 
-            if let Some(button_line) = self.button_line(ctx) {
-                lines.push(Line::default());
-                lines.push(button_line);
-            }
-
-            if let Some(ctrl_hint_line) = self.ctrl_hint_line(ctx) {
-                lines.push(Line::default());
-                lines.push(ctrl_hint_line);
+            if let Some(button_block) = self.button_block_lines(ctx) {
+                has_button_block = true;
+                footer_lines.extend(button_block);
+            } else if let Some(ctrl_hint_line) = self.ctrl_hint_line(ctx) {
+                footer_lines.push(ctrl_hint_line);
             }
         } else {
             let status_lines = self.status_lines_with_entries(&status_entries);
-            lines.extend(status_lines);
+            content_lines.extend(status_lines);
 
-            if let Some(button_line) = self.button_line(ctx) {
-                lines.push(Line::default());
-                lines.push(button_line);
+            if let Some(button_block) = self.button_block_lines(ctx) {
+                has_button_block = true;
+                footer_lines.extend(button_block);
             }
 
             if let Some(hint_line) = self.manual_hint_line(ctx) {
-                lines.push(hint_line);
+                footer_lines.push(hint_line);
             }
 
             if let Some(ctrl_hint_line) = self.ctrl_hint_line(ctx) {
-                lines.push(Line::default());
-                lines.push(ctrl_hint_line);
+                footer_lines.push(Line::default());
+                footer_lines.push(ctrl_hint_line);
             }
         }
 
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .render(inner, buf);
+        if !content_lines.is_empty()
+            && !footer_lines.is_empty()
+            && has_button_block
+            && footer_lines
+                .first()
+                .map(|line| line.width() == 0)
+                .unwrap_or(false)
+        {
+            // Already have leading spacer
+        } else if !content_lines.is_empty()
+            && !footer_lines.is_empty()
+            && has_button_block
+        {
+            footer_lines.insert(0, Line::default());
+        }
+
+        let available_height = inner.height as usize;
+        if available_height == 0 {
+            return;
+        }
+
+        if footer_lines.is_empty() {
+            let lines: Vec<Line<'static>> = if content_lines.len() > available_height {
+                let skip = content_lines.len() - available_height;
+                content_lines.into_iter().skip(skip).collect()
+            } else {
+                content_lines
+            };
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .render(inner, buf);
+        } else {
+            let footer_len = footer_lines.len();
+            let footer_keep = footer_len.min(available_height);
+            let footer_skip = footer_len - footer_keep;
+            let footer_lines: Vec<Line<'static>> = footer_lines
+                .into_iter()
+                .skip(footer_skip)
+                .collect();
+            let footer_height = footer_lines.len();
+            let content_capacity = available_height.saturating_sub(footer_height);
+            let mut lines: Vec<Line<'static>> = if content_capacity == 0 {
+                Vec::new()
+            } else if content_lines.len() > content_capacity {
+                let skip = content_lines.len() - content_capacity;
+                content_lines.into_iter().skip(skip).collect()
+            } else {
+                content_lines
+            };
+            lines.extend(footer_lines);
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .render(inner, buf);
+        }
 
         let mut next_interval = if spinner_active {
             Duration::from_millis(spinner_def.interval_ms.max(80))
@@ -551,14 +662,6 @@ impl AutoCoordinatorView {
             width: area.width.saturating_sub(1),
             height: area.height,
         }
-    }
-}
-
-fn format_button_text(button: &AutoCoordinatorButton) -> String {
-    if button.enabled {
-        format!("[{}]", button.label)
-    } else {
-        button.label.clone()
     }
 }
 
