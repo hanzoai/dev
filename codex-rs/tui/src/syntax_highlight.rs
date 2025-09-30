@@ -1,6 +1,8 @@
 use once_cell::sync::OnceCell;
 use ratatui::text::{Line, Span};
 
+use crate::colors::color_to_rgb;
+
 // syntect imports
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style as SynStyle, Theme, ThemeItem, ThemeSet, ThemeSettings, StyleModifier, FontStyle, Color as SynColor};
@@ -12,10 +14,6 @@ use syntect::util::LinesWithEndings;
 // ANSI-256 indexed colors resolve to the correct palette entries instead of a
 // flat grayscale fallback. This keeps luminance-detection accurate even on
 // terminals without truecolor support.
-fn color_to_rgb(c: ratatui::style::Color) -> (u8, u8, u8) {
-    crate::colors::color_to_rgb(c)
-}
-
 fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
     (0.2126 * rgb.0 as f32 + 0.7152 * rgb.1 as f32 + 0.0722 * rgb.2 as f32) / 255.0
 }
