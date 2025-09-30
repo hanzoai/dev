@@ -1038,6 +1038,7 @@ fn auto_decision_persists_summary_through_cli_cycle() {
         AutoCoordinatorStatus::Continue,
         "**Plan:** run tests".to_string(),
         Some("run tests".to_string()),
+        Vec::new(),
     );
 
     assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
@@ -1065,6 +1066,33 @@ fn auto_decision_persists_summary_through_cli_cycle() {
     assert!(chat.auto_state.waiting_for_response, "next JSON in flight");
     assert!(chat.auto_state.coordinator_waiting, "spinner resumes for JSON");
     assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+}
+
+#[test]
+fn auto_history_captures_raw_transcript() {
+    use codex_protocol::models::{ContentItem, ResponseItem};
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+
+    let transcript = vec![ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: "{\n  \"finish_status\": \"continue\"\n}".to_string(),
+        }],
+    }];
+
+    chat.auto_handle_decision(
+        AutoCoordinatorStatus::Continue,
+        "Next".to_string(),
+        Some("do thing".to_string()),
+        transcript.clone(),
+    );
+
+    assert_eq!(chat.auto_history.raw_items(), transcript.as_slice());
 }
 
 fn pump_app_events(
