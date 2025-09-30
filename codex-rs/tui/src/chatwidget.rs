@@ -121,7 +121,6 @@ use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
 use crate::bottom_pane::{
     AutoCoordinatorButton,
-    AutoCoordinatorView,
     AutoCoordinatorViewModel,
     CountdownState,
 };
@@ -10494,7 +10493,6 @@ impl ChatWidget<'_> {
             prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
-            coordinator_waiting: self.auto_state.coordinator_waiting,
             countdown,
             button,
             manual_hint,
@@ -10502,8 +10500,9 @@ impl ChatWidget<'_> {
             cli_running,
         };
 
-        self.bottom_pane
-            .show_auto_coordinator_view(AutoCoordinatorView::new(model, self.app_event_tx.clone()));
+        self
+            .bottom_pane
+            .show_auto_coordinator_view(model);
 
         if self.auto_state.waiting_for_response {
             self.bottom_pane
