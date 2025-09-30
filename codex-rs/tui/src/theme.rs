@@ -4,6 +4,7 @@ use codex_core::config_types::ThemeName;
 use lazy_static::lazy_static;
 use ratatui::style::Color;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::sync::RwLock;
 
 lazy_static! {
@@ -491,10 +492,15 @@ fn quantize_color_to_ansi16(c: Color) -> Color {
 pub(crate) fn quantize_color_for_palette(c: Color) -> Color {
     match c {
         Color::Indexed(_) | Color::Reset => c,
-        _ => match palette_mode() {
-            PaletteMode::Ansi16 => quantize_color_to_ansi16(c),
-            PaletteMode::Ansi256 => quantize_color_to_ansi256(c),
-        },
+        _ => {
+            if has_truecolor_terminal() {
+                return c;
+            }
+            match palette_mode() {
+                PaletteMode::Ansi16 => quantize_color_to_ansi16(c),
+                PaletteMode::Ansi256 => quantize_color_to_ansi256(c),
+            }
+        }
     }
 }
 
@@ -507,6 +513,17 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
         let dg = a.1 as i32 - b.1 as i32;
         let db = a.2 as i32 - b.2 as i32;
         dr * dr + dg * dg + db * db
+    }
+
+    const SAT_THRESHOLD: u8 = 8;
+    const SAT_PENALTY_FACTOR: i32 = 10;
+
+    fn saturation_penalty(target_sat: u8, candidate_sat: u8) -> i32 {
+        if candidate_sat >= target_sat {
+            return 0;
+        }
+        let delta = target_sat as i32 - candidate_sat as i32;
+        delta * delta * SAT_PENALTY_FACTOR
     }
 
     // Candidate 1: color cube (16..231)
@@ -524,10 +541,60 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
     let ri = idx(r);
     let gi = idx(g);
     let bi = idx(b);
-    let cube_r = STEPS[ri];
-    let cube_g = STEPS[gi];
-    let cube_b = STEPS[bi];
-    let cube_index = 16 + 36 * ri as u8 + 6 * gi as u8 + bi as u8;
+
+    let target_rgb = (r, g, b);
+    let target_sat = {
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        max - min
+    };
+    let prefer_preserving_saturation = target_sat >= SAT_THRESHOLD;
+
+    let mut best_index = 0u8;
+    let mut best_score = i32::MAX;
+
+    let mut record_candidate = |
+        index: u8,
+        candidate_rgb: (u8, u8, u8),
+        best_index: &mut u8,
+        best_score: &mut i32,
+    | {
+        let mut score = dist2(target_rgb, candidate_rgb);
+        if prefer_preserving_saturation {
+            let cand_sat = candidate_rgb.0.max(candidate_rgb.1).max(candidate_rgb.2)
+                - candidate_rgb.0.min(candidate_rgb.1).min(candidate_rgb.2);
+            score += saturation_penalty(target_sat, cand_sat);
+        }
+        if score < *best_score {
+            *best_score = score;
+            *best_index = index;
+        }
+    };
+
+    let neighbor_steps = |i: usize| -> Vec<usize> {
+        let mut out = Vec::with_capacity(3);
+        if i > 0 { out.push(i - 1); }
+        out.push(i);
+        if i < 5 { out.push(i + 1); }
+        out
+    };
+
+    let mut seen_cube_indices: HashSet<u8> = HashSet::new();
+    for rr in neighbor_steps(ri as usize) {
+        for gg in neighbor_steps(gi as usize) {
+            for bb in neighbor_steps(bi as usize) {
+                if rr > 5 || gg > 5 || bb > 5 {
+                    continue;
+                }
+                let candidate_index = 16 + 36 * rr as u8 + 6 * gg as u8 + bb as u8;
+                if !seen_cube_indices.insert(candidate_index) {
+                    continue;
+                }
+                let candidate_rgb = (STEPS[rr], STEPS[gg], STEPS[bb]);
+                record_candidate(candidate_index, candidate_rgb, &mut best_index, &mut best_score);
+            }
+        }
+    }
 
     // Candidate 2: grayscale (232..255)
     let gray_level = {
@@ -536,28 +603,12 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
     };
     let gray_value = 8 + 10 * gray_level;
     let gray_index = 232 + gray_level;
+    record_candidate(gray_index, (gray_value, gray_value, gray_value), &mut best_index, &mut best_score);
 
     // Candidate 3: 16-color ANSI (0..15), includes true white (15) which the
     // grayscale ramp does not reach. This fixes near-white mapping to gray.
-    let rgb = (r, g, b);
-    let cube_rgb = (cube_r, cube_g, cube_b);
-    let gray_rgb = (gray_value, gray_value, gray_value);
-
-    let mut best_index = cube_index;
-    let mut best_dist = dist2(rgb, cube_rgb);
-
-    let gray_dist = dist2(rgb, gray_rgb);
-    if gray_dist < best_dist {
-        best_dist = gray_dist;
-        best_index = gray_index;
-    }
-
     for (i, &(ar, ag, ab)) in ANSI16_COLORS.iter().enumerate() {
-        let d = dist2(rgb, (ar, ag, ab));
-        if d < best_dist {
-            best_dist = d;
-            best_index = i as u8;
-        }
+        record_candidate(i as u8, (ar, ag, ab), &mut best_index, &mut best_score);
     }
 
     best_index
