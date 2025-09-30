@@ -232,6 +232,8 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryCellType;
 use crate::history_cell::PatchEventType;
 use crate::history_cell::PlainHistoryCell;
+use crate::history_cell::PlanUpdateCell;
+use crate::history_cell::DiffCell;
 use crate::history::state::PatchEventType as HistoryPatchEventType;
 use crate::history::state::{
     HistoryDomainEvent,
@@ -240,6 +242,8 @@ use crate::history::state::{
     AssistantMessageState,
     AssistantStreamDelta,
     AssistantStreamState,
+    DiffRecord,
+    DiffLineKind,
     HistoryEvent,
     HistoryId,
     HistoryMutation,
@@ -3174,6 +3178,213 @@ impl ChatWidget<'_> {
         }
         w.maybe_start_auto_upgrade_task();
         w
+    }
+
+    fn auto_drive_lines_to_string(lines: Vec<Line<'static>>) -> String {
+        let mut rows: Vec<String> = Vec::new();
+        for line in lines {
+            let mut row = String::new();
+            for span in line.spans {
+                row.push_str(span.content.as_ref());
+            }
+            rows.push(row);
+        }
+        while rows
+            .last()
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false)
+        {
+            rows.pop();
+        }
+        rows.join("\n")
+    }
+
+    fn auto_drive_cell_text(cell: &dyn HistoryCell) -> Option<String> {
+        let text = Self::auto_drive_lines_to_string(cell.display_lines());
+        if text.trim().is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    }
+
+    fn auto_drive_make_user_message(
+        text: String,
+    ) -> Option<codex_protocol::models::ResponseItem> {
+        if text.trim().is_empty() {
+            return None;
+        }
+        use codex_protocol::models::{ContentItem, ResponseItem};
+        Some(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText { text }],
+        })
+    }
+
+    fn auto_drive_make_assistant_message(
+        text: String,
+    ) -> Option<codex_protocol::models::ResponseItem> {
+        if text.trim().is_empty() {
+            return None;
+        }
+        use codex_protocol::models::{ContentItem, ResponseItem};
+        Some(ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText { text }],
+        })
+    }
+
+    fn auto_drive_normalize_diff_path(raw: &str) -> Option<String> {
+        let trimmed = raw.trim();
+        if trimmed == "/dev/null" {
+            return None;
+        }
+        let normalized = trimmed
+            .strip_prefix("a/")
+            .or_else(|| trimmed.strip_prefix("b/"))
+            .unwrap_or(trimmed);
+        Some(normalized.to_string())
+    }
+
+    fn auto_drive_diff_summary(record: &DiffRecord) -> Option<String> {
+        use std::collections::BTreeMap;
+
+        let mut stats: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+        let mut current_file: Option<String> = None;
+
+        for hunk in &record.hunks {
+            for line in &hunk.lines {
+                match line.kind {
+                    DiffLineKind::Context => {
+                        let content = line.content.trim();
+                        if let Some(rest) = content.strip_prefix("diff --git ") {
+                            let mut parts = rest.split_whitespace();
+                            let _old = parts.next();
+                            if let Some(new_path) = parts.next() {
+                                if let Some(path) = Self::auto_drive_normalize_diff_path(new_path) {
+                                    stats.entry(path.clone()).or_insert((0, 0));
+                                    current_file = Some(path);
+                                }
+                            }
+                        } else {
+                            if let Some(rest) = content.strip_prefix("--- ") {
+                                if let Some(path) = Self::auto_drive_normalize_diff_path(rest) {
+                                    stats.entry(path.clone()).or_insert((0, 0));
+                                    current_file = Some(path);
+                                }
+                            }
+                            if let Some(rest) = content.strip_prefix("+++ ") {
+                                if let Some(path) = Self::auto_drive_normalize_diff_path(rest) {
+                                    stats.entry(path.clone()).or_insert((0, 0));
+                                    current_file = Some(path);
+                                }
+                            }
+                        }
+                    }
+                    DiffLineKind::Addition => {
+                        if let Some(file) = current_file.as_ref() {
+                            let entry = stats.entry(file.clone()).or_insert((0, 0));
+                            entry.0 += 1;
+                        }
+                    }
+                    DiffLineKind::Removal => {
+                        if let Some(file) = current_file.as_ref() {
+                            let entry = stats.entry(file.clone()).or_insert((0, 0));
+                            entry.1 += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if stats.is_empty() {
+            return None;
+        }
+
+        let mut lines = Vec::with_capacity(stats.len() + 1);
+        lines.push("Files changed".to_string());
+        for (path, (added, removed)) in stats {
+            lines.push(format!("- {} (+{} / -{})", path, added, removed));
+        }
+        Some(lines.join("\n"))
+    }
+
+    pub(crate) fn export_auto_drive_items(&self) -> Vec<codex_protocol::models::ResponseItem> {
+        let mut items = Vec::new();
+        for cell in &self.history_cells {
+            match cell.kind() {
+                HistoryCellType::User => {
+                    if let Some(text) = Self::auto_drive_cell_text(cell.as_ref()) {
+                        if let Some(item) = Self::auto_drive_make_assistant_message(text) {
+                            items.push(item);
+                        }
+                    }
+                }
+                HistoryCellType::Assistant => {
+                    if let Some(text) = Self::auto_drive_cell_text(cell.as_ref()) {
+                        if let Some(item) = Self::auto_drive_make_user_message(text) {
+                            items.push(item);
+                        }
+                    }
+                }
+                HistoryCellType::Reasoning => {
+                    if let Some(text) = Self::auto_drive_cell_text(cell.as_ref()) {
+                        use codex_protocol::models::{ContentItem, ResponseItem};
+                        items.push(ResponseItem::Message {
+                            id: Some("auto-drive-reasoning".to_string()),
+                            role: "user".to_string(),
+                            content: vec![ContentItem::InputText { text }],
+                        });
+                    }
+                }
+                HistoryCellType::PlanUpdate => {
+                    if let Some(plan) = cell.as_any().downcast_ref::<PlanUpdateCell>() {
+                        let state = plan.state();
+                        let mut lines: Vec<String> = Vec::new();
+                        if !state.name.trim().is_empty() {
+                            lines.push(format!("Plan update: {}", state.name.trim()));
+                        } else {
+                            lines.push("Plan update".to_string());
+                        }
+                        if state.progress.total > 0 {
+                            lines.push(format!(
+                                "Progress: {}/{}",
+                                state.progress.completed, state.progress.total
+                            ));
+                        }
+                        if state.steps.is_empty() {
+                            lines.push("(no steps recorded)".to_string());
+                        } else {
+                            for step in &state.steps {
+                                let status_label = match step.status {
+                                    StepStatus::Completed => "[completed]",
+                                    StepStatus::InProgress => "[in_progress]",
+                                    StepStatus::Pending => "[pending]",
+                                };
+                                lines.push(format!("{} {}", status_label, step.description));
+                            }
+                        }
+                        let text = lines.join("\n");
+                        if let Some(item) = Self::auto_drive_make_user_message(text) {
+                            items.push(item);
+                        }
+                    }
+                }
+                HistoryCellType::Diff => {
+                    if let Some(diff_cell) = cell.as_any().downcast_ref::<DiffCell>() {
+                        if let Some(summary) = Self::auto_drive_diff_summary(diff_cell.record()) {
+                            if let Some(item) = Self::auto_drive_make_user_message(summary) {
+                                items.push(item);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        items
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
@@ -9792,7 +10003,7 @@ impl ChatWidget<'_> {
             self.auto_stop(None);
         }
 
-        let conversation = self.export_response_items();
+        let conversation = self.export_auto_drive_items();
         match start_auto_coordinator(
             self.app_event_tx.clone(),
             goal_text.clone(),
@@ -9834,7 +10045,7 @@ impl ChatWidget<'_> {
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
-        let conversation = self.export_response_items();
+        let conversation = self.export_auto_drive_items();
         if handle
             .send(AutoCoordinatorCommand::UpdateConversation(conversation))
             .is_err()
