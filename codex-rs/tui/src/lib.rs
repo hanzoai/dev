@@ -99,8 +99,8 @@ mod chatwidget_stream_tests;
 mod updates;
 
 pub use cli::Cli;
-pub use public_widgets::composer_input::ComposerInput;
 pub use self::markdown_render::render_markdown_text;
+pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 
 fn theme_configured_in_config_file(codex_home: &std::path::Path) -> bool {
     let config_path = codex_home.join("config.toml");
@@ -116,7 +116,6 @@ fn theme_configured_in_config_file(codex_home: &std::path::Path) -> bool {
     let inline_pattern = Regex::new(r"(?m)^\s*tui\.theme\s*=").expect("valid regex");
     inline_pattern.is_match(&contents)
 }
-
 // (tests access modules directly within the crate)
 
 #[derive(Debug)]
