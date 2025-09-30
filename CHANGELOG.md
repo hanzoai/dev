@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.179] - 2025-09-30
+
+- Auto-drive: persist conversation between turns and retain the raw coordinator transcript so context carries forward. (6d6e3f5, 6edced3)
+- Auto-drive: restore streaming reasoning titles and tidy decision summaries by removing stray ellipses. (104febe, 001a415, 25b6d0c)
+- Auto-drive: surface spinner status when the composer is hidden, show progress in the title, and refresh the footer CTA styling. (935876a, eb54fe6, 86600f8, c9550bd)
+- Auto-drive: expand coordinator guidance with AUTO_AGENTS instructions to keep automation setups aligned. (2029365)
+- TUI/Theme: reuse a shared RGB mapping for ANSI fallbacks to make colors consistent across terminals. (a904665, 258e032)
+
 ## [0.2.178] - 2025-09-30
 
 - Auto-drive: restructure coordinator transcript to clarify CLI roles and context. (4733856)
