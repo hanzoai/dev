@@ -1614,9 +1614,9 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::AutoCoordinatorDecision { status, thoughts, prompt } => {
+                AppEvent::AutoCoordinatorDecision { status, summary, prompt } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_decision(status, thoughts, prompt);
+                        widget.auto_handle_decision(status, summary, prompt);
                     }
                 }
                 AppEvent::AutoCoordinatorThinking { delta, summary_index } => {

@@ -84,7 +84,7 @@ pub(super) enum AutoCoordinatorCommand {
 #[derive(Debug, Deserialize)]
 struct CoordinatorDecision {
     finish_status: String,
-    thoughts: String,
+    summary: String,
     #[serde(default)]
     prompt: Option<String>,
 }
@@ -227,11 +227,11 @@ fn run_auto_loop(
                 &app_event_tx,
                 &cancel_token,
             ) {
-                Ok((status, thoughts, prompt_opt)) => {
+                Ok((status, summary, prompt_opt)) => {
                     let prompt_clone = prompt_opt.clone();
                     let event = AppEvent::AutoCoordinatorDecision {
                         status,
-                        thoughts,
+                        summary,
                         prompt: prompt_opt,
                     };
                     app_event_tx.send(event);
@@ -267,7 +267,7 @@ fn run_auto_loop(
                     }
                     let event = AppEvent::AutoCoordinatorDecision {
                         status: AutoCoordinatorStatus::Failed,
-                        thoughts: format!("Coordinator error: {err}"),
+                        summary: format!("Coordinator error: {err}"),
                         prompt: None,
                     };
                     app_event_tx.send(event);
@@ -347,7 +347,7 @@ fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
 
 fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
     let intro = format!(
-        "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**Rules**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in it's entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely can not be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `thoughts`: short status (<= 160 characters) describing you thought process around what the next prompt will do\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n- First plan, then execute. Allow the CLI to plan for you. You should get it to do the thinking for you.\n- Keep the prompt minimal to give the CLI room to make independent decision.\n- Don't repeat yourself. You will see past prompts and outputs showing current progress. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nUseful commands:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n`/reasoning <high|medium|low>` e.g. set `/reasoning high` if the CLI makes a poor decision or `/reasoning low` to move faster on simple tasks\n\nEnvironment:\\n{environment_details}"
+        "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**Rules**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in it's entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely can not be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `summary`: short summary (<= 160 characters) describing what will happen when the CLI performs the next prompt\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n- First plan, then execute. Allow the CLI to plan for you. You should get it to do the thinking for you.\n- Keep the prompt minimal to give the CLI room to make independent decision.\n- Don't repeat yourself. You will see past prompts and outputs showing current progress. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nUseful commands:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n`/reasoning <high|medium|low>` e.g. set `/reasoning high` if the CLI makes a poor decision or `/reasoning low` to move faster on simple tasks\n\nEnvironment:\\n{environment_details}"
     );
     let primary_goal = format!("**Primary Goal**\n{goal_text}");
     (intro, primary_goal)
@@ -392,14 +392,19 @@ fn build_schema() -> Value {
                 "enum": ["continue", "finish_success", "finish_failed"],
                 "description": "Decision on how to proceed"
             },
-            "thoughts": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "description": "Short summary describing what will happen when the CLI performs the next prompt"
+            },
             "prompt": {
                 "type": ["string", "null"],
                 "minLength": 1,
                 "description": "Prompt to send to Code CLI when finish_status is 'continue'"
             }
         },
-        "required": ["finish_status", "thoughts", "prompt"],
+        "required": ["finish_status", "summary", "prompt"],
         "additionalProperties": false
     })
 }
@@ -450,7 +455,7 @@ fn request_coordinator_decision(
         _ => None,
     };
 
-    Ok((status, decision.thoughts.trim().to_string(), prompt_opt))
+    Ok((status, decision.summary.trim().to_string(), prompt_opt))
 }
 
 fn request_decision(

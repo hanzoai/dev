@@ -148,7 +148,7 @@ pub(crate) enum AppEvent {
 
     AutoCoordinatorDecision {
         status: AutoCoordinatorStatus,
-        thoughts: String,
+        summary: String,
         prompt: Option<String>,
     },
     AutoCoordinatorThinking {

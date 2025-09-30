@@ -190,21 +190,28 @@ fn run_observer_prompt(
         other => return Err(anyhow!("unexpected status '{other}'")),
     };
 
-    let replace_message = response
+    let trimmed_replace_message = response
         .replace_message
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let additional_instructions = response
+    let trimmed_additional_instructions = response
         .additional_instructions
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
     if matches!(status, AutoObserverStatus::Failing)
-        && replace_message.is_none()
-        && additional_instructions.is_none()
+        && trimmed_replace_message.is_none()
+        && trimmed_additional_instructions.is_none()
     {
         warn!("observer returned failing status without guidance");
     }
+
+    let (replace_message, additional_instructions) =
+        if matches!(status, AutoObserverStatus::Failing) {
+            (trimmed_replace_message, trimmed_additional_instructions)
+        } else {
+            (None, None)
+        };
 
     debug!(
         "[Auto observer] status={status:?} replace={} instructions={}",
@@ -330,7 +337,7 @@ fn build_observer_schema() -> Value {
                 "minLength": 1,
             }
         },
-        "required": ["status"],
+        "required": ["status", "replace_message", "additional_instructions"],
         "additionalProperties": false
     })
 }
@@ -356,23 +363,75 @@ fn summarize_intervention(
 
 // Helper so observer can append the coordinator's latest prompt.
 pub(super) fn build_observer_conversation(
-    mut conversation: Vec<ResponseItem>,
+    conversation: Vec<ResponseItem>,
     coordinator_prompt: Option<&str>,
 ) -> Vec<ResponseItem> {
+    let mut filtered: Vec<ResponseItem> = Vec::new();
+
+    for item in conversation {
+        match item {
+            ResponseItem::Message { id, role, content } => {
+                if id.as_deref() == Some("auto-drive-reasoning") {
+                    continue;
+                }
+
+                if role == "assistant" {
+                    let mut new_content: Vec<ContentItem> = Vec::new();
+                    for entry in content {
+                        match entry {
+                            ContentItem::InputText { text } => {
+                                let prefixed = if text.trim_start().starts_with("Coordinator:") {
+                                    text
+                                } else {
+                                    format!("Coordinator: {text}")
+                                };
+                                new_content.push(ContentItem::InputText { text: prefixed });
+                            }
+                            ContentItem::OutputText { text } => {
+                                let prefixed = if text.trim_start().starts_with("Coordinator:") {
+                                    text
+                                } else {
+                                    format!("Coordinator: {text}")
+                                };
+                                new_content.push(ContentItem::InputText { text: prefixed });
+                            }
+                            other => new_content.push(other),
+                        }
+                    }
+                    filtered.push(ResponseItem::Message {
+                        id: None,
+                        role: "user".to_string(),
+                        content: new_content,
+                    });
+                } else {
+                    filtered.push(ResponseItem::Message { id, role, content });
+                }
+            }
+            ResponseItem::Reasoning { .. } => {
+                // Observer should not inspect reasoning blocks.
+                continue;
+            }
+            other => filtered.push(other),
+        }
+    }
+
     if let Some(prompt) = coordinator_prompt.and_then(|p| {
         let trimmed = p.trim();
         (!trimmed.is_empty()).then_some(trimmed)
     }) {
-        let content = ContentItem::OutputText {
-            text: format!("Coordinator: {prompt}"),
+        let text = if prompt.trim_start().starts_with("Coordinator:") {
+            prompt.to_string()
+        } else {
+            format!("Coordinator: {prompt}")
         };
-        conversation.push(ResponseItem::Message {
+        filtered.push(ResponseItem::Message {
             id: None,
-            role: "assistant".to_string(),
-            content: vec![content],
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText { text }],
         });
     }
-    conversation
+
+    filtered
 }
 
 #[cfg(test)]
