@@ -47,6 +47,7 @@ use codex_protocol::num_format::format_with_separators;
 
 
 mod auto_coordinator;
+mod auto_drive_history;
 mod auto_observer;
 #[cfg(feature = "dev-faults")]
 mod faults;
@@ -78,6 +79,7 @@ use self::agent_install::{
     start_upgrade_terminal_session,
     wrap_command,
 };
+use self::auto_drive_history::AutoDriveHistory;
 use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand, AutoCoordinatorHandle};
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
@@ -654,6 +656,7 @@ pub(crate) struct ChatWidget<'a> {
 
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
+    auto_history: AutoDriveHistory,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2888,6 +2891,7 @@ impl ChatWidget<'_> {
             pending_snapshot_dispatches: VecDeque::new(),
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
+            auto_history: AutoDriveHistory::new(),
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3142,6 +3146,7 @@ impl ChatWidget<'_> {
             pending_snapshot_dispatches: VecDeque::new(),
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
+            auto_history: AutoDriveHistory::new(),
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3385,6 +3390,24 @@ impl ChatWidget<'_> {
             }
         }
         items
+    }
+
+    fn rebuild_auto_history(&mut self) -> Vec<codex_protocol::models::ResponseItem> {
+        let conversation = self.export_auto_drive_items();
+        let tail = self
+            .auto_history
+            .replace_converted(conversation.clone());
+        if !tail.is_empty() {
+            self.auto_history.append_raw(&tail);
+        }
+        self.auto_history.raw_snapshot()
+    }
+
+    fn current_auto_history(&mut self) -> Vec<codex_protocol::models::ResponseItem> {
+        if self.auto_history.converted_is_empty() {
+            return self.rebuild_auto_history();
+        }
+        self.auto_history.raw_snapshot()
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
@@ -10005,7 +10028,7 @@ impl ChatWidget<'_> {
             self.auto_stop(None);
         }
 
-        let conversation = self.export_auto_drive_items();
+        let conversation = self.rebuild_auto_history();
         match start_auto_coordinator(
             self.app_event_tx.clone(),
             goal_text.clone(),
@@ -10044,10 +10067,10 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || self.auto_state.waiting_for_response {
             return;
         }
+        let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
-        let conversation = self.export_auto_drive_items();
         if handle
             .send(AutoCoordinatorCommand::UpdateConversation(conversation))
             .is_err()
@@ -10073,12 +10096,16 @@ impl ChatWidget<'_> {
         status: AutoCoordinatorStatus,
         summary: String,
         prompt: Option<String>,
+        transcript: Vec<codex_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
         let summary = summary.trim().to_string();
+        if !transcript.is_empty() {
+            self.auto_history.append_raw(&transcript);
+        }
         self.auto_state.last_decision_summary = Some(summary.clone());
         self.auto_state.coordinator_waiting = false;
         self.auto_on_reasoning_final(&summary);
@@ -10296,6 +10323,7 @@ impl ChatWidget<'_> {
         }
         self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_state.reset();
+        self.auto_history.clear();
         self.bottom_pane.clear_auto_coordinator_view();
         self.bottom_pane.clear_live_ring();
         let any_exec_running = !self.exec.running_commands.is_empty();
@@ -10337,6 +10365,7 @@ impl ChatWidget<'_> {
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
+        self.rebuild_auto_history();
         self.auto_send_conversation();
     }
 
