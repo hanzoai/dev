@@ -19,3 +19,4 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-protocol = { workspace = true }
 ts-rs = { workspace = true }
+mcp-types = { workspace = true }

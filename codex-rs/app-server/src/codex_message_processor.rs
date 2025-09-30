@@ -120,7 +120,7 @@ impl CodexMessageProcessor {
             ClientRequest::SendUserTurn { request_id, params } => {
                 self.send_user_turn_compat(request_id, params).await;
             }
-            ClientRequest::LoginChatGpt { request_id } => {
+            ClientRequest::LoginChatGpt { request_id, .. } => {
                 let error = JSONRPCErrorError {
                     code: INVALID_REQUEST_ERROR_CODE,
                     message: "login is not supported by this server".to_string(),
@@ -136,7 +136,7 @@ impl CodexMessageProcessor {
                 };
                 self.outgoing.send_error(request_id, error).await;
             }
-            ClientRequest::LogoutChatGpt { request_id } => {
+            ClientRequest::LogoutChatGpt { request_id, .. } => {
                 // Not supported by this server implementation
                 let error = JSONRPCErrorError {
                     code: INVALID_REQUEST_ERROR_CODE,
