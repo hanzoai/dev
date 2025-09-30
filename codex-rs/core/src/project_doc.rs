@@ -1,6 +1,7 @@
 //! Project-level documentation discovery.
 //!
-//! Project-level documentation can be stored in files named `AGENTS.md`.
+//! Project-level documentation can be stored in files named `AGENTS.md` and
+//! Auto Drive can use specialised guidance stored in `AUTO_AGENTS.md`.
 //! We include the concatenation of all files found along the path from the
 //! repository root to the current working directory as follows:
 //!
@@ -17,8 +18,11 @@ use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tracing::error;
 
-/// Currently, we only match the filename `AGENTS.md` exactly.
-const CANDIDATE_FILENAMES: &[&str] = &["AGENTS.md"];
+/// Filenames recognised for standard agent instructions.
+const AGENT_FILENAMES: &[&str] = &["AGENTS.md"];
+
+/// Filenames recognised for Auto Drive instructions.
+const AUTO_AGENT_FILENAMES: &[&str] = &["AUTO_AGENTS.md"];
 
 /// When both `Config::instructions` and the project doc are present, they will
 /// be concatenated with the following separator.
@@ -48,14 +52,17 @@ pub(crate) async fn get_user_instructions(config: &Config) -> Option<String> {
 /// concatenation of all discovered docs. If no documentation file is found the
 /// function returns `Ok(None)`. Unexpected I/O failures bubble up as `Err` so
 /// callers can decide how to handle them.
-pub async fn read_project_docs(config: &Config) -> std::io::Result<Option<String>> {
+async fn read_project_docs_with_candidates(
+    config: &Config,
+    candidate_filenames: &[&str],
+) -> std::io::Result<Option<String>> {
     let max_total = config.project_doc_max_bytes;
 
     if max_total == 0 {
         return Ok(None);
     }
 
-    let paths = discover_project_doc_paths(config)?;
+    let paths = discover_project_doc_paths_with_candidates(config, candidate_filenames)?;
     if paths.is_empty() {
         return Ok(None);
     }
@@ -101,12 +108,23 @@ pub async fn read_project_docs(config: &Config) -> std::io::Result<Option<String
     }
 }
 
+pub async fn read_project_docs(config: &Config) -> std::io::Result<Option<String>> {
+    read_project_docs_with_candidates(config, AGENT_FILENAMES).await
+}
+
+pub async fn read_auto_drive_docs(config: &Config) -> std::io::Result<Option<String>> {
+    read_project_docs_with_candidates(config, AUTO_AGENT_FILENAMES).await
+}
+
 /// Discover the list of AGENTS.md files using the same search rules as
 /// `read_project_docs`, but return the file paths instead of concatenated
 /// contents. The list is ordered from repository root to the current working
 /// directory (inclusive). Symlinks are allowed. When `project_doc_max_bytes`
 /// is zero, returns an empty list.
-pub fn discover_project_doc_paths(config: &Config) -> std::io::Result<Vec<PathBuf>> {
+fn discover_project_doc_paths_with_candidates(
+    config: &Config,
+    candidate_filenames: &[&str],
+) -> std::io::Result<Vec<PathBuf>> {
     let mut dir = config.cwd.clone();
     if let Ok(canon) = dir.canonicalize() {
         dir = canon;
@@ -153,7 +171,7 @@ pub fn discover_project_doc_paths(config: &Config) -> std::io::Result<Vec<PathBu
 
     let mut found: Vec<PathBuf> = Vec::new();
     for d in search_dirs {
-        for name in CANDIDATE_FILENAMES {
+        for name in candidate_filenames {
             let candidate = d.join(name);
             match std::fs::symlink_metadata(&candidate) {
                 Ok(md) => {
@@ -171,6 +189,14 @@ pub fn discover_project_doc_paths(config: &Config) -> std::io::Result<Vec<PathBu
     }
 
     Ok(found)
+}
+
+pub fn discover_project_doc_paths(config: &Config) -> std::io::Result<Vec<PathBuf>> {
+    discover_project_doc_paths_with_candidates(config, AGENT_FILENAMES)
+}
+
+pub fn discover_auto_drive_doc_paths(config: &Config) -> std::io::Result<Vec<PathBuf>> {
+    discover_project_doc_paths_with_candidates(config, AUTO_AGENT_FILENAMES)
 }
 
 #[cfg(test)]
@@ -346,5 +372,40 @@ mod tests {
 
         let res = get_user_instructions(&cfg).await.expect("doc expected");
         assert_eq!(res, "root doc\n\ncrate doc");
+    }
+
+    #[tokio::test]
+    async fn auto_drive_doc_missing_returns_none() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = make_config(&tmp, 4096, None);
+        let res = read_auto_drive_docs(&cfg).await;
+        assert!(res.expect("auto docs read").is_none());
+    }
+
+    #[tokio::test]
+    async fn auto_drive_docs_follow_same_lookup_rules() {
+        let repo = tempfile::tempdir().expect("tempdir");
+
+        std::fs::write(
+            repo.path().join(".git"),
+            "gitdir: /path/to/actual/git/dir\n",
+        )
+        .unwrap();
+
+        fs::write(repo.path().join("AUTO_AGENTS.md"), "root auto").unwrap();
+
+        let nested = repo.path().join("workspace/crate_a");
+        std::fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("AUTO_AGENTS.md"), "nested auto").unwrap();
+
+        let mut cfg = make_config(&repo, 4096, None);
+        cfg.cwd = nested;
+
+        let res = read_auto_drive_docs(&cfg)
+            .await
+            .expect("auto doc expected")
+            .expect("auto doc should be present");
+
+        assert_eq!(res, "root auto\n\nnested auto");
     }
 }

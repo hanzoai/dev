@@ -8,6 +8,7 @@ use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::debug_logger::DebugLogger;
 use codex_core::model_family::{derive_default_model_family, find_family_for_model};
+use codex_core::project_doc::read_auto_drive_docs;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use codex_core::error::CodexErr;
@@ -17,7 +18,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::app_event::{AppEvent, AutoCoordinatorStatus};
@@ -167,6 +168,27 @@ fn run_auto_loop(
         )),
     );
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("creating runtime for auto coordinator")?;
+
+    let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
+        Ok(Some(text)) => {
+            let trimmed = text.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        Ok(None) => None,
+        Err(err) => {
+            warn!("failed to read AUTO_AGENTS.md instructions: {err:#}");
+            None
+        }
+    };
+
     let sandbox_label = if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
         "full access"
     } else {
@@ -178,11 +200,6 @@ fn run_auto_loop(
     let schema = build_schema();
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("creating runtime for auto coordinator")?;
 
     let mut pending_conversation = Some(initial_conversation);
     let mut stopped = false;
@@ -224,6 +241,7 @@ fn run_auto_loop(
                 &primary_goal_message,
                 &schema,
                 conv,
+                auto_instructions.as_deref(),
                 &app_event_tx,
                 &cancel_token,
             ) {
@@ -416,6 +434,7 @@ fn request_coordinator_decision(
     primary_goal: &str,
     schema: &Value,
     conversation: Vec<ResponseItem>,
+    auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
@@ -426,6 +445,7 @@ fn request_coordinator_decision(
         primary_goal,
         schema,
         &conversation,
+        auto_instructions,
         app_event_tx,
         cancel_token,
     )?;
@@ -465,6 +485,7 @@ fn request_decision(
     primary_goal: &str,
     schema: &Value,
     conversation: &[ResponseItem],
+    auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<String> {
@@ -475,6 +496,7 @@ fn request_decision(
         primary_goal,
         schema,
         conversation,
+        auto_instructions,
         app_event_tx,
         cancel_token,
         MODEL_SLUG,
@@ -496,6 +518,7 @@ fn request_decision(
                     primary_goal,
                     schema,
                     conversation,
+                    auto_instructions,
                     app_event_tx,
                     cancel_token,
                     &fallback_slug,
@@ -519,6 +542,7 @@ fn request_decision_with_model(
     primary_goal: &str,
     schema: &Value,
     conversation: &[ResponseItem],
+    auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
     model_slug: &str,
@@ -527,6 +551,7 @@ fn request_decision_with_model(
     let primary_goal = primary_goal.to_string();
     let schema = schema.clone();
     let conversation: Vec<ResponseItem> = conversation.to_vec();
+    let auto_instructions = auto_instructions.map(|text| text.to_string());
     let tx = app_event_tx.clone();
     let cancel = cancel_token.clone();
     let classify = |error: &anyhow::Error| classify_model_error(error);
@@ -535,12 +560,14 @@ fn request_decision_with_model(
     let result = runtime.block_on(async move {
         retry_with_backoff(
             || {
+                let instructions = auto_instructions.clone();
                 let prompt = build_prompt_for_model(
                     &developer_intro,
                     &primary_goal,
                     &schema,
                     &conversation,
                     model_slug,
+                    instructions.as_deref(),
                 );
                 let tx_inner = tx.clone();
                 async move {
@@ -651,9 +678,18 @@ fn build_prompt_for_model(
     schema: &Value,
     conversation: &[ResponseItem],
     model_slug: &str,
+    auto_instructions: Option<&str>,
 ) -> Prompt {
     let mut prompt = Prompt::default();
     prompt.store = true;
+    if let Some(instructions) = auto_instructions {
+        let trimmed = instructions.trim();
+        if !trimmed.is_empty() {
+            prompt
+                .input
+                .push(make_message("developer", trimmed.to_string()));
+        }
+    }
     prompt
         .input
         .push(make_message("developer", developer_intro.to_string()));
