@@ -465,6 +465,7 @@ struct AutoCoordinatorUiState {
     current_summary: Option<String>,
     current_prompt: Option<String>,
     current_display_line: Option<String>,
+    current_reasoning_title: Option<String>,
     placeholder_phrase: Option<String>,
     thinking_prefix_stripped: bool,
     current_summary_index: Option<u32>,
@@ -10044,6 +10045,7 @@ impl ChatWidget<'_> {
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_summary = None;
                 self.auto_state.current_display_line = None;
+                self.auto_state.current_reasoning_title = None;
                 self.auto_state.current_summary_index = None;
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
@@ -10082,6 +10084,8 @@ impl ChatWidget<'_> {
             self.auto_state.current_summary = None;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
+            self.auto_state.current_display_line = None;
+            self.auto_state.current_reasoning_title = None;
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
@@ -10251,7 +10255,6 @@ impl ChatWidget<'_> {
         if !self.auto_state.active {
             return;
         }
-        self.auto_state.placeholder_phrase = None;
         self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
@@ -10282,6 +10285,7 @@ impl ChatWidget<'_> {
         self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
             auto_drive_strings::next_auto_drive_phrase().to_string()
         });
+        self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
@@ -10522,18 +10526,26 @@ impl ChatWidget<'_> {
             return;
         };
 
-        if let Some(title) = extract_latest_bold_title(summary) {
-            let needs_update = self
-                .auto_state
-                .current_display_line
-                .as_ref()
-                .map(|current| current != &title)
-                .unwrap_or(true);
+        let display = summary.lines().find_map(|line| {
+            let trimmed = line.trim();
+            (!trimmed.is_empty()).then(|| Self::truncate_with_ellipsis(trimmed, 160))
+        });
 
-            if needs_update {
-                self.auto_state.current_display_line = Some(title);
-                self.auto_state.placeholder_phrase = None;
-            }
+        let Some(display) = display else {
+            return;
+        };
+
+        let needs_update = self
+            .auto_state
+            .current_display_line
+            .as_ref()
+            .map(|current| current != &display)
+            .unwrap_or(true);
+
+        if needs_update {
+            self.auto_state.current_display_line = Some(display);
+            self.auto_state.placeholder_phrase = None;
+            self.auto_state.current_reasoning_title = None;
         }
     }
 
@@ -10576,6 +10588,12 @@ impl ChatWidget<'_> {
                 self.auto_state.current_summary_index = Some(idx);
                 self.auto_state.current_summary = Some(String::new());
                 self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.current_reasoning_title = None;
+                self.auto_state.current_display_line = None;
+                self.auto_state.placeholder_phrase =
+                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_rebuild_live_ring();
+                self.request_redraw();
             }
         }
 
@@ -10604,6 +10622,22 @@ impl ChatWidget<'_> {
             }
 
             entry.push_str(&cleaned_delta);
+
+            if let Some(title) = extract_latest_bold_title(entry) {
+                let needs_update = self
+                    .auto_state
+                    .current_reasoning_title
+                    .as_ref()
+                    .map(|existing| existing != &title)
+                    .unwrap_or(true);
+                if needs_update {
+                    self.auto_state.current_reasoning_title = Some(title.clone());
+                    self.auto_state.current_display_line = Some(title);
+                    self.auto_state.placeholder_phrase = None;
+                    self.auto_rebuild_live_ring();
+                    self.request_redraw();
+                }
+            }
         }
     }
 
