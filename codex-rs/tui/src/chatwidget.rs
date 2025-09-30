@@ -3394,15 +3394,20 @@ impl ChatWidget<'_> {
 
     fn rebuild_auto_history(&mut self) -> Vec<codex_protocol::models::ResponseItem> {
         let conversation = self.export_auto_drive_items();
-        self.auto_history.replace(conversation.clone());
-        conversation
+        let tail = self
+            .auto_history
+            .replace_converted(conversation.clone());
+        if !tail.is_empty() {
+            self.auto_history.append_raw(&tail);
+        }
+        self.auto_history.raw_snapshot()
     }
 
     fn current_auto_history(&mut self) -> Vec<codex_protocol::models::ResponseItem> {
-        if self.auto_history.is_empty() {
+        if self.auto_history.converted_is_empty() {
             return self.rebuild_auto_history();
         }
-        self.auto_history.snapshot()
+        self.auto_history.raw_snapshot()
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
@@ -10089,12 +10094,16 @@ impl ChatWidget<'_> {
         status: AutoCoordinatorStatus,
         summary: String,
         prompt: Option<String>,
+        transcript: Vec<codex_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
         let summary = summary.trim().to_string();
+        if !transcript.is_empty() {
+            self.auto_history.append_raw(&transcript);
+        }
         self.auto_state.last_decision_summary = Some(summary.clone());
         self.auto_state.coordinator_waiting = false;
         self.auto_on_reasoning_final(&summary);
