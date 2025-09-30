@@ -12,7 +12,7 @@ use codex_core::project_doc::read_auto_drive_docs;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use codex_core::error::CodexErr;
-use codex_protocol::models::{ContentItem, ResponseItem};
+use codex_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
 use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -245,12 +245,13 @@ fn run_auto_loop(
                 &app_event_tx,
                 &cancel_token,
             ) {
-                Ok((status, summary, prompt_opt)) => {
+                Ok((status, summary, prompt_opt, transcript_items)) => {
                     let prompt_clone = prompt_opt.clone();
                     let event = AppEvent::AutoCoordinatorDecision {
                         status,
                         summary,
                         prompt: prompt_opt,
+                        transcript: transcript_items.clone(),
                     };
                     app_event_tx.send(event);
 
@@ -287,6 +288,7 @@ fn run_auto_loop(
                         status: AutoCoordinatorStatus::Failed,
                         summary: format!("Coordinator error: {err}"),
                         prompt: None,
+                        transcript: Vec::new(),
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -427,6 +429,11 @@ fn build_schema() -> Value {
     })
 }
 
+struct RequestStreamResult {
+    output_text: String,
+    response_items: Vec<ResponseItem>,
+}
+
 fn request_coordinator_decision(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
@@ -437,8 +444,8 @@ fn request_coordinator_decision(
     auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
-) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
-    let raw = request_decision(
+) -> Result<(AutoCoordinatorStatus, String, Option<String>, Vec<ResponseItem>)> {
+    let (raw, response_items) = request_decision(
         runtime,
         client,
         developer_intro,
@@ -475,7 +482,12 @@ fn request_coordinator_decision(
         _ => None,
     };
 
-    Ok((status, decision.summary.trim().to_string(), prompt_opt))
+    Ok((
+        status,
+        decision.summary.trim().to_string(),
+        prompt_opt,
+        response_items,
+    ))
 }
 
 fn request_decision(
@@ -488,7 +500,7 @@ fn request_decision(
     auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
-) -> Result<String> {
+) -> Result<(String, Vec<ResponseItem>)> {
     match request_decision_with_model(
         runtime,
         client,
@@ -501,7 +513,7 @@ fn request_decision(
         cancel_token,
         MODEL_SLUG,
     ) {
-        Ok(output) => Ok(output),
+        Ok(result) => Ok((result.output_text, result.response_items)),
         Err(err) => {
             let fallback_slug = client.default_model_slug().to_string();
             if fallback_slug != MODEL_SLUG && should_retry_with_default_model(&err) {
@@ -523,6 +535,7 @@ fn request_decision(
                     cancel_token,
                     &fallback_slug,
                 )
+                .map(|res| (res.output_text, res.response_items))
                 .map_err(|fallback_err| {
                     fallback_err.context(format!(
                         "coordinator fallback with model '{}' failed after original error: {}",
@@ -546,7 +559,7 @@ fn request_decision_with_model(
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
     model_slug: &str,
-) -> Result<String> {
+) -> Result<RequestStreamResult> {
     let developer_intro = developer_intro.to_string();
     let primary_goal = primary_goal.to_string();
     let schema = schema.clone();
@@ -578,31 +591,43 @@ fn request_decision_with_model(
                     }
                     let mut stream = client.stream(&prompt).await?;
                     let mut out = String::new();
+                    let mut response_items: Vec<ResponseItem> = Vec::new();
+                    let mut reasoning_delta_accumulator = String::new();
                     while let Some(ev) = stream.next().await {
                         match ev {
-                            Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
+                            Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
+                                out.push_str(&delta);
+                            }
                             Ok(ResponseEvent::OutputItemDone { item, .. }) => {
-                                if let ResponseItem::Message { content, .. } = item {
+                                if let ResponseItem::Message { content, .. } = &item {
                                     for c in content {
                                         if let ContentItem::OutputText { text } = c {
-                                            out.push_str(&text);
+                                            out.push_str(text);
                                         }
                                     }
                                 }
+                                if matches!(item, ResponseItem::Reasoning { .. }) {
+                                    reasoning_delta_accumulator.clear();
+                                }
+                                response_items.push(item);
                             }
                             Ok(ResponseEvent::ReasoningSummaryDelta {
                                 delta,
                                 summary_index,
                                 ..
                             }) => {
-                                let message = strip_role_prefix(&delta).to_string();
+                                let cleaned = strip_role_prefix(&delta);
+                                reasoning_delta_accumulator.push_str(cleaned);
+                                let message = cleaned.to_string();
                                 tx_inner.send(AppEvent::AutoCoordinatorThinking {
                                     delta: message,
                                     summary_index,
                                 });
                             }
                             Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
-                                let message = strip_role_prefix(&delta).to_string();
+                                let cleaned = strip_role_prefix(&delta);
+                                reasoning_delta_accumulator.push_str(cleaned);
+                                let message = cleaned.to_string();
                                 tx_inner.send(AppEvent::AutoCoordinatorThinking {
                                     delta: message,
                                     summary_index: None,
@@ -613,7 +638,24 @@ fn request_decision_with_model(
                             _ => {}
                         }
                     }
-                    Ok(out)
+                    if !reasoning_delta_accumulator.trim().is_empty()
+                        && !response_items
+                            .iter()
+                            .any(|item| matches!(item, ResponseItem::Reasoning { .. }))
+                    {
+                        response_items.push(ResponseItem::Reasoning {
+                            id: String::new(),
+                            summary: Vec::new(),
+                            content: Some(vec![ReasoningItemContent::ReasoningText {
+                                text: reasoning_delta_accumulator.trim().to_string(),
+                            }]),
+                            encrypted_content: None,
+                        });
+                    }
+                    Ok(RequestStreamResult {
+                        output_text: out,
+                        response_items,
+                    })
                 }
             },
             classify,
