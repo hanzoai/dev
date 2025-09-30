@@ -8,30 +8,12 @@ use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::parsing::SyntaxSetBuilder;
 use syntect::util::LinesWithEndings;
 
-// Convert a ratatui Color to RGB tuple; mirrored locally to avoid exposing internals.
+// Convert a ratatui `Color` into an RGB tuple using the shared theme helper so
+// ANSI-256 indexed colors resolve to the correct palette entries instead of a
+// flat grayscale fallback. This keeps luminance-detection accurate even on
+// terminals without truecolor support.
 fn color_to_rgb(c: ratatui::style::Color) -> (u8, u8, u8) {
-    use ratatui::style::Color;
-    match c {
-        Color::Rgb(r, g, b) => (r, g, b),
-        Color::Black => (0, 0, 0),
-        Color::White => (255, 255, 255),
-        Color::Gray => (192, 192, 192),
-        Color::DarkGray => (128, 128, 128),
-        Color::Red => (205, 49, 49),
-        Color::Green => (13, 188, 121),
-        Color::Yellow => (229, 229, 16),
-        Color::Blue => (36, 114, 200),
-        Color::Magenta => (188, 63, 188),
-        Color::Cyan => (17, 168, 205),
-        Color::LightRed => (255, 102, 102),
-        Color::LightGreen => (102, 255, 178),
-        Color::LightYellow => (255, 255, 102),
-        Color::LightBlue => (102, 153, 255),
-        Color::LightMagenta => (255, 102, 255),
-        Color::LightCyan => (102, 255, 255),
-        Color::Indexed(i) => (i, i, i),
-        Color::Reset => (255, 255, 255),
-    }
+    crate::colors::color_to_rgb(c)
 }
 
 fn relative_luminance(rgb: (u8, u8, u8)) -> f32 {
