@@ -3,6 +3,12 @@ use crate::history::state::{RateLimitLegendEntry, RateLimitsRecord, TextTone};
 use codex_common::elapsed::format_duration;
 use codex_core::protocol::RateLimitSnapshotEvent;
 use ratatui::style::Color;
+use time::{
+    format_description::FormatItem,
+    macros::format_description,
+    Duration as TimeDuration,
+    OffsetDateTime,
+};
 
 pub(crate) struct RateLimitsCell {
     record: RateLimitsRecord,
@@ -78,9 +84,9 @@ fn snapshot_summary_lines(snapshot: &RateLimitSnapshotEvent) -> Vec<Line<'static
     let mut lines = Vec::new();
 
     let hourly_line = format!(
-        "└ Hourly usage: {:.0}% of {} min window",
-        snapshot.primary_used_percent,
-        snapshot.primary_window_minutes,
+        "└ Hourly usage: {percent:.0}% of {window}",
+        percent = snapshot.primary_used_percent,
+        window = format_window_minutes(snapshot.primary_window_minutes),
     );
     lines.push(Line::from(vec![Span::styled(
         hourly_line,
@@ -88,17 +94,16 @@ fn snapshot_summary_lines(snapshot: &RateLimitSnapshotEvent) -> Vec<Line<'static
     )]));
 
     if let Some(seconds) = snapshot.primary_reset_after_seconds {
-        let reset = format_duration(std::time::Duration::from_secs(seconds));
         lines.push(Line::from(vec![Span::styled(
-            format!("   • resets in {reset}"),
+            format_reset_line(seconds),
             Style::default().fg(crate::colors::text_dim()),
         )]));
     }
 
     let weekly_line = format!(
-        "└ Weekly usage: {:.0}% of {} min window",
-        snapshot.secondary_used_percent,
-        snapshot.secondary_window_minutes,
+        "└ Weekly usage: {percent:.0}% of {window}",
+        percent = snapshot.secondary_used_percent,
+        window = format_window_minutes(snapshot.secondary_window_minutes),
     );
     lines.push(Line::from(vec![Span::styled(
         weekly_line,
@@ -106,14 +111,64 @@ fn snapshot_summary_lines(snapshot: &RateLimitSnapshotEvent) -> Vec<Line<'static
     )]));
 
     if let Some(seconds) = snapshot.secondary_reset_after_seconds {
-        let reset = format_duration(std::time::Duration::from_secs(seconds));
         lines.push(Line::from(vec![Span::styled(
-            format!("   • resets in {reset}"),
+            format_reset_line(seconds),
             Style::default().fg(crate::colors::text_dim()),
         )]));
     }
 
     lines
+}
+
+const TIME_OF_DAY_FORMAT: &[FormatItem<'static>] =
+    format_description!("[hour repr:12 padding:none]:[minute][period case:lower]");
+const DAY_TIME_FORMAT: &[FormatItem<'static>] = format_description!(
+    "[weekday repr:long] [hour repr:12 padding:none]:[minute][period case:lower]"
+);
+
+fn format_window_minutes(minutes: u64) -> String {
+    if minutes < 60 {
+        return format!("{minutes} min window");
+    }
+
+    let hours = (minutes as f64 / 60.0).round().max(1.0);
+    if hours < 24.0 {
+        let hours = hours as u64;
+        let unit = if hours == 1 { "hour" } else { "hours" };
+        return format!("{hours} {unit} window");
+    }
+
+    let days = (minutes as f64 / 1_440.0).round().max(1.0) as u64;
+    if days % 7 == 0 {
+        let weeks = days / 7;
+        let unit = if weeks == 1 { "week" } else { "weeks" };
+        return format!("{weeks} {unit} window");
+    }
+
+    let unit = if days == 1 { "day" } else { "days" };
+    format!("{days} {unit} window")
+}
+
+fn format_reset_line(seconds: u64) -> String {
+    let reset_duration = std::time::Duration::from_secs(seconds);
+    let reset = format_duration(reset_duration);
+    let timestamp = format_reset_timestamp(seconds)
+        .map(|formatted| format!(" @ {formatted}"))
+        .unwrap_or_default();
+    format!("   • resets in {reset}{timestamp}")
+}
+
+fn format_reset_timestamp(seconds: u64) -> Option<String> {
+    let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let seconds_i64 = i64::try_from(seconds).ok()?;
+    let reset_at = now + TimeDuration::seconds(seconds_i64);
+    let same_day = now.date() == reset_at.date();
+    let format = if same_day {
+        TIME_OF_DAY_FORMAT
+    } else {
+        DAY_TIME_FORMAT
+    };
+    reset_at.format(format).ok()
 }
 
 fn legend_lines(entry: &RateLimitLegendEntry) -> Vec<Line<'static>> {
