@@ -8953,6 +8953,9 @@ impl ChatWidget<'_> {
             return;
         }
 
+        // Always surface the update settings UI before kicking off any upgrade flow.
+        self.show_update_settings_ui();
+
         match crate::updates::resolve_upgrade_resolution() {
             crate::updates::UpgradeResolution::Command { command, display } => {
                 if command.is_empty() {
@@ -8972,7 +8975,6 @@ impl ChatWidget<'_> {
                 }
             }
             crate::updates::UpgradeResolution::Manual { instructions } => {
-                self.show_update_settings_ui();
                 self.history_push(history_cell::new_background_event(instructions));
                 self.request_redraw();
             }
