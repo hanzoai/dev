@@ -47,6 +47,7 @@ use codex_protocol::num_format::format_with_separators;
 
 
 mod auto_coordinator;
+mod auto_drive_history;
 mod auto_observer;
 #[cfg(feature = "dev-faults")]
 mod faults;
@@ -78,6 +79,7 @@ use self::agent_install::{
     start_upgrade_terminal_session,
     wrap_command,
 };
+use self::auto_drive_history::AutoDriveHistory;
 use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand, AutoCoordinatorHandle};
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
@@ -119,7 +121,6 @@ use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
 use crate::bottom_pane::{
     AutoCoordinatorButton,
-    AutoCoordinatorView,
     AutoCoordinatorViewModel,
     CountdownState,
 };
@@ -463,6 +464,7 @@ struct AutoCoordinatorUiState {
     current_summary: Option<String>,
     current_prompt: Option<String>,
     current_display_line: Option<String>,
+    current_reasoning_title: Option<String>,
     placeholder_phrase: Option<String>,
     thinking_prefix_stripped: bool,
     current_summary_index: Option<u32>,
@@ -654,6 +656,7 @@ pub(crate) struct ChatWidget<'a> {
 
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
+    auto_history: AutoDriveHistory,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2888,6 +2891,7 @@ impl ChatWidget<'_> {
             pending_snapshot_dispatches: VecDeque::new(),
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
+            auto_history: AutoDriveHistory::new(),
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3142,6 +3146,7 @@ impl ChatWidget<'_> {
             pending_snapshot_dispatches: VecDeque::new(),
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
+            auto_history: AutoDriveHistory::new(),
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -3385,6 +3390,24 @@ impl ChatWidget<'_> {
             }
         }
         items
+    }
+
+    fn rebuild_auto_history(&mut self) -> Vec<codex_protocol::models::ResponseItem> {
+        let conversation = self.export_auto_drive_items();
+        let tail = self
+            .auto_history
+            .replace_converted(conversation.clone());
+        if !tail.is_empty() {
+            self.auto_history.append_raw(&tail);
+        }
+        self.auto_history.raw_snapshot()
+    }
+
+    fn current_auto_history(&mut self) -> Vec<codex_protocol::models::ResponseItem> {
+        if self.auto_history.converted_is_empty() {
+            return self.rebuild_auto_history();
+        }
+        self.auto_history.raw_snapshot()
     }
 
     /// Export current user/assistant messages into ResponseItem list for forking.
@@ -8953,6 +8976,9 @@ impl ChatWidget<'_> {
             return;
         }
 
+        // Always surface the update settings UI before kicking off any upgrade flow.
+        self.show_update_settings_ui();
+
         match crate::updates::resolve_upgrade_resolution() {
             crate::updates::UpgradeResolution::Command { command, display } => {
                 if command.is_empty() {
@@ -8972,7 +8998,6 @@ impl ChatWidget<'_> {
                 }
             }
             crate::updates::UpgradeResolution::Manual { instructions } => {
-                self.show_update_settings_ui();
                 self.history_push(history_cell::new_background_event(instructions));
                 self.request_redraw();
             }
@@ -10003,7 +10028,7 @@ impl ChatWidget<'_> {
             self.auto_stop(None);
         }
 
-        let conversation = self.export_auto_drive_items();
+        let conversation = self.rebuild_auto_history();
         match start_auto_coordinator(
             self.app_event_tx.clone(),
             goal_text.clone(),
@@ -10019,6 +10044,7 @@ impl ChatWidget<'_> {
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_summary = None;
                 self.auto_state.current_display_line = None;
+                self.auto_state.current_reasoning_title = None;
                 self.auto_state.current_summary_index = None;
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
@@ -10042,10 +10068,10 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || self.auto_state.waiting_for_response {
             return;
         }
+        let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
-        let conversation = self.export_auto_drive_items();
         if handle
             .send(AutoCoordinatorCommand::UpdateConversation(conversation))
             .is_err()
@@ -10057,6 +10083,8 @@ impl ChatWidget<'_> {
             self.auto_state.current_summary = None;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
+            self.auto_state.current_display_line = None;
+            self.auto_state.current_reasoning_title = None;
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
@@ -10071,12 +10099,16 @@ impl ChatWidget<'_> {
         status: AutoCoordinatorStatus,
         summary: String,
         prompt: Option<String>,
+        transcript: Vec<codex_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
         let summary = summary.trim().to_string();
+        if !transcript.is_empty() {
+            self.auto_history.append_raw(&transcript);
+        }
         self.auto_state.last_decision_summary = Some(summary.clone());
         self.auto_state.coordinator_waiting = false;
         self.auto_on_reasoning_final(&summary);
@@ -10222,7 +10254,6 @@ impl ChatWidget<'_> {
         if !self.auto_state.active {
             return;
         }
-        self.auto_state.placeholder_phrase = None;
         self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
@@ -10253,6 +10284,7 @@ impl ChatWidget<'_> {
         self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
             auto_drive_strings::next_auto_drive_phrase().to_string()
         });
+        self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
@@ -10294,6 +10326,7 @@ impl ChatWidget<'_> {
         }
         self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_state.reset();
+        self.auto_history.clear();
         self.bottom_pane.clear_auto_coordinator_view();
         self.bottom_pane.clear_live_ring();
         let any_exec_running = !self.exec.running_commands.is_empty();
@@ -10335,6 +10368,7 @@ impl ChatWidget<'_> {
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
+        self.rebuild_auto_history();
         self.auto_send_conversation();
     }
 
@@ -10368,7 +10402,8 @@ impl ChatWidget<'_> {
                 .clone()
         };
 
-        let mut status_lines = vec![append_thought_ellipsis(&status_text)];
+        let headline = self.auto_format_status_headline(&status_text);
+        let mut status_lines = vec![headline];
         if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
             if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
                 let trimmed = summary.trim();
@@ -10459,7 +10494,6 @@ impl ChatWidget<'_> {
             prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
-            coordinator_waiting: self.auto_state.coordinator_waiting,
             countdown,
             button,
             manual_hint,
@@ -10467,8 +10501,9 @@ impl ChatWidget<'_> {
             cli_running,
         };
 
-        self.bottom_pane
-            .show_auto_coordinator_view(AutoCoordinatorView::new(model, self.app_event_tx.clone()));
+        self
+            .bottom_pane
+            .show_auto_coordinator_view(model);
 
         if self.auto_state.waiting_for_response {
             self.bottom_pane
@@ -10482,6 +10517,28 @@ impl ChatWidget<'_> {
             .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
     }
 
+    fn auto_format_status_headline(&self, text: &str) -> String {
+        let trimmed = text.trim_end();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        let show_summary_without_ellipsis = self.auto_state.awaiting_submission
+            && self.auto_state.current_reasoning_title.is_none()
+            && self
+                .auto_state
+                .current_summary
+                .as_ref()
+                .map(|summary| !summary.trim().is_empty())
+                .unwrap_or(false);
+
+        if show_summary_without_ellipsis {
+            trimmed.to_string()
+        } else {
+            append_thought_ellipsis(trimmed)
+        }
+    }
+
     fn auto_update_display_title(&mut self) {
         if !self.auto_state.active {
             return;
@@ -10491,18 +10548,26 @@ impl ChatWidget<'_> {
             return;
         };
 
-        if let Some(title) = extract_latest_bold_title(summary) {
-            let needs_update = self
-                .auto_state
-                .current_display_line
-                .as_ref()
-                .map(|current| current != &title)
-                .unwrap_or(true);
+        let display = summary.lines().find_map(|line| {
+            let trimmed = line.trim();
+            (!trimmed.is_empty()).then(|| Self::truncate_with_ellipsis(trimmed, 160))
+        });
 
-            if needs_update {
-                self.auto_state.current_display_line = Some(title);
-                self.auto_state.placeholder_phrase = None;
-            }
+        let Some(display) = display else {
+            return;
+        };
+
+        let needs_update = self
+            .auto_state
+            .current_display_line
+            .as_ref()
+            .map(|current| current != &display)
+            .unwrap_or(true);
+
+        if needs_update {
+            self.auto_state.current_display_line = Some(display);
+            self.auto_state.placeholder_phrase = None;
+            self.auto_state.current_reasoning_title = None;
         }
     }
 
@@ -10545,6 +10610,12 @@ impl ChatWidget<'_> {
                 self.auto_state.current_summary_index = Some(idx);
                 self.auto_state.current_summary = Some(String::new());
                 self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.current_reasoning_title = None;
+                self.auto_state.current_display_line = None;
+                self.auto_state.placeholder_phrase =
+                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_rebuild_live_ring();
+                self.request_redraw();
             }
         }
 
@@ -10573,6 +10644,22 @@ impl ChatWidget<'_> {
             }
 
             entry.push_str(&cleaned_delta);
+
+            if let Some(title) = extract_latest_bold_title(entry) {
+                let needs_update = self
+                    .auto_state
+                    .current_reasoning_title
+                    .as_ref()
+                    .map(|existing| existing != &title)
+                    .unwrap_or(true);
+                if needs_update {
+                    self.auto_state.current_reasoning_title = Some(title.clone());
+                    self.auto_state.current_display_line = Some(title);
+                    self.auto_state.placeholder_phrase = None;
+                    self.auto_rebuild_live_ring();
+                    self.request_redraw();
+                }
+            }
         }
     }
 

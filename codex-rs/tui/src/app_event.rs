@@ -150,6 +150,7 @@ pub(crate) enum AppEvent {
         status: AutoCoordinatorStatus,
         summary: String,
         prompt: Option<String>,
+        transcript: Vec<ResponseItem>,
     },
     AutoCoordinatorThinking {
         delta: String,

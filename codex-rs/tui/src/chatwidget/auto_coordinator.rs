@@ -8,16 +8,17 @@ use codex_core::config::Config;
 use codex_core::config_types::ReasoningEffort;
 use codex_core::debug_logger::DebugLogger;
 use codex_core::model_family::{derive_default_model_family, find_family_for_model};
+use codex_core::project_doc::read_auto_drive_docs;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use codex_core::error::CodexErr;
-use codex_protocol::models::{ContentItem, ResponseItem};
+use codex_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
 use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::app_event::{AppEvent, AutoCoordinatorStatus};
@@ -167,6 +168,27 @@ fn run_auto_loop(
         )),
     );
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("creating runtime for auto coordinator")?;
+
+    let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
+        Ok(Some(text)) => {
+            let trimmed = text.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        Ok(None) => None,
+        Err(err) => {
+            warn!("failed to read AUTO_AGENTS.md instructions: {err:#}");
+            None
+        }
+    };
+
     let sandbox_label = if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
         "full access"
     } else {
@@ -178,11 +200,6 @@ fn run_auto_loop(
     let schema = build_schema();
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("creating runtime for auto coordinator")?;
 
     let mut pending_conversation = Some(initial_conversation);
     let mut stopped = false;
@@ -224,15 +241,17 @@ fn run_auto_loop(
                 &primary_goal_message,
                 &schema,
                 conv,
+                auto_instructions.as_deref(),
                 &app_event_tx,
                 &cancel_token,
             ) {
-                Ok((status, summary, prompt_opt)) => {
+                Ok((status, summary, prompt_opt, transcript_items)) => {
                     let prompt_clone = prompt_opt.clone();
                     let event = AppEvent::AutoCoordinatorDecision {
                         status,
                         summary,
                         prompt: prompt_opt,
+                        transcript: transcript_items.clone(),
                     };
                     app_event_tx.send(event);
 
@@ -269,6 +288,7 @@ fn run_auto_loop(
                         status: AutoCoordinatorStatus::Failed,
                         summary: format!("Coordinator error: {err}"),
                         prompt: None,
+                        transcript: Vec::new(),
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -347,7 +367,7 @@ fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
 
 fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
     let intro = format!(
-        "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**Rules**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in it's entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely can not be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `summary`: short summary (<= 160 characters) describing what will happen when the CLI performs the next prompt\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n- First plan, then execute. Allow the CLI to plan for you. You should get it to do the thinking for you.\n- Keep the prompt minimal to give the CLI room to make independent decision.\n- Don't repeat yourself. You will see past prompts and outputs showing current progress. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nUseful commands:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n`/reasoning <high|medium|low>` e.g. set `/reasoning high` if the CLI makes a poor decision or `/reasoning low` to move faster on simple tasks\n\nEnvironment:\\n{environment_details}"
+        "You are coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**JSON Structure**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in its entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely cannot be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `summary`: short summary (<= 160 characters) describing what will happen when the CLI performs the next prompt\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n\n**Rules**\n- You set direction, not implementation. Keep the CLI on track, but let it do all the thinking and implementation. You do not have the context the CLI has.\n- When working on an existing code base, start by prompting the CLI to explain the problem and outline plausible approaches. This lets it build context rather than jumping in naively with a solution.\n- Keep every prompt minimal to give the CLI room to make independent decisions.\n- Don't repeat yourself. If something doesn't work, take a different approach. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\nUseful command:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n\nEnvironment:\n{environment_details}"
     );
     let primary_goal = format!("**Primary Goal**\n{goal_text}");
     (intro, primary_goal)
@@ -409,6 +429,11 @@ fn build_schema() -> Value {
     })
 }
 
+struct RequestStreamResult {
+    output_text: String,
+    response_items: Vec<ResponseItem>,
+}
+
 fn request_coordinator_decision(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
@@ -416,16 +441,18 @@ fn request_coordinator_decision(
     primary_goal: &str,
     schema: &Value,
     conversation: Vec<ResponseItem>,
+    auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
-) -> Result<(AutoCoordinatorStatus, String, Option<String>)> {
-    let raw = request_decision(
+) -> Result<(AutoCoordinatorStatus, String, Option<String>, Vec<ResponseItem>)> {
+    let (raw, response_items) = request_decision(
         runtime,
         client,
         developer_intro,
         primary_goal,
         schema,
         &conversation,
+        auto_instructions,
         app_event_tx,
         cancel_token,
     )?;
@@ -455,7 +482,12 @@ fn request_coordinator_decision(
         _ => None,
     };
 
-    Ok((status, decision.summary.trim().to_string(), prompt_opt))
+    Ok((
+        status,
+        decision.summary.trim().to_string(),
+        prompt_opt,
+        response_items,
+    ))
 }
 
 fn request_decision(
@@ -465,9 +497,10 @@ fn request_decision(
     primary_goal: &str,
     schema: &Value,
     conversation: &[ResponseItem],
+    auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
-) -> Result<String> {
+) -> Result<(String, Vec<ResponseItem>)> {
     match request_decision_with_model(
         runtime,
         client,
@@ -475,11 +508,12 @@ fn request_decision(
         primary_goal,
         schema,
         conversation,
+        auto_instructions,
         app_event_tx,
         cancel_token,
         MODEL_SLUG,
     ) {
-        Ok(output) => Ok(output),
+        Ok(result) => Ok((result.output_text, result.response_items)),
         Err(err) => {
             let fallback_slug = client.default_model_slug().to_string();
             if fallback_slug != MODEL_SLUG && should_retry_with_default_model(&err) {
@@ -496,10 +530,12 @@ fn request_decision(
                     primary_goal,
                     schema,
                     conversation,
+                    auto_instructions,
                     app_event_tx,
                     cancel_token,
                     &fallback_slug,
                 )
+                .map(|res| (res.output_text, res.response_items))
                 .map_err(|fallback_err| {
                     fallback_err.context(format!(
                         "coordinator fallback with model '{}' failed after original error: {}",
@@ -519,14 +555,16 @@ fn request_decision_with_model(
     primary_goal: &str,
     schema: &Value,
     conversation: &[ResponseItem],
+    auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
     model_slug: &str,
-) -> Result<String> {
+) -> Result<RequestStreamResult> {
     let developer_intro = developer_intro.to_string();
     let primary_goal = primary_goal.to_string();
     let schema = schema.clone();
     let conversation: Vec<ResponseItem> = conversation.to_vec();
+    let auto_instructions = auto_instructions.map(|text| text.to_string());
     let tx = app_event_tx.clone();
     let cancel = cancel_token.clone();
     let classify = |error: &anyhow::Error| classify_model_error(error);
@@ -535,12 +573,14 @@ fn request_decision_with_model(
     let result = runtime.block_on(async move {
         retry_with_backoff(
             || {
+                let instructions = auto_instructions.clone();
                 let prompt = build_prompt_for_model(
                     &developer_intro,
                     &primary_goal,
                     &schema,
                     &conversation,
                     model_slug,
+                    instructions.as_deref(),
                 );
                 let tx_inner = tx.clone();
                 async move {
@@ -551,31 +591,43 @@ fn request_decision_with_model(
                     }
                     let mut stream = client.stream(&prompt).await?;
                     let mut out = String::new();
+                    let mut response_items: Vec<ResponseItem> = Vec::new();
+                    let mut reasoning_delta_accumulator = String::new();
                     while let Some(ev) = stream.next().await {
                         match ev {
-                            Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
+                            Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
+                                out.push_str(&delta);
+                            }
                             Ok(ResponseEvent::OutputItemDone { item, .. }) => {
-                                if let ResponseItem::Message { content, .. } = item {
+                                if let ResponseItem::Message { content, .. } = &item {
                                     for c in content {
                                         if let ContentItem::OutputText { text } = c {
-                                            out.push_str(&text);
+                                            out.push_str(text);
                                         }
                                     }
                                 }
+                                if matches!(item, ResponseItem::Reasoning { .. }) {
+                                    reasoning_delta_accumulator.clear();
+                                }
+                                response_items.push(item);
                             }
                             Ok(ResponseEvent::ReasoningSummaryDelta {
                                 delta,
                                 summary_index,
                                 ..
                             }) => {
-                                let message = strip_role_prefix(&delta).to_string();
+                                let cleaned = strip_role_prefix(&delta);
+                                reasoning_delta_accumulator.push_str(cleaned);
+                                let message = cleaned.to_string();
                                 tx_inner.send(AppEvent::AutoCoordinatorThinking {
                                     delta: message,
                                     summary_index,
                                 });
                             }
                             Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
-                                let message = strip_role_prefix(&delta).to_string();
+                                let cleaned = strip_role_prefix(&delta);
+                                reasoning_delta_accumulator.push_str(cleaned);
+                                let message = cleaned.to_string();
                                 tx_inner.send(AppEvent::AutoCoordinatorThinking {
                                     delta: message,
                                     summary_index: None,
@@ -586,7 +638,24 @@ fn request_decision_with_model(
                             _ => {}
                         }
                     }
-                    Ok(out)
+                    if !reasoning_delta_accumulator.trim().is_empty()
+                        && !response_items
+                            .iter()
+                            .any(|item| matches!(item, ResponseItem::Reasoning { .. }))
+                    {
+                        response_items.push(ResponseItem::Reasoning {
+                            id: String::new(),
+                            summary: Vec::new(),
+                            content: Some(vec![ReasoningItemContent::ReasoningText {
+                                text: reasoning_delta_accumulator.trim().to_string(),
+                            }]),
+                            encrypted_content: None,
+                        });
+                    }
+                    Ok(RequestStreamResult {
+                        output_text: out,
+                        response_items,
+                    })
                 }
             },
             classify,
@@ -651,9 +720,18 @@ fn build_prompt_for_model(
     schema: &Value,
     conversation: &[ResponseItem],
     model_slug: &str,
+    auto_instructions: Option<&str>,
 ) -> Prompt {
     let mut prompt = Prompt::default();
     prompt.store = true;
+    if let Some(instructions) = auto_instructions {
+        let trimmed = instructions.trim();
+        if !trimmed.is_empty() {
+            prompt
+                .input
+                .push(make_message("developer", trimmed.to_string()));
+        }
+    }
     prompt
         .input
         .push(make_message("developer", developer_intro.to_string()));
