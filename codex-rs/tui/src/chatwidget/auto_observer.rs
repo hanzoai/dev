@@ -190,21 +190,28 @@ fn run_observer_prompt(
         other => return Err(anyhow!("unexpected status '{other}'")),
     };
 
-    let replace_message = response
+    let trimmed_replace_message = response
         .replace_message
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let additional_instructions = response
+    let trimmed_additional_instructions = response
         .additional_instructions
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
     if matches!(status, AutoObserverStatus::Failing)
-        && replace_message.is_none()
-        && additional_instructions.is_none()
+        && trimmed_replace_message.is_none()
+        && trimmed_additional_instructions.is_none()
     {
         warn!("observer returned failing status without guidance");
     }
+
+    let (replace_message, additional_instructions) =
+        if matches!(status, AutoObserverStatus::Failing) {
+            (trimmed_replace_message, trimmed_additional_instructions)
+        } else {
+            (None, None)
+        };
 
     debug!(
         "[Auto observer] status={status:?} replace={} instructions={}",
@@ -330,7 +337,7 @@ fn build_observer_schema() -> Value {
                 "minLength": 1,
             }
         },
-        "required": ["status"],
+        "required": ["status", "replace_message", "additional_instructions"],
         "additionalProperties": false
     })
 }
