@@ -23,7 +23,6 @@ use codex_core::RolloutRecorder;
 use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
 use codex_responses_api_proxy::Args as ResponsesApiProxyArgs;
-use codex_tui::AppExitInfo;
 use codex_tui::Cli as TuiCli;
 use codex_tui::ExitSummary;
 use codex_tui::RESUME_COMMAND_NAME;
