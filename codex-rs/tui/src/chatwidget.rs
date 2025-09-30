@@ -464,6 +464,7 @@ struct AutoCoordinatorUiState {
     current_summary: Option<String>,
     current_prompt: Option<String>,
     current_display_line: Option<String>,
+    current_display_is_summary: bool,
     current_reasoning_title: Option<String>,
     placeholder_phrase: Option<String>,
     thinking_prefix_stripped: bool,
@@ -478,6 +479,7 @@ struct AutoCoordinatorUiState {
     last_broadcast_summary: Option<String>,
     last_decision_summary: Option<String>,
     last_decision_display: Option<String>,
+    last_decision_display_is_summary: bool,
     observer_telemetry: Option<AutoObserverTelemetry>,
     observer_status: AutoObserverStatus,
     coordinator_waiting: bool,
@@ -10044,6 +10046,7 @@ impl ChatWidget<'_> {
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_summary = None;
                 self.auto_state.current_display_line = None;
+                self.auto_state.current_display_is_summary = false;
                 self.auto_state.current_reasoning_title = None;
                 self.auto_state.current_summary_index = None;
                 self.auto_state.placeholder_phrase =
@@ -10084,6 +10087,7 @@ impl ChatWidget<'_> {
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
             self.auto_state.current_display_line = None;
+            self.auto_state.current_display_is_summary = false;
             self.auto_state.current_reasoning_title = None;
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
@@ -10113,6 +10117,8 @@ impl ChatWidget<'_> {
         self.auto_state.coordinator_waiting = false;
         self.auto_on_reasoning_final(&summary);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
+        self.auto_state.last_decision_display_is_summary =
+            self.auto_state.current_display_is_summary;
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
@@ -10280,6 +10286,8 @@ impl ChatWidget<'_> {
         self.auto_state.current_summary = None;
         self.auto_state.last_broadcast_summary = None;
         self.auto_state.current_display_line = post_submit_display.clone();
+        self.auto_state.current_display_is_summary =
+            self.auto_state.last_decision_display_is_summary && post_submit_display.is_some();
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
             auto_drive_strings::next_auto_drive_phrase().to_string()
@@ -10523,6 +10531,10 @@ impl ChatWidget<'_> {
             return String::new();
         }
 
+        if self.auto_state.current_display_is_summary {
+            return trimmed.to_string();
+        }
+
         let show_summary_without_ellipsis = self.auto_state.awaiting_submission
             && self.auto_state.current_reasoning_title.is_none()
             && self
@@ -10566,6 +10578,7 @@ impl ChatWidget<'_> {
 
         if needs_update {
             self.auto_state.current_display_line = Some(display);
+            self.auto_state.current_display_is_summary = true;
             self.auto_state.placeholder_phrase = None;
             self.auto_state.current_reasoning_title = None;
         }
@@ -10612,6 +10625,7 @@ impl ChatWidget<'_> {
                 self.auto_state.thinking_prefix_stripped = false;
                 self.auto_state.current_reasoning_title = None;
                 self.auto_state.current_display_line = None;
+                self.auto_state.current_display_is_summary = false;
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_rebuild_live_ring();
@@ -10655,6 +10669,7 @@ impl ChatWidget<'_> {
                 if needs_update {
                     self.auto_state.current_reasoning_title = Some(title.clone());
                     self.auto_state.current_display_line = Some(title);
+                    self.auto_state.current_display_is_summary = false;
                     self.auto_state.placeholder_phrase = None;
                     self.auto_rebuild_live_ring();
                     self.request_redraw();
