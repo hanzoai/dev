@@ -363,23 +363,75 @@ fn summarize_intervention(
 
 // Helper so observer can append the coordinator's latest prompt.
 pub(super) fn build_observer_conversation(
-    mut conversation: Vec<ResponseItem>,
+    conversation: Vec<ResponseItem>,
     coordinator_prompt: Option<&str>,
 ) -> Vec<ResponseItem> {
+    let mut filtered: Vec<ResponseItem> = Vec::new();
+
+    for item in conversation {
+        match item {
+            ResponseItem::Message { id, role, content } => {
+                if id.as_deref() == Some("auto-drive-reasoning") {
+                    continue;
+                }
+
+                if role == "assistant" {
+                    let mut new_content: Vec<ContentItem> = Vec::new();
+                    for entry in content {
+                        match entry {
+                            ContentItem::InputText { text } => {
+                                let prefixed = if text.trim_start().starts_with("Coordinator:") {
+                                    text
+                                } else {
+                                    format!("Coordinator: {text}")
+                                };
+                                new_content.push(ContentItem::InputText { text: prefixed });
+                            }
+                            ContentItem::OutputText { text } => {
+                                let prefixed = if text.trim_start().starts_with("Coordinator:") {
+                                    text
+                                } else {
+                                    format!("Coordinator: {text}")
+                                };
+                                new_content.push(ContentItem::InputText { text: prefixed });
+                            }
+                            other => new_content.push(other),
+                        }
+                    }
+                    filtered.push(ResponseItem::Message {
+                        id: None,
+                        role: "user".to_string(),
+                        content: new_content,
+                    });
+                } else {
+                    filtered.push(ResponseItem::Message { id, role, content });
+                }
+            }
+            ResponseItem::Reasoning { .. } => {
+                // Observer should not inspect reasoning blocks.
+                continue;
+            }
+            other => filtered.push(other),
+        }
+    }
+
     if let Some(prompt) = coordinator_prompt.and_then(|p| {
         let trimmed = p.trim();
         (!trimmed.is_empty()).then_some(trimmed)
     }) {
-        let content = ContentItem::OutputText {
-            text: format!("Coordinator: {prompt}"),
+        let text = if prompt.trim_start().starts_with("Coordinator:") {
+            prompt.to_string()
+        } else {
+            format!("Coordinator: {prompt}")
         };
-        conversation.push(ResponseItem::Message {
+        filtered.push(ResponseItem::Message {
             id: None,
-            role: "assistant".to_string(),
-            content: vec![content],
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText { text }],
         });
     }
-    conversation
+
+    filtered
 }
 
 #[cfg(test)]
