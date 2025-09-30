@@ -10668,6 +10668,7 @@ impl ChatWidget<'_> {
             return;
         }
 
+        self.auto_state.current_reasoning_title = None;
         self.auto_state.current_summary = Some(text.to_string());
         self.auto_state.thinking_prefix_stripped = true;
         self.auto_state.current_summary_index = None;
