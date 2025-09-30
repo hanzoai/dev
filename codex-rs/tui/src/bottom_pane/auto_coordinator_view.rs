@@ -250,9 +250,7 @@ impl AutoCoordinatorView {
             }
         }
         let title_y = area.y;
-        let style = Style::default()
-            .fg(colors::info())
-            .add_modifier(Modifier::BOLD);
+        let style = Style::default().fg(colors::info());
         let mut x = start_x;
         for ch in trimmed.chars() {
             if x >= area.x.saturating_add(area.width) {
@@ -464,7 +462,6 @@ impl AutoCoordinatorView {
                 total += Self::wrap_count(prompt, inner_width).max(1);
             }
             if ctx.button.is_some() {
-                total += 1; // spacer before button block
                 total += button_height;
             }
             if ctrl_height > 0 {
@@ -477,7 +474,6 @@ impl AutoCoordinatorView {
                 total += Self::wrap_count(text, inner_width);
             }
             if ctx.button.is_some() {
-                total += 1; // spacer before button block
                 total += button_height;
             }
             if ctx.manual_hint.is_some() {
