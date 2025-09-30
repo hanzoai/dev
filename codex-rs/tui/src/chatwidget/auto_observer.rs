@@ -206,12 +206,11 @@ fn run_observer_prompt(
         warn!("observer returned failing status without guidance");
     }
 
-    let (replace_message, additional_instructions) =
-        if matches!(status, AutoObserverStatus::Failing) {
-            (trimmed_replace_message, trimmed_additional_instructions)
-        } else {
-            (None, None)
-        };
+    let (replace_message, additional_instructions) = partition_observer_guidance(
+        status,
+        trimmed_replace_message,
+        trimmed_additional_instructions,
+    );
 
     debug!(
         "[Auto observer] status={status:?} replace={} instructions={}",
@@ -220,6 +219,18 @@ fn run_observer_prompt(
     );
 
     Ok((status, replace_message, additional_instructions))
+}
+
+fn partition_observer_guidance(
+    status: AutoObserverStatus,
+    replace_message: Option<String>,
+    additional_instructions: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if matches!(status, AutoObserverStatus::Failing) {
+        (replace_message, additional_instructions)
+    } else {
+        (None, additional_instructions)
+    }
 }
 
 fn build_observer_prompt(trigger: &ObserverTrigger, model_slug: &str) -> Prompt {
@@ -393,14 +404,14 @@ pub(super) fn build_observer_conversation(
                                 } else {
                                     format!("Coordinator: {text}")
                                 };
-                                new_content.push(ContentItem::InputText { text: prefixed });
+                                new_content.push(ContentItem::OutputText { text: prefixed });
                             }
                             other => new_content.push(other),
                         }
                     }
                     filtered.push(ResponseItem::Message {
                         id: None,
-                        role: "user".to_string(),
+                        role,
                         content: new_content,
                     });
                 } else {
@@ -481,5 +492,67 @@ mod tests {
             response.additional_instructions.as_deref(),
             Some("Confirm environment variables")
         );
+    }
+
+    #[test]
+    fn observer_ok_status_retains_additional_instructions() {
+        let status = AutoObserverStatus::Ok;
+        let (replace_message, additional_instructions) = partition_observer_guidance(
+            status,
+            Some("Should be ignored".to_string()),
+            Some("Keep nudging the task".to_string()),
+        );
+
+        assert!(replace_message.is_none(), "ok status should not replace prompt");
+        assert_eq!(
+            additional_instructions.as_deref(),
+            Some("Keep nudging the task"),
+            "observer notes should be preserved for ok status"
+        );
+    }
+
+    #[test]
+    fn build_observer_conversation_preserves_assistant_roles() {
+        let base = vec![
+            make_message("assistant", "Coordinator: initial guidance".to_string()),
+            make_message("assistant", "Consider running tests".to_string()),
+        ];
+
+        let conversation = build_observer_conversation(base.clone(), Some("Review progress"));
+
+        assert_eq!(conversation.len(), base.len() + 1);
+
+        for (idx, item) in conversation.iter().enumerate().take(base.len()) {
+            match item {
+                ResponseItem::Message { role, content, .. } => {
+                    assert_eq!(role, "assistant", "role should remain assistant at index {idx}");
+                    assert_eq!(content.len(), 1);
+                    match &content[0] {
+                        ContentItem::OutputText { text } => {
+                            assert!(
+                                text.starts_with("Coordinator:"),
+                                "coordinator text should be prefixed"
+                            );
+                        }
+                        other => panic!("unexpected content variant: {:?}", other),
+                    }
+                }
+                other => panic!("unexpected response item: {:?}", other),
+            }
+        }
+
+        match conversation.last().expect("appended prompt") {
+            ResponseItem::Message { role, content, .. } => {
+                assert_eq!(role, "user");
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    ContentItem::InputText { text } => {
+                        assert!(text.contains("Coordinator: Review progress"));
+                    }
+                    other => panic!("unexpected content: {:?}", other),
+                }
+            }
+            other => panic!("unexpected item appended: {:?}", other),
+        }
     }
 }
