@@ -185,21 +185,26 @@ fn render_border_weave(area: Rect, buf: &mut Buffer, phase: f32, tick: u32) {
     if positions.is_empty() {
         return;
     }
-    let base_color = crate::colors::border();
-    let highlight = crate::colors::mix_toward(base_color, prism_color(phase), 0.75);
+    let base_bg = crate::colors::background();
+    let info = crate::colors::info();
+    let wave = ((phase * TAU).sin() * 0.5) + 0.5;
+    let highlight_strength = 0.65 + wave * 0.25;
+    let highlight = crate::colors::mix_toward(base_bg, info, highlight_strength);
+    let midtone = crate::colors::mix_toward(base_bg, info, 0.5);
+    let lowtone = crate::colors::mix_toward(base_bg, info, 0.3);
     for (idx, &(x, y)) in positions.iter().enumerate() {
         let tick_step = (tick as usize) % 12;
         let phase_idx = (idx + (12 - tick_step)) % 12;
         let color = if phase_idx < 4 {
             highlight
         } else if phase_idx < 8 {
-            crate::colors::mix_toward(highlight, base_color, 0.5)
+            midtone
         } else {
-            crate::colors::mix_toward(base_color, crate::colors::text_dim(), 0.35)
+            lowtone
         };
         let cell = &mut buf[(x, y)];
         cell.set_fg(color);
-        cell.set_bg(crate::colors::background());
+        cell.set_bg(base_bg);
     }
 }
 
@@ -233,16 +238,4 @@ fn border_positions(area: Rect) -> Vec<(u16, u16)> {
     }
 
     positions
-}
-
-fn prism_color(t: f32) -> Color {
-    let angle = wrap_unit(t) * TAU;
-    let r = (angle.sin() * 0.5 + 0.5).powf(0.55);
-    let g = ((angle + TAU / 3.0).sin() * 0.5 + 0.5).powf(0.55);
-    let b = ((angle + 2.0 * TAU / 3.0).sin() * 0.5 + 0.5).powf(0.55);
-    Color::Rgb(
-        (r * 255.0).clamp(0.0, 255.0) as u8,
-        (g * 255.0).clamp(0.0, 255.0) as u8,
-        (b * 255.0).clamp(0.0, 255.0) as u8,
-    )
 }
