@@ -553,7 +553,7 @@ fn rgb_to_ansi256_index(r: u8, g: u8, b: u8) -> u8 {
     let mut best_index = 0u8;
     let mut best_score = i32::MAX;
 
-    let mut record_candidate = |
+    let record_candidate = |
         index: u8,
         candidate_rgb: (u8, u8, u8),
         best_index: &mut u8,
