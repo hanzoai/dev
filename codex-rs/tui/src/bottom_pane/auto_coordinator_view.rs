@@ -3,22 +3,19 @@ use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::colors;
 use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
+use crate::spinner;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-use std::borrow::Cow;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DRIVE_SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const DRIVE_SPINNER_INTERVAL_MS: u64 = 120;
-
-static DRIVE_SPINNER_TICK: AtomicUsize = AtomicUsize::new(0);
-
-use super::bottom_pane_view::BottomPaneView;
+use super::{
+    bottom_pane_view::{BottomPaneView, ConditionalUpdate},
+    chat_composer::ChatComposer,
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct CountdownState {
@@ -39,7 +36,6 @@ pub(crate) struct AutoCoordinatorViewModel {
     pub prompt: Option<String>,
     pub awaiting_submission: bool,
     pub waiting_for_response: bool,
-    pub coordinator_waiting: bool,
     pub countdown: Option<CountdownState>,
     pub button: Option<AutoCoordinatorButton>,
     pub manual_hint: Option<String>,
@@ -58,6 +54,7 @@ pub(crate) struct AutoCoordinatorView {
     app_event_tx: AppEventSender,
     header_wave: HeaderWaveEffect,
     header_border: HeaderBorderWeaveEffect,
+    status_message: Option<String>,
 }
 
 impl AutoCoordinatorView {
@@ -78,7 +75,12 @@ impl AutoCoordinatorView {
             app_event_tx,
             header_wave,
             header_border,
+            status_message: None,
         }
+    }
+
+    pub fn update_model(&mut self, model: AutoCoordinatorViewModel) {
+        self.model = model;
     }
 
     fn build_context(&self) -> VariantContext {
@@ -94,94 +96,66 @@ impl AutoCoordinatorView {
         }
     }
 
-    fn build_title(
-        &self,
-        area_width: u16,
-        spinner_symbol: Option<&str>,
-        status_text: Option<&str>,
-    ) -> String {
-        const BASE_TITLE: &str = " Auto Drive ";
-        let base_width = UnicodeWidthStr::width(BASE_TITLE);
-        let mut title = String::from(BASE_TITLE);
-
-        let Some(spinner) = spinner_symbol else {
-            return title;
-        };
-        let Some(status) = status_text.map(str::trim) else {
-            return title;
-        };
-        if status.is_empty() {
-            return title;
+    fn normalize_status_message(message: &str) -> Option<String> {
+        let mapped = ChatComposer::map_status_message(message);
+        let trimmed = mapped.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
         }
-
-        let inner_width = area_width.saturating_sub(2) as usize;
-        if inner_width <= base_width {
-            return title;
-        }
-
-        let spinner_width = UnicodeWidthStr::width(spinner);
-        let max_segment_width = inner_width.saturating_sub(base_width);
-        if max_segment_width <= spinner_width + 1 {
-            return title;
-        }
-
-        let mut final_status = String::new();
-        let mut truncated = false;
-        let mut used_width = spinner_width + 1; // spinner + single separating space
-
-        for ch in status.chars() {
-            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-            if ch_width == 0 {
-                continue;
-            }
-            if used_width + ch_width > max_segment_width {
-                truncated = true;
-                break;
-            }
-            final_status.push(ch);
-            used_width += ch_width;
-        }
-
-        if final_status.is_empty() {
-            // Nothing fit besides the spinner – keep default title.
-            return title;
-        }
-
-        if truncated {
-            // Attempt to append an ellipsis without exceeding the available width.
-            let ellipsis_width = UnicodeWidthStr::width("…");
-            if used_width + ellipsis_width <= max_segment_width {
-                final_status.push('…');
-            } else if let Some(last) = final_status.pop() {
-                // Replace last character if adding ellipsis would overflow.
-                let last_width = UnicodeWidthChar::width(last).unwrap_or(0);
-                let used_without_last = used_width.saturating_sub(last_width);
-                if used_without_last + ellipsis_width <= max_segment_width {
-                    final_status.push('…');
-                } else {
-                    // No room for ellipsis; restore last char to avoid dropping information.
-                    final_status.push(last);
-                }
-            }
-        }
-
-        let segment = format!("{spinner} {final_status}");
-        let segment_width = UnicodeWidthStr::width(segment.as_str());
-        let inner_center = inner_width.saturating_sub(segment_width) / 2;
-        let spinner_start = inner_center.max(base_width + 1);
-        let pad_width = spinner_start.saturating_sub(base_width);
-        title.push_str(&" ".repeat(pad_width));
-        title.push_str(&segment);
-        title.push(' ');
-        title
     }
 
-    fn render_frame(&self, area: Rect, buf: &mut Buffer, title: &str, now: Instant) -> Option<Rect> {
+    fn update_status_message(&mut self, message: String) -> bool {
+        let new_value = Self::normalize_status_message(&message);
+        if self.status_message.as_deref() == new_value.as_deref() {
+            return false;
+        }
+        self.status_message = new_value;
+        true
+    }
+
+    fn status_message_for_display(message: &str) -> Option<String> {
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            None
+        } else if trimmed.ends_with("...") || trimmed.ends_with('…') {
+            Some(trimmed.to_string())
+        } else {
+            Some(format!("{trimmed}..."))
+        }
+    }
+
+    fn spinner_should_run(&self) -> bool {
+        self.model.cli_running
+    }
+
+    fn overlay_text(&self, spinner_symbol: &str) -> Option<String> {
+        let message = self
+            .status_message
+            .as_ref()
+            .and_then(|msg| Self::status_message_for_display(msg))
+            .unwrap_or_else(|| "Working...".to_string());
+        if message.is_empty() {
+            None
+        } else {
+            Some(format!(" {spinner_symbol} {message} "))
+        }
+    }
+
+    fn render_frame(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        now: Instant,
+        overlay: Option<&str>,
+    ) -> Option<Rect> {
+        const BASE_TITLE: &str = " Auto Drive ";
         if area.width < 3 || area.height < 3 {
             return None;
         }
         let title_span = Span::styled(
-            title,
+            BASE_TITLE,
             Style::default()
                 .fg(colors::text())
                 .add_modifier(Modifier::BOLD),
@@ -203,7 +177,7 @@ impl AutoCoordinatorView {
             .add_modifier(Modifier::BOLD);
         let title_y = area.y;
         let title_start = area.x + 1;
-        for (offset, ch) in title.chars().enumerate() {
+        for (offset, ch) in BASE_TITLE.chars().enumerate() {
             let x = title_start + offset as u16;
             if x >= area.x && x < area.x.saturating_add(area.width) {
                 let mut ch_buf = [0u8; 4];
@@ -213,12 +187,76 @@ impl AutoCoordinatorView {
                 cell.set_style(title_style);
             }
         }
+
+        if let Some(text) = overlay {
+            self.render_title_overlay(area, buf, text);
+        }
+
         Some(Rect {
             x: area.x + 1,
             y: area.y + 1,
             width: area.width.saturating_sub(2),
             height: area.height.saturating_sub(2),
         })
+    }
+
+    fn render_title_overlay(&self, area: Rect, buf: &mut Buffer, text: &str) {
+        if area.width <= 2 {
+            return;
+        }
+        const BASE_TITLE: &str = " Auto Drive ";
+        let overlay_width = UnicodeWidthStr::width(text);
+        if overlay_width == 0 {
+            return;
+        }
+        let available = area.width.saturating_sub(2) as usize;
+        let trimmed = if overlay_width > available {
+            let mut acc = String::new();
+            let mut used = 0usize;
+            for ch in text.chars() {
+                let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if used + w > available {
+                    acc.push('…');
+                    break;
+                }
+                acc.push(ch);
+                used += w;
+            }
+            acc
+        } else {
+            text.to_string()
+        };
+        let draw_width = UnicodeWidthStr::width(trimmed.as_str());
+        if draw_width == 0 {
+            return;
+        }
+        let base_width = UnicodeWidthStr::width(BASE_TITLE) as u16;
+        let base_end = area.x + 1 + base_width;
+        let mut start_x = area.x + (area.width.saturating_sub(draw_width as u16)) / 2;
+        start_x = start_x.max(base_end);
+        if start_x + draw_width as u16 >= area.x.saturating_add(area.width) {
+            if area.width > draw_width as u16 + 1 {
+                start_x = area.x + area.width - draw_width as u16 - 1;
+            } else {
+                start_x = area.x + 1;
+            }
+        }
+        let title_y = area.y;
+        let style = Style::default()
+            .fg(colors::info())
+            .add_modifier(Modifier::BOLD);
+        let mut x = start_x;
+        for ch in trimmed.chars() {
+            if x >= area.x.saturating_add(area.width) {
+                break;
+            }
+            let mut ch_buf = [0u8; 4];
+            let symbol = ch.encode_utf8(&mut ch_buf);
+            let cell = &mut buf[(x, title_y)];
+            cell.set_symbol(symbol);
+            cell.set_style(style);
+            x += UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
+        }
     }
 
     fn derived_status_entries(&self) -> Vec<(String, Style)> {
@@ -254,31 +292,14 @@ impl AutoCoordinatorView {
         entries
     }
 
-    fn status_lines_with_entries(
-        &self,
-        entries: &[(String, Style)],
-        spinner_symbol: Option<&str>,
-    ) -> Vec<Line<'static>> {
+    fn status_lines_with_entries(&self, entries: &[(String, Style)]) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         for (index, (text, style)) in entries.iter().enumerate() {
             if index == 0 {
-                if let Some(symbol) = spinner_symbol {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            symbol.to_string(),
-                            Style::default()
-                                .fg(colors::spinner())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(text.clone(), *style),
-                    ]));
-                } else {
-                    lines.push(Line::from(vec![
-                        Span::raw("   "),
-                        Span::styled(text.clone(), *style),
-                    ]));
-                }
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(text.clone(), *style),
+                ]));
             } else {
                 lines.push(Line::from(Span::styled(text.clone(), *style)));
             }
@@ -374,7 +395,6 @@ impl AutoCoordinatorView {
         };
 
         let awaiting = self.model.awaiting_submission;
-        let spinner_active = !awaiting && self.model.coordinator_waiting;
 
         let mut total = 0;
 
@@ -392,13 +412,8 @@ impl AutoCoordinatorView {
             }
         } else {
             let status_entries = self.derived_status_entries();
-            for (index, (text, _)) in status_entries.iter().enumerate() {
-                let measure: Cow<'_, str> = if index == 0 {
-                    Cow::Owned(format!("{}  {}", DRIVE_SPINNER_FRAMES[0], text))
-                } else {
-                    Cow::Borrowed(text.as_str())
-                };
-                total += Self::wrap_count(measure.as_ref(), inner_width);
+            for (_, (text, _)) in status_entries.iter().enumerate() {
+                total += Self::wrap_count(text, inner_width);
             }
             if ctx.button.is_some() {
                 total += 1; // spacer before button
@@ -411,10 +426,6 @@ impl AutoCoordinatorView {
                 total += 1; // spacer before ctrl hint
                 total += ctrl_height.max(1);
             }
-        }
-
-        if spinner_active {
-            total = total.saturating_add(2);
         }
 
         total
@@ -445,20 +456,22 @@ impl AutoCoordinatorView {
             frame_needed = true;
         }
 
-        let spinner_active = !self.model.awaiting_submission && self.model.coordinator_waiting;
-        let spinner_symbol = spinner_active.then(|| {
-            let frame_idx = DRIVE_SPINNER_TICK.fetch_add(1, Ordering::Relaxed);
-            DRIVE_SPINNER_FRAMES[frame_idx % DRIVE_SPINNER_FRAMES.len()].to_string()
-        });
-        let status_entries = self.derived_status_entries();
-        let status_title_text = status_entries.first().map(|(text, _)| text.clone());
-        let title = self.build_title(
-            area.width,
-            spinner_symbol.as_deref(),
-            status_title_text.as_deref(),
-        );
+        let spinner_active = self.spinner_should_run();
+        let spinner_def = spinner::current_spinner();
+        let spinner_symbol = if spinner_active {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            Some(spinner::frame_at_time(spinner_def, now_ms))
+        } else {
+            None
+        };
+        let overlay_text = spinner_symbol
+            .as_ref()
+            .and_then(|symbol| self.overlay_text(symbol));
 
-        let Some(inner) = self.render_frame(area, buf, &title, now) else {
+        let Some(inner) = self.render_frame(area, buf, now, overlay_text.as_deref()) else {
             return;
         };
         let inner = self.apply_left_padding(inner, buf);
@@ -466,11 +479,8 @@ impl AutoCoordinatorView {
             return;
         }
 
+        let status_entries = self.derived_status_entries();
         let mut lines: Vec<Line<'static>> = Vec::new();
-
-        if spinner_active {
-            lines.push(Line::default());
-        }
 
         if self.model.awaiting_submission {
             if let Some(prompt_lines) =
@@ -489,8 +499,7 @@ impl AutoCoordinatorView {
                 lines.push(ctrl_hint_line);
             }
         } else {
-            let status_lines =
-                self.status_lines_with_entries(&status_entries, spinner_symbol.as_deref());
+            let status_lines = self.status_lines_with_entries(&status_entries);
             lines.extend(status_lines);
 
             if let Some(button_line) = self.button_line(ctx) {
@@ -508,15 +517,15 @@ impl AutoCoordinatorView {
             }
         }
 
-        if spinner_active {
-            lines.push(Line::default());
-        }
-
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .render(inner, buf);
 
-        let mut next_interval = Duration::from_millis(DRIVE_SPINNER_INTERVAL_MS);
+        let mut next_interval = if spinner_active {
+            Duration::from_millis(spinner_def.interval_ms.max(80))
+        } else {
+            Duration::from_millis(200)
+        };
         if frame_needed {
             next_interval = next_interval.min(HeaderBorderWeaveEffect::FRAME_INTERVAL);
         }
@@ -566,5 +575,17 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
         }
 
         self.render_internal(area, buf, &ctx);
+    }
+
+    fn update_status_text(&mut self, text: String) -> ConditionalUpdate {
+        if self.update_status_message(text) {
+            ConditionalUpdate::NeedsRedraw
+        } else {
+            ConditionalUpdate::NoRedraw
+        }
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 }

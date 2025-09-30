@@ -9,7 +9,6 @@ use std::path::PathBuf;
 
 use codex_core::protocol::FileChange;
 
-use crate::colors::color_to_rgb;
 use crate::history_cell::PatchEventType;
 use crate::sanitize::{sanitize_for_tui, Mode as SanitizeMode, Options as SanitizeOptions};
 
