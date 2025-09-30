@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.177] - 2025-09-29
+
+- Core/CLI: centralize pre-main process hardening into `codex-process-hardening` and invoke it automatically when secure mode is enabled. (bacba3f)
+- CLI/Proxy: rename the responses proxy binary to `codex-responses-api-proxy`, harden startup, and remove request timeouts so streaming stays reliable. (bacba3f)
+- Auto-drive: relay plan updates to the coordinator so guidance stays aligned with the latest steps. (b7a8d7f)
+- TUI/Auto-drive: show the waiting spinner only while the coordinator is active to avoid idle animation churn. (9e622ab)
+
 ## [0.2.176] - 2025-09-29
 
 - Auto-drive: add an observer thread and telemetry stream to watch automation health in real time. (fd7d3a71)
