@@ -195,6 +195,13 @@ fn status_tokens_prefix() -> &'static str {
     STATUS_TOKENS_PREFIX
 }
 
+fn describe_cloud_error(err: &CloudTaskError) -> String {
+    match err {
+        CloudTaskError::Msg(message) => message.clone(),
+        other => other.to_string(),
+    }
+}
+
 use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
@@ -210,6 +217,7 @@ use crate::app_event::{
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::CustomPromptView;
 use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionAction, SelectionItem};
+use crate::bottom_pane::CloudTasksView;
 use crate::bottom_pane::validation_settings_view;
 use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
 use crate::bottom_pane::BottomPane;
@@ -255,6 +263,7 @@ use crate::history::state::{
     RateLimitsRecord,
     TextTone,
 };
+use crate::cloud_tasks_service::CloudEnvironment;
 use crate::slash_command::{ProcessedCommand, SlashCommand};
 use crate::live_wrap::RowBuilder;
 use crate::streaming::StreamKind;
@@ -276,6 +285,7 @@ use codex_core::config::set_github_check_on_push;
 use codex_core::config::set_validation_group_enabled;
 use codex_core::config::set_validation_tool_enabled;
 use codex_file_search::FileMatch;
+use codex_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_core::config_types::{validation_tool_category, ValidationCategory};
@@ -659,6 +669,11 @@ pub(crate) struct ChatWidget<'a> {
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
     auto_history: AutoDriveHistory,
+    cloud_tasks_selected_env: Option<CloudEnvironment>,
+    cloud_tasks_environments: Vec<CloudEnvironment>,
+    cloud_tasks_last_tasks: Vec<TaskSummary>,
+    cloud_tasks_best_of_n: usize,
+    cloud_tasks_creation_inflight: bool,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -2894,6 +2909,11 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            cloud_tasks_selected_env: None,
+            cloud_tasks_environments: Vec::new(),
+            cloud_tasks_last_tasks: Vec::new(),
+            cloud_tasks_best_of_n: 1,
+            cloud_tasks_creation_inflight: false,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3149,6 +3169,11 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            cloud_tasks_selected_env: None,
+            cloud_tasks_environments: Vec::new(),
+            cloud_tasks_last_tasks: Vec::new(),
+            cloud_tasks_best_of_n: 1,
+            cloud_tasks_creation_inflight: false,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -17356,6 +17381,486 @@ impl ChatWidget<'_> {
     /// Handle `/branch [task]` command. Creates a worktree under `.code/branches`,
     /// optionally copies current uncommitted changes, then switches the session cwd
     /// into the worktree. If `task` is non-empty, submits it immediately.
+    pub(crate) fn handle_cloud_command(&mut self, args: String) {
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            self.open_cloud_menu();
+            return;
+        }
+
+        let mut parts = trimmed.splitn(2, ' ');
+        let head = parts.next().unwrap_or("").to_ascii_lowercase();
+        let rest = parts.next().map(str::trim).unwrap_or("");
+
+        match head.as_str() {
+            "list" => {
+                if rest.is_empty() {
+                    self.request_cloud_task_refresh(None);
+                } else {
+                    self.request_cloud_task_refresh(Some(rest.to_string()));
+                }
+            }
+            "env" => {
+                self.app_event_tx.send(AppEvent::FetchCloudEnvironments);
+            }
+            "new" => {
+                if rest.is_empty() {
+                    self.show_cloud_task_create_prompt();
+                } else if let Some(env) = self.cloud_tasks_selected_env.clone() {
+                    if self.cloud_tasks_creation_inflight {
+                        self.bottom_pane.flash_footer_notice(
+                            "Cloud task creation already in progress".to_string(),
+                        );
+                    } else {
+                        self.cloud_tasks_creation_inflight = true;
+                        self.app_event_tx.send(AppEvent::SubmitCloudTaskCreate {
+                            env_id: env.id.clone(),
+                            prompt: rest.to_string(),
+                            best_of_n: self.cloud_tasks_best_of_n,
+                        });
+                        self.show_cloud_task_create_progress();
+                    }
+                } else {
+                    self.show_cloud_tasks_error(
+                        "Select an environment before creating a cloud task".to_string(),
+                    );
+                    self.app_event_tx.send(AppEvent::FetchCloudEnvironments);
+                }
+            }
+            _ => {
+                self.history_push(history_cell::new_error_event(format!(
+                    "`/cloud` — unknown option '{head}'. Try `/cloud`, `/cloud list`, `/cloud new`, or `/cloud env`."
+                )));
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn open_cloud_menu(&mut self) {
+        let current = self.cloud_env_label();
+        let env_id = self
+            .cloud_tasks_selected_env
+            .as_ref()
+            .map(|env| env.id.clone());
+        let fetch_action_env = env_id.clone();
+        let mut items: Vec<SelectionItem> = Vec::new();
+        items.push(SelectionItem {
+            name: "Browse cloud tasks".to_string(),
+            description: Some(format!("Current filter: {current}")),
+            is_current: false,
+            actions: vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::FetchCloudTasks {
+                    environment: fetch_action_env.clone(),
+                });
+            })],
+        });
+        items.push(SelectionItem {
+            name: "Select environment".to_string(),
+            description: Some("Choose which environment to browse".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &AppEventSender| {
+                tx.send(AppEvent::FetchCloudEnvironments);
+            })],
+        });
+        items.push(SelectionItem {
+            name: "Create new task".to_string(),
+            description: Some("Open the composer to submit a new cloud task".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &AppEventSender| {
+                tx.send(AppEvent::OpenCloudTaskCreate);
+            })],
+        });
+
+        let view = ListSelectionView::new(
+            " Cloud tasks ".to_string(),
+            Some("Choose an action".to_string()),
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            6,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Cloud tasks".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn show_cloud_tasks_loading(&mut self) {
+        let loading_item = SelectionItem {
+            name: "Loading cloud tasks…".to_string(),
+            description: Some("Fetching latest tasks from Codex Cloud".to_string()),
+            is_current: true,
+            actions: Vec::new(),
+        };
+        let view = ListSelectionView::new(
+            " Cloud tasks ".to_string(),
+            Some(self.cloud_env_label()),
+            Some("Esc cancel".to_string()),
+            vec![loading_item],
+            self.app_event_tx.clone(),
+            6,
+        );
+        self.bottom_pane.show_list_selection(
+            "Loading cloud tasks".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn present_cloud_tasks(
+        &mut self,
+        environment: Option<String>,
+        tasks: Vec<TaskSummary>,
+    ) {
+        self.cloud_tasks_last_tasks = tasks.clone();
+        let env_label = match environment {
+            Some(ref id) => self
+                .cloud_tasks_selected_env
+                .as_ref()
+                .filter(|env| env.id == *id)
+                .map(|env| self.display_name_for_env(env))
+                .unwrap_or_else(|| format!("Environment {id}")),
+            None => "All environments".to_string(),
+        };
+        let view = CloudTasksView::new(
+            tasks,
+            Some(env_label.clone()),
+            environment,
+            self.app_event_tx.clone(),
+        );
+        self.bottom_pane.show_cloud_tasks(view);
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_cloud_tasks_error(&mut self, message: String) {
+        self.bottom_pane.flash_footer_notice(message.clone());
+        self.history_push(history_cell::new_error_event(format!(
+            "`/cloud` — {message}"
+        )));
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_cloud_environment_loading(&mut self) {
+        let loading_item = SelectionItem {
+            name: "Loading environments…".to_string(),
+            description: Some("Fetching available Codex Cloud environments".to_string()),
+            is_current: true,
+            actions: Vec::new(),
+        };
+        let view = ListSelectionView::new(
+            " Select environment ".to_string(),
+            Some("Choose which environment to browse".to_string()),
+            Some("Esc cancel".to_string()),
+            vec![loading_item],
+            self.app_event_tx.clone(),
+            8,
+        );
+        self.bottom_pane.show_list_selection(
+            "Select environment".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn present_cloud_environment_picker(
+        &mut self,
+        environments: Vec<CloudEnvironment>,
+    ) {
+        if environments.is_empty() {
+            self.show_cloud_tasks_error("No environments available".to_string());
+            return;
+        }
+        self.cloud_tasks_environments = environments.clone();
+
+        let mut items: Vec<SelectionItem> = Vec::with_capacity(environments.len() + 1);
+        items.push(SelectionItem {
+            name: "All environments".to_string(),
+            description: Some("Show tasks across every environment".to_string()),
+            is_current: self.cloud_tasks_selected_env.is_none(),
+            actions: vec![Box::new(|tx: &AppEventSender| {
+                tx.send(AppEvent::SetCloudEnvironment { environment: None });
+            })],
+        });
+
+        for env in environments {
+            let env_clone = env.clone();
+            let display = self.display_name_for_env(&env_clone);
+            let repo_hint = env_clone
+                .repo_hints
+                .clone()
+                .map(|hint| format!("Repo: {hint}"));
+            items.push(SelectionItem {
+                name: display,
+                description: repo_hint,
+                is_current: self
+                    .cloud_tasks_selected_env
+                    .as_ref()
+                    .map(|selected| selected.id == env_clone.id)
+                    .unwrap_or(false),
+                actions: vec![Box::new(move |tx: &AppEventSender| {
+                    tx.send(AppEvent::SetCloudEnvironment {
+                        environment: Some(env_clone.clone()),
+                    });
+                })],
+            });
+        }
+
+        let view = ListSelectionView::new(
+            " Select environment ".to_string(),
+            Some("Pick the environment to browse".to_string()),
+            Some("Enter select · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            10,
+        );
+
+        self.bottom_pane.show_list_selection(
+            "Select environment".to_string(),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn set_cloud_environment(&mut self, environment: Option<CloudEnvironment>) {
+        self.cloud_tasks_selected_env = environment.clone();
+        let label = environment
+            .as_ref()
+            .map(|env| self.display_name_for_env(env))
+            .unwrap_or_else(|| "All environments".to_string());
+        self.bottom_pane
+            .flash_footer_notice(format!("Cloud tasks filter set to {label}"));
+        self.request_cloud_task_refresh(None);
+    }
+
+    fn display_name_for_env(&self, env: &CloudEnvironment) -> String {
+        match env.label.as_ref() {
+            Some(label) if !label.is_empty() => format!("{label} ({})", env.id),
+            _ => env.id.clone(),
+        }
+    }
+
+    fn request_cloud_task_refresh(&mut self, env_override: Option<String>) {
+        let selected = env_override.or_else(|| self.current_cloud_env_id());
+        self.app_event_tx
+            .send(AppEvent::FetchCloudTasks { environment: selected });
+    }
+
+    fn cloud_env_label(&self) -> String {
+        self.cloud_tasks_selected_env
+            .as_ref()
+            .map(|env| self.display_name_for_env(env))
+            .unwrap_or_else(|| "All environments".to_string())
+    }
+
+    fn current_cloud_env_id(&self) -> Option<String> {
+        self.cloud_tasks_selected_env
+            .as_ref()
+            .map(|env| env.id.clone())
+    }
+
+    pub(crate) fn show_cloud_task_actions(&mut self, task_id: String) {
+        let Some(task) = self.find_cloud_task(&task_id) else {
+            self.show_cloud_tasks_error(format!("Task {task_id} no longer available"));
+            return;
+        };
+
+        let status_label = format!("Status: {:?}", task.status);
+        let env_display = task
+            .environment_label
+            .as_ref()
+            .or(task.environment_id.as_ref())
+            .cloned()
+            .unwrap_or_else(|| "Unknown environment".to_string());
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let diff_id = task.id.0.clone();
+        items.push(SelectionItem {
+            name: "View diff".to_string(),
+            description: Some("Open the unified diff in history".to_string()),
+            is_current: true,
+            actions: vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::FetchCloudTaskDiff {
+                    task_id: diff_id.clone(),
+                });
+            })],
+        });
+
+        let msg_id = task.id.0.clone();
+        items.push(SelectionItem {
+            name: "View assistant output".to_string(),
+            description: Some("Show assistant messages associated with this task".to_string()),
+            is_current: false,
+            actions: vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::FetchCloudTaskMessages {
+                    task_id: msg_id.clone(),
+                });
+            })],
+        });
+
+        let preflight_id = task.id.0.clone();
+        items.push(SelectionItem {
+            name: "Preflight apply".to_string(),
+            description: Some("Check whether the patch applies cleanly".to_string()),
+            is_current: false,
+            actions: vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::ApplyCloudTask {
+                    task_id: preflight_id.clone(),
+                    preflight: true,
+                });
+            })],
+        });
+
+        let apply_id = task.id.0.clone();
+        items.push(SelectionItem {
+            name: "Apply task".to_string(),
+            description: Some("Apply the diff to the working tree".to_string()),
+            is_current: false,
+            actions: vec![Box::new(move |tx: &AppEventSender| {
+                tx.send(AppEvent::ApplyCloudTask {
+                    task_id: apply_id.clone(),
+                    preflight: false,
+                });
+            })],
+        });
+
+        let subtitle = format!("{} • Env: {}", status_label, env_display);
+        let view = ListSelectionView::new(
+            format!(" Task {} ", task.title),
+            Some(subtitle),
+            Some("Enter choose · Esc cancel".to_string()),
+            items,
+            self.app_event_tx.clone(),
+            8,
+        );
+
+        self.bottom_pane.show_list_selection(
+            format!("Cloud task: {}", task.title),
+            None,
+            None,
+            view,
+        );
+    }
+
+    pub(crate) fn show_cloud_task_create_prompt(&mut self) {
+        let Some(env) = self.cloud_tasks_selected_env.clone() else {
+            self.show_cloud_tasks_error(
+                "Select an environment before creating a cloud task".to_string(),
+            );
+            return;
+        };
+
+        let env_display = self.display_name_for_env(&env);
+        let submit_tx = self.app_event_tx.clone();
+        let env_id = env.id.clone();
+        let best_of = self.cloud_tasks_best_of_n;
+        let on_submit: Box<dyn Fn(String) + Send + Sync> = Box::new(move |text: String| {
+            if text.trim().is_empty() {
+                return;
+            }
+            submit_tx.send(AppEvent::SubmitCloudTaskCreate {
+                env_id: env_id.clone(),
+                prompt: text,
+                best_of_n: best_of,
+            });
+        });
+
+        let view = CustomPromptView::new(
+            format!("Create cloud task ({env_display})"),
+            "Describe the change you want Codex to implement".to_string(),
+            Some("Press Enter to submit · Esc cancel".to_string()),
+            self.app_event_tx.clone(),
+            None,
+            on_submit,
+        );
+        self.bottom_pane.show_custom_prompt(view);
+    }
+
+    pub(crate) fn show_cloud_task_create_progress(&mut self) {
+        self.cloud_tasks_creation_inflight = true;
+        self.bottom_pane
+            .flash_footer_notice("Submitting cloud task…".to_string());
+        self.request_redraw();
+    }
+
+    pub(crate) fn handle_cloud_task_created(
+        &mut self,
+        env_id: String,
+        result: Result<CreatedTask, CloudTaskError>,
+    ) {
+        self.cloud_tasks_creation_inflight = false;
+        match result {
+            Ok(created) => {
+                self.app_event_tx.send_background_event(format!(
+                    "✅ Created cloud task {} in {env_id}",
+                    created.id.0
+                ));
+                self.request_cloud_task_refresh(None);
+            }
+            Err(err) => {
+                self.show_cloud_tasks_error(format!(
+                    "Failed to create cloud task in {env_id}: {}",
+                    describe_cloud_error(&err)
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn show_cloud_task_apply_status(&mut self, task_id: &str, preflight: bool) {
+        if preflight {
+            self.app_event_tx
+                .send_background_event(format!("Preflighting cloud task {task_id}…"));
+        } else {
+            self.app_event_tx
+                .send_background_event(format!("Applying cloud task {task_id}…"));
+        }
+    }
+
+    pub(crate) fn handle_cloud_task_apply_finished(
+        &mut self,
+        task_id: String,
+        outcome: Result<ApplyOutcome, CloudTaskError>,
+        preflight: bool,
+    ) {
+        match outcome {
+            Ok(result) => {
+                let mut message = if preflight {
+                    format!("Preflight result for {task_id}: {}", result.message)
+                } else {
+                    format!("Apply result for {task_id}: {}", result.message)
+                };
+                if !result.skipped_paths.is_empty() {
+                    message.push_str("\nSkipped: ");
+                    message.push_str(&result.skipped_paths.join(", "));
+                }
+                if !result.conflict_paths.is_empty() {
+                    message.push_str("\nConflicts: ");
+                    message.push_str(&result.conflict_paths.join(", "));
+                }
+                self.app_event_tx.send_background_event(message);
+                if !preflight {
+                    self.request_cloud_task_refresh(None);
+                }
+            }
+            Err(err) => {
+                self.show_cloud_tasks_error(format!(
+                    "Cloud task {task_id} failed: {}",
+                    describe_cloud_error(&err)
+                ));
+            }
+        }
+    }
+
+    fn find_cloud_task(&self, task_id: &str) -> Option<&TaskSummary> {
+        self.cloud_tasks_last_tasks
+            .iter()
+            .find(|task| task.id.0 == task_id)
+    }
     pub(crate) fn handle_branch_command(&mut self, args: String) {
         if Self::is_branch_worktree_path(&self.config.cwd) {
             self.history_push(crate::history_cell::new_error_event(
