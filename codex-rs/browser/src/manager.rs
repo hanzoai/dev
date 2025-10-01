@@ -1368,6 +1368,81 @@ impl BrowserManager {
     }
 
     pub async fn goto(&self, url: &str) -> Result<crate::page::GotoResult> {
+        const MAX_RECOVERY_ATTEMPTS: usize = 2; // number of retries after the initial attempt
+        let mut recovery_attempts = 0usize;
+
+        loop {
+            match self.goto_once(url).await {
+                Ok(result) => {
+                    if recovery_attempts > 0 {
+                        info!(
+                            "Browser navigation succeeded after {} recovery attempt(s)",
+                            recovery_attempts
+                        );
+                    }
+                    return Ok(result);
+                }
+                Err(err) => {
+                    let should_retry =
+                        recovery_attempts < MAX_RECOVERY_ATTEMPTS
+                            && self.should_retry_after_goto_error(&err).await;
+
+                    if !should_retry {
+                        return Err(err);
+                    }
+
+                    warn!(
+                        error = %err,
+                        recovery_attempt = recovery_attempts + 1,
+                        "Browser navigation failed; restarting browser before retry"
+                    );
+
+                    if let Err(stop_err) = self.stop().await {
+                        warn!("Failed to stop browser during recovery: {}", stop_err);
+                    }
+
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    recovery_attempts += 1;
+                }
+            }
+        }
+    }
+
+    async fn should_retry_after_goto_error(&self, err: &BrowserError) -> bool {
+        let is_internal = {
+            let cfg = self.config.read().await;
+            cfg.connect_port.is_none() && cfg.connect_ws.is_none()
+        };
+
+        if !is_internal {
+            return false;
+        }
+
+        match err {
+            BrowserError::NotInitialized => true,
+            BrowserError::CdpError(msg) => {
+                let msg_lower = msg.to_ascii_lowercase();
+                const RECOVERABLE_SUBSTRINGS: &[&str] = &[
+                    "connection closed",
+                    "browser closed",
+                    "target crashed",
+                    "context destroyed",
+                    "no such session",
+                    "disconnected",
+                    "transport",
+                    "timeout",
+                    "timed out",
+                ];
+
+                RECOVERABLE_SUBSTRINGS
+                    .iter()
+                    .any(|needle| msg_lower.contains(needle))
+            }
+            _ => false,
+        }
+    }
+
+    async fn goto_once(&self, url: &str) -> Result<crate::page::GotoResult> {
         // Get or create page
         let page = self.get_or_create_page().await?;
 
