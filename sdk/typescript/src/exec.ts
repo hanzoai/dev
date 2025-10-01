@@ -20,7 +20,7 @@ export class CodexExec {
   }
 
   async *run(args: CodexExecArgs): AsyncGenerator<string> {
-    const commandArgs: string[] = ["exec", "--experimental-json"];
+    const commandArgs: string[] = ["exec", "--json"];
 
     if (args.model) {
       commandArgs.push("--model", args.model);
