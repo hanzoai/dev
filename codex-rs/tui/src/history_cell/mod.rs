@@ -2401,12 +2401,6 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/undo", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Undo.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
         Span::styled("/review", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
         Span::from(SlashCommand::Review.description())
@@ -2421,6 +2415,13 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
             " Experimental",
             Style::default().fg(crate::colors::primary()),
         ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/cloud", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Cloud.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
 
     lines
