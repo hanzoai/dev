@@ -128,8 +128,13 @@ impl CollapsibleReasoningCell {
         self.collapsed.get()
     }
 
-    pub(crate) fn set_hide_when_collapsed(&self, hide: bool) {
-        self.state.borrow_mut().hide_when_collapsed = hide;
+    pub(crate) fn set_hide_when_collapsed(&self, hide: bool) -> bool {
+        let mut state = self.state.borrow_mut();
+        if state.hide_when_collapsed == hide {
+            return false;
+        }
+        state.hide_when_collapsed = hide;
+        true
     }
 
     pub(crate) fn append_lines_dedup(&self, new_lines: Vec<Line<'static>>) {
