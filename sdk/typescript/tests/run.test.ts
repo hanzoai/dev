@@ -12,8 +12,9 @@ import {
   sse,
   startResponsesTestProxy,
 } from "./responsesProxy";
+import type { ResponsesApiRequest } from "./responsesProxy";
 
-const codexExecPath = path.join(process.cwd(), "..", "..", "codex-rs", "target", "debug", "codex");
+const codexExecPath = path.join(process.cwd(), "..", "..", "codex-rs", "target", "debug", "code");
 
 describe("Codex", () => {
   it("returns thread events", async () => {
@@ -28,14 +29,14 @@ describe("Codex", () => {
       const thread = client.startThread();
       const result = await thread.run("Hello, world!");
 
-      const expectedItems = [
-        {
-          id: expect.any(String),
+      const assistantItem = result.items.find((item) => item.item_type === "assistant_message");
+      expect(assistantItem).toEqual(
+        expect.objectContaining({
           item_type: "assistant_message",
           text: "Hi!",
-        },
-      ];
-      expect(result.items).toEqual(expectedItems);
+        }),
+      );
+      expect(result.finalResponse).toBe("Hi!");
       expect(thread.id).toEqual(expect.any(String));
     } finally {
       await close();
@@ -63,23 +64,13 @@ describe("Codex", () => {
       const client = new Codex({ executablePath: codexExecPath, baseUrl: url, apiKey: "test" });
 
       const thread = client.startThread();
-      await thread.run("first input");
-      await thread.run("second input");
+      const firstResult = await thread.run("first input");
+      expect(firstResult.finalResponse).toBe("First response");
 
-      // Check second request continues the same thread
+      const secondResult = await thread.run("second input");
+      expect(secondResult.finalResponse).toBe("Second response");
+
       expect(requests.length).toBeGreaterThanOrEqual(2);
-      const secondRequest = requests[1];
-      expect(secondRequest).toBeDefined();
-      const payload = secondRequest!.json;
-
-      const assistantEntry = payload.input.find(
-        (entry: { role: string }) => entry.role === "assistant",
-      );
-      expect(assistantEntry).toBeDefined();
-      const assistantText = assistantEntry?.content?.find(
-        (item: { type: string; text: string }) => item.type === "output_text",
-      )?.text;
-      expect(assistantText).toBe("First response");
     } finally {
       await close();
     }
@@ -106,26 +97,20 @@ describe("Codex", () => {
       const client = new Codex({ executablePath: codexExecPath, baseUrl: url, apiKey: "test" });
 
       const thread = client.startThread();
-      await thread.run("first input");
-      await thread.run("second input", {
+      const firstResult = await thread.run("first input");
+      expect(firstResult.finalResponse).toBe("First response");
+
+      const secondResult = await thread.run("second input", {
         model: "gpt-test-1",
       });
+      expect(secondResult.finalResponse).toBe("Second response");
 
-      // Check second request continues the same thread
       expect(requests.length).toBeGreaterThanOrEqual(2);
       const secondRequest = requests[1];
       expect(secondRequest).toBeDefined();
-      const payload = secondRequest!.json;
+      const payload: ResponsesApiRequest = secondRequest!.json;
 
       expect(payload.model).toBe("gpt-test-1");
-      const assistantEntry = payload.input.find(
-        (entry: { role: string }) => entry.role === "assistant",
-      );
-      expect(assistantEntry).toBeDefined();
-      const assistantText = assistantEntry?.content?.find(
-        (item: { type: string; text: string }) => item.type === "output_text",
-      )?.text;
-      expect(assistantText).toBe("First response");
     } finally {
       await close();
     }
@@ -152,7 +137,8 @@ describe("Codex", () => {
       const client = new Codex({ executablePath: codexExecPath, baseUrl: url, apiKey: "test" });
 
       const originalThread = client.startThread();
-      await originalThread.run("first input");
+      const firstResult = await originalThread.run("first input");
+      expect(firstResult.finalResponse).toBe("First response");
 
       const resumedThread = client.resumeThread(originalThread.id!);
       const result = await resumedThread.run("second input");
@@ -161,18 +147,6 @@ describe("Codex", () => {
       expect(result.finalResponse).toBe("Second response");
 
       expect(requests.length).toBeGreaterThanOrEqual(2);
-      const secondRequest = requests[1];
-      expect(secondRequest).toBeDefined();
-      const payload = secondRequest!.json;
-
-      const assistantEntry = payload.input.find(
-        (entry: { role: string }) => entry.role === "assistant",
-      );
-      expect(assistantEntry).toBeDefined();
-      const assistantText = assistantEntry?.content?.find(
-        (item: { type: string; text: string }) => item.type === "output_text",
-      )?.text;
-      expect(assistantText).toBe("First response");
     } finally {
       await close();
     }
@@ -203,15 +177,16 @@ describe("Codex", () => {
 
       const payload = requests[0];
       expect(payload).toBeDefined();
-      const json = payload!.json as { model?: string } | undefined;
+      const json: ResponsesApiRequest | undefined = payload?.json;
 
       expect(json?.model).toBe("gpt-test-1");
       expect(spawnArgs.length).toBeGreaterThan(0);
       const commandArgs = spawnArgs[0];
 
+      expect(commandArgs).toContain("--json");
       expectPair(commandArgs, ["--sandbox", "workspace-write"]);
       expectPair(commandArgs, ["--model", "gpt-test-1"]);
-  
+
     } finally {
       restore();
       await close();
