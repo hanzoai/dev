@@ -1,3 +1,5 @@
-pub mod state;
+pub use codex_core::history::*;
 
-pub use state::*;
+pub mod state {
+    pub use codex_core::history::*;
+}

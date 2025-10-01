@@ -626,16 +626,18 @@ impl AutoCoordinatorView {
                 .render(inner, buf);
         }
 
-        let mut next_interval = if spinner_active {
-            Duration::from_millis(spinner_def.interval_ms.max(80))
-        } else {
-            Duration::from_millis(200)
-        };
-        if frame_needed {
-            next_interval = next_interval.min(HeaderBorderWeaveEffect::FRAME_INTERVAL);
+        if spinner_active || frame_needed {
+            let mut next_interval = if spinner_active {
+                Duration::from_millis(spinner_def.interval_ms.max(80))
+            } else {
+                Duration::from_millis(200)
+            };
+            if frame_needed {
+                next_interval = next_interval.min(HeaderBorderWeaveEffect::FRAME_INTERVAL);
+            }
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(next_interval));
         }
-        self.app_event_tx
-            .send(AppEvent::ScheduleFrameIn(next_interval));
     }
 
     fn apply_left_padding(&self, area: Rect, buf: &mut Buffer) -> Rect {

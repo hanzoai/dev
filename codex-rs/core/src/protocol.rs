@@ -173,6 +173,11 @@ pub enum Op {
         text: String,
     },
 
+    /// Persist the full chat history snapshot for the current session.
+    PersistHistorySnapshot {
+        snapshot: serde_json::Value,
+    },
+
     /// Execute a project-scoped custom command defined in configuration.
     RunProjectCommand {
         name: String,
@@ -922,9 +927,8 @@ pub struct ReplayHistoryEvent {
     /// Items to render in order. Front-ends should render these as static
     /// history without triggering any tool execution.
     pub items: Vec<codex_protocol::models::ResponseItem>,
-    /// Previously emitted events to replay for UI restoration.
-    #[serde(default)]
-    pub events: Vec<RecordedEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_snapshot: Option<serde_json::Value>,
 }
 
 impl From<TokenUsage> for FinalOutput {
