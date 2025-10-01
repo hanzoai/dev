@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::app_event::{AppEvent, AutoCoordinatorStatus};
+use crate::app_event::{AppEvent, AutoCoordinatorStatus, AutoObserverStatus, AutoObserverTelemetry};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
@@ -31,10 +31,13 @@ use chrono::{DateTime, Local, Utc};
 use rand::Rng;
 use super::auto_observer::{
     build_observer_conversation,
+    run_observer_once,
     start_auto_observer,
     AutoObserverCommand,
     ObserverOutcome,
+    ObserverReason,
     ObserverTrigger,
+    summarize_intervention,
 };
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
@@ -154,7 +157,7 @@ fn run_auto_loop(
     let model_text_verbosity = config.model_text_verbosity;
     let sandbox_policy = config.sandbox_policy.clone();
     let config = Arc::new(config);
-    let client = ModelClient::new(
+    let client = Arc::new(ModelClient::new(
         config.clone(),
         Some(auth_mgr),
         None,
@@ -167,7 +170,7 @@ fn run_auto_loop(
             DebugLogger::new(debug_enabled)
                 .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
         )),
-    );
+    ));
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -206,6 +209,7 @@ fn run_auto_loop(
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
     let mut observer_guidance: Vec<String> = Vec::new();
+    let mut observer_telemetry = AutoObserverTelemetry::default();
     let mut observer_handle = if observer_cadence == 0 {
         None
     } else {
@@ -237,7 +241,7 @@ fn run_auto_loop(
                 compose_developer_intro(&base_developer_intro, &observer_guidance);
             match request_coordinator_decision(
                 &runtime,
-                &client,
+                client.as_ref(),
                 developer_intro.as_str(),
                 &primary_goal_message,
                 &schema,
@@ -247,16 +251,16 @@ fn run_auto_loop(
                 &cancel_token,
             ) {
                 Ok((status, summary, prompt_opt, transcript_items)) => {
-                    let prompt_clone = prompt_opt.clone();
-                    let event = AppEvent::AutoCoordinatorDecision {
-                        status,
-                        summary,
-                        prompt: prompt_opt,
-                        transcript: transcript_items.clone(),
-                    };
-                    app_event_tx.send(event);
-
                     if matches!(status, AutoCoordinatorStatus::Continue) {
+                        let prompt_clone = prompt_opt.clone();
+                        let event = AppEvent::AutoCoordinatorDecision {
+                            status,
+                            summary,
+                            prompt: prompt_opt,
+                            transcript: transcript_items.clone(),
+                        };
+                        app_event_tx.send(event);
+
                         if let (Some(handle), Some(cadence)) =
                             (observer_handle.as_ref(), observer_cadence)
                         {
@@ -269,16 +273,73 @@ fn run_auto_loop(
                                     conversation,
                                     goal_text: goal_text.clone(),
                                     environment_details: environment_details.clone(),
+                                    reason: ObserverReason::Cadence,
                                 };
                                 if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
                                     tracing::warn!("failed to trigger auto observer");
                                 }
                             }
                         }
-                    } else {
-                        stopped = true;
                         continue;
                     }
+
+                    let observer_conversation =
+                        build_observer_conversation(conv_for_observer.clone(), None);
+                    let validation_result = run_final_observer_validation(
+                        &runtime,
+                        client.clone(),
+                        observer_conversation,
+                        &goal_text,
+                        &environment_details,
+                        status,
+                    );
+
+                    if let Ok((observer_status, replace_message, additional_instructions)) =
+                        &validation_result
+                    {
+                        let telemetry = AutoObserverTelemetry {
+                            trigger_count: observer_telemetry.trigger_count.saturating_add(1),
+                            last_status: *observer_status,
+                            last_intervention: summarize_intervention(
+                                replace_message.as_deref(),
+                                additional_instructions.as_deref(),
+                            ),
+                        };
+                        observer_telemetry = telemetry.clone();
+                        let observer_event = AppEvent::AutoObserverReport {
+                            status: *observer_status,
+                            telemetry,
+                            replace_message: replace_message.clone(),
+                            additional_instructions: additional_instructions.clone(),
+                        };
+                        app_event_tx.send(observer_event);
+
+                        if matches!(observer_status, AutoObserverStatus::Failing) {
+                            if let Some(instr) = additional_instructions
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                            {
+                                if !observer_guidance.iter().any(|existing| existing == instr) {
+                                    observer_guidance.push(instr.to_string());
+                                }
+                            }
+                            pending_conversation = Some(conv_for_observer);
+                            continue;
+                        }
+                    } else if let Err(err) = validation_result {
+                        tracing::warn!("final observer validation failed: {err:#}");
+                    }
+
+                    let event = AppEvent::AutoCoordinatorDecision {
+                        status,
+                        summary,
+                        prompt: prompt_opt,
+                        transcript: transcript_items,
+                    };
+                    app_event_tx.send(event);
+                    stopped = true;
+                    continue;
                 }
                 Err(err) => {
                     if err.downcast_ref::<AutoCoordinatorCancelled>().is_some() {
@@ -321,6 +382,7 @@ fn run_auto_loop(
                     }
                 }
 
+                observer_telemetry = telemetry.clone();
                 let event = AppEvent::AutoObserverReport {
                     status,
                     telemetry,
@@ -364,6 +426,23 @@ fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
 
 fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
     cadence != 0 && requests_completed > 0 && requests_completed % cadence == 0
+}
+
+fn run_final_observer_validation(
+    runtime: &tokio::runtime::Runtime,
+    client: Arc<ModelClient>,
+    conversation: Vec<ResponseItem>,
+    goal_text: &str,
+    environment_details: &str,
+    finish_status: AutoCoordinatorStatus,
+) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
+    let trigger = ObserverTrigger {
+        conversation,
+        goal_text: goal_text.to_string(),
+        environment_details: environment_details.to_string(),
+        reason: ObserverReason::FinalCheck { finish_status },
+    };
+    run_observer_once(runtime, client, trigger)
 }
 
 fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
