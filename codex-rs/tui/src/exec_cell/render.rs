@@ -384,7 +384,7 @@ impl ExecCell {
                 lines.extend(prefix_lines(
                     wrapped_output,
                     Span::from(layout.output_block.initial_prefix).dim(),
-                    Span::from(layout.output_block.subsequent_prefix),
+                    Span::from(layout.output_block.subsequent_prefix).dim(),
                 ));
             }
         }
@@ -487,6 +487,6 @@ impl ExecDisplayLayout {
 const EXEC_DISPLAY_LAYOUT: ExecDisplayLayout = ExecDisplayLayout::new(
     PrefixedBlock::new("  │ ", "  │ "),
     2,
-    PrefixedBlock::new("  └ ", "    "),
+    PrefixedBlock::new("   │ ", "   │ "),
     5,
 );

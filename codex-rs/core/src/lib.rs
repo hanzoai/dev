@@ -46,6 +46,7 @@ mod image_comparison;
 pub mod git_worktree;
 pub mod slash_commands;
 pub mod parse_command;
+pub mod history;
 mod truncate;
 mod unified_exec;
 mod user_instructions;

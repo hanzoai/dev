@@ -58,5 +58,4 @@ async fn resume_restores_recorded_events() {
         .expect("resume recorder");
 
     assert_eq!(saved.items, vec![response_item]);
-    assert_eq!(saved.events, vec![recorded_event]);
 }

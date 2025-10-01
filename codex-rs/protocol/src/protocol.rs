@@ -168,6 +168,11 @@ pub enum Op {
         text: String,
     },
 
+    /// Persist the full chat history snapshot for the current session.
+    PersistHistorySnapshot {
+        snapshot: serde_json::Value,
+    },
+
     /// Request a single history entry identified by `log_id` + `offset`.
     GetHistoryEntryRequest { offset: usize, log_id: u64 },
 
@@ -662,12 +667,12 @@ pub struct RateLimitWindow {
     pub resets_in_seconds: Option<u64>,
 }
 
-/// Payload for `ReplayHistory` containing prior `ResponseItem`s and optional events.
+/// Payload for `ReplayHistory` containing prior `ResponseItem`s.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct ReplayHistoryEvent {
     pub items: Vec<crate::models::ResponseItem>,
-    #[serde(default)]
-    pub events: Vec<RecordedEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_snapshot: Option<serde_json::Value>,
 }
 
 // Includes prompts, tools and space to call compact.

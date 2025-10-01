@@ -592,7 +592,6 @@ use crate::protocol::InputItem;
 use crate::protocol::Op;
 use crate::protocol::PatchApplyBeginEvent;
 use crate::protocol::PatchApplyEndEvent;
-use crate::protocol::RecordedEvent;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenCountEvent;
 use crate::protocol::TokenUsageInfo;
@@ -1673,10 +1672,7 @@ impl Session {
     async fn record_state_snapshot(&self, items: &[ResponseItem]) {
         let snapshot = { SessionStateSnapshot {} };
 
-        let recorder = {
-            let guard = self.rollout.lock().unwrap();
-            guard.as_ref().cloned()
-        };
+        let recorder = self.clone_rollout_recorder();
 
         if let Some(rec) = recorder {
             if let Err(e) = rec.record_state(snapshot).await {
@@ -1686,6 +1682,11 @@ impl Session {
                 error!("failed to record rollout items: {e:#}");
             }
         }
+    }
+
+    fn clone_rollout_recorder(&self) -> Option<RolloutRecorder> {
+        let guard = self.rollout.lock().unwrap();
+        guard.as_ref().cloned()
     }
 
     pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
@@ -2938,7 +2939,7 @@ async fn submission_loop(
 
                 // Optionally resume an existing rollout.
                 let mut restored_items: Option<Vec<RolloutItem>> = None;
-                let mut restored_events: Option<Vec<RecordedEvent>> = None;
+                let mut restored_history_snapshot: Option<crate::history::HistorySnapshot> = None;
                 let rollout_recorder: Option<RolloutRecorder> =
                     if let Some(path) = resume_path.as_ref() {
                         match RolloutRecorder::resume(&config, path).await {
@@ -2947,8 +2948,8 @@ async fn submission_loop(
                                 if !saved.items.is_empty() {
                                     restored_items = Some(saved.items);
                                 }
-                                if !saved.events.is_empty() {
-                                    restored_events = Some(saved.events);
+                                if let Some(snapshot) = saved.history_snapshot {
+                                    restored_history_snapshot = Some(snapshot);
                                 }
                                 Some(rec)
                             }
@@ -3201,12 +3202,20 @@ async fn submission_loop(
                     }
                 }
                 // If we resumed from a rollout, replay the prior transcript into the UI.
-                if replay_history_items.is_some() || restored_events.is_some() {
+                if replay_history_items.is_some()
+                    || restored_history_snapshot.is_some()
+                    || restored_items.is_some()
+                {
                     let items = replay_history_items.clone().unwrap_or_default();
-                    let events = restored_events.clone().unwrap_or_default();
+                    let history_snapshot_value = restored_history_snapshot
+                        .as_ref()
+                        .and_then(|snapshot| serde_json::to_value(snapshot).ok());
                     let event = sess_arc.make_event(
                         &sub.id,
-                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent { items, events }),
+                        EventMsg::ReplayHistory(crate::protocol::ReplayHistoryEvent {
+                            items,
+                            history_snapshot: history_snapshot_value,
+                        }),
                     );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
@@ -3365,6 +3374,20 @@ async fn submission_loop(
                         warn!("failed to append to message history: {e}");
                     }
                 });
+            }
+
+            Op::PersistHistorySnapshot { snapshot } => {
+                let Some(sess) = sess.as_ref() else {
+                    send_no_session_event(sub.id).await;
+                    continue;
+                };
+                if let Some(recorder) = sess.clone_rollout_recorder() {
+                    tokio::spawn(async move {
+                        if let Err(e) = recorder.set_history_snapshot(snapshot).await {
+                            warn!("failed to persist history snapshot: {e}");
+                        }
+                    });
+                }
             }
 
             Op::RunProjectCommand { name } => {
