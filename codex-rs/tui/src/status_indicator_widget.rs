@@ -104,6 +104,19 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
+        let viewport = buf.area();
+        let area_right = area.x.saturating_add(area.width);
+        let area_bottom = area.y.saturating_add(area.height);
+        let view_right = viewport.x.saturating_add(viewport.width);
+        let view_bottom = viewport.y.saturating_add(viewport.height);
+        let intersects = area.x < view_right
+            && viewport.x < area_right
+            && area.y < view_bottom
+            && viewport.y < area_bottom;
+        if !intersects {
+            return;
+        }
+
         // Schedule periodic refreshes so the elapsed timer stays up to date without
         // forcing a high-FPS redraw of the entire UI.
         let now = Instant::now();

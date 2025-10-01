@@ -12,15 +12,11 @@ use std::path::{Component, Path};
 
 pub(crate) struct ExploreAggregationCell {
     record: ExploreRecord,
-    is_trailing: bool,
 }
 
 impl ExploreAggregationCell {
     pub(crate) fn from_record(record: ExploreRecord) -> Self {
-        Self {
-            record,
-            is_trailing: true,
-        }
+        Self { record }
     }
 
     pub(crate) fn record(&self) -> &ExploreRecord {
@@ -29,14 +25,6 @@ impl ExploreAggregationCell {
 
     pub(crate) fn record_mut(&mut self) -> &mut ExploreRecord {
         &mut self.record
-    }
-
-    pub(crate) fn set_trailing(&mut self, trailing: bool) {
-        self.is_trailing = trailing;
-    }
-
-    pub(crate) fn is_trailing(&self) -> bool {
-        self.is_trailing
     }
 
     fn current_exec_status(&self) -> ExecStatus {
@@ -77,79 +65,7 @@ impl HistoryCell for ExploreAggregationCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
-        let header = if self.is_trailing {
-            "Exploring..."
-        } else {
-            "Explored"
-        };
-
-        if self.record.entries.is_empty() {
-            return vec![Line::styled(
-                header,
-                Style::default().fg(crate::colors::text()),
-            )];
-        }
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::styled(
-            header,
-            Style::default().fg(crate::colors::text()),
-        ));
-
-        let max_label_len = self
-            .record
-            .entries
-            .iter()
-            .map(entry_label_width)
-            .max()
-            .unwrap_or(0);
-
-        for (idx, entry) in self.record.entries.iter().enumerate() {
-            let prefix = if idx == 0 { "└ " } else { "  " };
-            let mut spans: Vec<Span<'static>> = vec![Span::styled(
-                prefix,
-                Style::default().add_modifier(Modifier::DIM),
-            )];
-            let label = entry_label(entry);
-            let padding = max_label_len.saturating_sub(label.chars().count()) + 1;
-            let mut padded_label = String::with_capacity(label.len() + padding);
-            padded_label.push_str(label);
-            padded_label.extend(std::iter::repeat(' ').take(padding));
-            spans.push(Span::styled(
-                padded_label,
-                Style::default().fg(crate::colors::text_dim()),
-            ));
-            spans.extend(entry_summary_spans(entry));
-            match entry.status {
-                ExploreEntryStatus::Running => spans.push(Span::styled(
-                    "…",
-                    Style::default().fg(crate::colors::text_dim()),
-                )),
-                ExploreEntryStatus::NotFound => spans.push(Span::styled(
-                    " (not found)",
-                    Style::default().fg(crate::colors::text_dim()),
-                )),
-                ExploreEntryStatus::Error { exit_code } => {
-                    let msg = match (entry.action, exit_code) {
-                        (ExecAction::Search, Some(2)) => " (invalid pattern)".to_string(),
-                        (ExecAction::Search, _) => " (search error)".to_string(),
-                        (ExecAction::List, _) => " (list error)".to_string(),
-                        (ExecAction::Read, _) => " (read error)".to_string(),
-                        _ => exit_code
-                            .map(|code| format!(" (exit {})", code))
-                            .unwrap_or_else(|| " (failed)".to_string()),
-                    };
-                    spans.push(Span::styled(
-                        msg,
-                        Style::default().fg(crate::colors::error()),
-                    ));
-                }
-                ExploreEntryStatus::Success => {}
-            }
-            lines.push(Line::from(spans));
-        }
-
-        lines
+        explore_lines_from_record(&self.record)
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -165,180 +81,302 @@ impl HistoryCell for ExploreAggregationCell {
     }
 }
 
-impl ExploreRecord {
-    pub(crate) fn push_from_parsed(
-        &mut self,
-        parsed: &[ParsedCommand],
-        status: ExploreEntryStatus,
-        cwd: &Path,
-        session_root: &Path,
-        original_command: &[String],
-    ) -> Option<usize> {
-        let action = action_enum_from_parsed(parsed);
-        let summary = match action {
-            ExecAction::Search => parsed.iter().find_map(|p| match p {
-                ParsedCommand::Search { query, path, cmd } => {
-                    let formatted_path =
-                        format_search_target(path.as_deref(), cwd, session_root);
-                    let pretty_query =
-                        query.clone().filter(|q| !q.trim().is_empty()).or_else(|| {
-                            if query.is_none() {
-                                Some(cmd.clone())
-                            } else {
-                                None
-                            }
-                        });
-                    Some(ExploreSummary::Search {
-                        query: pretty_query,
-                        path: formatted_path,
-                    })
-                }
-                _ => None,
-            }),
-            ExecAction::List => parsed.iter().find_map(|p| match p {
-                ParsedCommand::ListFiles { path, .. } => {
-                    let display = format_list_target(path.as_deref(), cwd, session_root);
-                    Some(ExploreSummary::List { path: display })
-                }
-                _ => None,
-            }),
-            ExecAction::Read => parsed.iter().find_map(|p| match p {
-                ParsedCommand::Read { name, cmd, .. } => {
-                    let (annotation, range) =
-                        super::parse_read_line_annotation_with_range(cmd);
-                    let display_path = format_read_target(name, cwd, session_root);
-                    Some(ExploreSummary::Read {
-                        display_path,
-                        annotation,
-                        range,
-                    })
-                }
-                _ => None,
-            }),
-            ExecAction::Run => parsed.iter().find_map(|p| match p {
-                ParsedCommand::ReadCommand { cmd } => {
-                    let summary = build_command_summary(cmd, original_command);
-                    Some(ExploreSummary::Command {
-                        display: summary.display,
-                        annotation: summary.annotation,
-                    })
-                }
-                _ => None,
-            }),
-        };
-
-        let summary = summary.or_else(|| {
-            let text = parsed
-                .iter()
-                .map(|p| match p {
-                    ParsedCommand::Unknown { cmd } => cmd.clone(),
-                    _ => String::new(),
-                })
-                .find(|s| !s.is_empty())
-                .unwrap_or_else(|| "exec".to_string());
-            Some(ExploreSummary::Fallback { text })
-        })?;
-
-        if let ExploreSummary::Read {
-            display_path,
-            annotation,
-            range,
-        } = &summary
-        {
-            let path_key = display_path.clone();
-            let annot = annotation.clone();
-            let range_val = *range;
-            for idx in (0..self.entries.len()).rev() {
-                if let ExploreSummary::Read {
-                    display_path: existing_path,
-                    annotation: existing_ann,
-                    range: existing_range,
-                } = &mut self.entries[idx].summary
-                {
-                    if *existing_path == path_key {
-                        let reuse = match (*existing_range, range_val) {
-                            (Some((es, ee)), Some((ns, ne))) => {
-                                if ns <= es && ne >= ee {
-                                    *existing_range = Some((ns, ne));
-                                    *existing_ann =
-                                        annot.clone().or_else(|| annotation_for_range(ns, ne));
-                                    true
-                                } else if es <= ns && ee >= ne {
-                                    true
-                                } else {
-                                    let start = es.min(ns);
-                                    let end = if ee == u32::MAX || ne == u32::MAX {
-                                        u32::MAX
-                                    } else {
-                                        ee.max(ne)
-                                    };
-                                    *existing_range = Some((start, end));
-                                    *existing_ann = annotation_for_range(start, end);
-                                    true
-                                }
-                            }
-                            (None, Some((ns, ne))) => {
-                                *existing_range = Some((ns, ne));
-                                *existing_ann =
-                                    annot.clone().or_else(|| annotation_for_range(ns, ne));
-                                true
-                            }
-                            (Some(_), None) => {
-                                if annot.is_some() {
-                                    *existing_ann = annot.clone();
-                                }
-                                true
-                            }
-                            (None, None) => {
-                                if annot.is_some() {
-                                    *existing_ann = annot.clone();
-                                }
-                                true
-                            }
-                        };
-
-                        if reuse {
-                            self.entries[idx].status = status;
-                            return Some(idx);
-                        }
+pub(crate) fn explore_record_push_from_parsed(
+    record: &mut ExploreRecord,
+    parsed: &[ParsedCommand],
+    status: ExploreEntryStatus,
+    cwd: &Path,
+    session_root: &Path,
+    original_command: &[String],
+) -> Option<usize> {
+    let action = action_enum_from_parsed(parsed);
+    let summary = match action {
+        ExecAction::Search => parsed.iter().find_map(|p| match p {
+            ParsedCommand::Search { query, path, cmd } => {
+                let formatted_path = format_search_target(path.as_deref(), cwd, session_root);
+                let pretty_query = query.clone().filter(|q| !q.trim().is_empty()).or_else(|| {
+                    if query.is_none() {
+                        Some(cmd.clone())
+                    } else {
+                        None
                     }
-                }
+                });
+                Some(ExploreSummary::Search {
+                    query: pretty_query,
+                    path: formatted_path,
+                })
             }
-        }
+            _ => None,
+        }),
+        ExecAction::List => parsed.iter().find_map(|p| match p {
+            ParsedCommand::ListFiles { path, .. } => {
+                let display = format_list_target(path.as_deref(), cwd, session_root);
+                Some(ExploreSummary::List { path: display })
+            }
+            _ => None,
+        }),
+        ExecAction::Read => parsed.iter().find_map(|p| match p {
+            ParsedCommand::Read { name, cmd, .. } => {
+                let (annotation, range) = super::parse_read_line_annotation_with_range(cmd);
+                let display_path = format_read_target(name, cwd, session_root);
+                Some(ExploreSummary::Read {
+                    display_path,
+                    annotation,
+                    range,
+                })
+            }
+            _ => None,
+        }),
+        ExecAction::Run => parsed.iter().find_map(|p| match p {
+            ParsedCommand::ReadCommand { cmd } => {
+                let summary = build_command_summary(cmd, original_command);
+                Some(ExploreSummary::Command {
+                    display: summary.display,
+                    annotation: summary.annotation,
+                })
+            }
+            _ => None,
+        }),
+    };
 
-        if let ExploreSummary::Command {
-            display,
-            annotation,
-        } = &summary
-        {
-            for idx in (0..self.entries.len()).rev() {
-                if let ExploreSummary::Command {
-                    display: existing_display,
-                    annotation: existing_annotation,
-                } = &self.entries[idx].summary
-                {
-                    if existing_display == display && existing_annotation == annotation {
-                        self.entries[idx].status = status;
+    let summary = summary.or_else(|| {
+        let text = parsed
+            .iter()
+            .map(|p| match p {
+                ParsedCommand::Unknown { cmd } => cmd.clone(),
+                _ => String::new(),
+            })
+            .find(|s| !s.is_empty())
+            .unwrap_or_else(|| "exec".to_string());
+        Some(ExploreSummary::Fallback { text })
+    })?;
+
+    if let ExploreSummary::Read {
+        display_path,
+        annotation,
+        range,
+    } = &summary
+    {
+        let path_key = display_path.clone();
+        let annot = annotation.clone();
+        let range_val = *range;
+        for idx in (0..record.entries.len()).rev() {
+            if let ExploreSummary::Read {
+                display_path: existing_path,
+                annotation: existing_ann,
+                range: existing_range,
+            } = &mut record.entries[idx].summary
+            {
+                if *existing_path == path_key {
+                    let reuse = match (*existing_range, range_val) {
+                        (Some((es, ee)), Some((ns, ne))) => {
+                            if ns <= es && ne >= ee {
+                                *existing_range = Some((ns, ne));
+                                *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                                true
+                            } else if es <= ns && ee >= ne {
+                                true
+                            } else {
+                                let start = es.min(ns);
+                                let end = if ee == u32::MAX || ne == u32::MAX {
+                                    u32::MAX
+                                } else {
+                                    ee.max(ne)
+                                };
+                                *existing_range = Some((start, end));
+                                *existing_ann = annotation_for_range(start, end);
+                                true
+                            }
+                        }
+                        (None, Some((ns, ne))) => {
+                            *existing_range = Some((ns, ne));
+                            *existing_ann = annot.clone().or_else(|| annotation_for_range(ns, ne));
+                            true
+                        }
+                        (Some(_), None) => {
+                            if annot.is_some() {
+                                *existing_ann = annot.clone();
+                            }
+                            true
+                        }
+                        (None, None) => {
+                            if annot.is_some() {
+                                *existing_ann = annot.clone();
+                            }
+                            true
+                        }
+                    };
+
+                    if reuse {
+                        record.entries[idx].status = status;
                         return Some(idx);
                     }
                 }
             }
         }
-
-        self.entries.push(ExploreEntry {
-            action,
-            summary,
-            status,
-        });
-        Some(self.entries.len().saturating_sub(1))
     }
 
-    pub(crate) fn update_status(&mut self, idx: usize, status: ExploreEntryStatus) {
-        if let Some(entry) = self.entries.get_mut(idx) {
-            entry.status = status;
+    if let ExploreSummary::Command {
+        display,
+        annotation,
+    } = &summary
+    {
+        for idx in (0..record.entries.len()).rev() {
+            if let ExploreSummary::Command {
+                display: existing_display,
+                annotation: existing_annotation,
+            } = &record.entries[idx].summary
+            {
+                if existing_display == display && existing_annotation == annotation {
+                    record.entries[idx].status = status;
+                    return Some(idx);
+                }
+            }
         }
     }
+
+    record.entries.push(ExploreEntry {
+        action,
+        summary,
+        status,
+    });
+    Some(record.entries.len().saturating_sub(1))
 }
+
+pub(crate) fn explore_record_update_status(
+    record: &mut ExploreRecord,
+    idx: usize,
+    status: ExploreEntryStatus,
+) {
+    if let Some(entry) = record.entries.get_mut(idx) {
+        entry.status = status;
+    }
+}
+
+pub(crate) fn explore_lines_from_record(record: &ExploreRecord) -> Vec<Line<'static>> {
+    let exploring = record.entries.is_empty()
+        || record
+            .entries
+            .iter()
+            .any(|entry| matches!(entry.status, ExploreEntryStatus::Running));
+    let header = if exploring { "Exploring..." } else { "Explored" };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::styled(
+        header,
+        Style::default().fg(crate::colors::text()),
+    ));
+
+    if record.entries.is_empty() {
+        return lines;
+    }
+
+    let max_label_len = record
+        .entries
+        .iter()
+        .map(entry_label_width)
+        .max()
+        .unwrap_or(0);
+
+    for (idx, entry) in record.entries.iter().enumerate() {
+        let prefix = if idx == 0 { "└ " } else { "  " };
+        let mut spans: Vec<Span<'static>> = vec![Span::styled(
+            prefix,
+            Style::default().add_modifier(Modifier::DIM),
+        )];
+        let label = entry_label(entry);
+        let padding = max_label_len.saturating_sub(label.chars().count()) + 1;
+        let mut padded_label = String::with_capacity(label.len() + padding);
+        padded_label.push_str(label);
+        padded_label.extend(std::iter::repeat(' ').take(padding));
+        spans.push(Span::styled(
+            padded_label,
+            Style::default().fg(crate::colors::text_dim()),
+        ));
+        spans.extend(entry_summary_spans(entry));
+        match entry.status {
+            ExploreEntryStatus::Running => spans.push(Span::styled(
+                "…",
+                Style::default().fg(crate::colors::text_dim()),
+            )),
+            ExploreEntryStatus::NotFound => spans.push(Span::styled(
+                " (not found)",
+                Style::default().fg(crate::colors::text_dim()),
+            )),
+            ExploreEntryStatus::Error { exit_code } => {
+                let msg = match (entry.action, exit_code) {
+                    (ExecAction::Search, Some(2)) => " (invalid pattern)".to_string(),
+                    (ExecAction::Search, _) => " (search error)".to_string(),
+                    (ExecAction::List, _) => " (list error)".to_string(),
+                    (ExecAction::Read, _) => " (read error)".to_string(),
+                    _ => exit_code
+                        .map(|code| format!(" (exit {})", code))
+                        .unwrap_or_else(|| " (failed)".to_string()),
+                };
+                spans.push(Span::styled(
+                    msg,
+                    Style::default().fg(crate::colors::error()),
+                ));
+            }
+            ExploreEntryStatus::Success => {}
+        }
+        lines.push(Line::from(spans));
+    }
+
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_text(line: &Line<'_>) -> String {
+        line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn explore_lines_from_record_reflects_running_status() {
+        let record = ExploreRecord {
+            id: HistoryId(7),
+            entries: vec![
+                ExploreEntry {
+                    action: ExecAction::Search,
+                    summary: ExploreSummary::Search {
+                        query: Some("pattern".into()),
+                        path: Some("src".into()),
+                    },
+                    status: ExploreEntryStatus::Running,
+                },
+                ExploreEntry {
+                    action: ExecAction::Read,
+                    summary: ExploreSummary::Read {
+                        display_path: "README.md".into(),
+                        annotation: Some("(lines 1 to 5)".into()),
+                        range: Some((1, 5)),
+                    },
+                    status: ExploreEntryStatus::Success,
+                },
+            ],
+        };
+
+        let lines = explore_lines_from_record(&record);
+        assert_eq!(line_text(&lines[0]), "Exploring...");
+        assert!(lines.iter().any(|line| line_text(line).contains("pattern")));
+        assert!(lines.iter().any(|line| line_text(line).contains("README.md")));
+
+        let mut completed = record.clone();
+        for entry in &mut completed.entries {
+            entry.status = ExploreEntryStatus::Success;
+        }
+        let completed_lines = explore_lines_from_record(&completed);
+        assert_eq!(line_text(&completed_lines[0]), "Explored");
+    }
+}
+
 
 fn entry_label(entry: &ExploreEntry) -> &'static str {
     if matches!(entry.summary, ExploreSummary::Command { .. }) {
