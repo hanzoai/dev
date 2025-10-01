@@ -14,6 +14,7 @@ use crate::streaming::StreamKind;
 use std::time::Duration;
 
 use codex_git_tooling::{GhostCommit, GitToolingError};
+use codex_cloud_tasks_client::{ApplyOutcome, CloudTaskError, CreatedTask, TaskSummary};
 
 use crate::app::ChatWidgetArgs;
 use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
@@ -22,6 +23,7 @@ use codex_protocol::models::ResponseItem;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
+use crate::cloud_tasks_service::CloudEnvironment;
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -242,6 +244,42 @@ pub(crate) enum AppEvent {
 
     /// Show the multi-line prompt input to collect custom review instructions.
     OpenReviewCustomPrompt,
+
+    /// Cloud tasks: fetch the latest list based on the active environment filter.
+    FetchCloudTasks { environment: Option<String> },
+    /// Cloud tasks: response containing the refreshed task list.
+    PresentCloudTasks { environment: Option<String>, tasks: Vec<TaskSummary> },
+    /// Cloud tasks: generic error surfaced to the UI.
+    CloudTasksError { message: String },
+    /// Cloud tasks: fetch available environments to filter against.
+    FetchCloudEnvironments,
+    /// Cloud tasks: populated environment list ready for selection.
+    PresentCloudEnvironments { environments: Vec<CloudEnvironment> },
+    /// Cloud tasks: update the active environment filter (None = all environments).
+    SetCloudEnvironment { environment: Option<CloudEnvironment> },
+    /// Cloud tasks: show actions for a specific task.
+    ShowCloudTaskActions { task_id: String },
+    /// Cloud tasks: load diff for a task (current attempt).
+    FetchCloudTaskDiff { task_id: String },
+    /// Cloud tasks: load assistant messages for a task (current attempt).
+    FetchCloudTaskMessages { task_id: String },
+    /// Cloud tasks: run apply or preflight on a task.
+    ApplyCloudTask { task_id: String, preflight: bool },
+    /// Cloud tasks: apply/preflight finished.
+    CloudTaskApplyFinished {
+        task_id: String,
+        outcome: Result<ApplyOutcome, CloudTaskError>,
+        preflight: bool,
+    },
+    /// Cloud tasks: open the create-task prompt.
+    OpenCloudTaskCreate,
+    /// Cloud tasks: submit a new task creation request.
+    SubmitCloudTaskCreate { env_id: String, prompt: String, best_of_n: usize },
+    /// Cloud tasks: new task creation result.
+    CloudTaskCreated {
+        env_id: String,
+        result: Result<CreatedTask, CloudTaskError>,
+    },
 
     /// Update the theme (with history event)
     UpdateTheme(ThemeName),

@@ -36,6 +36,8 @@ Notes
   the workspace, a specific commit, compare against another branch, or enter
   custom instructions. With a focus argument, skips the picker and uses your
   text directly.
+- `/cloud`: browse Codex Cloud tasks, view details, apply patches, and create
+  new tasks from the TUI.
 - `/cmd <name>`: run a project command defined for the current workspace.
 
 ## UX & Display
