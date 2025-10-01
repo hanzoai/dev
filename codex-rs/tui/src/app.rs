@@ -1,6 +1,7 @@
 use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::{ChatWidget, GhostState};
+use crate::cloud_tasks_service;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::file_search::FileSearchManager;
 use crate::get_git_diff::get_git_diff;
@@ -21,6 +22,8 @@ use codex_core::protocol::Op;
 use codex_core::protocol::SandboxPolicy;
 use codex_core::ConversationManager;
 use codex_login::{AuthManager, AuthMode, ServerOptions};
+use codex_cloud_tasks_client::TaskId;
+use codex_cloud_tasks_client::CloudTaskError;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -1694,6 +1697,11 @@ impl App<'_> {
                                 }
                             }
                         }
+                        SlashCommand::Cloud => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                widget.handle_cloud_command(command_args);
+                            }
+                        }
                         SlashCommand::Branch => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_branch_command(command_args);
@@ -2081,6 +2089,138 @@ impl App<'_> {
                 AppEvent::OpenReviewCustomPrompt => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.show_review_custom_prompt();
+                    }
+                }
+                AppEvent::FetchCloudTasks { environment } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_tasks_loading();
+                    }
+                    let tx = self.app_event_tx.clone();
+                    let env_clone = environment.clone();
+                    tokio::spawn(async move {
+                        match cloud_tasks_service::fetch_tasks(environment).await {
+                            Ok(tasks) => tx.send(AppEvent::PresentCloudTasks {
+                                environment: env_clone,
+                                tasks,
+                            }),
+                            Err(err) => tx.send(AppEvent::CloudTasksError {
+                                message: err.to_string(),
+                            }),
+                        }
+                    });
+                }
+                AppEvent::PresentCloudTasks { environment, tasks } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.present_cloud_tasks(environment, tasks);
+                    }
+                }
+                AppEvent::CloudTasksError { message } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_tasks_error(message);
+                    }
+                }
+                AppEvent::FetchCloudEnvironments => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_environment_loading();
+                    }
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        match cloud_tasks_service::fetch_environments().await {
+                            Ok(envs) => tx.send(AppEvent::PresentCloudEnvironments { environments: envs }),
+                            Err(err) => tx.send(AppEvent::CloudTasksError { message: err.to_string() }),
+                        }
+                    });
+                }
+                AppEvent::PresentCloudEnvironments { environments } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.present_cloud_environment_picker(environments);
+                    }
+                }
+                AppEvent::SetCloudEnvironment { environment } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.set_cloud_environment(environment);
+                    }
+                }
+                AppEvent::ShowCloudTaskActions { task_id } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_task_actions(task_id);
+                    }
+                }
+                AppEvent::FetchCloudTaskDiff { task_id } => {
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let task = TaskId(task_id.clone());
+                        match cloud_tasks_service::fetch_task_diff(task.clone()).await {
+                            Ok(Some(diff)) => {
+                                tx.send(AppEvent::DiffResult(diff));
+                            }
+                            Ok(None) => tx.send(AppEvent::CloudTasksError {
+                                message: format!("Task {} has no diff available", task.0),
+                            }),
+                            Err(err) => tx.send(AppEvent::CloudTasksError { message: err.to_string() }),
+                        }
+                    });
+                }
+                AppEvent::FetchCloudTaskMessages { task_id } => {
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let task = TaskId(task_id.clone());
+                        match cloud_tasks_service::fetch_task_messages(task).await {
+                            Ok(messages) if !messages.is_empty() => {
+                                let joined = messages.join("\n\n");
+                                tx.send(AppEvent::InsertBackgroundEvent {
+                                    message: format!("Cloud task output for {task_id}:\n{joined}"),
+                                    placement: crate::app_event::BackgroundPlacement::Tail,
+                                });
+                            }
+                            Ok(_) => tx.send(AppEvent::CloudTasksError {
+                                message: format!("Task {task_id} has no assistant messages"),
+                            }),
+                            Err(err) => tx.send(AppEvent::CloudTasksError { message: err.to_string() }),
+                        }
+                    });
+                }
+                AppEvent::ApplyCloudTask { task_id, preflight } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_task_apply_status(&task_id, preflight);
+                    }
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let task = TaskId(task_id.clone());
+                        let result = cloud_tasks_service::apply_task(task, preflight).await;
+                        tx.send(AppEvent::CloudTaskApplyFinished {
+                            task_id,
+                            outcome: result.map_err(|err| CloudTaskError::Msg(err.to_string())),
+                            preflight,
+                        });
+                    });
+                }
+                AppEvent::CloudTaskApplyFinished { task_id, outcome, preflight } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_cloud_task_apply_finished(task_id, outcome, preflight);
+                    }
+                }
+                AppEvent::OpenCloudTaskCreate => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_task_create_prompt();
+                    }
+                }
+                AppEvent::SubmitCloudTaskCreate { env_id, prompt, best_of_n } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_cloud_task_create_progress();
+                    }
+                    let tx = self.app_event_tx.clone();
+                    tokio::spawn(async move {
+                        let result = cloud_tasks_service::create_task(env_id.clone(), prompt.clone(), best_of_n).await;
+                        tx.send(AppEvent::CloudTaskCreated {
+                            env_id,
+                            result: result.map_err(|err| CloudTaskError::Msg(err.to_string())),
+                        });
+                    });
+                }
+                AppEvent::CloudTaskCreated { env_id, result } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_cloud_task_created(env_id.clone(), result);
                     }
                 }
                 AppEvent::StartReviewCommitPicker => {

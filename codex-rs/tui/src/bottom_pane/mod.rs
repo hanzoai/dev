@@ -34,6 +34,8 @@ mod selection_popup_common;
 pub mod list_selection_view;
 pub(crate) use list_selection_view::SelectionAction;
 pub(crate) use custom_prompt_view::CustomPromptView;
+mod cloud_tasks_view;
+pub(crate) use cloud_tasks_view::CloudTasksView;
 pub mod resume_selection_view;
 pub mod agents_settings_view;
 mod github_settings_view;
@@ -629,6 +631,13 @@ impl BottomPane<'_> {
         self.active_view = Some(Box::new(items));
         self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
+        self.status_view_active = false;
+        self.request_redraw();
+    }
+
+    pub fn show_cloud_tasks(&mut self, view: CloudTasksView) {
+        self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
     }
