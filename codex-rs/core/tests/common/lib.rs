@@ -146,3 +146,23 @@ macro_rules! non_sandbox_test {
         }
     }};
 }
+
+#[macro_export]
+macro_rules! skip_if_no_network {
+    () => {{
+        if ::std::env::var(codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+            println!(
+                "Skipping test because networking is disabled in the current Codex sandbox."
+            );
+            return;
+        }
+    }};
+    ($result:expr $(,)?) => {{
+        if ::std::env::var(codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+            println!(
+                "Skipping test because networking is disabled in the current Codex sandbox."
+            );
+            return $result;
+        }
+    }};
+}
