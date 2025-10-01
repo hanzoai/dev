@@ -36,6 +36,7 @@ mod account_label;
 mod bottom_pane;
 mod chatwidget;
 mod citation_regex;
+mod cloud_tasks_service;
 mod cli;
 mod common;
 mod colors;
