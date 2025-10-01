@@ -2104,14 +2104,20 @@ impl ChatWidget<'_> {
 
     fn refresh_reasoning_collapsed_visibility(&mut self) {
         let show = self.config.tui.show_reasoning;
+        let mut changed = false;
         if show {
             for cell in &self.history_cells {
                 if let Some(reasoning_cell) = cell
                     .as_any()
                     .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                 {
-                    reasoning_cell.set_hide_when_collapsed(false);
+                    if reasoning_cell.set_hide_when_collapsed(false) {
+                        changed = true;
+                    }
                 }
+            }
+            if changed {
+                self.invalidate_height_cache();
             }
             return;
         }
@@ -2157,11 +2163,19 @@ impl ChatWidget<'_> {
                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
             {
                 if hide_indices.contains(&i) {
-                    reasoning_cell.set_hide_when_collapsed(true);
+                    if reasoning_cell.set_hide_when_collapsed(true) {
+                        changed = true;
+                    }
                 } else {
-                    reasoning_cell.set_hide_when_collapsed(false);
+                    if reasoning_cell.set_hide_when_collapsed(false) {
+                        changed = true;
+                    }
                 }
             }
+        }
+
+        if changed {
+            self.invalidate_height_cache();
         }
     }
 
