@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.180] - 2025-10-01
+
+- Auto-drive: add final observer validation before finishing runs so missed work is caught. (94061ee)
+- Auto-drive: stop appending ellipsis to decision summaries so prompts stay clean. (6384601)
+
 ## [0.2.179] - 2025-09-30
 
 - Auto-drive: persist conversation between turns and retain the raw coordinator transcript so context carries forward. (6d6e3f5, 6edced3)
