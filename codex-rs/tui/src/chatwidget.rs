@@ -8267,7 +8267,12 @@ impl ChatWidget<'_> {
                 // the status spinner can hide promptly when nothing else is running.
                 self.active_task_ids.remove(&id);
                 self.maybe_hide_spinner();
-                self.auto_on_assistant_final();
+                // Important: do not advance Auto Drive here. The StreamController will emit
+                // AppEvent::InsertFinalAnswer, and the App thread will finalize the assistant
+                // cell slightly later. Advancing at this point can start the next Auto Drive
+                // step before the final answer is actually inserted, which appears as a
+                // mid-turn re-trigger. We instead advance immediately after insertion inside
+                // insert_final_answer_with_id().
             }
             EventMsg::ReplayHistory(ev) => {
                 self.clear_resume_placeholder();
@@ -14688,6 +14693,8 @@ impl ChatWidget<'_> {
             }
             self.last_assistant_message = Some(final_source.clone());
             let _ = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            // Advance Auto Drive after the assistant message has been finalized.
+            self.auto_on_assistant_final();
             return;
         }
         // Debug: list last few history cell kinds so we can see what's present
@@ -14816,6 +14823,8 @@ impl ChatWidget<'_> {
                     .insert(StreamId(want.clone()));
             }
             self.autoscroll_if_near_bottom();
+            // Final cell committed via replacement; now advance Auto Drive.
+            self.auto_on_assistant_final();
             return;
         }
 
@@ -14845,6 +14854,8 @@ impl ChatWidget<'_> {
                     .closed_answer_ids
                     .insert(StreamId(want.clone()));
                 self.autoscroll_if_near_bottom();
+                // Final cell replaced in-place; advance Auto Drive now.
+                self.auto_on_assistant_final();
                 return;
             }
         }
@@ -14884,13 +14895,15 @@ impl ChatWidget<'_> {
                 tracing::debug!(
                     "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/superset"
                 );
-                let state =
-                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
-                let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
-                self.history_replace_at(idx, Box::new(cell));
-                self.autoscroll_if_near_bottom();
-                return;
-            }
+            let state =
+                self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
+            self.history_replace_at(idx, Box::new(cell));
+            self.autoscroll_if_near_bottom();
+            // Final assistant content revised; advance Auto Drive now.
+            self.auto_on_assistant_final();
+            return;
+        }
         }
 
         // Fallback: no prior assistant cell found; insert at stable sequence position.
@@ -14926,6 +14939,9 @@ impl ChatWidget<'_> {
                 .closed_answer_ids
                 .insert(StreamId(want.clone()));
         }
+        // Ordered insert completed; advance Auto Drive now that the assistant
+        // message is present in history.
+        self.auto_on_assistant_final();
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
