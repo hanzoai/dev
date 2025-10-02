@@ -836,6 +836,8 @@ struct State {
     turn_scratchpad: Option<TurnScratchpad>,
     /// Per-submission monotonic event sequence (resets at TaskStarted)
     event_seq_by_sub_id: HashMap<String, u64>,
+    /// Per-submission sequence used when synthesizing background OrderMeta.
+    background_seq_by_sub_id: HashMap<String, u64>,
     /// 1-based ordinal of the current HTTP request attempt in this session.
     request_ordinal: u64,
     dry_run_guard: DryRunGuardState,
@@ -1017,6 +1019,42 @@ impl Session {
 
     pub(crate) fn get_approval_policy(&self) -> AskForApproval {
         self.approval_policy
+    }
+
+    fn next_background_sequence(&self, sub_id: &str) -> u64 {
+        let mut state = self.state.lock().unwrap();
+        let entry = state
+            .background_seq_by_sub_id
+            .entry(sub_id.to_string())
+            .or_insert(0);
+        let current = *entry;
+        *entry = entry.saturating_add(1);
+        current
+    }
+
+    pub(crate) fn next_background_order(
+        &self,
+        sub_id: &str,
+        req_ordinal: u64,
+        output_index: Option<u32>,
+    ) -> crate::protocol::OrderMeta {
+        let normalized_req = if req_ordinal == 0 { 1 } else { req_ordinal };
+        let sequence = self.next_background_sequence(sub_id);
+        let stored_output_index = output_index.unwrap_or(i32::MAX as u32);
+        crate::protocol::OrderMeta {
+            request_ordinal: normalized_req,
+            output_index: Some(stored_output_index),
+            sequence_number: Some(sequence),
+        }
+    }
+
+    pub(crate) fn background_order_for_ctx(
+        &self,
+        ctx: &ToolCallCtx,
+        req_ordinal: u64,
+    ) -> crate::protocol::OrderMeta {
+        let base_output = ctx.output_index.unwrap_or(i32::MAX as u32);
+        self.next_background_order(&ctx.sub_id, req_ordinal, Some(base_output))
     }
 
     pub(crate) fn get_cwd(&self) -> &Path {
@@ -1931,13 +1969,18 @@ impl Session {
         result
     }
 
-    /// Helper that emits a BackgroundEvent with the given message. This keeps
-    /// the call‑sites terse so adding more diagnostics does not clutter the
-    /// core agent logic.
-    pub(crate) async fn notify_background_event(&self, sub_id: &str, message: impl Into<String>) {
-        let event = self.make_event(
+    /// Helper that emits a BackgroundEvent with explicit ordering metadata.
+    pub(crate) async fn notify_background_event_with_order(
+        &self,
+        sub_id: &str,
+        order: crate::protocol::OrderMeta,
+        message: impl Into<String>,
+    ) {
+        let event = self.make_event_with_order(
             sub_id,
             EventMsg::BackgroundEvent(BackgroundEventEvent { message: message.into() }),
+            order,
+            None,
         );
         let _ = self.tx_event.send(event).await;
     }
@@ -2109,9 +2152,11 @@ impl Session {
                 .name
                 .as_deref()
                 .unwrap_or_else(|| hook.command.first().map(String::as_str).unwrap_or("hook"));
+            let order = self.next_background_order(&sub_id, attempt_req, None);
             self
-                .notify_background_event(
+                .notify_background_event_with_order(
                     &sub_id,
+                    order,
                     format!("Hook `{}` failed: {}", hook_label, get_error_message_ui(&err)),
                 )
                 .await;
@@ -2133,9 +2178,11 @@ impl Session {
         attempt_req: u64,
     ) {
         let Some(command) = self.find_project_command(name) else {
+            let order = self.next_background_order(sub_id, attempt_req, None);
             self
-                .notify_background_event(
+                .notify_background_event_with_order(
                     sub_id,
+                    order,
                     format!("Unknown project command `{}`", name.trim()),
                 )
                 .await;
@@ -2184,9 +2231,11 @@ impl Session {
             .run_exec_with_events(turn_diff_tracker, exec_ctx, exec_args, None, None, attempt_req)
             .await
         {
+            let order = self.next_background_order(sub_id, attempt_req, None);
             self
-                .notify_background_event(
+                .notify_background_event_with_order(
                     sub_id,
+                    order,
                     format!(
                         "Project command `{}` failed: {}",
                         command.name,
@@ -2535,6 +2584,7 @@ impl State {
             // Preserve request_ordinal so reconfigurations (e.g., /reasoning)
             // do not reset provider ordering mid-session.
             request_ordinal: self.request_ordinal,
+            background_seq_by_sub_id: self.background_seq_by_sub_id.clone(),
             dry_run_guard: self.dry_run_guard.clone(),
             next_internal_sub_id: self.next_internal_sub_id,
             ..Default::default()
@@ -6385,8 +6435,10 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     "⚠️ Agent prompt too short: give the manager more context (at least a full sentence) before running agents. Current prompt: \"{}\".",
                     trimmed_task
                 );
+                let req = sess.current_request_ordinal();
+                let order = sess.background_order_for_ctx(ctx, req);
                 sess
-                    .notify_background_event(&ctx.sub_id, guidance.clone())
+                    .notify_background_event_with_order(&ctx.sub_id, order, guidance.clone())
                     .await;
 
                 let response = serde_json::json!({
@@ -6594,7 +6646,10 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                 )
             };
 
-            sess.notify_background_event(&ctx.sub_id, launch_hint.clone())
+            let req = sess.current_request_ordinal();
+            let order = sess.background_order_for_ctx(ctx, req);
+            sess
+                .notify_background_event_with_order(&ctx.sub_id, order, launch_hint.clone())
                 .await;
 
             let response = if let Some(batch_id) = batch_id {
@@ -7551,8 +7606,13 @@ async fn handle_container_exec_with_params(
                     .unwrap_or_else(|_| "<failed to serialize suggested argv>".to_string());
                 let guidance = pattern.guidance("original_script", &script, &suggested);
 
+                let order = sess.next_background_order(&sub_id, attempt_req, output_index);
                 sess
-                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance))
+                    .notify_background_event_with_order(
+                        &sub_id,
+                        order,
+                        format!("Command guard: {}", guidance),
+                    )
                     .await;
 
                 return ResponseInputItem::FunctionCallOutput {
@@ -7570,8 +7630,13 @@ async fn handle_container_exec_with_params(
 
                 let guidance = guidance_for_sensitive_git(kind, "original_script", &script, &suggested);
 
+                let order = sess.next_background_order(&sub_id, attempt_req, output_index);
                 sess
-                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                    .notify_background_event_with_order(
+                        &sub_id,
+                        order,
+                        format!("Command guard: {}", guidance.clone()),
+                    )
                     .await;
 
                 return ResponseInputItem::FunctionCallOutput {
@@ -7611,8 +7676,13 @@ async fn handle_container_exec_with_params(
                             argv_confirm,
                         );
 
+                        let order = sess.next_background_order(&sub_id, attempt_req, output_index);
                         sess
-                            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                            .notify_background_event_with_order(
+                                &sub_id,
+                                order,
+                                format!("Command guard: {}", guidance.clone()),
+                            )
                             .await;
 
                         return ResponseInputItem::FunctionCallOutput {
@@ -7629,8 +7699,13 @@ async fn handle_container_exec_with_params(
 
     if let Some(redundant) = detect_redundant_cd(&params.command, &params.cwd) {
         let guidance = guidance_for_redundant_cd(&redundant);
+        let order = sess.next_background_order(&sub_id, attempt_req, output_index);
         sess
-            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .notify_background_event_with_order(
+                &sub_id,
+                order,
+                format!("Command guard: {}", guidance.clone()),
+            )
             .await;
 
         return ResponseInputItem::FunctionCallOutput {
@@ -7644,8 +7719,13 @@ async fn handle_container_exec_with_params(
 
     if let Some(cat_guard) = detect_cat_write(&params.command) {
         let guidance = guidance_for_cat_write(&cat_guard);
+        let order = sess.next_background_order(&sub_id, attempt_req, output_index);
         sess
-            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .notify_background_event_with_order(
+                &sub_id,
+                order,
+                format!("Command guard: {}", guidance.clone()),
+            )
             .await;
 
         return ResponseInputItem::FunctionCallOutput {
@@ -7659,8 +7739,13 @@ async fn handle_container_exec_with_params(
 
     if let Some(python_guard) = detect_python_write(&params.command) {
         let guidance = guidance_for_python_write(&python_guard);
+        let order = sess.next_background_order(&sub_id, attempt_req, output_index);
         sess
-            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+            .notify_background_event_with_order(
+                &sub_id,
+                order,
+                format!("Command guard: {}", guidance.clone()),
+            )
             .await;
 
         return ResponseInputItem::FunctionCallOutput {
@@ -7689,8 +7774,13 @@ async fn handle_container_exec_with_params(
                     &suggested,
                 );
 
+                let order = sess.next_background_order(&sub_id, attempt_req, output_index);
                 sess
-                    .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                    .notify_background_event_with_order(
+                        &sub_id,
+                        order,
+                        format!("Command guard: {}", guidance.clone()),
+                    )
                     .await;
 
                 return ResponseInputItem::FunctionCallOutput {
@@ -7719,8 +7809,13 @@ async fn handle_container_exec_with_params(
                         resend,
                     );
 
+                    let order = sess.next_background_order(&sub_id, attempt_req, output_index);
                     sess
-                        .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                        .notify_background_event_with_order(
+                            &sub_id,
+                            order,
+                            format!("Command guard: {}", guidance.clone()),
+                        )
                         .await;
 
                     return ResponseInputItem::FunctionCallOutput {
@@ -7796,8 +7891,13 @@ async fn handle_container_exec_with_params(
 
                         let guidance = guidance_for_sensitive_git(kind, "original_argv", &format!("{:?}", params.command), &suggested);
 
+                        let order = sess.next_background_order(&sub_id, attempt_req, output_index);
                         sess
-                            .notify_background_event(&sub_id, format!("Command guard: {}", guidance.clone()))
+                            .notify_background_event_with_order(
+                                &sub_id,
+                                order,
+                                format!("Command guard: {}", guidance.clone()),
+                            )
                             .await;
 
                         return ResponseInputItem::FunctionCallOutput { call_id, output: FunctionCallOutputPayload { content: guidance, success: None } };
@@ -7816,7 +7916,16 @@ async fn handle_container_exec_with_params(
             let changes = convert_apply_patch_to_protocol(&action);
             turn_diff_tracker.on_patch_begin(&changes);
 
-            match apply_patch::apply_patch(sess, &sub_id, &call_id, action).await {
+            match apply_patch::apply_patch(
+                sess,
+                &sub_id,
+                &call_id,
+                attempt_req,
+                output_index,
+                action,
+            )
+            .await
+            {
                 ApplyPatchResult::Reply(item) => return item,
                 ApplyPatchResult::Applied(run) => {
                     let order_begin = crate::protocol::OrderMeta {
@@ -8274,7 +8383,13 @@ async fn handle_sandbox_error(
 
     // For now, we categorically ask the user to retry without sandbox and
     // emit the raw error as a background event.
-    sess.notify_background_event(&sub_id, format!("Execution failed: {error}"))
+    let failure_order = sess.next_background_order(&sub_id, attempt_req, None);
+    sess
+        .notify_background_event_with_order(
+            &sub_id,
+            failure_order,
+            format!("Execution failed: {error}"),
+        )
         .await;
 
     let rx_approve = sess
@@ -8321,7 +8436,13 @@ async fn handle_sandbox_error(
     };
 
     // Inform UI we are retrying without sandbox.
-    sess.notify_background_event(&sub_id, "retrying command without sandbox")
+    let retry_order = sess.next_background_order(&sub_id, attempt_req, None);
+    sess
+        .notify_background_event_with_order(
+            &sub_id,
+            retry_order,
+            "retrying command without sandbox",
+        )
         .await;
 
     // This is an escalated retry; the policy will not be examined and the sandbox has been set to `None`.
