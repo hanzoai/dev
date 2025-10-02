@@ -501,7 +501,9 @@ struct AutoCoordinatorUiState {
     active: bool,
     goal: Option<String>,
     current_summary: Option<String>,
-    current_prompt: Option<String>,
+    current_progress_past: Option<String>,
+    current_progress_current: Option<String>,
+    current_cli_prompt: Option<String>,
     current_display_line: Option<String>,
     current_display_is_summary: bool,
     current_reasoning_title: Option<String>,
@@ -517,6 +519,8 @@ struct AutoCoordinatorUiState {
     awaiting_goal_input: bool,
     last_broadcast_summary: Option<String>,
     last_decision_summary: Option<String>,
+    last_decision_progress_past: Option<String>,
+    last_decision_progress_current: Option<String>,
     last_decision_display: Option<String>,
     last_decision_display_is_summary: bool,
     observer_telemetry: Option<AutoObserverTelemetry>,
@@ -11077,6 +11081,9 @@ impl ChatWidget<'_> {
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_summary = None;
+                self.auto_state.current_progress_past = None;
+                self.auto_state.current_progress_current = None;
+                self.auto_state.current_cli_prompt = None;
                 self.auto_state.current_display_line = None;
                 self.auto_state.current_display_is_summary = false;
                 self.auto_state.current_reasoning_title = None;
@@ -11085,6 +11092,8 @@ impl ChatWidget<'_> {
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_state.thinking_prefix_stripped = false;
                 self.auto_state.last_broadcast_summary = None;
+                self.auto_state.last_decision_progress_past = None;
+                self.auto_state.last_decision_progress_current = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
@@ -11116,6 +11125,9 @@ impl ChatWidget<'_> {
             self.auto_state.waiting_for_response = true;
             self.auto_state.coordinator_waiting = true;
             self.auto_state.current_summary = None;
+            self.auto_state.current_progress_past = None;
+            self.auto_state.current_progress_current = None;
+            self.auto_state.current_cli_prompt = None;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
             self.auto_state.current_display_line = None;
@@ -11133,21 +11145,31 @@ impl ChatWidget<'_> {
     pub(crate) fn auto_handle_decision(
         &mut self,
         status: AutoCoordinatorStatus,
-        summary: String,
-        prompt: Option<String>,
+        progress_past: Option<String>,
+        progress_current: Option<String>,
+        cli_prompt: Option<String>,
         transcript: Vec<codex_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
-        let summary = summary.trim().to_string();
+        let progress_past = Self::normalize_progress_field(progress_past);
+        let progress_current = Self::normalize_progress_field(progress_current);
+
         if !transcript.is_empty() {
             self.auto_history.append_raw(&transcript);
         }
-        self.auto_state.last_decision_summary = Some(summary.clone());
+
+        self.auto_state.current_progress_past = progress_past.clone();
+        self.auto_state.current_progress_current = progress_current.clone();
+        self.auto_state.last_decision_progress_past = progress_past.clone();
+        self.auto_state.last_decision_progress_current = progress_current.clone();
+
+        let summary_text = Self::compose_progress_summary(&progress_current, &progress_past);
+        self.auto_state.last_decision_summary = Some(summary_text.clone());
         self.auto_state.coordinator_waiting = false;
-        self.auto_on_reasoning_final(&summary);
+        self.auto_on_reasoning_final(&summary_text);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.last_decision_display_is_summary =
             self.auto_state.current_display_is_summary;
@@ -11159,11 +11181,11 @@ impl ChatWidget<'_> {
 
         match status {
             AutoCoordinatorStatus::Continue => {
-                let Some(prompt_text) = prompt else {
+                let Some(prompt_text) = cli_prompt else {
                     self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
                     return;
                 };
-                self.auto_state.current_prompt = Some(prompt_text.clone());
+                self.auto_state.current_cli_prompt = Some(prompt_text.clone());
                 self.auto_state.awaiting_submission = true;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
@@ -11173,21 +11195,31 @@ impl ChatWidget<'_> {
                 self.auto_start_countdown(countdown_id);
             }
             AutoCoordinatorStatus::Success => {
-                let lower = summary.to_ascii_lowercase();
-                let message = if lower.starts_with("coordinator success:") {
-                    summary
+                let normalized = summary_text.trim();
+                let message = if normalized.is_empty() {
+                    "Coordinator success.".to_string()
+                } else if normalized
+                    .to_ascii_lowercase()
+                    .starts_with("coordinator success:")
+                {
+                    summary_text
                 } else {
-                    format!("Coordinator success: {summary}")
+                    format!("Coordinator success: {summary_text}")
                 };
                 self.auto_stop(Some(message));
                 return;
             }
             AutoCoordinatorStatus::Failed => {
-                let lower = summary.to_ascii_lowercase();
-                let message = if lower.starts_with("coordinator error:") {
-                    summary
+                let normalized = summary_text.trim();
+                let message = if normalized.is_empty() {
+                    "Coordinator error.".to_string()
+                } else if normalized
+                    .to_ascii_lowercase()
+                    .starts_with("coordinator error:")
+                {
+                    summary_text
                 } else {
-                    format!("Coordinator error: {summary}")
+                    format!("Coordinator error: {summary_text}")
                 };
                 self.auto_stop(Some(message));
                 return;
@@ -11267,7 +11299,7 @@ impl ChatWidget<'_> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                self.auto_state.current_prompt = Some(message.to_string());
+                self.auto_state.current_cli_prompt = Some(message.to_string());
                 if self.auto_state.awaiting_submission {
                     self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
                     self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
@@ -11299,7 +11331,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active {
             return;
         }
-        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
             self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
             return;
         };
@@ -11316,6 +11348,8 @@ impl ChatWidget<'_> {
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_summary = None;
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
         self.auto_state.last_broadcast_summary = None;
         self.auto_state.current_display_line = post_submit_display.clone();
         self.auto_state.current_display_is_summary =
@@ -11337,7 +11371,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || !self.auto_state.awaiting_submission {
             return;
         }
-        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
             return;
         };
 
@@ -11402,6 +11436,8 @@ impl ChatWidget<'_> {
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
         self.auto_state.current_summary = Some(String::new());
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
@@ -11444,19 +11480,31 @@ impl ChatWidget<'_> {
 
         let headline = self.auto_format_status_headline(&status_text);
         let mut status_lines = vec![headline];
+        self.auto_append_progress_lines(
+            &mut status_lines,
+            self.auto_state.current_progress_current.as_ref(),
+            self.auto_state.current_progress_past.as_ref(),
+        );
         if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
-            if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
-                let trimmed = summary.trim();
-                if !trimmed.is_empty() {
-                    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if !collapsed.is_empty() {
-                        let current_line = status_lines
-                            .first()
-                            .map(|line| line.trim_end_matches('…').trim())
-                            .unwrap_or("");
-                        if collapsed != current_line {
-                            let display = Self::truncate_with_ellipsis(&collapsed, 160);
-                            status_lines.push(display);
+            let appended = self.auto_append_progress_lines(
+                &mut status_lines,
+                self.auto_state.last_decision_progress_current.as_ref(),
+                self.auto_state.last_decision_progress_past.as_ref(),
+            );
+            if !appended {
+                if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
+                    let trimmed = summary.trim();
+                    if !trimmed.is_empty() {
+                        let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if !collapsed.is_empty() {
+                            let current_line = status_lines
+                                .first()
+                                .map(|line| line.trim_end_matches('…').trim())
+                                .unwrap_or("");
+                            if collapsed != current_line {
+                                let display = Self::truncate_with_ellipsis(&collapsed, 160);
+                                status_lines.push(display);
+                            }
                         }
                     }
                 }
@@ -11485,9 +11533,9 @@ impl ChatWidget<'_> {
         }
         let cli_running = self.is_cli_running();
 
-        let prompt = self
+        let cli_prompt = self
             .auto_state
-            .current_prompt
+            .current_cli_prompt
             .clone()
             .filter(|p| !p.trim().is_empty());
 
@@ -11531,7 +11579,7 @@ impl ChatWidget<'_> {
         let model = AutoCoordinatorViewModel {
             goal: self.auto_state.goal.clone(),
             status_lines,
-            prompt,
+            cli_prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
             countdown,
@@ -11746,6 +11794,56 @@ impl ChatWidget<'_> {
         }
         out.push('…');
         out
+    }
+
+    fn normalize_progress_field(field: Option<String>) -> Option<String> {
+        field.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
+    fn compose_progress_summary(
+        progress_current: &Option<String>,
+        progress_past: &Option<String>,
+    ) -> String {
+        let mut lines = Vec::new();
+        if let Some(current) = progress_current.as_ref() {
+            lines.push(current.clone());
+        }
+        if let Some(past) = progress_past.as_ref() {
+            lines.push(past.clone());
+        }
+        lines.join("\n")
+    }
+
+    fn auto_append_progress_lines(
+        &self,
+        lines: &mut Vec<String>,
+        progress_current: Option<&String>,
+        progress_past: Option<&String>,
+    ) -> bool {
+        let initial_len = lines.len();
+        Self::append_progress_line(lines, progress_current);
+        Self::append_progress_line(lines, progress_past);
+        lines.len() > initial_len
+    }
+
+    fn append_progress_line(lines: &mut Vec<String>, progress: Option<&String>) {
+        if let Some(progress) = progress {
+            let trimmed = progress.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let display = Self::truncate_with_ellipsis(trimmed, 160);
+            if !lines.iter().any(|existing| existing.trim() == display) {
+                lines.push(display);
+            }
+        }
     }
 
     pub(crate) fn launch_update_command(
