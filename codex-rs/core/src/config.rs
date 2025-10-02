@@ -936,6 +936,27 @@ pub fn set_tui_notifications(
     Ok(())
 }
 
+/// Persist the review auto-resolve preference into `CODEX_HOME/config.toml` at `[tui].review_auto_resolve`.
+pub fn set_tui_review_auto_resolve(codex_home: &Path, enabled: bool) -> anyhow::Result<()> {
+    let config_path = codex_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_codex_path_for_read(codex_home, Path::new(CONFIG_TOML_FILE));
+
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["tui"]["review_auto_resolve"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(codex_home)?;
+    let tmp_file = NamedTempFile::new_in(codex_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
 /// Persist the GitHub workflow check preference under `[github].check_workflows_on_push`.
 pub fn set_github_check_on_push(codex_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = codex_home.join(CONFIG_TOML_FILE);
