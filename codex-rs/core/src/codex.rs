@@ -8167,10 +8167,25 @@ async fn handle_container_exec_with_params(
     // Wait up to 10 seconds for completion
     let waited = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
     if waited.is_ok() {
-        // Completed within 10s – return the real output
+        // Completed within 10s - return the real output and drop the background entry.
         let done_opt = {
-            let st = sess.state.lock().unwrap();
-            st.background_execs.get(&call_id).and_then(|bg| bg.result_cell.lock().unwrap().clone())
+            let mut st = sess.state.lock().unwrap();
+            st.background_execs
+                .remove(&call_id)
+                .and_then(|bg| bg.result_cell.lock().unwrap().clone())
+                .or_else(|| {
+                    st.background_execs
+                        .iter()
+                        .find_map(|(k, v)| {
+                            if v.result_cell.lock().unwrap().is_some() {
+                                Some(k.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .and_then(|k| st.background_execs.remove(&k))
+                        .and_then(|bg| bg.result_cell.lock().unwrap().clone())
+                })
         };
         if let Some(done) = done_opt {
             let is_success = done.exit_code == 0;
