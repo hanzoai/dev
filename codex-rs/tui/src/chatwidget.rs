@@ -377,6 +377,8 @@ const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [50.0, 75.0, 90.0];
 const RATE_LIMIT_REFRESH_INTERVAL: chrono::Duration = chrono::Duration::minutes(10);
 
 const MAX_TRACKED_GHOST_COMMITS: usize = 20;
+const GHOST_SNAPSHOT_NOTICE_THRESHOLD: Duration = Duration::from_secs(1);
+const GHOST_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 struct RateLimitWarning {
@@ -6793,13 +6795,56 @@ impl ChatWidget<'_> {
         self.active_ghost_snapshot = Some((job_id, request));
 
         tokio::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
+            let handle = tokio::task::spawn_blocking(move || {
                 let options = CreateGhostCommitOptions::new(repo_path.as_path());
                 create_ghost_commit(&options)
-            })
-            .await;
+            });
+            tokio::pin!(handle);
+
+            let mut notice_sent = false;
+            let notice_sleep = tokio::time::sleep(GHOST_SNAPSHOT_NOTICE_THRESHOLD);
+            tokio::pin!(notice_sleep);
+            let timeout_sleep = tokio::time::sleep(GHOST_SNAPSHOT_TIMEOUT);
+            tokio::pin!(timeout_sleep);
+
+            let join_result = loop {
+                tokio::select! {
+                    res = &mut handle => break res,
+                    _ = &mut timeout_sleep => {
+                        handle.as_mut().abort();
+                        let elapsed = started_at.elapsed();
+                        let err = GitToolingError::Io(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            format!(
+                                "ghost snapshot exceeded {}",
+                                format_duration(GHOST_SNAPSHOT_TIMEOUT)
+                            ),
+                        ));
+                        let event = AppEvent::GhostSnapshotFinished {
+                            job_id,
+                            result: Err(err),
+                            elapsed,
+                        };
+                        app_event_tx.send(event);
+                        return;
+                    }
+                    _ = &mut notice_sleep, if !notice_sent => {
+                        notice_sent = true;
+                        let elapsed = started_at.elapsed();
+                        let message = format!(
+                            "Git snapshot still running… {} elapsed.",
+                            format_duration(elapsed)
+                        );
+                        let _ = app_event_tx.send(AppEvent::InsertBackgroundEvent {
+                            message,
+                            placement: BackgroundPlacement::Tail,
+                        });
+                    }
+                }
+            };
+
             let elapsed = started_at.elapsed();
-            let event = match result {
+            let event = match join_result {
                 Ok(Ok(commit)) => AppEvent::GhostSnapshotFinished {
                     job_id,
                     result: Ok(commit),
@@ -6822,6 +6867,7 @@ impl ChatWidget<'_> {
                     }
                 }
             };
+
             app_event_tx.send(event);
         });
     }
@@ -6851,15 +6897,28 @@ impl ChatWidget<'_> {
                 if self.ghost_snapshots.len() > MAX_TRACKED_GHOST_COMMITS {
                     self.ghost_snapshots.remove(0);
                 }
-                if elapsed >= Duration::from_secs(2) {
+                if elapsed >= GHOST_SNAPSHOT_NOTICE_THRESHOLD {
                     self.push_background_tail(format!(
-                        "Workspace snapshot captured in {}.",
+                        "Git snapshot captured in {}.",
                         format_duration(elapsed)
                     ));
                 }
                 Some(snapshot)
             }
             Err(err) => {
+                if let GitToolingError::Io(io_err) = &err {
+                    if io_err.kind() == io::ErrorKind::TimedOut {
+                        self.push_background_tail(format!(
+                            "Git snapshot timed out after {}. Try again once the repository is less busy.",
+                            format_duration(elapsed)
+                        ));
+                        tracing::warn!(
+                            elapsed = %format_duration(elapsed),
+                            "ghost snapshot timed out"
+                        );
+                        return None;
+                    }
+                }
                 self.ghost_snapshots_disabled = true;
                 let (message, hint) = match &err {
                     GitToolingError::NotAGitRepository { .. } => (
