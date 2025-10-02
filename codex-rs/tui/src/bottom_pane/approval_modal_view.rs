@@ -4,6 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
 
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::ApprovalRequest;
 use crate::user_approval_widget::UserApprovalWidget;
 
@@ -15,29 +16,38 @@ use std::collections::VecDeque;
 /// Modal overlay asking the user to approve/deny a sequence of requests.
 pub(crate) struct ApprovalModalView<'a> {
     current: UserApprovalWidget<'a>,
-    queue: VecDeque<ApprovalRequest>,
+    queue: VecDeque<(ApprovalRequest, BackgroundOrderTicket)>,
     app_event_tx: AppEventSender,
 }
 
 impl ApprovalModalView<'_> {
-    pub fn new(request: ApprovalRequest, app_event_tx: AppEventSender) -> Self {
+    pub fn new(
+        request: ApprovalRequest,
+        ticket: BackgroundOrderTicket,
+        app_event_tx: AppEventSender,
+    ) -> Self {
         Self {
-            current: UserApprovalWidget::new(request, app_event_tx.clone()),
+            current: UserApprovalWidget::new(request, ticket, app_event_tx.clone()),
             queue: VecDeque::new(),
             app_event_tx,
         }
     }
 
-    pub fn enqueue_request(&mut self, req: ApprovalRequest) {
-        self.queue.push_back(req);
+    pub fn enqueue_request(
+        &mut self,
+        req: ApprovalRequest,
+        ticket: BackgroundOrderTicket,
+    ) {
+        self.queue.push_back((req, ticket));
     }
 
     /// Advance to next request if the current one is finished.
     fn maybe_advance(&mut self) {
         if self.current.is_complete() {
-            if let Some(req) = self.queue.pop_front() {
-            self.current = UserApprovalWidget::new(req, self.app_event_tx.clone());
-        }
+            if let Some((req, ticket)) = self.queue.pop_front() {
+                self.current =
+                    UserApprovalWidget::new(req, ticket, self.app_event_tx.clone());
+            }
         }
     }
 }
@@ -66,8 +76,12 @@ impl<'a> BottomPaneView<'a> for ApprovalModalView<'a> {
         (&self.current).render_ref(area, buf);
     }
 
-    fn try_consume_approval_request(&mut self, req: ApprovalRequest) -> Option<ApprovalRequest> {
-        self.enqueue_request(req);
+    fn try_consume_approval_request(
+        &mut self,
+        req: ApprovalRequest,
+        ticket: BackgroundOrderTicket,
+    ) -> Option<(ApprovalRequest, BackgroundOrderTicket)> {
+        self.enqueue_request(req, ticket);
         None
     }
 }
@@ -91,8 +105,10 @@ mod tests {
         let (tx_raw, _rx) = channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let first = make_exec_request();
-        let mut view = ApprovalModalView::new(first, tx);
-        view.enqueue_request(make_exec_request());
+        let ticket = BackgroundOrderTicket::test_for_request(1);
+        let mut view = ApprovalModalView::new(first, ticket, tx);
+        let ticket2 = BackgroundOrderTicket::test_for_request(2);
+        view.enqueue_request(make_exec_request(), ticket2);
 
         let (tx_raw2, _rx2) = channel::<AppEvent>();
         let mut pane = BottomPane::new(super::super::BottomPaneParams {

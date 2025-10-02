@@ -27,6 +27,7 @@ use shlex::split as shlex_split;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::exec_command::strip_bash_lc_and_escape;
 use codex_core::protocol::ApprovedCommandMatchKind;
 
@@ -72,6 +73,7 @@ enum SelectAction {
 pub(crate) struct UserApprovalWidget<'a> {
     approval_request: ApprovalRequest,
     app_event_tx: AppEventSender,
+    before_ticket: BackgroundOrderTicket,
     confirmation_prompt: Paragraph<'a>,
     select_options: Vec<SelectOption>,
 
@@ -84,7 +86,11 @@ pub(crate) struct UserApprovalWidget<'a> {
 }
 
 impl UserApprovalWidget<'_> {
-    pub(crate) fn new(approval_request: ApprovalRequest, app_event_tx: AppEventSender) -> Self {
+    pub(crate) fn new(
+        approval_request: ApprovalRequest,
+        before_ticket: BackgroundOrderTicket,
+        app_event_tx: AppEventSender,
+    ) -> Self {
         let confirmation_prompt = match &approval_request {
             ApprovalRequest::Exec {
                 command, reason, ..
@@ -154,6 +160,7 @@ impl UserApprovalWidget<'_> {
         Self {
             approval_request,
             app_event_tx,
+            before_ticket,
             confirmation_prompt,
             select_options,
             selected_option: 0,
@@ -276,9 +283,8 @@ impl UserApprovalWidget<'_> {
             format!("{}\nfeedback:\n{}", message, feedback)
         };
         // Insert above the upcoming command begin so the decision reads first.
-        self
-            .app_event_tx
-            .send_background_event_before_next_output(message);
+        self.app_event_tx
+            .send_background_before_next_output_with_ticket(&self.before_ticket, message);
 
         // If the user aborted an exec approval, immediately cancel any running task
         // so the UI reflects their intent (clear spinner/status) without waiting
@@ -572,7 +578,7 @@ mod tests {
             command: vec!["echo".to_string()],
             reason: None,
         };
-        let mut widget = UserApprovalWidget::new(req, tx);
+        let mut widget = UserApprovalWidget::new(req, BackgroundOrderTicket::test_for_request(1), tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
         assert!(widget.is_complete());
         let events: Vec<AppEvent> = rx.try_iter().collect();
@@ -594,7 +600,7 @@ mod tests {
             command: vec!["git".into(), "status".into()],
             reason: None,
         };
-        let mut widget = UserApprovalWidget::new(req, tx);
+        let mut widget = UserApprovalWidget::new(req, BackgroundOrderTicket::test_for_request(1), tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
 
         let events: Vec<AppEvent> = rx.try_iter().collect();
@@ -623,7 +629,7 @@ mod tests {
             ],
             reason: None,
         };
-        let mut widget = UserApprovalWidget::new(req, tx);
+        let mut widget = UserApprovalWidget::new(req, BackgroundOrderTicket::test_for_request(1), tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
 
         let events: Vec<AppEvent> = rx.try_iter().collect();
@@ -680,7 +686,7 @@ mod tests {
             command: vec!["echo".to_string()],
             reason: None,
         };
-        let mut widget = UserApprovalWidget::new(req, tx);
+        let mut widget = UserApprovalWidget::new(req, BackgroundOrderTicket::test_for_request(1), tx);
         widget.handle_key_event(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE));
         assert!(widget.is_complete());
         let events: Vec<AppEvent> = rx.try_iter().collect();
