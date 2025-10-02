@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::{ContentItem, ResponseItem};
 
 /// Maintains the Auto Drive conversation transcript between coordinator turns.
 ///
@@ -11,7 +11,7 @@ use codex_protocol::models::ResponseItem;
 pub(crate) struct AutoDriveHistory {
     converted: Vec<ResponseItem>,
     raw: Vec<ResponseItem>,
-    pending_duplicates: VecDeque<ResponseItem>,
+    pending_duplicates: VecDeque<NormalizedMessage>,
 }
 
 impl AutoDriveHistory {
@@ -49,13 +49,20 @@ impl AutoDriveHistory {
         let mut filtered = Vec::with_capacity(tail.len());
         let queue = &mut self.pending_duplicates;
         for item in tail.into_iter() {
-            if let Some(expected) = queue.front() {
-                if *expected == item {
-                    queue.pop_front();
-                    continue;
-                }
+            let matched = normalize_message(&item)
+                .and_then(|message| queue.front().map(|expected| (message, expected)))
+                .map(|(message, expected)| message == *expected)
+                .unwrap_or(false);
+
+            if matched {
+                queue.pop_front();
+                continue;
+            }
+
+            if queue.front().is_some() {
                 queue.clear();
             }
+
             filtered.push(item);
         }
 
@@ -68,8 +75,8 @@ impl AutoDriveHistory {
         }
         self.raw.extend(items.iter().cloned());
         for item in items.iter() {
-            if matches!(item, ResponseItem::Message { .. }) {
-                self.pending_duplicates.push_back(item.clone());
+            if let Some(message) = normalize_message(item) {
+                self.pending_duplicates.push_back(message);
             }
         }
     }
@@ -159,7 +166,13 @@ mod tests {
         let mut history = AutoDriveHistory::new();
 
         // Coordinator appends an auto-generated assistant message.
-        let transcript = vec![text_message("assistant", "auto step")];
+        let transcript = vec![ResponseItem::Message {
+            id: Some("msg-123".to_string()),
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: "auto step".to_string(),
+            }],
+        }];
         history.append_raw(&transcript);
         assert_eq!(history.pending_duplicates.len(), 1);
 
@@ -172,5 +185,62 @@ mod tests {
         let tail = history.replace_converted(conversation.clone());
         assert_eq!(tail.len(), 3);
         assert!(history.pending_duplicates.is_empty());
+    }
+
+    #[test]
+    fn dedupe_ignores_ids() {
+        let mut history = AutoDriveHistory::new();
+
+        let transcript = vec![ResponseItem::Message {
+            id: Some("msg-xyz".to_string()),
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: "coordinator turn".to_string(),
+            }],
+        }];
+        history.append_raw(&transcript);
+        assert_eq!(history.pending_duplicates.len(), 1);
+
+        let rebuilt = vec![
+            text_message("user", "hi"),
+            text_message("assistant", "coordinator turn"),
+        ];
+        let tail = history.replace_converted(rebuilt);
+        assert!(tail.is_empty(), "turn should be skipped despite differing ids");
+        assert!(history.pending_duplicates.is_empty());
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NormalizedMessage {
+    role: String,
+    content: Vec<NormalizedContent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NormalizedContent {
+    InputText(String),
+    OutputText(String),
+    InputImage(String),
+}
+
+fn normalize_message(item: &ResponseItem) -> Option<NormalizedMessage> {
+    if let ResponseItem::Message { role, content, .. } = item {
+        let normalized = content
+            .iter()
+            .map(|chunk| match chunk {
+                ContentItem::InputText { text } => NormalizedContent::InputText(text.clone()),
+                ContentItem::OutputText { text } => NormalizedContent::OutputText(text.clone()),
+                ContentItem::InputImage { image_url } => {
+                    NormalizedContent::InputImage(image_url.clone())
+                }
+            })
+            .collect();
+        Some(NormalizedMessage {
+            role: role.clone(),
+            content: normalized,
+        })
+    } else {
+        None
     }
 }
