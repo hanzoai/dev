@@ -654,7 +654,6 @@ pub(crate) struct ChatWidget<'a> {
     session_id: Option<uuid::Uuid>,
 
     // Pending jump-back state (reversible until submit)
-    pending_jump_back: Option<PendingJumpBack>,
 
     // Track active task ids so we don't drop the working status while any
     // agent/sub‑agent is still running (long‑running sessions can interleave).
@@ -731,10 +730,6 @@ pub(crate) struct ChatWidget<'a> {
     // Track the largest order key we have assigned so far to keep tail inserts monotonic
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
-}
-
-struct PendingJumpBack {
-    removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
 }
 
 #[derive(Clone)]
@@ -3170,7 +3165,6 @@ impl ChatWidget<'_> {
                 pending_scroll_rows: Cell::new(0),
             },
             session_id: None,
-            pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
@@ -3437,7 +3431,6 @@ impl ChatWidget<'_> {
                 pending_scroll_rows: Cell::new(0),
             },
             session_id: None,
-            pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
@@ -4091,10 +4084,6 @@ impl ChatWidget<'_> {
                     self.bottom_pane.set_task_running(false);
                     self.handle_auto_command(Some(trimmed.to_string()));
                     return;
-                }
-                // Commit pending jump-back (make trimming permanent) before submission
-                if self.pending_jump_back.is_some() {
-                    self.pending_jump_back = None;
                 }
                 if self.try_handle_terminal_shortcut(&text) {
                     return;
@@ -7800,7 +7789,6 @@ impl ChatWidget<'_> {
         self.bottom_pane.clear_live_ring();
         self.bottom_pane.set_task_running(false);
         self.active_task_ids.clear();
-        self.pending_jump_back = None;
         if !self.agents_terminal.active {
             self.bottom_pane.ensure_input_focus();
         }
@@ -12719,7 +12707,7 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
-        lines.push(kv("Esc", "Edit previous message / close popups"));
+        lines.push(kv("Esc", "Undo timeline / close popups"));
         // Task control shortcuts
         lines.push(kv("Esc", "End current task"));
         lines.push(kv("Ctrl+C", "End current task"));
@@ -13748,88 +13736,9 @@ impl ChatWidget<'_> {
     }
 
     // --- Double‑Escape helpers ---
-    pub(crate) fn show_esc_backtrack_hint(&mut self) {
+    pub(crate) fn show_esc_undo_hint(&mut self) {
         self.bottom_pane
-            .flash_footer_notice("Esc edit prev".to_string());
-    }
-
-    pub(crate) fn show_edit_previous_picker(&mut self) {
-        use crate::bottom_pane::list_selection_view::ListSelectionView;
-        use crate::bottom_pane::list_selection_view::SelectionItem;
-        // Collect recent user prompts (newest first)
-        let mut items: Vec<SelectionItem> = Vec::new();
-        let mut nth_counter = 0usize;
-        for cell in self.history_cells.iter().rev() {
-            if cell.kind() == crate::history_cell::HistoryCellType::User {
-                nth_counter += 1; // 1-based index for Nth last
-                let content_lines = cell.display_lines();
-                if content_lines.is_empty() {
-                    continue;
-                }
-                let full_text: String = content_lines
-                    .iter()
-                    .map(|l| {
-                        l.spans
-                            .iter()
-                            .map(|s| s.content.to_string())
-                            .collect::<String>()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                // Build a concise name from first line
-                let mut first = content_lines[0]
-                    .spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>();
-                const MAX: usize = 64;
-                if first.chars().count() > MAX {
-                    first = first.chars().take(MAX).collect::<String>() + "…";
-                }
-
-                let nth = nth_counter;
-                let actions: Vec<crate::bottom_pane::list_selection_view::SelectionAction> =
-                    vec![Box::new({
-                        let text = full_text.clone();
-                        move |tx: &crate::app_event_sender::AppEventSender| {
-                            tx.send(crate::app_event::AppEvent::JumpBack {
-                                nth,
-                                prefill: text.clone(),
-                                history_snapshot: None,
-                            });
-                        }
-                    })];
-
-                items.push(SelectionItem {
-                    name: first,
-                    description: None,
-                    is_current: false,
-                    actions,
-                });
-            }
-        }
-
-        if items.is_empty() {
-            self.bottom_pane
-                .flash_footer_notice("No previous messages to edit".to_string());
-            return;
-        }
-
-        let view: ListSelectionView = ListSelectionView::new(
-            " Jump back to a previous message ".to_string(),
-            Some("This will return the conversation to an earlier state".to_string()),
-            Some("Esc cancel".to_string()),
-            items,
-            self.app_event_tx.clone(),
-            8,
-        );
-        self.bottom_pane.show_list_selection(
-            "Jump back to a previous message".to_string(),
-            None,
-            None,
-            view,
-        );
+            .flash_footer_notice("Esc undo timeline".to_string());
     }
 
     pub(crate) fn is_task_running(&self) -> bool {
@@ -13840,25 +13749,6 @@ impl ChatWidget<'_> {
             || !self.tools_state.running_web_search.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty()
-    }
-
-    // begin_jump_back no longer used: backend fork handles it.
-
-    pub(crate) fn undo_jump_back(&mut self) {
-        if let Some(mut st) = self.pending_jump_back.take() {
-            // Restore removed cells in original order
-            for cell in st.removed_cells.drain(..) {
-                self.history_cell_ids.push(None);
-                self.history_cells.push(cell);
-            }
-            // Clear composer (no reliable way to restore prior text)
-            self.insert_str("");
-            self.request_redraw();
-        }
-    }
-
-    pub(crate) fn has_pending_jump_back(&self) -> bool {
-        self.pending_jump_back.is_some()
     }
 
     /// Clear the composer text and any pending paste placeholders/history cursors.
