@@ -108,7 +108,10 @@ impl App {
     /// Open transcript overlay (enters alternate screen and shows full transcript).
     pub(crate) fn open_transcript_overlay(&mut self, tui: &mut tui::Tui) {
         let _ = tui.enter_alt_screen();
-        self.overlay = Some(Overlay::new_transcript(self.transcript_lines.clone()));
+        self.overlay = Some(Overlay::new_transcript(
+            self.transcript_lines.clone(),
+            crate::chatwidget::ChatWidget::double_esc_hint_label(),
+        ));
         tui.frame_requester().schedule_frame();
     }
 
@@ -141,15 +144,13 @@ impl App {
         self.backtrack.primed = true;
         self.backtrack.count = 0;
         self.backtrack.base_id = self.chat_widget.conversation_id();
-        self.chat_widget.show_esc_backtrack_hint();
+        self.chat_widget.show_esc_undo_hint();
     }
 
     /// Open overlay and begin backtrack preview flow (first step + highlight).
     fn open_backtrack_preview(&mut self, tui: &mut tui::Tui) {
         self.open_transcript_overlay(tui);
         self.backtrack.overlay_preview_active = true;
-        // Composer is hidden by overlay; clear its hint.
-        self.chat_widget.clear_esc_backtrack_hint();
         self.step_backtrack_and_highlight(tui);
     }
 
@@ -259,8 +260,6 @@ impl App {
         self.backtrack.primed = false;
         self.backtrack.base_id = None;
         self.backtrack.count = 0;
-        // In case a hint is somehow still visible (e.g., race with overlay open/close).
-        self.chat_widget.clear_esc_backtrack_hint();
     }
 
     /// Handle a ConversationHistory response while a backtrack is pending.

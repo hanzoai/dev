@@ -88,9 +88,20 @@ pub(super) enum AutoCoordinatorCommand {
 #[derive(Debug, Deserialize)]
 struct CoordinatorDecision {
     finish_status: String,
-    summary: String,
     #[serde(default)]
-    prompt: Option<String>,
+    progress_past: Option<String>,
+    #[serde(default)]
+    progress_current: Option<String>,
+    #[serde(default)]
+    cli_prompt: Option<String>,
+}
+
+struct ParsedCoordinatorDecision {
+    status: AutoCoordinatorStatus,
+    progress_past: Option<String>,
+    progress_current: Option<String>,
+    cli_prompt: Option<String>,
+    response_items: Vec<ResponseItem>,
 }
 
 pub(super) fn start_auto_coordinator(
@@ -250,24 +261,21 @@ fn run_auto_loop(
                 &app_event_tx,
                 &cancel_token,
             ) {
-                Ok((status, summary, prompt_opt, transcript_items)) => {
+                Ok(ParsedCoordinatorDecision {
+                    status,
+                    progress_past,
+                    progress_current,
+                    cli_prompt,
+                    response_items,
+                }) => {
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        let prompt_clone = prompt_opt.clone();
-                        let event = AppEvent::AutoCoordinatorDecision {
-                            status,
-                            summary,
-                            prompt: prompt_opt,
-                            transcript: transcript_items.clone(),
-                        };
-                        app_event_tx.send(event);
-
                         if let (Some(handle), Some(cadence)) =
                             (observer_handle.as_ref(), observer_cadence)
                         {
                             if should_trigger_observer(requests_completed, cadence) {
                                 let conversation = build_observer_conversation(
                                     conv_for_observer,
-                                    prompt_clone.as_deref(),
+                                    cli_prompt.as_deref(),
                                 );
                                 let trigger = ObserverTrigger {
                                     conversation,
@@ -280,6 +288,15 @@ fn run_auto_loop(
                                 }
                             }
                         }
+
+                        let event = AppEvent::AutoCoordinatorDecision {
+                            status,
+                            progress_past,
+                            progress_current,
+                            cli_prompt,
+                            transcript: response_items,
+                        };
+                        app_event_tx.send(event);
                         continue;
                     }
 
@@ -333,9 +350,10 @@ fn run_auto_loop(
 
                     let event = AppEvent::AutoCoordinatorDecision {
                         status,
-                        summary,
-                        prompt: prompt_opt,
-                        transcript: transcript_items,
+                        progress_past,
+                        progress_current,
+                        cli_prompt,
+                        transcript: response_items,
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -348,8 +366,9 @@ fn run_auto_loop(
                     }
                     let event = AppEvent::AutoCoordinatorDecision {
                         status: AutoCoordinatorStatus::Failed,
-                        summary: format!("Coordinator error: {err}"),
-                        prompt: None,
+                        progress_past: None,
+                        progress_current: Some(format!("Coordinator error: {err}")),
+                        cli_prompt: None,
                         transcript: Vec::new(),
                     };
                     app_event_tx.send(event);
@@ -447,7 +466,7 @@ fn run_final_observer_validation(
 
 fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
     let intro = format!(
-        "You have a special role within Code. You are a Coordinator, coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**JSON Structure**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in its entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely cannot be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `summary`: short summary (<= 160 characters) describing what will happen when the CLI performs the next prompt\n- `prompt`: the exact prompt to provide to the Code CLI process. You will receive the response the CLI provides.\n\n**Rules**\n- You set direction, not implementation. Keep the CLI on track, but let it do all the thinking and implementation. You do not have the context the CLI has.\n- When working on an existing code base, start by prompting the CLI to explain the problem and outline plausible approaches. This lets it build context rather than jumping in naively with a solution.\n- Keep every prompt minimal to give the CLI room to make independent decisions.\n- Don't repeat yourself. If something doesn't work, take a different approach. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\n**WARNING**\n- Only send the CLI ONE instruction to follow at a time.\n- DO NOT repeat earlier instructions sent to the CLI otherwise you will end in a loop as the CLI will yield once it completes the first instruction. So for example if you say something like 1. Research the codebase 2. Fix the problem., the CLI will yield as soon as it finishes instruciton 1. If you keep sending both instructions, you'll just keep looping on the first instruction. Just send them one at the time. i.e. `Research the codebase` then once you have the results `Fix the problem`\n- You should ask the CLI to research the problem before proposing a solution or writing code. The ensures the CLI reads all relevant parts of the code before starting work and results in more significantly accurate code.\n\nUseful command:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n\nEnvironment:\n{environment_details}"
+        "You have a special role within Code. You are a Coordinator, coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.\n\n**JSON Structure**\n- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.\n  * Use `continue` when another prompt is reasonable. Always prefer this option.\n  * Use `finish_success` when the goal has been completed in its entirety and absolutely no work remains.\n  * Use `finish_failed` when the goal absolutely cannot be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.\n- `progress_past`: 1 sentence (<= 160 characters) describing everything completed so far. Use past tense. Leave blank if nothing significant has been done yet.\n- `progress_current`: A short phrase (<= 100 characters) describing what happens when the CLI runs `cli_prompt`. Use present tense.\n- `cli_prompt`: The exact prompt to send to the Code CLI process when `finish_status` is `continue`. Prefer 1-2 concise sentences focused on the next instruction.\n\n**Rules**\n- You set direction, not implementation. Keep the CLI on track, but let it do all the thinking and implementation. You do not have the context the CLI has.\n- When working on an existing code base, start by prompting the CLI to explain the problem and outline plausible approaches. This lets it build context rather than jumping in naively with a solution.\n- Keep every prompt minimal to give the CLI room to make independent decisions.\n- Don't repeat yourself. If something doesn't work, take a different approach. Always push the project forward.\n- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.\n- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.\n\n**WARNING**\n- Only send the CLI ONE instruction to follow at a time.\n- DO NOT repeat earlier instructions sent to the CLI otherwise you will end in a loop as the CLI will yield once it completes the first instruction. So for example if you say something like 1. Research the codebase 2. Fix the problem., the CLI will yield as soon as it finishes instruciton 1. If you keep sending both instructions, you'll just keep looping on the first instruction. Just send them one at the time. i.e. `Research the codebase` then once you have the results `Fix the problem`\n- You should ask the CLI to research the problem before proposing a solution or writing code. The ensures the CLI reads all relevant parts of the code before starting work and results in more significantly accurate code.\n\nUseful command:\n`/review <what to review>` e.g. `/review latest commit` - this spins up a specialist review thread for the CLI which excels at identify issues. This is useful for repeatedly reviewing code changes you make and fixing them.\n\nEnvironment:\n{environment_details}"
     );
     let primary_goal = format!("**Primary Goal**\n{goal_text}");
     (intro, primary_goal)
@@ -492,19 +511,25 @@ fn build_schema() -> Value {
                 "enum": ["continue", "finish_success", "finish_failed"],
                 "description": "Decision on how to proceed"
             },
-            "summary": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160,
-                "description": "Short summary describing what will happen when the CLI performs the next prompt"
-            },
-            "prompt": {
+            "progress_past": {
                 "type": ["string", "null"],
                 "minLength": 1,
-                "description": "Prompt to send to Code CLI when finish_status is 'continue'"
+                "maxLength": 160,
+                "description": "1 sentence summary of all work done so far. Leave blank if none. Use past tense. e.g. `Explored codebase and fixed all reported bugs.`"
+            },
+            "progress_current": {
+                "type": ["string", "null"],
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "A few words describing what is happening when the CLI performs the cli_prompt. Use current tense e.g. `Now updating documentation.`"
+            },
+            "cli_prompt": {
+                "type": ["string", "null"],
+                "minLength": 1,
+                "description": "This is the prompt sent to the CLI. It should be 1-2 sentences. Shorter commands are preferred - e.g. ('What do you think the solution is?', 'Please fix this') let the CLI do the work. You just direct it! Ignored unless finish_status is 'continue'"
             }
         },
-        "required": ["finish_status", "summary", "prompt"],
+        "required": ["finish_status", "progress_past", "progress_current", "cli_prompt"],
         "additionalProperties": false
     })
 }
@@ -524,7 +549,7 @@ fn request_coordinator_decision(
     auto_instructions: Option<&str>,
     app_event_tx: &AppEventSender,
     cancel_token: &CancellationToken,
-) -> Result<(AutoCoordinatorStatus, String, Option<String>, Vec<ResponseItem>)> {
+) -> Result<ParsedCoordinatorDecision> {
     let (raw, response_items) = request_decision(
         runtime,
         client,
@@ -548,26 +573,41 @@ fn request_coordinator_decision(
         }
     };
 
-    let prompt_opt = match status {
+    let clean_field = |field: Option<String>| -> Option<String> {
+        field.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    };
+
+    let progress_past = clean_field(decision.progress_past);
+    let progress_current = clean_field(decision.progress_current);
+
+    let cli_prompt = match status {
         AutoCoordinatorStatus::Continue => {
             let prompt_text = decision
-                .prompt
+                .cli_prompt
                 .as_ref()
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("model response missing prompt for continue"))?;
+                .ok_or_else(|| anyhow!("model response missing cli_prompt for continue"))?;
             let cleaned = strip_role_prefix(prompt_text);
             Some(cleaned.to_string())
         }
         _ => None,
     };
 
-    Ok((
+    Ok(ParsedCoordinatorDecision {
         status,
-        decision.summary.trim().to_string(),
-        prompt_opt,
+        progress_past,
+        progress_current,
+        cli_prompt,
         response_items,
-    ))
+    })
 }
 
 fn request_decision(

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, unnameable_test_items)]
 
 use super::*;
+use super::OrderKey;
 use crate::app_event::{
     AppEvent,
     AutoCoordinatorStatus,
@@ -39,6 +40,11 @@ use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::CustomToolCallBeginEvent;
 use codex_core::protocol::CustomToolCallEndEvent;
+use codex_core::protocol::McpInvocation;
+use codex_core::protocol::McpToolCallBeginEvent;
+use codex_core::protocol::McpToolCallEndEvent;
+use codex_core::protocol::WebSearchBeginEvent;
+use codex_core::protocol::WebSearchCompleteEvent;
 use codex_core::protocol::ExecApprovalRequestEvent;
 use codex_core::protocol::ExecCommandBeginEvent;
 use codex_core::protocol::ExecCommandEndEvent;
@@ -54,6 +60,7 @@ use codex_core::protocol::Op;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
 use codex_protocol::models::{ContentItem, ResponseItem};
+use mcp_types::CallToolResult;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -185,6 +192,57 @@ fn assistant_history_state_tracks_stream_and_final() {
 }
 
 #[test]
+fn replayed_assistant_message_with_id_dedupes_final_event() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let replay_item = ResponseItem::Message {
+        id: Some("answer-1".to_string()),
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: "Hello from resume".to_string(),
+        }],
+    };
+
+    chat.render_replay_item(replay_item);
+
+    let initial_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        initial_assistant_cells, 1,
+        "resume replay should seed exactly one assistant cell"
+    );
+
+    chat.handle_codex_event(Event {
+        id: "answer-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello from resume".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let final_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        final_assistant_cells, 1,
+        "AgentMessage replay should not duplicate assistant output"
+    );
+}
+
+#[test]
 fn history_snapshot_restore_rehydrates_state() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
 
@@ -226,6 +284,719 @@ fn history_snapshot_restore_rehydrates_state() {
     );
 }
 
+#[test]
+fn history_snapshot_restore_rehydrates_running_tools() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let custom_call_id = "tool-call-123";
+    chat.handle_codex_event(Event {
+        id: "req-custom".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: custom_call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let search_call_id = "search-call-abc";
+    let search_query = "find repo docs";
+    chat.handle_codex_event(Event {
+        id: "req-search".into(),
+        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: search_call_id.to_string(),
+            query: Some(search_query.to_string()),
+        }),
+    });
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    let custom_key = ToolCallId(custom_call_id.to_string());
+    let custom_entry = chat
+        .tools_state
+        .running_custom_tools
+        .get(&custom_key)
+        .copied()
+        .expect("custom tool entry should be rehydrated");
+
+    let (custom_idx, custom_history_id) = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == custom_call_id)
+                        .map(|_| {
+                            let hid = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+                            (idx, hid)
+                        })
+                })
+        })
+        .expect("expected running custom tool cell");
+
+    assert_eq!(custom_entry.fallback_index, custom_idx);
+    assert_eq!(custom_entry.history_id, custom_history_id);
+    let custom_key_order = chat.cell_order_seq[custom_idx];
+    assert_eq!(custom_entry.order_key.req, custom_key_order.req);
+    assert_eq!(custom_entry.order_key.out, custom_key_order.out);
+    assert_eq!(custom_entry.order_key.seq, custom_key_order.seq);
+
+    let search_key = ToolCallId(search_call_id.to_string());
+    let (search_idx_recorded, search_query_recorded) = chat
+        .tools_state
+        .running_web_search
+        .get(&search_key)
+        .cloned()
+        .expect("web search entry should be rehydrated");
+
+    let search_idx = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == search_call_id)
+                        .map(|_| idx)
+                })
+        })
+        .expect("expected running web search cell");
+
+    assert_eq!(search_idx_recorded, search_idx);
+    assert_eq!(search_query_recorded.as_deref(), Some(search_query));
+}
+
+#[test]
+fn finalize_running_tool_handles_stale_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "tool-stale";
+    chat.handle_codex_event(Event {
+        id: "req-stale".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let key = ToolCallId(call_id.to_string());
+    let idx = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(i, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| i)
+                })
+        })
+        .expect("running tool cell should exist");
+
+    chat.cell_order_seq[idx].seq = chat.cell_order_seq[idx].seq.saturating_add(7);
+    if let Some(entry) = chat.tools_state.running_custom_tools.get_mut(&key) {
+        entry.history_id = None;
+        entry.fallback_index = chat.history_cells.len().saturating_add(10);
+    }
+
+    chat.finalize_all_running_due_to_answer();
+
+    let has_running = chat.history_cells.iter().any(|cell| {
+        cell.as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some()
+    });
+    assert!(!has_running, "running tool cell should be replaced");
+
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "exactly one completed tool cell expected");
+    assert!(
+        chat.tools_state.running_custom_tools.is_empty(),
+        "custom tool map should be cleared when finalize succeeds"
+    );
+}
+
+#[test]
+fn finalize_running_tool_retains_unresolved_entry_when_cell_missing() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "tool-missing";
+    chat.handle_codex_event(Event {
+        id: "req-missing".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let key = ToolCallId(call_id.to_string());
+    let idx = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(i, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| i)
+                })
+        })
+        .expect("running tool cell should exist");
+
+    if let Some(entry) = chat.tools_state.running_custom_tools.get_mut(&key) {
+        entry.history_id = None;
+        entry.fallback_index = chat.history_cells.len().saturating_add(10);
+    }
+
+    if let Some(cell) = chat.history_cells.get_mut(idx) {
+        if let Some(running) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::RunningToolCallCell>()
+        {
+            running.state_mut().call_id = None;
+        }
+    }
+
+    chat.finalize_all_running_due_to_answer();
+
+    assert!(
+        chat.tools_state.running_custom_tools.contains_key(&key),
+        "entry should remain unresolved when no matching cell is found"
+    );
+
+    let running_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(running_count, 1, "running cell should remain untouched");
+}
+
+#[test]
+fn custom_tool_end_recovers_missing_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "custom-end-missing-entry";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+    chat.tools_state.running_custom_tools.clear();
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(10),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert!(
+        !chat.history_cells.iter().any(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .is_some()
+        }),
+        "running custom tool spinner should be gone"
+    );
+
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "expected single completed custom tool cell");
+    assert!(
+        chat.tools_state.running_custom_tools.is_empty(),
+        "running map should stay empty after fallback"
+    );
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_end_removes_orphaned_spinner() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "custom-end-orphan";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    if let Some((idx, cell)) = chat.history_cells.iter_mut().enumerate().find(|(_, cell)| {
+        cell.as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some()
+    }) {
+        if let Some(running) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::RunningToolCallCell>()
+        {
+            running.state_mut().call_id = None;
+        }
+        if let Some(entry) = chat.tools_state.running_custom_tools.get_mut(&ToolCallId(call_id.to_string())) {
+            entry.history_id = None;
+            entry.fallback_index = idx.saturating_add(20);
+        }
+    }
+
+    chat.tools_state.running_custom_tools.clear();
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(10),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    let running_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(running_count, 0, "no running spinner should remain after fallback");
+
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "completion should appear exactly once");
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn mcp_tool_end_recovers_missing_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "mcp-end-missing-entry";
+    let invocation = McpInvocation {
+        server: "demo".into(),
+        tool: "info".into(),
+        arguments: None,
+    };
+    let result = CallToolResult {
+        content: Vec::new(),
+        is_error: Some(false),
+        structured_content: None,
+    };
+    chat.handle_codex_event(Event {
+        id: "turn-mcp".into(),
+        msg: EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            invocation: invocation.clone(),
+        }),
+    });
+
+    chat.tools_state.running_custom_tools.clear();
+
+    chat.handle_codex_event(Event {
+        id: "turn-mcp".into(),
+        msg: EventMsg::McpToolCallEnd(McpToolCallEndEvent {
+            call_id: call_id.to_string(),
+            invocation,
+            duration: Duration::from_millis(5),
+            result: Ok(result),
+        }),
+    });
+
+    assert!(
+        !chat.history_cells.iter().any(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .is_some()
+        }),
+        "MCP running cell should be finalized"
+    );
+    assert!(chat.tools_state.running_custom_tools.is_empty());
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn web_search_complete_recovers_missing_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "web-search-missing-entry";
+    chat.handle_codex_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    chat.tools_state.running_web_search.clear();
+
+    chat.handle_codex_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    assert!(
+        !chat.history_cells.iter().any(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .is_some_and(|rt| rt.has_title("Web Search..."))
+        }),
+        "web search spinner should be finalized"
+    );
+    assert!(chat.tools_state.running_web_search.is_empty());
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn web_search_complete_handles_missing_cell() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "web-search-missing-cell";
+    chat.handle_codex_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    if let Some(cell) = chat.history_cells.iter_mut().find(|cell| {
+        cell.as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some()
+    }) {
+        if let Some(running) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::RunningToolCallCell>()
+        {
+            running.state_mut().call_id = None;
+        }
+    }
+
+    chat.tools_state.running_web_search.clear();
+
+    chat.handle_codex_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    let running_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(running_count, 0, "no running web search cell should remain");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_sequence_begin_restore_taskcomplete_end() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "custom-seq-a";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+    assert_history_consistent(&chat);
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    });
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(4),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_background_group(&chat, "Creating worktree", "Created worktree.");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_sequence_begin_restore_end_taskcomplete() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "custom-seq-b";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(5),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_background_group(&chat, "Creating worktree", "Created worktree.");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_sequence_begin_taskcomplete_restore_end() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "custom-seq-c";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    });
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(6),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_background_group(&chat, "Creating worktree", "Created worktree.");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_duplicate_end_idempotent() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    let call_id = "custom-dup";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(4),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    let snapshot = cell_texts(&chat);
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+
+    chat.handle_codex_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(4),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_eq!(snapshot, cell_texts(&chat), "duplicate end should not change UI");
+    assert_history_consistent(&chat);
+}
+
+
+#[test]
+fn background_banners_survive_tool_finalize_after_restore() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "tool-order-restore";
+    chat.handle_codex_event(Event {
+        id: "turn-order".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_codex_event(Event {
+        id: "turn-order".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(3),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    let creating_idx = find_background_index(&chat, "Creating worktree").expect("creating banner index");
+    let created_idx = find_background_index(&chat, "Created worktree").expect("created banner index");
+    assert_eq!(created_idx, creating_idx + 1, "banners should remain adjacent");
+    assert!(!is_running_tool_present(&chat));
+    assert!(chat.tools_state.running_custom_tools.is_empty());
+    assert!(chat.system_cell_by_id.is_empty());
+}
+
+#[test]
+fn background_notice_after_restore_appends_after_group() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.push_background_tail("Final status.".to_string());
+
+    let creating_idx = find_background_index(&chat, "Creating worktree").expect("creating banner index");
+    let created_idx = find_background_index(&chat, "Created worktree").expect("created banner index");
+    let final_idx = find_background_index(&chat, "Final status").expect("final banner index");
+    assert_eq!(created_idx, creating_idx + 1, "original banners stay adjacent");
+    assert!(final_idx > created_idx, "new banner should append after originals");
+    let indices = background_indices(&chat);
+    assert_eq!(indices.last().copied(), Some(final_idx));
+}
+
+#[test]
+fn history_trace_flag_collects_events() {
+    std::env::set_var("CODEX_TRACE_HISTORY", "1");
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    let call_id = "trace-tool";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+    chat.handle_codex_event(Event {
+        id: "turn-trace".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(2),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+
+    let events = chat.history_debug_events();
+    assert!(events.iter().any(|e| e.contains("restore_history_snapshot.start")), "missing restore start trace");
+    assert!(events.iter().any(|e| e.contains("restore_history_snapshot.done")), "missing restore done trace");
+    assert!(events.iter().any(|e| e.contains("custom_tool_end")), "missing custom tool trace");
+
+    std::env::remove_var("CODEX_TRACE_HISTORY");
+}
+
+#[test]
+fn history_trace_flag_disabled_no_events() {
+    std::env::remove_var("CODEX_TRACE_HISTORY");
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    let call_id = "trace-off";
+    let _ = begin_custom_tool(&mut chat, call_id);
+    chat.handle_codex_event(Event {
+        id: "turn-trace-off".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(2),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert!(chat.history_debug_events().is_empty(), "no trace events expected when flag disabled");
+}
+
 fn cell_texts(chat: &ChatWidget<'_>) -> Vec<String> {
     chat
         .history_cells
@@ -242,6 +1013,130 @@ fn cell_texts(chat: &ChatWidget<'_>) -> Vec<String> {
             out.join("\n")
         })
         .collect()
+}
+
+fn find_background_index(chat: &ChatWidget<'_>, needle: &str) -> Option<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            if cell.kind() != crate::history_cell::HistoryCellType::BackgroundEvent {
+                return None;
+            }
+            let matches = cell.display_lines().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.as_ref().contains(needle))
+            });
+            matches.then_some(idx)
+        })
+}
+
+fn background_indices(chat: &ChatWidget<'_>) -> Vec<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, cell)| {
+            if cell.kind() == crate::history_cell::HistoryCellType::BackgroundEvent {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn is_running_tool_present(chat: &ChatWidget<'_>) -> bool {
+    chat.history_cells.iter().any(|cell| {
+        cell.as_any()
+            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
+            .is_some()
+    })
+}
+
+fn begin_custom_tool(chat: &mut ChatWidget<'_>, call_id: &str) -> OrderKey {
+    chat.handle_codex_event(Event {
+        id: format!("turn-{call_id}"),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+    let idx = running_tool_index(chat, call_id).expect("running custom tool cell");
+    chat.cell_order_seq[idx]
+}
+
+fn running_tool_index(chat: &ChatWidget<'_>, call_id: &str) -> Option<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| idx)
+                })
+        })
+}
+
+fn completed_custom_tool_index(chat: &ChatWidget<'_>, call_id: &str) -> Option<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::ToolCallCell>()
+                .and_then(|tool| {
+                    tool.state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| idx)
+                })
+        })
+}
+
+fn assert_custom_tool_finalized(chat: &ChatWidget<'_>, call_id: &str, expected_key: OrderKey) {
+    assert!(
+        !is_running_tool_present(chat),
+        "running spinner should be cleared for {call_id}"
+    );
+    let idx = completed_custom_tool_index(chat, call_id)
+        .expect("completed custom tool cell should exist");
+    assert_eq!(chat.cell_order_seq[idx], expected_key, "order key should be preserved");
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "expected single completed custom tool cell");
+}
+
+fn assert_background_group(chat: &ChatWidget<'_>, first: &str, second: &str) {
+    let first_idx = find_background_index(chat, first).expect("first banner idx");
+    let second_idx = find_background_index(chat, second).expect("second banner idx");
+    assert_eq!(second_idx, first_idx + 1, "banners should remain adjacent");
+}
+
+fn assert_history_consistent(chat: &ChatWidget<'_>) {
+    assert_eq!(chat.history_cells.len(), chat.cell_order_seq.len(), "order seq length mismatch");
+    assert_eq!(chat.history_cells.len(), chat.history_cell_ids.len(), "id slot length mismatch");
+    for &idx in chat.system_cell_by_id.values() {
+        assert!(idx < chat.history_cells.len(), "system cell id out of bounds");
+    }
 }
 
 #[test]
@@ -1085,26 +1980,41 @@ fn auto_decision_persists_summary_through_cli_cycle() {
 
     chat.auto_handle_decision(
         AutoCoordinatorStatus::Continue,
-        "**Plan:** run tests".to_string(),
+        Some("Reviewed failing integration tests.".to_string()),
+        Some("Running tests now.".to_string()),
         Some("run tests".to_string()),
         Vec::new(),
     );
 
-    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
     assert!(!chat.auto_state.coordinator_waiting, "spinner should stop");
     assert!(!chat.auto_state.waiting_for_response, "coordinator finished");
     assert_eq!(
         chat.auto_state.last_decision_summary.as_deref(),
-        Some("**Plan:** run tests")
+        Some("Running tests now.\nReviewed failing integration tests.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_progress_current.as_deref(),
+        Some("Running tests now.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_progress_past.as_deref(),
+        Some("Reviewed failing integration tests.")
     );
 
     chat.auto_submit_prompt();
     assert!(chat.auto_state.waiting_for_response, "waiting on CLI");
     assert!(!chat.auto_state.coordinator_waiting, "spinner stays off during CLI");
-    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
     assert_eq!(
         chat.auto_state.last_decision_summary.as_deref(),
-        Some("**Plan:** run tests")
+        Some("Running tests now.\nReviewed failing integration tests.")
     );
 
     chat.auto_state.placeholder_phrase = None;
@@ -1114,7 +2024,10 @@ fn auto_decision_persists_summary_through_cli_cycle() {
 
     assert!(chat.auto_state.waiting_for_response, "next JSON in flight");
     assert!(chat.auto_state.coordinator_waiting, "spinner resumes for JSON");
-    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
 }
 
 #[test]
@@ -1136,7 +2049,8 @@ fn auto_history_captures_raw_transcript() {
 
     chat.auto_handle_decision(
         AutoCoordinatorStatus::Continue,
-        "Next".to_string(),
+        None,
+        Some("Next".to_string()),
         Some("do thing".to_string()),
         transcript.clone(),
     );

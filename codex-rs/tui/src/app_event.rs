@@ -151,8 +151,9 @@ pub(crate) enum AppEvent {
 
     AutoCoordinatorDecision {
         status: AutoCoordinatorStatus,
-        summary: String,
-        prompt: Option<String>,
+        progress_past: Option<String>,
+        progress_current: Option<String>,
+        cli_prompt: Option<String>,
         transcript: Vec<ResponseItem>,
     },
     AutoCoordinatorThinking {
