@@ -2,6 +2,7 @@ use std::sync::mpsc::Sender;
 
 use crate::app_event::{AppEvent, BackgroundPlacement};
 use crate::session_log;
+use codex_core::protocol::OrderMeta;
 
 #[derive(Clone, Debug)]
 pub(crate) struct AppEventSender {
@@ -72,16 +73,37 @@ impl AppEventSender {
         message: impl Into<String>,
         placement: BackgroundPlacement,
     ) {
+        self.send_background_event_with_placement_and_order(message, placement, None);
+    }
+
+    pub(crate) fn send_background_event_with_placement_and_order(
+        &self,
+        message: impl Into<String>,
+        placement: BackgroundPlacement,
+        order: Option<OrderMeta>,
+    ) {
         self.send(AppEvent::InsertBackgroundEvent {
             message: message.into(),
             placement,
-            order: None,
+            order,
         });
     }
 
     /// Convenience: append a background event at the end of the history.
     pub(crate) fn send_background_event(&self, message: impl Into<String>) {
         self.send_background_event_with_placement(message, BackgroundPlacement::Tail);
+    }
+
+    pub(crate) fn send_background_event_with_order(
+        &self,
+        message: impl Into<String>,
+        order: OrderMeta,
+    ) {
+        self.send_background_event_with_placement_and_order(
+            message,
+            BackgroundPlacement::Tail,
+            Some(order),
+        );
     }
 
     /// Convenience: place a background event before the next provider/tool output.

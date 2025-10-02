@@ -1153,6 +1153,10 @@ impl App<'_> {
                                 // If a file-search popup is visible, close it first
                                 // then continue with global Esc policy in the same keypress.
                                 let _closed_file_popup = widget.close_file_popup_if_active();
+                                if widget.auto_should_handle_global_esc() {
+                                    widget.handle_key_event(key_event);
+                                    continue;
+                                }
                                 {
                                     let now = Instant::now();
                                     const THRESHOLD: Duration = Duration::from_millis(600);
@@ -2083,14 +2087,26 @@ impl App<'_> {
                         widget.handle_review_command(args);
                     }
                 }
+                AppEvent::ToggleReviewAutoResolve => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.toggle_review_auto_resolve();
+                    }
+                }
                 AppEvent::RunReviewWithScope {
                     prompt,
                     hint,
                     preparation_label,
                     metadata,
+                    auto_resolve,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.start_review_with_scope(prompt, hint, preparation_label, metadata);
+                        widget.start_review_with_scope(
+                            prompt,
+                            hint,
+                            preparation_label,
+                            metadata,
+                            auto_resolve,
+                        );
                     }
                 }
                 AppEvent::OpenReviewCustomPrompt => {
