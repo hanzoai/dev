@@ -652,6 +652,20 @@ async fn execute_model_with_permissions(
                 cmd.args(defaults);
             }
         }
+        "cloud" => {
+            // The cloud agent CLI expects the prompt as a positional argument. If
+            // the configuration already provided explicit args for this mode, we
+            // append the prompt directly; otherwise we fall back to any shared
+            // defaults (if present) before adding the prompt.
+            let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
+            if have_mode_args {
+                cmd.arg(prompt);
+            } else {
+                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                defaults.push(prompt.to_string());
+                cmd.args(defaults);
+            }
+        }
         _ => { return Err(format!("Unknown model: {}", model)); }
     }
 
