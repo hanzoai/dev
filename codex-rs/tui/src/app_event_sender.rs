@@ -75,6 +75,7 @@ impl AppEventSender {
         self.send(AppEvent::InsertBackgroundEvent {
             message: message.into(),
             placement,
+            order: None,
         });
     }
 
