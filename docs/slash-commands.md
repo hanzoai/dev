@@ -93,3 +93,7 @@ Implementation Notes
   new command, please update this document to keep the UI and docs in sync.
 - Prompt formatting for `/plan`, `/solve`, and `/code` lives in
   `codex-rs/core/src/slash_commands.rs`.
+  When no `[[agents]]` are configured, the orchestrator advertises the
+  following agent names to the LLM for multi‑agent runs: `claude`, `gemini`,
+  `qwen`, `code`, and `cloud`. You can replace or pin this set via `[[agents]]`
+  or per‑command `[[subagents.commands]].agents`.
