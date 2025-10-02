@@ -1,4 +1,5 @@
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 use codex_core::config::Config;
 use codex_core::git_info::collect_git_info;
 use std::process::Command;
@@ -30,7 +31,12 @@ pub(super) fn get_github_token() -> Option<(String, TokenSource)> {
 /// Start a background task to watch GitHub Actions for the latest push and
 /// surface a failure message if any run for the pushed commit completes with a
 /// non-success conclusion.
-pub(super) fn maybe_watch_after_push(app_event_tx: AppEventSender, config: Config, command: &[String]) {
+pub(super) fn maybe_watch_after_push(
+    app_event_tx: AppEventSender,
+    config: Config,
+    command: &[String],
+    ticket: BackgroundOrderTicket,
+) {
     // Only proceed when enabled in config and the command appears to be a git push.
     if !config.github.check_workflows_on_push {
         return;
@@ -43,6 +49,7 @@ pub(super) fn maybe_watch_after_push(app_event_tx: AppEventSender, config: Confi
     // Spawn a detached task so we don't block UI; clone what we need.
     let tx = app_event_tx.clone();
     tokio::spawn(async move {
+        let ticket = ticket.clone();
         // Gather repo info (branch, sha, origin URL) from the current cwd.
         let Some(git) = collect_git_info(&config.cwd).await else { return; };
         let (Some(head_sha), branch_opt, Some(repo_url)) = (git.commit_hash, git.branch, git.repository_url) else { return; };
@@ -89,7 +96,16 @@ pub(super) fn maybe_watch_after_push(app_event_tx: AppEventSender, config: Confi
                             let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("unknown");
                             if conclusion != "success" {
                                 let html = run.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
-                                surface_failure(&tx, &owner, &repo, &branch, &head_sha, html, conclusion);
+                                surface_failure(
+                                    &tx,
+                                    &ticket,
+                                    &owner,
+                                    &repo,
+                                    &branch,
+                                    &head_sha,
+                                    html,
+                                    conclusion,
+                                );
                             }
                             return;
                         }
@@ -112,7 +128,16 @@ pub(super) fn maybe_watch_after_push(app_event_tx: AppEventSender, config: Confi
                         let conclusion = run.get("conclusion").and_then(|v| v.as_str()).unwrap_or("unknown");
                         let html = run.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
                         if conclusion != "success" {
-                            surface_failure(&tx, &owner, &repo, &branch, &head_sha, html, conclusion);
+                            surface_failure(
+                                &tx,
+                                &ticket,
+                                &owner,
+                                &repo,
+                                &branch,
+                                &head_sha,
+                                html,
+                                conclusion,
+                            );
                         }
                         return;
                     }
@@ -148,14 +173,23 @@ fn parse_owner_repo(url: &str) -> Option<(String, String)> {
     None
 }
 
-fn surface_failure(tx: &AppEventSender, owner: &str, repo: &str, branch: &str, sha: &str, url: &str, conclusion: &str) {
+fn surface_failure(
+    tx: &AppEventSender,
+    ticket: &BackgroundOrderTicket,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    sha: &str,
+    url: &str,
+    conclusion: &str,
+) {
     let short = &sha[..std::cmp::min(7, sha.len())];
     let msg = if url.is_empty() {
         format!("❌ GitHub Actions failed for {owner}/{repo}@{short} on {branch}: {conclusion}")
     } else {
         format!("❌ GitHub Actions failed for {owner}/{repo}@{short} on {branch}: {conclusion} — {url}")
     };
-    tx.send_background_event(msg);
+    tx.send_background_event_with_ticket(ticket, msg);
 }
 
 async fn sleep_ms(ms: u64) { tokio::time::sleep(std::time::Duration::from_millis(ms)).await; }

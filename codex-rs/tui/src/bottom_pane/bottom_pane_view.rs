@@ -1,3 +1,4 @@
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::ApprovalRequest;
 use crossterm::event::KeyEvent;
 use std::any::Any;
@@ -56,8 +57,9 @@ pub(crate) trait BottomPaneView<'a> {
     fn try_consume_approval_request(
         &mut self,
         request: ApprovalRequest,
-    ) -> Option<ApprovalRequest> {
-        Some(request)
+        ticket: BackgroundOrderTicket,
+    ) -> Option<(ApprovalRequest, BackgroundOrderTicket)> {
+        Some((request, ticket))
     }
 
     /// Handle pasted text while this view is active. Return whether a redraw
