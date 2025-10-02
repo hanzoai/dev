@@ -48,7 +48,7 @@ mod theme_selection_view;
 mod verbosity_selection_view;
 pub(crate) mod validation_settings_view;
 mod update_settings_view;
-mod undo_restore_view;
+mod undo_timeline_view;
 mod notifications_settings_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +84,7 @@ use codex_core::config_types::ThemeName;
 use model_selection_view::ModelSelectionView;
 use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
-pub(crate) use undo_restore_view::UndoRestoreView;
+pub(crate) use undo_timeline_view::{UndoTimelineEntry, UndoTimelineEntryKind, UndoTimelineView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveViewKind {
@@ -667,7 +667,7 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-    pub fn show_undo_restore_view(&mut self, view: UndoRestoreView) {
+    pub fn show_undo_timeline_view(&mut self, view: UndoTimelineView) {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
