@@ -33,7 +33,7 @@ pub(crate) struct AutoCoordinatorViewModel {
     #[allow(dead_code)]
     pub goal: Option<String>,
     pub status_lines: Vec<String>,
-    pub prompt: Option<String>,
+    pub cli_prompt: Option<String>,
     pub awaiting_submission: bool,
     pub waiting_for_response: bool,
     pub countdown: Option<CountdownState>,
@@ -313,8 +313,8 @@ impl AutoCoordinatorView {
         lines
     }
 
-    fn prompt_lines(&self, style: Style) -> Option<Vec<Line<'static>>> {
-        self.model.prompt.as_ref().map(|prompt| {
+    fn cli_prompt_lines(&self, style: Style) -> Option<Vec<Line<'static>>> {
+        self.model.cli_prompt.as_ref().map(|prompt| {
             prompt
                 .lines()
                 .map(|line| Line::from(Span::styled(line.trim_end().to_string(), style)))
@@ -458,7 +458,7 @@ impl AutoCoordinatorView {
         let mut total = 0;
 
         if awaiting {
-            if let Some(prompt) = &self.model.prompt {
+            if let Some(prompt) = &self.model.cli_prompt {
                 total += Self::wrap_count(prompt, inner_width).max(1);
             }
             if ctx.button.is_some() {
@@ -542,11 +542,11 @@ impl AutoCoordinatorView {
         let mut has_button_block = false;
 
         if self.model.awaiting_submission {
-            if let Some(prompt_lines) =
-                self.prompt_lines(Style::default().fg(colors::text_dim()))
-            {
-                content_lines.extend(prompt_lines);
-            }
+        if let Some(prompt_lines) =
+            self.cli_prompt_lines(Style::default().fg(colors::text_dim()))
+        {
+            content_lines.extend(prompt_lines);
+        }
 
             if let Some(button_block) = self.button_block_lines(ctx) {
                 has_button_block = true;
