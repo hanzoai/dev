@@ -1617,10 +1617,19 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
                 }
                 if !text.messages.is_empty() {
                     out.push_str("Assistant Messages:\n");
+                    // Safe formatting of assistant messages without NULs
+                    for (i, m) in text.messages.iter().enumerate() {
+                        out.push_str(&format!("{}. ", i + 1));
+                        out.push_str(m.trim());
+                        out.push_str("\n\n");
+                    }
+                    // Disable legacy block that contained a NUL in its format string
+                    if false {
                     for (i, m) in text.messages.iter().enumerate() {
                         out.push_str(&format!("{}.  ", i + 1));
                         out.push_str(m.trim());
                         out.push_str("\n\n");
+                    }
                     }
                 }
                 match diff_opt {
