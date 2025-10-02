@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use codex_protocol::models::ResponseItem;
 
 /// Maintains the Auto Drive conversation transcript between coordinator turns.
@@ -9,7 +11,7 @@ use codex_protocol::models::ResponseItem;
 pub(crate) struct AutoDriveHistory {
     converted: Vec<ResponseItem>,
     raw: Vec<ResponseItem>,
-    pending_skip: usize,
+    pending_duplicates: VecDeque<ResponseItem>,
 }
 
 impl AutoDriveHistory {
@@ -17,7 +19,7 @@ impl AutoDriveHistory {
         Self {
             converted: Vec::new(),
             raw: Vec::new(),
-            pending_skip: 0,
+            pending_duplicates: VecDeque::new(),
         }
     }
 
@@ -26,7 +28,7 @@ impl AutoDriveHistory {
     pub(crate) fn replace_converted(&mut self, items: Vec<ResponseItem>) -> Vec<ResponseItem> {
         let prev_len = self.converted.len();
         self.converted = items;
-        let mut tail: Vec<_> = if self.converted.len() <= prev_len {
+        let tail: Vec<_> = if self.converted.len() <= prev_len {
             Vec::new()
         } else {
             self.converted
@@ -36,17 +38,28 @@ impl AutoDriveHistory {
                 .collect()
         };
 
-        if !tail.is_empty() && self.pending_skip > 0 {
-            if self.pending_skip >= tail.len() {
-                self.pending_skip -= tail.len();
-                tail.clear();
-            } else {
-                tail.drain(0..self.pending_skip);
-                self.pending_skip = 0;
-            }
+        if tail.is_empty() {
+            return tail;
         }
 
-        tail
+        if self.pending_duplicates.is_empty() {
+            return tail;
+        }
+
+        let mut filtered = Vec::with_capacity(tail.len());
+        let queue = &mut self.pending_duplicates;
+        for item in tail.into_iter() {
+            if let Some(expected) = queue.front() {
+                if *expected == item {
+                    queue.pop_front();
+                    continue;
+                }
+                queue.clear();
+            }
+            filtered.push(item);
+        }
+
+        filtered
     }
 
     pub(crate) fn append_raw(&mut self, items: &[ResponseItem]) {
@@ -54,13 +67,11 @@ impl AutoDriveHistory {
             return;
         }
         self.raw.extend(items.iter().cloned());
-        let convertible_count = items
-            .iter()
-            .filter(|item| matches!(item, ResponseItem::Message { .. }))
-            .count();
-        self.pending_skip = self
-            .pending_skip
-            .saturating_add(convertible_count);
+        for item in items.iter() {
+            if matches!(item, ResponseItem::Message { .. }) {
+                self.pending_duplicates.push_back(item.clone());
+            }
+        }
     }
 
     pub(crate) fn append_converted_tail(&mut self, items: &[ResponseItem]) {
@@ -77,7 +88,7 @@ impl AutoDriveHistory {
     pub(crate) fn clear(&mut self) {
         self.converted.clear();
         self.raw.clear();
-        self.pending_skip = 0;
+        self.pending_duplicates.clear();
     }
 
     pub(crate) fn converted_is_empty(&self) -> bool {
@@ -115,18 +126,18 @@ mod tests {
         assert_eq!(tail.len(), 1);
         history.append_converted_tail(&tail);
         assert_eq!(history.raw_snapshot(), first);
-        assert_eq!(history.pending_skip, 0);
+        assert!(history.pending_duplicates.is_empty());
 
         // Coordinator delivers transcript; these entries should be skipped on the next rebuild.
         let transcript = vec![text_message("assistant", "ack")];
         history.append_raw(&transcript);
-        assert_eq!(history.pending_skip, transcript.len());
+        assert_eq!(history.pending_duplicates.len(), 1);
 
         // UI rebuild includes the coordinator output; nothing new should be appended and skip resets.
         let second = vec![text_message("user", "hi"), text_message("assistant", "ack")];
         let tail = history.replace_converted(second.clone());
         assert!(tail.is_empty());
-        assert_eq!(history.pending_skip, 0);
+        assert!(history.pending_duplicates.is_empty());
 
         // A new user turn appears; ensure it is not dropped by the skip logic.
         let third = vec![
@@ -140,6 +151,26 @@ mod tests {
 
         let snapshot = history.raw_snapshot();
         assert_eq!(snapshot, third);
-        assert_eq!(history.pending_skip, 0);
+        assert!(history.pending_duplicates.is_empty());
+    }
+
+    #[test]
+    fn skips_only_matching_duplicates() {
+        let mut history = AutoDriveHistory::new();
+
+        // Coordinator appends an auto-generated assistant message.
+        let transcript = vec![text_message("assistant", "auto step")];
+        history.append_raw(&transcript);
+        assert_eq!(history.pending_duplicates.len(), 1);
+
+        // UI rebuild produces an unrelated tail entry; it should not be dropped.
+        let conversation = vec![
+            text_message("user", "hi"),
+            text_message("assistant", "auto step"),
+            text_message("assistant", "manual edit"),
+        ];
+        let tail = history.replace_converted(conversation.clone());
+        assert_eq!(tail.len(), 3);
+        assert!(history.pending_duplicates.is_empty());
     }
 }
