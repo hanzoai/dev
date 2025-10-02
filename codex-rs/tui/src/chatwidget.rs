@@ -71,6 +71,7 @@ mod streaming;
 mod terminal_handlers;
 mod terminal;
 mod tools;
+mod running_tools;
 #[cfg(all(test, feature = "legacy_tests"))]
 mod tests_retry;
 use self::agent_install::{
@@ -129,6 +130,8 @@ use crate::bottom_pane::{
     CountdownState,
 };
 use crate::exec_command::strip_bash_lc_and_escape;
+
+pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -153,6 +156,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
+    if let Ok(value) = std::env::var("CODEX_TRACE_HISTORY") {
+        let trimmed = value.trim();
+        if !matches!(trimmed, "" | "0") {
+            return true;
+        }
+    }
     *ENABLED.get_or_init(|| {
         if let Ok(value) = std::env::var("CODE_BUFFER_DIFF_TRACE_CELLS") {
             return !matches!(value.trim(), "" | "0");
@@ -177,6 +186,9 @@ const STATUS_LABEL_TARGET_WIDTH: usize = 7;
 const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
+const RESUME_PLACEHOLDER_MESSAGE: &str = "Resuming previous session...";
+const RESUME_NO_HISTORY_NOTICE: &str =
+    "No saved messages for this session. Start typing to continue.";
 const AUTO_COUNTDOWN_SECONDS: u8 = 10;
 const ENABLE_WARP_STRIPES: bool = false;
 
@@ -492,7 +504,9 @@ struct AutoCoordinatorUiState {
     active: bool,
     goal: Option<String>,
     current_summary: Option<String>,
-    current_prompt: Option<String>,
+    current_progress_past: Option<String>,
+    current_progress_current: Option<String>,
+    current_cli_prompt: Option<String>,
     current_display_line: Option<String>,
     current_display_is_summary: bool,
     current_reasoning_title: Option<String>,
@@ -508,6 +522,8 @@ struct AutoCoordinatorUiState {
     awaiting_goal_input: bool,
     last_broadcast_summary: Option<String>,
     last_decision_summary: Option<String>,
+    last_decision_progress_past: Option<String>,
+    last_decision_progress_current: Option<String>,
     last_decision_display: Option<String>,
     last_decision_display_is_summary: bool,
     observer_telemetry: Option<AutoObserverTelemetry>,
@@ -541,6 +557,7 @@ pub(crate) struct ChatWidget<'a> {
     history_snapshot_dirty: bool,
     history_snapshot_last_flush: Option<Instant>,
     config: Config,
+    history_debug_events: Option<RefCell<Vec<String>>>,
     latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -654,7 +671,6 @@ pub(crate) struct ChatWidget<'a> {
     session_id: Option<uuid::Uuid>,
 
     // Pending jump-back state (reversible until submit)
-    pending_jump_back: Option<PendingJumpBack>,
 
     // Track active task ids so we don't drop the working status while any
     // agent/sub‑agent is still running (long‑running sessions can interleave).
@@ -731,10 +747,7 @@ pub(crate) struct ChatWidget<'a> {
     // Track the largest order key we have assigned so far to keep tail inserts monotonic
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
-}
-
-struct PendingJumpBack {
-    removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
+    resume_placeholder_visible: bool,
 }
 
 #[derive(Clone)]
@@ -1477,6 +1490,11 @@ impl ChatWidget<'_> {
     // Track latest request index observed from provider so internal inserts can anchor to it.
     fn note_order(&mut self, order: Option<&codex_core::protocol::OrderMeta>) {
         if let Some(om) = order {
+            let is_background_sentinel = om.output_index == Some(i32::MAX as u32);
+            let is_initial_session = self.last_seen_request_index == 0;
+            if is_background_sentinel && is_initial_session {
+                return;
+            }
             self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal);
         }
     }
@@ -2810,6 +2828,7 @@ impl ChatWidget<'_> {
             self.insert_background_event_with_placement(
                 message,
                 BackgroundPlacement::Tail,
+                None,
             );
             // Do NOT clear running state or streams; the retry will resume them.
             self.request_redraw();
@@ -2817,6 +2836,7 @@ impl ChatWidget<'_> {
         }
 
         // Fatal error path: show an error cell and clear running state.
+        self.clear_resume_placeholder();
         let key = self.next_internal_key();
         let state = history_cell::new_error_event(message.clone());
         let cell = crate::history_cell::PlainHistoryCell::from_state(state.clone());
@@ -2849,8 +2869,9 @@ impl ChatWidget<'_> {
         }
 
         let mut has_wait_running = false;
-        for entry in self.tools_state.running_custom_tools.values() {
-            if let Some(idx) = self.resolve_running_tool_index(entry) {
+        for (call_id, entry) in self.tools_state.running_custom_tools.iter() {
+            if let Some(idx) = running_tools::resolve_entry_index(self, entry, &call_id.0)
+            {
                 if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
                     .as_any()
                     .downcast_ref::<history_cell::RunningToolCallCell>())
@@ -3047,6 +3068,11 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            history_debug_events: if history_cell_logging_enabled() {
+                Some(RefCell::new(Vec::new()))
+            } else {
+                None
+            },
             latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
@@ -3070,12 +3096,7 @@ impl ChatWidget<'_> {
                 suppressed_exec_end_order: VecDeque::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
-            tools_state: ToolState {
-                running_custom_tools: HashMap::new(),
-                running_web_search: HashMap::new(),
-                running_wait_tools: HashMap::new(),
-                running_kill_tools: HashMap::new(),
-            },
+            tools_state: ToolState::default(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -3171,7 +3192,6 @@ impl ChatWidget<'_> {
                 pending_scroll_rows: Cell::new(0),
             },
             session_id: None,
-            pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
@@ -3213,6 +3233,7 @@ impl ChatWidget<'_> {
             last_assigned_order: None,
             standard_terminal_mode: !config.tui.alternate_screen,
             replay_history_depth: 0,
+            resume_placeholder_visible: false,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3254,6 +3275,7 @@ impl ChatWidget<'_> {
             w.welcome_shown = true;
         } else {
             w.welcome_shown = true;
+            w.insert_resume_placeholder();
         }
         w.maybe_start_auto_upgrade_task();
         w
@@ -3319,6 +3341,11 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            history_debug_events: if history_cell_logging_enabled() {
+                Some(RefCell::new(Vec::new()))
+            } else {
+                None
+            },
             latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
@@ -3438,7 +3465,6 @@ impl ChatWidget<'_> {
                 pending_scroll_rows: Cell::new(0),
             },
             session_id: None,
-            pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
@@ -3480,6 +3506,7 @@ impl ChatWidget<'_> {
             system_cell_by_id: HashMap::new(),
             last_assigned_order: None,
             replay_history_depth: 0,
+            resume_placeholder_visible: false,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -4092,10 +4119,6 @@ impl ChatWidget<'_> {
                     self.bottom_pane.set_task_running(false);
                     self.handle_auto_command(Some(trimmed.to_string()));
                     return;
-                }
-                // Commit pending jump-back (make trimming permanent) before submission
-                if self.pending_jump_back.is_some() {
-                    self.pending_jump_back = None;
                 }
                 if self.try_handle_terminal_shortcut(&text) {
                     return;
@@ -5869,6 +5892,7 @@ impl ChatWidget<'_> {
         self.insert_background_event_with_placement(
             message,
             BackgroundPlacement::BeforeNextOutput,
+            None,
         );
     }
     /// Insert a background event using the specified placement semantics.
@@ -5876,6 +5900,7 @@ impl ChatWidget<'_> {
         &mut self,
         message: String,
         placement: BackgroundPlacement,
+        order: Option<codex_core::protocol::OrderMeta>,
     ) {
         let system_placement = match placement {
             BackgroundPlacement::Tail => SystemPlacement::EndOfCurrent,
@@ -5893,21 +5918,64 @@ impl ChatWidget<'_> {
             Box::new(cell),
             system_placement,
             None,
-            None,
+            order.as_ref(),
             "background",
             Some(record),
         );
     }
 
     pub(crate) fn push_background_tail(&mut self, message: impl Into<String>) {
-        self.insert_background_event_with_placement(message.into(), BackgroundPlacement::Tail);
+        self.insert_background_event_with_placement(message.into(), BackgroundPlacement::Tail, None);
     }
 
     pub(crate) fn push_background_before_next_output(&mut self, message: impl Into<String>) {
         self.insert_background_event_with_placement(
             message.into(),
             BackgroundPlacement::BeforeNextOutput,
+            None,
         );
+    }
+
+    pub(super) fn history_debug(&self, message: impl Into<String>) {
+        if !history_cell_logging_enabled() {
+            return;
+        }
+        let message = message.into();
+        tracing::trace!(target: "codex_history", "{message}");
+        if let Some(buffer) = &self.history_debug_events {
+            buffer.borrow_mut().push(message);
+        }
+    }
+
+    fn rehydrate_system_order_cache(&mut self, preserved: &[(String, HistoryId)]) {
+        let prev = self.system_cell_by_id.len();
+        self.system_cell_by_id.clear();
+
+        for (key, hid) in preserved {
+            if let Some(idx) = self
+                .history_cell_ids
+                .iter()
+                .position(|maybe| maybe.map(|stored| stored == *hid).unwrap_or(false))
+            {
+                self.system_cell_by_id.insert(key.clone(), idx);
+            }
+        }
+
+        self.history_debug(format!(
+            "system_order_cache.rehydrate prev={} restored={} entries={}",
+            prev,
+            preserved.len(),
+            self.system_cell_by_id.len()
+        ));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn history_debug_events(&self) -> Vec<String> {
+        self
+            .history_debug_events
+            .as_ref()
+            .map(|buf| buf.borrow().clone())
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -6002,25 +6070,6 @@ impl ChatWidget<'_> {
         self.refresh_explore_trailing_flags();
         // Keep debug info for this cell index as-is.
         self.mark_history_dirty();
-    }
-
-    fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
-        if let Some(id) = entry.history_id {
-            if let Some(pos) = self.cell_index_for_history_id(id) {
-                return Some(pos);
-            }
-        }
-        if let Some(pos) = self
-            .cell_order_seq
-            .iter()
-            .position(|key| *key == entry.order_key)
-        {
-            return Some(pos);
-        }
-        if entry.fallback_index < self.history_cells.len() {
-            return Some(entry.fallback_index);
-        }
-        None
     }
 
     fn history_remove_at(&mut self, idx: usize) {
@@ -6243,12 +6292,27 @@ impl ChatWidget<'_> {
                 let preview = crate::slash_command::process_slash_command_message(
                     command_line.as_str(),
                 );
-                if !matches!(preview, ProcessedCommand::NotCommand(_)) {
-                    self.submit_user_message(command_line.clone().into());
-                    if !rest_text.trim().is_empty() {
-                        self.submit_user_message(rest_text.into());
+                match preview {
+                    ProcessedCommand::RegularCommand(SlashCommand::Auto, canonical_text) => {
+                        let goal = rest_text.trim();
+                        let command_text = if goal.is_empty() {
+                            canonical_text
+                        } else {
+                            format!("{canonical_text} {goal}")
+                        };
+                        self.app_event_tx
+                            .send(AppEvent::DispatchCommand(SlashCommand::Auto, command_text));
+                        return;
                     }
-                    return;
+                    ProcessedCommand::NotCommand(_) => {}
+                    _ => {
+                        self.submit_user_message(command_line.into());
+                        let trimmed_rest = rest_text.trim();
+                        if !trimmed_rest.is_empty() {
+                            self.submit_user_message(rest_text.into());
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -6841,6 +6905,7 @@ impl ChatWidget<'_> {
                         let _ = app_event_tx.send(AppEvent::InsertBackgroundEvent {
                             message,
                             placement: BackgroundPlacement::Tail,
+                            order: None,
                         });
                     }
                 }
@@ -7565,6 +7630,21 @@ impl ChatWidget<'_> {
 
     pub(crate) fn restore_history_snapshot(&mut self, snapshot: &HistorySnapshot) {
         let perf_timer = self.perf_state.enabled.then(Instant::now);
+        let preserved_system_entries: Vec<(String, HistoryId)> = self
+            .system_cell_by_id
+            .iter()
+            .filter_map(|(key, &idx)| {
+                self.history_cell_ids
+                    .get(idx)
+                    .and_then(|maybe| maybe.map(|hid| (key.clone(), hid)))
+            })
+            .collect();
+        self.history_debug(format!(
+            "restore_history_snapshot.start records={} cells_before={} order_before={}",
+            snapshot.records.len(),
+            self.history_cells.len(),
+            self.cell_order_seq.len()
+        ));
         self.history_state.restore(snapshot);
 
         self.history_render.invalidate_all();
@@ -7652,6 +7732,9 @@ impl ChatWidget<'_> {
         self.internal_seq = max_seq;
         self.last_assigned_order = self.cell_order_seq.iter().copied().max();
 
+        running_tools::rehydrate(self);
+        self.rehydrate_system_order_cache(&preserved_system_entries);
+
         self.bottom_pane
             .set_has_chat_history(!self.history_cells.is_empty());
         self.refresh_reasoning_collapsed_visibility();
@@ -7668,6 +7751,13 @@ impl ChatWidget<'_> {
         }
         self.history_snapshot_dirty = true;
         self.history_snapshot_last_flush = None;
+
+        self.history_debug(format!(
+            "restore_history_snapshot.done cells={} order={} system_cells={}",
+            self.history_cells.len(),
+            self.cell_order_seq.len(),
+            self.system_cell_by_id.len()
+        ));
     }
 
     pub(crate) fn perform_undo_restore(
@@ -7801,7 +7891,6 @@ impl ChatWidget<'_> {
         self.bottom_pane.clear_live_ring();
         self.bottom_pane.set_task_running(false);
         self.active_task_ids.clear();
-        self.pending_jump_back = None;
         if !self.agents_terminal.active {
             self.bottom_pane.ensure_input_focus();
         }
@@ -7915,7 +8004,7 @@ impl ChatWidget<'_> {
                     }
                     let session_state = history_cell::new_session_info(
                         &self.config,
-                        event,
+                        event.clone(),
                         is_first,
                         self.latest_upgrade_version.as_deref(),
                     );
@@ -7928,6 +8017,10 @@ impl ChatWidget<'_> {
                     // If the user provided an initial message, add it to the
                     // conversation history.
                     self.submit_user_message(user_message);
+                }
+
+                if self.resume_placeholder_visible && event.history_entry_count == 0 {
+                    self.replace_resume_placeholder_with_notice(RESUME_NO_HISTORY_NOTICE);
                 }
 
                 self.request_redraw();
@@ -7999,6 +8092,7 @@ impl ChatWidget<'_> {
                 self.auto_on_assistant_final();
             }
             EventMsg::ReplayHistory(ev) => {
+                self.clear_resume_placeholder();
                 let codex_core::protocol::ReplayHistoryEvent { items, history_snapshot } = ev;
                 self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let max_req = self.last_seen_request_index;
@@ -8032,7 +8126,14 @@ impl ChatWidget<'_> {
                 self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
-                tools::web_search_complete(self, ev.call_id, ev.query)
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on WebSearchComplete; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
+                tools::web_search_complete(self, ev.call_id, ev.query, ok)
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
@@ -9036,7 +9137,8 @@ impl ChatWidget<'_> {
                     .remove(&ToolCallId(call_id.clone()));
                 let resolved_idx = running_entry
                     .as_ref()
-                    .and_then(|entry| self.resolve_running_tool_index(entry));
+                    .and_then(|entry| running_tools::resolve_entry_index(self, entry, &call_id))
+                    .or_else(|| running_tools::find_by_call_id(self, &call_id));
 
                 if tool_name == "apply_patch" && success {
                     if let Some(idx) = resolved_idx {
@@ -9149,6 +9251,7 @@ impl ChatWidget<'_> {
                     if let Some(idx) = resolved_idx {
                         self.history_replace_at(idx, Box::new(completed));
                     } else {
+                        running_tools::collapse_spinner(self, &call_id);
                         let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                     }
 
@@ -9167,8 +9270,24 @@ impl ChatWidget<'_> {
                 );
                 completed.state_mut().call_id = Some(call_id.clone());
                 if let Some(idx) = resolved_idx {
+                    self.history_debug(format!(
+                        "custom_tool_end.in_place call_id={} idx={} order=({}, {}, {})",
+                        call_id,
+                        idx,
+                        ok.req,
+                        ok.out,
+                        ok.seq
+                    ));
                     self.history_replace_at(idx, Box::new(completed));
                 } else {
+                    self.history_debug(format!(
+                        "custom_tool_end.fallback_insert call_id={} order=({}, {}, {})",
+                        call_id,
+                        ok.req,
+                        ok.out,
+                        ok.seq
+                    ));
+                    running_tools::collapse_spinner(self, &call_id);
                     let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                 }
 
@@ -9201,10 +9320,10 @@ impl ChatWidget<'_> {
                 // event to a turn (order present), prefer placing it before the next
                 // provider output; else append to the tail. Use the event.id for
                 // in-place replacement.
-                let placement = if event.order.as_ref().is_some() {
-                    SystemPlacement::EarlyInCurrent
-                } else {
-                    SystemPlacement::EndOfCurrent
+                let placement = match event.order.as_ref().and_then(|om| om.output_index) {
+                    Some(v) if v == i32::MAX as u32 => SystemPlacement::EndOfCurrent,
+                    Some(_) => SystemPlacement::EarlyInCurrent,
+                    None => SystemPlacement::EndOfCurrent,
                 };
                 let id_for_replace = Some(id.clone());
                 let message_clone = message.clone();
@@ -11000,6 +11119,9 @@ impl ChatWidget<'_> {
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_summary = None;
+                self.auto_state.current_progress_past = None;
+                self.auto_state.current_progress_current = None;
+                self.auto_state.current_cli_prompt = None;
                 self.auto_state.current_display_line = None;
                 self.auto_state.current_display_is_summary = false;
                 self.auto_state.current_reasoning_title = None;
@@ -11008,6 +11130,8 @@ impl ChatWidget<'_> {
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_state.thinking_prefix_stripped = false;
                 self.auto_state.last_broadcast_summary = None;
+                self.auto_state.last_decision_progress_past = None;
+                self.auto_state.last_decision_progress_current = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
@@ -11039,6 +11163,9 @@ impl ChatWidget<'_> {
             self.auto_state.waiting_for_response = true;
             self.auto_state.coordinator_waiting = true;
             self.auto_state.current_summary = None;
+            self.auto_state.current_progress_past = None;
+            self.auto_state.current_progress_current = None;
+            self.auto_state.current_cli_prompt = None;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
             self.auto_state.current_display_line = None;
@@ -11056,21 +11183,31 @@ impl ChatWidget<'_> {
     pub(crate) fn auto_handle_decision(
         &mut self,
         status: AutoCoordinatorStatus,
-        summary: String,
-        prompt: Option<String>,
+        progress_past: Option<String>,
+        progress_current: Option<String>,
+        cli_prompt: Option<String>,
         transcript: Vec<codex_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
-        let summary = summary.trim().to_string();
+        let progress_past = Self::normalize_progress_field(progress_past);
+        let progress_current = Self::normalize_progress_field(progress_current);
+
         if !transcript.is_empty() {
             self.auto_history.append_raw(&transcript);
         }
-        self.auto_state.last_decision_summary = Some(summary.clone());
+
+        self.auto_state.current_progress_past = progress_past.clone();
+        self.auto_state.current_progress_current = progress_current.clone();
+        self.auto_state.last_decision_progress_past = progress_past.clone();
+        self.auto_state.last_decision_progress_current = progress_current.clone();
+
+        let summary_text = Self::compose_progress_summary(&progress_current, &progress_past);
+        self.auto_state.last_decision_summary = Some(summary_text.clone());
         self.auto_state.coordinator_waiting = false;
-        self.auto_on_reasoning_final(&summary);
+        self.auto_on_reasoning_final(&summary_text);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.last_decision_display_is_summary =
             self.auto_state.current_display_is_summary;
@@ -11082,11 +11219,11 @@ impl ChatWidget<'_> {
 
         match status {
             AutoCoordinatorStatus::Continue => {
-                let Some(prompt_text) = prompt else {
+                let Some(prompt_text) = cli_prompt else {
                     self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
                     return;
                 };
-                self.auto_state.current_prompt = Some(prompt_text.clone());
+                self.auto_state.current_cli_prompt = Some(prompt_text.clone());
                 self.auto_state.awaiting_submission = true;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
@@ -11096,21 +11233,31 @@ impl ChatWidget<'_> {
                 self.auto_start_countdown(countdown_id);
             }
             AutoCoordinatorStatus::Success => {
-                let lower = summary.to_ascii_lowercase();
-                let message = if lower.starts_with("coordinator success:") {
-                    summary
+                let normalized = summary_text.trim();
+                let message = if normalized.is_empty() {
+                    "Coordinator success.".to_string()
+                } else if normalized
+                    .to_ascii_lowercase()
+                    .starts_with("coordinator success:")
+                {
+                    summary_text
                 } else {
-                    format!("Coordinator success: {summary}")
+                    format!("Coordinator success: {summary_text}")
                 };
                 self.auto_stop(Some(message));
                 return;
             }
             AutoCoordinatorStatus::Failed => {
-                let lower = summary.to_ascii_lowercase();
-                let message = if lower.starts_with("coordinator error:") {
-                    summary
+                let normalized = summary_text.trim();
+                let message = if normalized.is_empty() {
+                    "Coordinator error.".to_string()
+                } else if normalized
+                    .to_ascii_lowercase()
+                    .starts_with("coordinator error:")
+                {
+                    summary_text
                 } else {
-                    format!("Coordinator error: {summary}")
+                    format!("Coordinator error: {summary_text}")
                 };
                 self.auto_stop(Some(message));
                 return;
@@ -11190,7 +11337,7 @@ impl ChatWidget<'_> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                self.auto_state.current_prompt = Some(message.to_string());
+                self.auto_state.current_cli_prompt = Some(message.to_string());
                 if self.auto_state.awaiting_submission {
                     self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
                     self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
@@ -11222,7 +11369,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active {
             return;
         }
-        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
             self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
             return;
         };
@@ -11239,6 +11386,8 @@ impl ChatWidget<'_> {
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_summary = None;
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
         self.auto_state.last_broadcast_summary = None;
         self.auto_state.current_display_line = post_submit_display.clone();
         self.auto_state.current_display_is_summary =
@@ -11260,7 +11409,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || !self.auto_state.awaiting_submission {
             return;
         }
-        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
             return;
         };
 
@@ -11325,6 +11474,8 @@ impl ChatWidget<'_> {
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
         self.auto_state.current_summary = Some(String::new());
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
@@ -11367,19 +11518,31 @@ impl ChatWidget<'_> {
 
         let headline = self.auto_format_status_headline(&status_text);
         let mut status_lines = vec![headline];
+        self.auto_append_progress_lines(
+            &mut status_lines,
+            self.auto_state.current_progress_current.as_ref(),
+            self.auto_state.current_progress_past.as_ref(),
+        );
         if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
-            if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
-                let trimmed = summary.trim();
-                if !trimmed.is_empty() {
-                    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if !collapsed.is_empty() {
-                        let current_line = status_lines
-                            .first()
-                            .map(|line| line.trim_end_matches('…').trim())
-                            .unwrap_or("");
-                        if collapsed != current_line {
-                            let display = Self::truncate_with_ellipsis(&collapsed, 160);
-                            status_lines.push(display);
+            let appended = self.auto_append_progress_lines(
+                &mut status_lines,
+                self.auto_state.last_decision_progress_current.as_ref(),
+                self.auto_state.last_decision_progress_past.as_ref(),
+            );
+            if !appended {
+                if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
+                    let trimmed = summary.trim();
+                    if !trimmed.is_empty() {
+                        let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if !collapsed.is_empty() {
+                            let current_line = status_lines
+                                .first()
+                                .map(|line| line.trim_end_matches('…').trim())
+                                .unwrap_or("");
+                            if collapsed != current_line {
+                                let display = Self::truncate_with_ellipsis(&collapsed, 160);
+                                status_lines.push(display);
+                            }
                         }
                     }
                 }
@@ -11408,9 +11571,9 @@ impl ChatWidget<'_> {
         }
         let cli_running = self.is_cli_running();
 
-        let prompt = self
+        let cli_prompt = self
             .auto_state
-            .current_prompt
+            .current_cli_prompt
             .clone()
             .filter(|p| !p.trim().is_empty());
 
@@ -11454,7 +11617,7 @@ impl ChatWidget<'_> {
         let model = AutoCoordinatorViewModel {
             goal: self.auto_state.goal.clone(),
             status_lines,
-            prompt,
+            cli_prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
             countdown,
@@ -11669,6 +11832,56 @@ impl ChatWidget<'_> {
         }
         out.push('…');
         out
+    }
+
+    fn normalize_progress_field(field: Option<String>) -> Option<String> {
+        field.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
+    fn compose_progress_summary(
+        progress_current: &Option<String>,
+        progress_past: &Option<String>,
+    ) -> String {
+        let mut lines = Vec::new();
+        if let Some(current) = progress_current.as_ref() {
+            lines.push(current.clone());
+        }
+        if let Some(past) = progress_past.as_ref() {
+            lines.push(past.clone());
+        }
+        lines.join("\n")
+    }
+
+    fn auto_append_progress_lines(
+        &self,
+        lines: &mut Vec<String>,
+        progress_current: Option<&String>,
+        progress_past: Option<&String>,
+    ) -> bool {
+        let initial_len = lines.len();
+        Self::append_progress_line(lines, progress_current);
+        Self::append_progress_line(lines, progress_past);
+        lines.len() > initial_len
+    }
+
+    fn append_progress_line(lines: &mut Vec<String>, progress: Option<&String>) {
+        if let Some(progress) = progress {
+            let trimmed = progress.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let display = Self::truncate_with_ellipsis(trimmed, 160);
+            if !lines.iter().any(|existing| existing.trim() == display) {
+                lines.push(display);
+            }
+        }
     }
 
     pub(crate) fn launch_update_command(
@@ -12720,7 +12933,7 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
-        lines.push(kv("Esc", "Edit previous message / close popups"));
+        lines.push(kv("Esc", &format!("{} / close popups", Self::double_esc_hint_label())));
         // Task control shortcuts
         lines.push(kv("Esc", "End current task"));
         lines.push(kv("Ctrl+C", "End current task"));
@@ -13331,6 +13544,7 @@ impl ChatWidget<'_> {
                         tx.send(AppEvent::InsertBackgroundEvent {
                             message,
                             placement: BackgroundPlacement::Tail,
+                            order: None,
                         });
                     }
                 }
@@ -13749,88 +13963,13 @@ impl ChatWidget<'_> {
     }
 
     // --- Double‑Escape helpers ---
-    pub(crate) fn show_esc_backtrack_hint(&mut self) {
-        self.bottom_pane
-            .flash_footer_notice("Esc edit prev".to_string());
+    pub(crate) fn double_esc_hint_label() -> &'static str {
+        DOUBLE_ESC_HINT
     }
 
-    pub(crate) fn show_edit_previous_picker(&mut self) {
-        use crate::bottom_pane::list_selection_view::ListSelectionView;
-        use crate::bottom_pane::list_selection_view::SelectionItem;
-        // Collect recent user prompts (newest first)
-        let mut items: Vec<SelectionItem> = Vec::new();
-        let mut nth_counter = 0usize;
-        for cell in self.history_cells.iter().rev() {
-            if cell.kind() == crate::history_cell::HistoryCellType::User {
-                nth_counter += 1; // 1-based index for Nth last
-                let content_lines = cell.display_lines();
-                if content_lines.is_empty() {
-                    continue;
-                }
-                let full_text: String = content_lines
-                    .iter()
-                    .map(|l| {
-                        l.spans
-                            .iter()
-                            .map(|s| s.content.to_string())
-                            .collect::<String>()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                // Build a concise name from first line
-                let mut first = content_lines[0]
-                    .spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>();
-                const MAX: usize = 64;
-                if first.chars().count() > MAX {
-                    first = first.chars().take(MAX).collect::<String>() + "…";
-                }
-
-                let nth = nth_counter;
-                let actions: Vec<crate::bottom_pane::list_selection_view::SelectionAction> =
-                    vec![Box::new({
-                        let text = full_text.clone();
-                        move |tx: &crate::app_event_sender::AppEventSender| {
-                            tx.send(crate::app_event::AppEvent::JumpBack {
-                                nth,
-                                prefill: text.clone(),
-                                history_snapshot: None,
-                            });
-                        }
-                    })];
-
-                items.push(SelectionItem {
-                    name: first,
-                    description: None,
-                    is_current: false,
-                    actions,
-                });
-            }
-        }
-
-        if items.is_empty() {
-            self.bottom_pane
-                .flash_footer_notice("No previous messages to edit".to_string());
-            return;
-        }
-
-        let view: ListSelectionView = ListSelectionView::new(
-            " Jump back to a previous message ".to_string(),
-            Some("This will return the conversation to an earlier state".to_string()),
-            Some("Esc cancel".to_string()),
-            items,
-            self.app_event_tx.clone(),
-            8,
-        );
-        self.bottom_pane.show_list_selection(
-            "Jump back to a previous message".to_string(),
-            None,
-            None,
-            view,
-        );
+    pub(crate) fn show_esc_undo_hint(&mut self) {
+        self.bottom_pane
+            .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
     pub(crate) fn is_task_running(&self) -> bool {
@@ -13841,25 +13980,6 @@ impl ChatWidget<'_> {
             || !self.tools_state.running_web_search.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty()
-    }
-
-    // begin_jump_back no longer used: backend fork handles it.
-
-    pub(crate) fn undo_jump_back(&mut self) {
-        if let Some(mut st) = self.pending_jump_back.take() {
-            // Restore removed cells in original order
-            for cell in st.removed_cells.drain(..) {
-                self.history_cell_ids.push(None);
-                self.history_cells.push(cell);
-            }
-            // Clear composer (no reliable way to restore prior text)
-            self.insert_str("");
-            self.request_redraw();
-        }
-    }
-
-    pub(crate) fn has_pending_jump_back(&self) -> bool {
-        self.pending_jump_back.is_some()
     }
 
     /// Clear the composer text and any pending paste placeholders/history cursors.
@@ -17040,6 +17160,43 @@ impl ChatWidget<'_> {
         self.session_id
     }
 
+    fn insert_resume_placeholder(&mut self) {
+        if self.resume_placeholder_visible {
+            return;
+        }
+        let key = self.next_req_key_top();
+        let cell = history_cell::new_background_event(RESUME_PLACEHOLDER_MESSAGE.to_string());
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background", None);
+        self.resume_placeholder_visible = true;
+    }
+
+    fn clear_resume_placeholder(&mut self) {
+        if !self.resume_placeholder_visible {
+            return;
+        }
+        if let Some(idx) = self.history_cells.iter().position(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::BackgroundEventCell>()
+                .map(|c| c.state().description.trim() == RESUME_PLACEHOLDER_MESSAGE)
+                .unwrap_or(false)
+        }) {
+            self.history_remove_at(idx);
+        }
+        self.resume_placeholder_visible = false;
+    }
+
+    fn replace_resume_placeholder_with_notice(&mut self, message: &str) {
+        if !self.resume_placeholder_visible {
+            return;
+        }
+        self.clear_resume_placeholder();
+        self.insert_background_event_with_placement(
+            message.to_string(),
+            BackgroundPlacement::Tail,
+            None,
+        );
+    }
+
     pub(crate) fn clear_token_usage(&mut self) {
         self.total_token_usage = TokenUsage::default();
         self.rate_limit_snapshot = None;
@@ -18768,11 +18925,13 @@ impl ChatWidget<'_> {
             self.insert_background_event_with_placement(
                 "Creating branch worktree...".to_string(),
                 BackgroundPlacement::BeforeNextOutput,
+                None,
             );
         } else {
             self.insert_background_event_with_placement(
                 format!("Creating branch worktree... Task: {}", args_trim),
                 BackgroundPlacement::BeforeNextOutput,
+                None,
             );
         }
         self.request_redraw();
@@ -18989,6 +19148,7 @@ impl ChatWidget<'_> {
             self.insert_background_event_with_placement(
                 notice,
                 BackgroundPlacement::BeforeNextOutput,
+                None,
             );
             self.request_redraw();
             self.submit_op(Op::RunProjectCommand { name: cmd.name });
@@ -19196,12 +19356,55 @@ impl ChatWidget<'_> {
             };
             let repo_dirty = matches!(&repo_status_raw, Ok(s) if !s.trim().is_empty());
 
-            let default_branch_opt =
-                codex_core::git_worktree::detect_default_branch(&git_root).await;
-            let default_branch_hint = default_branch_opt
-                .clone()
-                .unwrap_or_else(|| "<detect default branch>".to_string());
+            let branch_metadata = codex_core::git_worktree::load_branch_metadata(&work_cwd);
+            let upstream = Command::new("git")
+                .current_dir(&work_cwd)
+                .args([
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "--symbolic-full-name",
+                    "@{u}",
+                ])
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    let value = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if value.is_empty() { None } else { Some(value) }
+                });
+            let upstream_parts = upstream.as_ref().and_then(|u| u.split_once('/'));
+            let upstream_remote = upstream_parts.map(|(remote, _)| remote.to_string());
 
+            let mut default_branch_opt = branch_metadata
+                .as_ref()
+                .and_then(|meta| meta.base_branch.clone());
+            if default_branch_opt.is_none() {
+                default_branch_opt =
+                    codex_core::git_worktree::detect_default_branch(&git_root).await;
+            }
+
+            let canonical_remote = "origin".to_string();
+            let mut remote_candidates: Vec<String> = Vec::new();
+            if default_branch_opt.is_some() {
+                remote_candidates.push(canonical_remote.clone());
+                if let Some(remote) = upstream_remote
+                    .clone()
+                    .filter(|remote| remote != codex_core::git_worktree::LOCAL_DEFAULT_REMOTE)
+                {
+                    if remote != canonical_remote {
+                        remote_candidates.push(remote);
+                    }
+                }
+            }
+
+            let primary_remote_for_instructions = remote_candidates.first().cloned();
+            let alternate_remote_for_instructions = remote_candidates.iter().skip(1).next().cloned();
+            let remote_branch_ref_for_instructions = default_branch_opt.as_ref().and_then(|branch| {
+                primary_remote_for_instructions
+                    .as_ref()
+                    .map(|remote| format!("{remote}/{branch}"))
+            });
             let mut handoff_reasons: Vec<String> = Vec::new();
             if let Err(err) = &worktree_status_raw {
                 handoff_reasons.push(format!("unable to read worktree status: {}", err));
@@ -19224,12 +19427,17 @@ impl ChatWidget<'_> {
             let worktree_display = work_cwd.display().to_string();
             let tx_for_switch = tx.clone();
             let git_root_for_switch = git_root.clone();
+            let default_branch_for_instructions = default_branch_opt.clone();
+            let primary_remote_instr = primary_remote_for_instructions.clone();
+            let alternate_remote_instr = alternate_remote_for_instructions.clone();
+            let remote_branch_ref_instr = remote_branch_ref_for_instructions.clone();
             let send_agent_handoff =
                 |mut reasons: Vec<String>,
                  extra_note: Option<String>,
                  worktree_status: String,
                  repo_status: String,
-                 worktree_diff: Option<String>| {
+                 worktree_diff: Option<String>,
+                 merge_remote_ref: Option<String>| {
                     if reasons.is_empty() {
                         reasons.push("manual follow-up requested".to_string());
                     }
@@ -19238,25 +19446,68 @@ impl ChatWidget<'_> {
                         &tx,
                         format!("`/merge` — handing off to agent ({})", reason_text),
                     );
+                    let default_branch_display = default_branch_for_instructions
+                        .clone()
+                        .unwrap_or_else(|| "unknown (inspect branch metadata)".to_string());
+                    let step2 = if let (Some(branch), Some(remote)) =
+                        (default_branch_for_instructions.as_ref(), primary_remote_instr.as_ref())
+                    {
+                        let mut text = format!("2. git fetch {} {}", remote, branch);
+                        if let Some(alt_remote) = alternate_remote_instr.as_ref() {
+                            text.push_str(&format!(
+                                " (if that remote is unavailable, try `git fetch {} {}`)",
+                                alt_remote, branch
+                            ));
+                        }
+                        text
+                    } else {
+                        "2. Determine the correct default branch (metadata missing) and fetch it from the appropriate remote.".to_string()
+                    };
+                    let step3 = if let Some(remote_ref) = merge_remote_ref.as_ref() {
+                        format!(
+                            "3. Merge the default branch into the worktree branch (`git merge {}`) and resolve conflicts.",
+                            remote_ref
+                        )
+                    } else {
+                        "3. Merge that branch into the worktree branch and resolve any conflicts.".to_string()
+                    };
+                    let step4 = if let Some(ref branch) = default_branch_for_instructions {
+                        format!(
+                            "4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.",
+                            root_display, branch
+                        )
+                    } else {
+                        format!(
+                            "4. cd {}\n   - Ensure the chosen target branch exists locally. If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.",
+                            root_display
+                        )
+                    };
+                    let step5 = if let Some(ref branch) = default_branch_for_instructions {
+                        format!(
+                            "5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.",
+                            branch_label, branch, root_display, branch_label
+                        )
+                    } else {
+                        format!(
+                            "5. Merge {} into the chosen target branch from {} (`git merge --no-ff {}`) and resolve conflicts.",
+                            branch_label, root_display, branch_label
+                        )
+                    };
                     let mut preface = format!(
-                        "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
+                        "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n{}\n{}\n{}\n{}\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
                         reason_text,
                         root_display,
                         worktree_display,
                         branch_label,
-                        default_branch_hint,
+                        default_branch_display,
                         worktree_status,
                         repo_status,
                         worktree_display,
                         branch_label,
-                        default_branch_hint,
-                        default_branch_hint,
-                        root_display,
-                        default_branch_hint,
-                        branch_label,
-                        default_branch_hint,
-                        root_display,
-                        branch_label,
+                        step2,
+                        step3,
+                        step4,
+                        step5,
                         worktree_display,
                         branch_label,
                         root_display
@@ -19285,6 +19536,7 @@ impl ChatWidget<'_> {
                     worktree_status_for_agent.clone(),
                     repo_status_for_agent.clone(),
                     worktree_diff_stat.clone(),
+                    remote_branch_ref_instr.clone(),
                 );
                 return;
             }
@@ -19326,13 +19578,106 @@ impl ChatWidget<'_> {
                 }
             }
 
-            let _ = Command::new("git")
-                .current_dir(&git_root)
-                .args(["fetch", "origin", &default_branch])
-                .output()
-                .await;
+            let mut selected_remote: Option<String> = None;
+            let mut fetch_notes: Vec<String> = Vec::new();
+            for remote in &remote_candidates {
+                let fetch_out = Command::new("git")
+                    .current_dir(&git_root)
+                    .args(["fetch", remote, &default_branch])
+                    .output()
+                    .await;
+                match fetch_out {
+                    Ok(ref out) if out.status.success() => {
+                        selected_remote = Some(remote.clone());
+                        break;
+                    }
+                    Ok(out) => {
+                        let stderr_s = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                        let stdout_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        let note = if !stderr_s.is_empty() {
+                            stderr_s
+                        } else if !stdout_s.is_empty() {
+                            stdout_s
+                        } else {
+                            "git fetch returned a non-zero status".to_string()
+                        };
+                        fetch_notes.push(format!("{}: {}", remote, note));
+                    }
+                    Err(err) => {
+                        fetch_notes.push(format!("{}: {}", remote, err));
+                    }
+                }
+            }
 
-            let remote_ref = format!("origin/{}", default_branch);
+            let (merge_remote_name, remote_ref) = if let Some(remote) = selected_remote {
+                (remote.clone(), format!("{remote}/{default_branch}"))
+            } else if let Some(existing_ref) = remote_branch_ref_instr.clone() {
+                if let Some((remote, _)) = existing_ref.split_once('/') {
+                    (remote.to_string(), existing_ref)
+                } else {
+                    let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                        .await
+                        .map(|s| {
+                            if s.trim().is_empty() { "clean".to_string() } else { s }
+                        })
+                        .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                    let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                        .await
+                        .ok()
+                        .map(|d| d.trim().to_string())
+                        .filter(|d| !d.is_empty())
+                        .or(worktree_diff_stat.clone());
+                    let reason = format!(
+                        "failed to parse remote reference for '{}'",
+                        default_branch
+                    );
+                    let note = if fetch_notes.is_empty() {
+                        None
+                    } else {
+                        Some(fetch_notes.join("; "))
+                    };
+                    send_agent_handoff(
+                        vec![reason],
+                        note,
+                        updated_worktree_status,
+                        repo_status_for_agent.clone(),
+                        updated_diff,
+                        remote_branch_ref_instr.clone(),
+                    );
+                    return;
+                }
+            } else {
+                let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                    .await
+                    .map(|s| {
+                        if s.trim().is_empty() { "clean".to_string() } else { s }
+                    })
+                    .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                    .await
+                    .ok()
+                    .map(|d| d.trim().to_string())
+                    .filter(|d| !d.is_empty())
+                    .or(worktree_diff_stat.clone());
+                let reason = format!(
+                    "failed to determine remote reference for '{}'",
+                    default_branch
+                );
+                let note = if fetch_notes.is_empty() {
+                    None
+                } else {
+                    Some(fetch_notes.join("; "))
+                };
+                send_agent_handoff(
+                    vec![reason],
+                    note,
+                    updated_worktree_status,
+                    repo_status_for_agent.clone(),
+                    updated_diff,
+                    remote_branch_ref_instr.clone(),
+                );
+                return;
+            };
             let ff_only = Command::new("git")
                 .current_dir(&work_cwd)
                 .args(["merge", "--ff-only", &remote_ref])
@@ -19379,7 +19724,7 @@ impl ChatWidget<'_> {
                         send_agent_handoff(
                             vec![format!(
                                 "merge conflicts while merging '{}' into '{}'",
-                                default_branch, branch_label
+                                remote_ref, branch_label
                             )],
                             Some(
                                 "The worktree currently has an in-progress merge that needs to be resolved. Please complete it before retrying the final merge.".to_string(),
@@ -19387,6 +19732,7 @@ impl ChatWidget<'_> {
                             updated_worktree_status,
                             repo_status_for_agent.clone(),
                             updated_diff,
+                            Some(remote_ref.clone()),
                         );
                         return;
                     }
@@ -19458,6 +19804,7 @@ impl ChatWidget<'_> {
                                 updated_worktree_status,
                                 repo_status_for_agent.clone(),
                                 updated_diff,
+                                Some(remote_ref.clone()),
                             );
                             return;
                         }
@@ -19487,6 +19834,7 @@ impl ChatWidget<'_> {
                             updated_worktree_status,
                             repo_status_for_agent.clone(),
                             updated_diff,
+                            Some(remote_ref.clone()),
                         );
                         return;
                     }
@@ -19523,7 +19871,7 @@ impl ChatWidget<'_> {
                 if !has_local {
                     let _ = Command::new("git")
                         .current_dir(&git_root)
-                        .args(["fetch", "origin", &default_branch])
+                        .args(["fetch", &merge_remote_name, &default_branch])
                         .output()
                         .await;
                     let _ = Command::new("git")
@@ -19532,7 +19880,7 @@ impl ChatWidget<'_> {
                             "branch",
                             "--track",
                             &default_branch,
-                            &format!("origin/{}", default_branch),
+                            &remote_ref,
                         ])
                         .output()
                         .await;
@@ -19627,6 +19975,7 @@ impl ChatWidget<'_> {
                         worktree_status_for_agent.clone(),
                         updated_repo_status,
                         updated_diff,
+                        Some(remote_ref.clone()),
                     );
                     return;
                 }
@@ -19669,6 +20018,7 @@ impl ChatWidget<'_> {
                     worktree_status_for_agent.clone(),
                     updated_repo_status,
                     updated_diff,
+                    Some(remote_ref.clone()),
                 );
                 return;
             }
@@ -22322,15 +22672,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     if next_is_collapsed_reasoning {
                         should_add_spacing = false;
                     }
-                }
-            }
-            if should_add_spacing {
-                let next_is_zero_height = visible_slice
-                    .get(offset + 1)
-                    .map(|next| next.height == 0)
-                    .unwrap_or(false);
-                if next_is_zero_height {
-                    should_add_spacing = false;
                 }
             }
             if should_add_spacing {
