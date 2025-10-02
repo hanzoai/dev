@@ -538,6 +538,51 @@ impl AutoCoordinatorUiState {
     }
 }
 
+const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
+const AUTO_RESOLVE_REVIEW_FOLLOWUP: &str = "This issue has been resolved. Please continue your search and return all remaining issues you find.";
+
+#[derive(Clone)]
+struct AutoResolveState {
+    prompt: String,
+    hint: String,
+    metadata: Option<ReviewContextMetadata>,
+    attempt: u32,
+    max_attempts: u32,
+    phase: AutoResolvePhase,
+    last_review: Option<ReviewOutputEvent>,
+    last_fix_message: Option<String>,
+}
+
+impl AutoResolveState {
+    fn new(prompt: String, hint: String, metadata: Option<ReviewContextMetadata>) -> Self {
+        Self {
+            prompt,
+            hint,
+            metadata,
+            attempt: 0,
+            max_attempts: AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
+            phase: AutoResolvePhase::WaitingForReview,
+            last_review: None,
+            last_fix_message: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum AutoResolvePhase {
+    WaitingForReview,
+    PendingFix { review: ReviewOutputEvent },
+    AwaitingFix { review: ReviewOutputEvent },
+    AwaitingJudge { review: ReviewOutputEvent },
+}
+
+#[derive(Deserialize)]
+struct AutoResolveDecision {
+    status: String,
+    #[serde(default)]
+    rationale: Option<String>,
+}
+
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
@@ -606,6 +651,7 @@ pub(crate) struct ChatWidget<'a> {
     recent_agent_hint: Option<String>,
     active_review_hint: Option<String>,
     active_review_prompt: Option<String>,
+    auto_resolve_state: Option<AutoResolveState>,
     overall_task_status: String,
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
@@ -3121,6 +3167,7 @@ impl ChatWidget<'_> {
             recent_agent_hint: None,
             active_review_hint: None,
             active_review_prompt: None,
+            auto_resolve_state: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -3392,6 +3439,7 @@ impl ChatWidget<'_> {
             recent_agent_hint: None,
             active_review_hint: None,
             active_review_prompt: None,
+            auto_resolve_state: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -8282,6 +8330,9 @@ impl ChatWidget<'_> {
                 }
                 // Remove this id from the active set (it may be a sub‑agent)
                 self.active_task_ids.remove(&id);
+                if self.auto_resolve_enabled() {
+                    self.auto_resolve_on_task_complete(last_agent_message.clone());
+                }
                 // Defensive: clear transient agents-preparing state
                 self.agents_ready_to_start = false;
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
@@ -9469,6 +9520,9 @@ impl ChatWidget<'_> {
             EventMsg::TurnAborted(_) => {}
             EventMsg::ConversationPath(_) => {}
             EventMsg::EnteredReviewMode(review_request) => {
+                if self.auto_resolve_enabled() {
+                    self.auto_resolve_handle_review_enter();
+                }
                 let hint = review_request.user_facing_hint.trim();
                 let banner = if hint.is_empty() {
                     ">> Code review started <<".to_string()
@@ -9499,6 +9553,9 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::ExitedReviewMode(review_output) => {
+                if self.auto_resolve_enabled() {
+                    self.auto_resolve_handle_review_exit(review_output.clone());
+                }
                 let hint = self.active_review_hint.take();
                 let prompt = self.active_review_prompt.take();
                 match review_output {
@@ -17860,6 +17917,289 @@ fn strip_role_prefix_if_present(input: &str) -> (&str, bool) {
 }
 
 impl ChatWidget<'_> {
+    fn auto_resolve_enabled(&self) -> bool {
+        self.auto_resolve_state.is_some()
+    }
+
+    fn auto_resolve_clear(&mut self) {
+        self.auto_resolve_state = None;
+    }
+
+    fn auto_resolve_notice<S: Into<String>>(&mut self, message: S) {
+        self.push_background_tail(message.into());
+        self.request_redraw();
+    }
+
+    fn auto_resolve_format_findings(review: &ReviewOutputEvent) -> String {
+        let mut sections: Vec<String> = Vec::new();
+        if !review.findings.is_empty() {
+            sections.push(format_review_findings_block(&review.findings, None));
+        }
+        let explanation = review.overall_explanation.trim();
+        if !explanation.is_empty() {
+            sections.push(explanation.to_string());
+        }
+        sections
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    fn auto_resolve_handle_review_enter(&mut self) {
+        if let Some(state) = self.auto_resolve_state.as_mut() {
+            state.phase = AutoResolvePhase::WaitingForReview;
+            state.last_review = None;
+            state.last_fix_message = None;
+        }
+    }
+
+    fn auto_resolve_handle_review_exit(&mut self, review_output: Option<ReviewOutputEvent>) {
+        if self.auto_resolve_state.is_none() {
+            return;
+        }
+
+        let notice: Option<String>;
+        let mut should_clear = false;
+        {
+            let state = self.auto_resolve_state.as_mut().unwrap();
+            match review_output {
+                Some(ref output) => {
+                    state.attempt = state.attempt.saturating_add(1);
+                    state.last_review = Some(output.clone());
+                    state.last_fix_message = None;
+
+                    if output.findings.is_empty() {
+                        notice = Some("Auto-resolve: review reported no actionable findings. Exiting.".to_string());
+                        should_clear = true;
+                    } else if state.attempt > state.max_attempts {
+                        notice = Some(format!(
+                            "Auto-resolve: reached {attempts} review attempts; handing control back to you.",
+                            attempts = state.max_attempts
+                        ));
+                        should_clear = true;
+                    } else {
+                        state.phase = AutoResolvePhase::PendingFix {
+                            review: output.clone(),
+                        };
+                        notice = Some("Auto-resolve: review found issues. Preparing follow-up fix request.".to_string());
+                    }
+                }
+                None => {
+                    notice = Some(
+                        "Auto-resolve: review ended without findings. Please inspect manually.".to_string(),
+                    );
+                    should_clear = true;
+                }
+            }
+        }
+
+        if should_clear {
+            self.auto_resolve_clear();
+        }
+        if let Some(message) = notice {
+            self.auto_resolve_notice(message);
+        }
+    }
+
+    fn auto_resolve_on_task_complete(&mut self, last_agent_message: Option<String>) {
+        let Some(state_snapshot) = self.auto_resolve_state.clone() else {
+            return;
+        };
+
+        match state_snapshot.phase {
+            AutoResolvePhase::PendingFix { review } => {
+                if let Some(state) = self.auto_resolve_state.as_mut() {
+                    state.phase = AutoResolvePhase::AwaitingFix {
+                        review: review.clone(),
+                    };
+                }
+                self.dispatch_auto_fix(&review);
+            }
+            AutoResolvePhase::AwaitingFix { review } => {
+                if let Some(state) = self.auto_resolve_state.as_mut() {
+                    state.last_fix_message = last_agent_message.clone();
+                    state.phase = AutoResolvePhase::AwaitingJudge {
+                        review: review.clone(),
+                    };
+                }
+                self.dispatch_auto_judge(&review, last_agent_message);
+            }
+            AutoResolvePhase::AwaitingJudge { review } => {
+                let message = last_agent_message.unwrap_or_default();
+                self.auto_resolve_process_judge(review, message);
+            }
+            AutoResolvePhase::WaitingForReview => {}
+        }
+    }
+
+    fn dispatch_auto_fix(&mut self, review: &ReviewOutputEvent) {
+        let summary = Self::auto_resolve_format_findings(review);
+        let mut preface = String::from(
+            "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding."
+        );
+        if !summary.is_empty() {
+            preface.push_str("\n\nFindings:\n");
+            preface.push_str(&summary);
+        }
+        self.auto_resolve_notice("Auto-resolve: asking the agent to verify and address the review findings.");
+        self.submit_text_message_with_preface(
+            "Is this a real issue introduced by our changes? If so, please fix and resolve all similar issues.".to_string(),
+            preface,
+        );
+    }
+
+    fn dispatch_auto_judge(&mut self, review: &ReviewOutputEvent, fix_message: Option<String>) {
+        let summary = Self::auto_resolve_format_findings(review);
+        let mut preface = String::from(
+            "You are evaluating whether the latest fixes resolved the findings from `/review`. Respond with a strict JSON object containing `status` and optional `rationale`. Valid `status` values: `review_again`, `no_issue`, `continue_fix`. Do not include any additional text before or after the JSON."
+        );
+        if !summary.is_empty() {
+            preface.push_str("\n\nOriginal findings:\n");
+            preface.push_str(&summary);
+        }
+        if let Some(fix) = fix_message.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            preface.push_str("\n\nLatest agent response:\n");
+            preface.push_str(fix);
+        }
+        preface.push_str("\n\nReturn JSON: {\"status\": \"...\", \"rationale\": \"optional explanation\"}.");
+
+        self.auto_resolve_notice("Auto-resolve: requesting status JSON from the agent.");
+        self.submit_text_message_with_preface(
+            "Auto-resolve status check".to_string(),
+            preface,
+        );
+    }
+
+    fn dispatch_auto_continue(&mut self, review: &ReviewOutputEvent) {
+        let summary = Self::auto_resolve_format_findings(review);
+        let mut preface = String::from(
+            "The previous status check indicated more work is required on the review findings. Continue addressing the remaining issues before responding."
+        );
+        if !summary.is_empty() {
+            preface.push_str("\n\nOutstanding findings:\n");
+            preface.push_str(&summary);
+        }
+        self.auto_resolve_notice("Auto-resolve: asking the agent to continue working on the findings.");
+        self.submit_text_message_with_preface("Please continue".to_string(), preface);
+    }
+
+    fn restart_auto_resolve_review(&mut self) {
+        let Some(state_snapshot) = self.auto_resolve_state.clone() else {
+            return;
+        };
+        let next_attempt = state_snapshot.attempt.saturating_add(1);
+        let bounded_attempt = next_attempt.min(state_snapshot.max_attempts);
+        let max_attempts = state_snapshot.max_attempts;
+        let prep_label = format!(
+            "Preparing follow-up code review (attempt {bounded_attempt} of {max_attempts})"
+        );
+        let continued_prompt = format!(
+            "{}\n\n{}",
+            state_snapshot.prompt.trim_end(),
+            AUTO_RESOLVE_REVIEW_FOLLOWUP
+        );
+        self.begin_review(
+            continued_prompt,
+            state_snapshot.hint.clone(),
+            Some(prep_label),
+            state_snapshot.metadata.clone(),
+        );
+        if let Some(state) = self.auto_resolve_state.as_mut() {
+            state.phase = AutoResolvePhase::WaitingForReview;
+            state.last_review = None;
+            state.last_fix_message = None;
+        }
+    }
+
+    fn auto_resolve_process_judge(&mut self, review: ReviewOutputEvent, message: String) {
+        let trimmed = message.trim();
+        let Some(decision) = Self::auto_resolve_parse_decision(trimmed) else {
+            self.auto_resolve_notice("Auto-resolve: expected JSON status but received something else. Stopping automation.");
+            self.auto_resolve_clear();
+            return;
+        };
+
+        let status = decision.status.to_ascii_lowercase();
+        let rationale = decision.rationale.unwrap_or_default();
+
+        match status.as_str() {
+            "no_issue" => {
+                if rationale.trim().is_empty() {
+                    self.auto_resolve_notice("Auto-resolve: agent reported no remaining issues. Done.");
+                } else {
+                    let rationale_text = rationale.trim();
+                    self.auto_resolve_notice(format!(
+                        "Auto-resolve: no remaining issues. {rationale_text}"
+                    ));
+                }
+                self.auto_resolve_clear();
+            }
+            "continue_fix" => {
+                if let Some(state) = self.auto_resolve_state.as_mut() {
+                    state.phase = AutoResolvePhase::AwaitingFix {
+                        review: review.clone(),
+                    };
+                }
+                self.dispatch_auto_continue(&review);
+            }
+            "review_again" => {
+                let stop = self
+                    .auto_resolve_state
+                    .as_ref()
+                    .is_some_and(|state| state.attempt >= state.max_attempts);
+                if stop {
+                    self.auto_resolve_notice("Auto-resolve: review-again requested but attempt limit reached. Stopping.");
+                    self.auto_resolve_clear();
+                } else {
+                    if rationale.trim().is_empty() {
+                        self.auto_resolve_notice("Auto-resolve: running another /review pass.".to_string());
+                    } else {
+                        let rationale_text = rationale.trim();
+                        self.auto_resolve_notice(format!(
+                            "Auto-resolve: running another /review pass. {rationale_text}"
+                        ));
+                    }
+                    self.restart_auto_resolve_review();
+                }
+            }
+            other => {
+                self.auto_resolve_notice(format!(
+                    "Auto-resolve: unexpected status '{other}'. Stopping automation."
+                ));
+                self.auto_resolve_clear();
+            }
+        }
+    }
+
+    fn auto_resolve_parse_decision(raw: &str) -> Option<AutoResolveDecision> {
+        if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(raw) {
+            return Some(decision);
+        }
+
+        if let Some(start) = raw.find("{" ) {
+            if let Some(end) = raw.rfind("}") {
+                let slice = &raw[start..=end];
+                if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(slice) {
+                    return Some(decision);
+                }
+            }
+        }
+
+        // try to strip ```json fences
+        if let Some(json_start) = raw.find("```") {
+            if let Some(rest) = raw[json_start + 3..].split_once("```") {
+                let candidate = rest.0.trim_start_matches("json").trim();
+                if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(candidate) {
+                    return Some(decision);
+                }
+            }
+        }
+
+        None
+    }
+
     pub(crate) fn open_review_dialog(&mut self) {
         if self.is_task_running() {
             self.history_push_plain_state(crate::history_cell::new_error_event(
@@ -17870,6 +18210,20 @@ impl ChatWidget<'_> {
         }
 
         let mut items: Vec<SelectionItem> = Vec::new();
+
+        let auto_label = if self.config.tui.review_auto_resolve {
+            "On"
+        } else {
+            "Off"
+        };
+        items.push(SelectionItem {
+            name: format!("Auto Resolve reviews — {auto_label}"),
+            description: Some("Automatically rerun fixes and follow-up checks after each review.".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::ToggleReviewAutoResolve);
+            })],
+        });
 
         items.push(SelectionItem {
             name: "Review /branch changes".to_string(),
@@ -17940,6 +18294,43 @@ impl ChatWidget<'_> {
         self.bottom_pane.show_custom_prompt(view);
     }
 
+    pub(crate) fn toggle_review_auto_resolve(&mut self) {
+        let new_value = !self.config.tui.review_auto_resolve;
+        self.config.tui.review_auto_resolve = new_value;
+
+        let (_persisted, message) = if let Ok(home) = codex_core::config::find_codex_home() {
+            match codex_core::config::set_tui_review_auto_resolve(&home, new_value) {
+                Ok(_) => {
+                    tracing::info!("Persisted review auto resolve toggle: {}", new_value);
+                    (true, if new_value {
+                        "Auto Resolve enabled for /review."
+                    } else {
+                        "Auto Resolve disabled for /review."
+                    })
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to persist review auto resolve toggle: {}", e);
+                    (false, if new_value {
+                        "Auto Resolve enabled for this session (failed to persist)."
+                    } else {
+                        "Auto Resolve disabled for this session (failed to persist)."
+                    })
+                }
+            }
+        } else {
+            tracing::warn!("Could not locate Codex home to persist review auto resolve toggle");
+            (false, if new_value {
+                "Auto Resolve enabled for this session."
+            } else {
+                "Auto Resolve disabled for this session."
+            })
+        };
+
+        self.bottom_pane.flash_footer_notice(message.to_string());
+        // Reopen selection view to reflect new label.
+        self.open_review_dialog();
+    }
+
     pub(crate) fn show_review_commit_loading(&mut self) {
         let loading_item = SelectionItem {
             name: "Loading recent commits…".to_string(),
@@ -17971,6 +18362,7 @@ impl ChatWidget<'_> {
             return;
         }
 
+        let auto_resolve = self.config.tui.review_auto_resolve;
         let mut items: Vec<SelectionItem> = Vec::with_capacity(commits.len());
         for entry in commits {
             let subject = entry.subject.trim().to_string();
@@ -18003,6 +18395,7 @@ impl ChatWidget<'_> {
                 commit: Some(sha.clone()),
                 ..Default::default()
             });
+            let auto_flag = auto_resolve;
             items.push(SelectionItem {
                 name: title,
                 description: None,
@@ -18013,6 +18406,7 @@ impl ChatWidget<'_> {
                         hint: hint_closure.clone(),
                         preparation_label: Some(prep_closure.clone()),
                         metadata: metadata_option.clone(),
+                        auto_resolve: auto_flag,
                     });
                 })],
             });
@@ -18072,6 +18466,7 @@ impl ChatWidget<'_> {
     ) {
         let current_trimmed = current_branch.as_ref().map(|s| s.trim().to_string());
         let mut items: Vec<SelectionItem> = Vec::new();
+        let auto_resolve = self.config.tui.review_auto_resolve;
         for branch in branches {
             let branch_trimmed = branch.trim();
             if branch_trimmed.is_empty() {
@@ -18110,6 +18505,7 @@ impl ChatWidget<'_> {
                 current_branch: current_trimmed.clone(),
                 ..Default::default()
             });
+            let auto_flag = auto_resolve;
             items.push(SelectionItem {
                 name: title,
                 description: None,
@@ -18120,6 +18516,7 @@ impl ChatWidget<'_> {
                         hint: hint_closure.clone(),
                         preparation_label: Some(prep_closure.clone()),
                         metadata: metadata_option.clone(),
+                        auto_resolve: auto_flag,
                     });
                 })],
             });
@@ -18164,6 +18561,7 @@ impl ChatWidget<'_> {
         }
 
         let trimmed = args.trim();
+        let auto_resolve = self.config.tui.review_auto_resolve;
         if trimmed.is_empty() {
             if Self::is_branch_worktree_path(&self.config.cwd) {
                 if let Some(git_root) =
@@ -18171,6 +18569,7 @@ impl ChatWidget<'_> {
                 {
                     let worktree_cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
+                    let auto_flag = auto_resolve;
                     tokio::spawn(async move {
                     let branch_metadata =
                         codex_core::git_worktree::load_branch_metadata(&worktree_cwd);
@@ -18219,6 +18618,7 @@ impl ChatWidget<'_> {
                                     hint,
                                     preparation_label,
                                     metadata,
+                                    auto_resolve: auto_flag,
                                 });
                                 return;
                             }
@@ -18232,6 +18632,7 @@ impl ChatWidget<'_> {
                                 scope: Some("workspace".to_string()),
                                 ..Default::default()
                             }),
+                            auto_resolve: auto_flag,
                         });
                     });
                     return;
@@ -18247,6 +18648,7 @@ impl ChatWidget<'_> {
                 "current workspace changes".to_string(),
                 Some("Preparing code review request...".to_string()),
                 Some(metadata),
+                auto_resolve,
             );
         } else {
             let value = trimmed.to_string();
@@ -18255,11 +18657,32 @@ impl ChatWidget<'_> {
                 scope: Some("custom".to_string()),
                 ..Default::default()
             };
-            self.start_review_with_scope(value.clone(), value, Some(preparation), Some(metadata));
+            self.start_review_with_scope(value.clone(), value, Some(preparation), Some(metadata), auto_resolve);
         }
     }
 
     pub(crate) fn start_review_with_scope(
+        &mut self,
+        prompt: String,
+        hint: String,
+        preparation_label: Option<String>,
+        metadata: Option<ReviewContextMetadata>,
+        auto_resolve: bool,
+    ) {
+        if auto_resolve {
+            self.auto_resolve_state = Some(AutoResolveState::new(
+                prompt.clone(),
+                hint.clone(),
+                metadata.clone(),
+            ));
+        } else {
+            self.auto_resolve_state = None;
+        }
+
+        self.begin_review(prompt, hint, preparation_label, metadata);
+    }
+
+    fn begin_review(
         &mut self,
         prompt: String,
         hint: String,
