@@ -957,7 +957,7 @@ pub fn create_get_agent_result_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent_result".to_string(),
-        description: "Get the final result of a completed agent.".to_string(),
+        description: "Get the final result of a completed agent. Returns a preview (first 500 lines) and a file path to the full output/error.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -1042,8 +1042,7 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent_wait".to_string(),
-        description: "Wait for a agent or any agent in a batch to complete, fail, or be cancelled."
-            .to_string(),
+        description: "Wait for an agent or any agent in a batch to complete, fail, or be cancelled. Returns status plus a preview (first 500 lines) and a file path to the full output/error. For batches, set return_all:true to receive per-agent summaries. Use agent_result with {\"agent_id\": \"...\"} to fetch after completion.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
