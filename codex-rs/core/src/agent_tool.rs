@@ -913,7 +913,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
         JsonSchema::Array {
             items: Box::new(JsonSchema::String { description: None }),
             description: Some(
-                "Optional: Array of model names (e.g., ['claude','gemini','qwen','code'])".to_string(),
+                "Optional: Array of model names (e.g., ['claude','gemini','qwen','code','cloud'])".to_string(),
             ),
         },
     );
