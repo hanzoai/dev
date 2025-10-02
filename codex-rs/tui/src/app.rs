@@ -1153,6 +1153,10 @@ impl App<'_> {
                                 // If a file-search popup is visible, close it first
                                 // then continue with global Esc policy in the same keypress.
                                 let _closed_file_popup = widget.close_file_popup_if_active();
+                                if widget.auto_should_handle_global_esc() {
+                                    widget.handle_key_event(key_event);
+                                    continue;
+                                }
                                 {
                                     let now = Instant::now();
                                     const THRESHOLD: Duration = Duration::from_millis(600);
