@@ -1669,6 +1669,90 @@ fn exec_output_delta_tracks_history_id_after_reorder() {
     );
 }
 
+#[test]
+fn exec_end_before_begin_upgrades_history_record() {
+    use codex_core::parse_command::ParsedCommand;
+
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    let call_id = "call-out-of-order";
+
+    chat.handle_codex_event(Event {
+        id: call_id.into(),
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id.to_string(),
+            stdout: "done".into(),
+            stderr: String::new(),
+            aggregated_output: "done".into(),
+            exit_code: 0,
+            duration: std::time::Duration::from_millis(12),
+        }),
+        order: Some(order_meta(20)),
+    });
+
+    // Force the pending end to materialise the fallback record immediately.
+    chat.flush_pending_exec_ends();
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let command = vec!["bash".into(), "-lc".into(), "echo upgraded".into()];
+    let parsed = vec![ParsedCommand::Unknown {
+        cmd: "echo upgraded".into(),
+    }];
+
+    chat.handle_codex_event(Event {
+        id: call_id.into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.to_string(),
+            command: command.clone(),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: parsed.clone(),
+        }),
+        order: Some(order_meta(10)),
+    });
+
+    chat.flush_pending_exec_ends();
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) if rec.call_id.as_deref() == Some(call_id) => {
+                Some(rec.clone())
+            }
+            _ => None,
+        })
+        .expect("exec record tracked by history state");
+
+    assert_eq!(exec_record.command, command, "history_state kept fallback command");
+    assert_eq!(exec_record.parsed, parsed, "history_state kept fallback parsing");
+    assert_eq!(exec_record.status, ExecStatus::Success);
+    assert_eq!(exec_record.exit_code, Some(0));
+
+    let exec_id = exec_record.id;
+    assert_eq!(
+        chat.history_state().history_id_for_exec_call(call_id),
+        Some(exec_id),
+        "history_id mapping missing upgraded call_id",
+    );
+
+    let ui_exec_record = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| history_cell::record_from_cell(cell.as_ref()))
+        .and_then(|record| match record {
+            HistoryRecord::Exec(rec) if rec.id == exec_id => Some(rec),
+            _ => None,
+        })
+        .expect("exec cell present in UI");
+
+    assert_eq!(ui_exec_record.command, exec_record.command);
+    assert_eq!(ui_exec_record.parsed, exec_record.parsed);
+    assert_eq!(ui_exec_record.status, ExecStatus::Success);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn binary_size_transcript_matches_ideal_fixture() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
