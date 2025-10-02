@@ -2054,6 +2054,44 @@ fn auto_decision_persists_summary_through_cli_cycle() {
 }
 
 #[test]
+fn auto_double_escape_stops_after_manual_pause() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    prepare_auto_drive_for_manual_pause(&mut chat);
+
+    chat.handle_key_event(esc_key());
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(chat.auto_state.paused_for_manual_edit, "first Esc should pause for manual edit");
+    assert!(chat.auto_state.resume_after_manual_submit);
+    assert!(chat.is_task_running(), "manual edit keeps task running hint active");
+    assert!(chat.auto_should_handle_global_esc(), "second Esc should route back to Auto Drive handler");
+
+    let (mut legacy, legacy_rx, _legacy_op_rx) = make_chatwidget_manual();
+    prepare_auto_drive_for_manual_pause(&mut legacy);
+    legacy.handle_key_event(esc_key());
+    let _ = pump_app_events(&mut legacy, &legacy_rx);
+    assert!(legacy.auto_state.paused_for_manual_edit);
+    assert!(legacy.is_task_running());
+    let _ = legacy.on_ctrl_c();
+    assert!(legacy.auto_state.active, "Ctrl-C interrupt alone should not reset Auto Drive");
+
+    if chat.auto_should_handle_global_esc() {
+        chat.handle_key_event(esc_key());
+        let _ = pump_app_events(&mut chat, &rx);
+    } else if chat.is_task_running() {
+        let _ = chat.on_ctrl_c();
+    } else if !chat.composer_is_empty() {
+        chat.clear_composer();
+    } else {
+        chat.show_esc_undo_hint();
+    }
+
+    assert!(!chat.auto_state.active, "Auto Drive must fully stop after the second Esc");
+    assert!(!chat.auto_state.paused_for_manual_edit);
+    assert!(!chat.auto_state.resume_after_manual_submit);
+    assert!(!chat.is_task_running());
+}
+
+#[test]
 fn auto_history_captures_raw_transcript() {
     use codex_protocol::models::{ContentItem, ResponseItem};
 
@@ -2110,6 +2148,19 @@ fn pump_app_events(
         }
     }
     captured
+}
+
+fn prepare_auto_drive_for_manual_pause(chat: &mut ChatWidget<'_>) {
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_cli_prompt = Some("echo hi".to_string());
+    chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+}
+
+fn esc_key() -> KeyEvent {
+    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
 }
 
 fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {

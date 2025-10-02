@@ -14126,6 +14126,15 @@ impl ChatWidget<'_> {
             .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
+    /// Returns true when the global Esc handler should defer to the Auto Drive
+    /// key path so that a subsequent Esc will fully stop the run instead of
+    /// routing through the generic interrupt logic.
+    pub(crate) fn auto_should_handle_global_esc(&self) -> bool {
+        self.auto_state.active
+            && self.auto_state.awaiting_submission
+            && self.auto_state.paused_for_manual_edit
+    }
+
     pub(crate) fn is_task_running(&self) -> bool {
         self.bottom_pane.is_task_running()
             || self.terminal_is_running()
