@@ -1617,9 +1617,21 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::AutoCoordinatorDecision { status, summary, prompt, transcript } => {
+                AppEvent::AutoCoordinatorDecision {
+                    status,
+                    progress_past,
+                    progress_current,
+                    cli_prompt,
+                    transcript,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_decision(status, summary, prompt, transcript);
+                        widget.auto_handle_decision(
+                            status,
+                            progress_past,
+                            progress_current,
+                            cli_prompt,
+                            transcript,
+                        );
                     }
                 }
                 AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
