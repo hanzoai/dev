@@ -1222,15 +1222,17 @@ fn observer_report_replaces_prompt_and_resets_countdown() {
 fn background_event_before_next_output_precedes_later_cells() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
 
+    let tail_ticket = chat.make_background_tail_ticket();
     chat.insert_background_event_with_placement(
         "initial".to_string(),
         BackgroundPlacement::Tail,
-        None,
+        Some(tail_ticket.next_order()),
     );
+    let before_ticket = chat.make_background_before_next_output_ticket();
     chat.insert_background_event_with_placement(
         "guard".to_string(),
         BackgroundPlacement::BeforeNextOutput,
-        None,
+        Some(before_ticket.next_order()),
     );
     chat.push_background_tail("tail".to_string());
 

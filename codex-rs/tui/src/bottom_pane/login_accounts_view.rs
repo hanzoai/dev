@@ -17,6 +17,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 
 use super::bottom_pane_view::{BottomPaneView, ConditionalUpdate};
 use super::form_text_field::FormTextField;
@@ -28,8 +29,16 @@ pub(crate) struct LoginAccountsView {
 }
 
 impl LoginAccountsView {
-    pub fn new(codex_home: PathBuf, app_event_tx: AppEventSender) -> (Self, Rc<RefCell<LoginAccountsState>>) {
-        let state = Rc::new(RefCell::new(LoginAccountsState::new(codex_home, app_event_tx)));
+    pub fn new(
+        codex_home: PathBuf,
+        app_event_tx: AppEventSender,
+        tail_ticket: BackgroundOrderTicket,
+    ) -> (Self, Rc<RefCell<LoginAccountsState>>) {
+        let state = Rc::new(RefCell::new(LoginAccountsState::new(
+            codex_home,
+            app_event_tx,
+            tail_ticket,
+        )));
         (Self { state: state.clone() }, state)
     }
 }
@@ -88,6 +97,7 @@ enum ViewMode {
 pub(crate) struct LoginAccountsState {
     codex_home: PathBuf,
     app_event_tx: AppEventSender,
+    tail_ticket: BackgroundOrderTicket,
     accounts: Vec<AccountRow>,
     active_account_id: Option<String>,
     selected: usize,
@@ -97,10 +107,15 @@ pub(crate) struct LoginAccountsState {
 }
 
 impl LoginAccountsState {
-    fn new(codex_home: PathBuf, app_event_tx: AppEventSender) -> Self {
+    fn new(
+        codex_home: PathBuf,
+        app_event_tx: AppEventSender,
+        tail_ticket: BackgroundOrderTicket,
+    ) -> Self {
         let mut state = Self {
             codex_home,
             app_event_tx,
+            tail_ticket,
             accounts: Vec::new(),
             active_account_id: None,
             selected: 0,
@@ -111,6 +126,11 @@ impl LoginAccountsState {
         state.sync_account_store_from_auth();
         state.reload_accounts();
         state
+    }
+
+    fn send_tail(&self, message: impl Into<String>) {
+        self.app_event_tx
+            .send_background_event_with_ticket(&self.tail_ticket, message);
     }
 
     pub fn weak_handle(state: &Rc<RefCell<Self>>) -> Weak<RefCell<Self>> {
@@ -276,8 +296,7 @@ impl LoginAccountsState {
                         let mode = account.mode;
                         if self.activate_account(account.id.clone(), mode) {
                             self.mode = ViewMode::List;
-                            self.app_event_tx
-                                .send_background_event(format!("Switched to {label}"));
+                            self.send_tail(format!("Switched to {label}"));
                             self.is_complete = true;
                         }
                     }
@@ -560,8 +579,16 @@ pub(crate) struct LoginAddAccountView {
 }
 
 impl LoginAddAccountView {
-    pub fn new(codex_home: PathBuf, app_event_tx: AppEventSender) -> (Self, Rc<RefCell<LoginAddAccountState>>) {
-        let state = Rc::new(RefCell::new(LoginAddAccountState::new(codex_home, app_event_tx)));
+    pub fn new(
+        codex_home: PathBuf,
+        app_event_tx: AppEventSender,
+        tail_ticket: BackgroundOrderTicket,
+    ) -> (Self, Rc<RefCell<LoginAddAccountState>>) {
+        let state = Rc::new(RefCell::new(LoginAddAccountState::new(
+            codex_home,
+            app_event_tx,
+            tail_ticket,
+        )));
         (Self { state: state.clone() }, state)
     }
 }
@@ -598,20 +625,31 @@ enum AddStep {
 pub(crate) struct LoginAddAccountState {
     codex_home: PathBuf,
     app_event_tx: AppEventSender,
+    tail_ticket: BackgroundOrderTicket,
     step: AddStep,
     feedback: Option<Feedback>,
     is_complete: bool,
 }
 
 impl LoginAddAccountState {
-    fn new(codex_home: PathBuf, app_event_tx: AppEventSender) -> Self {
+    fn new(
+        codex_home: PathBuf,
+        app_event_tx: AppEventSender,
+        tail_ticket: BackgroundOrderTicket,
+    ) -> Self {
         Self {
             codex_home,
             app_event_tx,
+            tail_ticket,
             step: AddStep::Choose { selected: 0 },
             feedback: None,
             is_complete: false,
         }
+    }
+
+    fn send_tail(&self, message: impl Into<String>) {
+        self.app_event_tx
+            .send_background_event_with_ticket(&self.tail_ticket, message);
     }
 
     pub fn weak_handle(state: &Rc<RefCell<Self>>) -> Weak<RefCell<Self>> {
@@ -660,8 +698,7 @@ impl LoginAddAccountState {
                                     message: "API key connected".to_string(),
                                     is_error: false,
                                 });
-                                self.app_event_tx
-                                    .send_background_event("Added API key account");
+                                self.send_tail("Added API key account".to_string());
                                 self.app_event_tx
                                     .send(AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth: false });
                                 self.finish_and_show_accounts();
@@ -827,9 +864,8 @@ impl LoginAddAccountState {
     pub fn on_chatgpt_complete(&mut self, result: Result<(), String>) {
         match result {
             Ok(()) => {
-                self.feedback = Some(Feedback { message: "ChatGPT account connected".to_string(), is_error: false });
-                self.app_event_tx
-                    .send_background_event("ChatGPT account connected");
+        self.feedback = Some(Feedback { message: "ChatGPT account connected".to_string(), is_error: false });
+        self.send_tail("ChatGPT account connected".to_string());
                 self.app_event_tx
                     .send(AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth: true });
                 self.finish_and_show_accounts();

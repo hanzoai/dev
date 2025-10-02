@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 
 use super::bottom_pane_view::BottomPaneView;
 use super::BottomPane;
@@ -20,15 +21,21 @@ pub(crate) enum NotificationsMode {
 pub(crate) struct NotificationsSettingsView {
     mode: NotificationsMode,
     app_event_tx: AppEventSender,
+    ticket: BackgroundOrderTicket,
     selected_row: usize,
     is_complete: bool,
 }
 
 impl NotificationsSettingsView {
-    pub fn new(mode: NotificationsMode, app_event_tx: AppEventSender) -> Self {
+    pub fn new(
+        mode: NotificationsMode,
+        app_event_tx: AppEventSender,
+        ticket: BackgroundOrderTicket,
+    ) -> Self {
         Self {
             mode,
             app_event_tx,
+            ticket,
             selected_row: 0,
             is_complete: false,
         }
@@ -47,11 +54,15 @@ impl NotificationsSettingsView {
                 } else {
                     entries.join(", ")
                 };
-                self.app_event_tx.send_background_event(format!(
-                    "TUI notifications are filtered in config: [{}]",
-                    filters
-                ));
-                self.app_event_tx.send_background_event(
+                self.app_event_tx.send_background_event_with_ticket(
+                    &self.ticket,
+                    format!(
+                        "TUI notifications are filtered in config: [{}]",
+                        filters
+                    ),
+                );
+                self.app_event_tx.send_background_event_with_ticket(
+                    &self.ticket,
                     "Edit ~/.code/config.toml [tui].notifications to change filters.".to_string(),
                 );
             }

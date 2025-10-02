@@ -18,6 +18,7 @@ use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::theme::{custom_theme_is_dark, map_theme_for_palette, palette_mode, PaletteMode};
 
 use super::BottomPane;
@@ -42,11 +43,18 @@ pub(crate) struct ThemeSelectionView {
     just_entered_themes: bool,
     just_entered_spinner: bool,
     app_event_tx: AppEventSender,
+    tail_ticket: BackgroundOrderTicket,
+    before_ticket: BackgroundOrderTicket,
     is_complete: bool,
 }
 
 impl ThemeSelectionView {
-    pub fn new(current_theme: ThemeName, app_event_tx: AppEventSender) -> Self {
+    pub fn new(
+        current_theme: ThemeName,
+        app_event_tx: AppEventSender,
+        tail_ticket: BackgroundOrderTicket,
+        before_ticket: BackgroundOrderTicket,
+    ) -> Self {
         let current_theme = map_theme_for_palette(current_theme, custom_theme_is_dark());
         let themes = Self::get_theme_options();
         let selected_theme_index = themes
@@ -76,6 +84,8 @@ impl ThemeSelectionView {
             just_entered_themes: false,
             just_entered_spinner: false,
             app_event_tx,
+            tail_ticket,
+            before_ticket,
             is_complete: false,
         }
     }
@@ -295,6 +305,18 @@ impl ThemeSelectionView {
         self.mode = Mode::Overview;
     }
 
+    fn send_tail(&self, message: impl Into<String>) {
+        self.app_event_tx
+            .send_background_event_with_ticket(&self.tail_ticket, message);
+    }
+
+    fn send_before_next_output(&self, message: impl Into<String>) {
+        self.app_event_tx.send_background_before_next_output_with_ticket(
+            &self.before_ticket,
+            message,
+        );
+    }
+
     /// Spawn a background task that creates a custom spinner using the LLM with a JSON schema
     fn kickoff_spinner_creation(
         &self,
@@ -302,6 +324,7 @@ impl ThemeSelectionView {
         progress_tx: std::sync::mpsc::Sender<ProgressMsg>,
     ) {
         let tx = self.app_event_tx.clone();
+        let before_ticket = self.before_ticket.clone();
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -309,10 +332,10 @@ impl ThemeSelectionView {
             {
                 Ok(rt) => rt,
                 Err(e) => {
-                    tx.send_background_event_before_next_output(format!(
-                        "Failed to start runtime: {}",
-                        e
-                    ));
+                    tx.send_background_before_next_output_with_ticket(
+                        &before_ticket,
+                        format!("Failed to start runtime: {}", e),
+                    );
                     return;
                 }
             };
@@ -320,7 +343,13 @@ impl ThemeSelectionView {
                 // Load current config (CLI-style) and construct a one-off ModelClient
                 let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
                     Ok(c) => c,
-                    Err(e) => { tx.send_background_event_before_next_output(format!("Config error: {}", e)); return; }
+                    Err(e) => {
+                        tx.send_background_before_next_output_with_ticket(
+                            &before_ticket,
+                            format!("Config error: {}", e),
+                        );
+                        return;
+                    }
                 };
                 // Use the same auth preference as the active Codex session.
                 // When logged in with ChatGPT, prefer ChatGPT auth; otherwise fall back to API key.
@@ -383,7 +412,10 @@ impl ThemeSelectionView {
                 let mut stream = match client.stream(&prompt).await {
                     Ok(s) => s,
                     Err(e) => {
-                        tx.send_background_event_before_next_output(format!("Request error: {}", e));
+                        tx.send_background_before_next_output_with_ticket(
+                            &before_ticket,
+                            format!("Request error: {}", e),
+                        );
                         tracing::info!("spinner request error: {}", e);
                         return;
                     }
@@ -610,6 +642,7 @@ impl ThemeSelectionView {
             example["colors"]["progress"] = serde_json::Value::String(v);
         }
 
+        let before_ticket = self.before_ticket.clone();
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -617,17 +650,23 @@ impl ThemeSelectionView {
             {
                 Ok(rt) => rt,
                 Err(e) => {
-                    tx.send_background_event_before_next_output(format!(
-                        "Failed to start runtime: {}",
-                        e
-                    ));
+                    tx.send_background_before_next_output_with_ticket(
+                        &before_ticket,
+                        format!("Failed to start runtime: {}", e),
+                    );
                     return;
                 }
             };
             let _ = rt.block_on(async move {
                 let cfg = match codex_core::config::Config::load_with_cli_overrides(vec![], codex_core::config::ConfigOverrides::default()) {
                     Ok(c) => c,
-                    Err(e) => { tx.send_background_event_before_next_output(format!("Config error: {}", e)); return; }
+                    Err(e) => {
+                        tx.send_background_before_next_output_with_ticket(
+                            &before_ticket,
+                            format!("Config error: {}", e),
+                        );
+                        return;
+                    }
                 };
                 let auth_mgr = codex_core::AuthManager::shared_with_mode_and_originator(
                     cfg.codex_home.clone(),
@@ -709,7 +748,10 @@ impl ThemeSelectionView {
                 let mut stream = match client.stream(&prompt).await {
                     Ok(s) => s,
                     Err(e) => {
-                        tx.send_background_event_before_next_output(format!("Request error: {}", e));
+                        tx.send_background_before_next_output_with_ticket(
+                            &before_ticket,
+                            format!("Request error: {}", e),
+                        );
                         return;
                     }
                 };
@@ -1301,9 +1343,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         self.current_spinner = "custom".to_string();
                                         self.app_event_tx
                                             .send(AppEvent::UpdateSpinner("custom".to_string()));
-                                        self
-                                            .app_event_tx
-                                            .send_background_event("Custom spinner saved".to_string());
+                                        self.send_tail("Custom spinner saved".to_string());
                                         go_overview = true;
                                     }
                                 } else {
@@ -1432,20 +1472,15 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                                         }
                                         // Informative status depending on whether we set active
                                         if s.preview_on.get() {
-                                            self
-                                                .app_event_tx
-                                                .send_background_event_before_next_output(
-                                                    format!("Set theme to {}", name),
-                                                );
+                                            self.send_before_next_output(format!(
+                                                "Set theme to {}",
+                                                name
+                                            ));
                                         } else {
-                                            self
-                                                .app_event_tx
-                                                .send_background_event_before_next_output(
-                                                    format!(
-                                                        "Saved custom theme {} (not active)",
-                                                        name
-                                                    ),
-                                                );
+                                            self.send_before_next_output(format!(
+                                                "Saved custom theme {} (not active)",
+                                                name
+                                            ));
                                         }
                                         go_overview = true;
                                     }
