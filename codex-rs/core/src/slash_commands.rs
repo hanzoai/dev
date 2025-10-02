@@ -22,6 +22,7 @@ fn get_default_models() -> Vec<String> {
         "gemini".to_string(),
         "qwen".to_string(),
         "code".to_string(),
+        "cloud".to_string(),
     ]
 }
 
@@ -238,7 +239,10 @@ mod tests {
         // Test /plan command
         let result = handle_slash_command("/plan implement a new feature", None);
         assert!(result.is_some());
-        assert!(result.unwrap().contains("Create a comprehensive plan"));
+        let plan_prompt = result.unwrap();
+        assert!(plan_prompt.contains("Create a comprehensive plan"));
+        // Default agents list should include cloud when no [[agents]] configured
+        assert!(plan_prompt.to_ascii_lowercase().contains("cloud"));
 
         // Test /solve command
         let result = handle_slash_command("/solve fix the bug in authentication", None);
