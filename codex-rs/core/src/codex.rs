@@ -1038,10 +1038,11 @@ impl Session {
         req_ordinal: u64,
         output_index: Option<u32>,
     ) -> crate::protocol::OrderMeta {
+        let normalized_req = if req_ordinal == 0 { 1 } else { req_ordinal };
         let sequence = self.next_background_sequence(sub_id);
         let stored_output_index = output_index.unwrap_or(i32::MAX as u32);
         crate::protocol::OrderMeta {
-            request_ordinal: req_ordinal,
+            request_ordinal: normalized_req,
             output_index: Some(stored_output_index),
             sequence_number: Some(sequence),
         }
