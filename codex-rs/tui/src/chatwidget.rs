@@ -1264,6 +1264,12 @@ enum SystemPlacement {
     PrePromptInCurrent,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutoDriveRole {
+    User,
+    Assistant,
+}
+
 impl ChatWidget<'_> {
     const MAX_UNDO_CONVERSATION_MESSAGES: usize = 8;
     const MAX_UNDO_PREVIEW_CHARS: usize = 160;
@@ -3543,6 +3549,26 @@ impl ChatWidget<'_> {
         rows.join("\n")
     }
 
+    fn auto_drive_role_for_kind(kind: HistoryCellType) -> Option<AutoDriveRole> {
+        use AutoDriveRole::{Assistant, User};
+        match kind {
+            HistoryCellType::User => Some(Assistant),
+            HistoryCellType::Assistant
+            | HistoryCellType::Reasoning
+            | HistoryCellType::Error
+            | HistoryCellType::Exec { .. }
+            | HistoryCellType::Tool { .. }
+            | HistoryCellType::Patch { .. }
+            | HistoryCellType::PlanUpdate
+            | HistoryCellType::BackgroundEvent
+            | HistoryCellType::Notice
+            | HistoryCellType::Diff
+            | HistoryCellType::Plain
+            | HistoryCellType::Image => Some(User),
+            HistoryCellType::AnimatedWelcome | HistoryCellType::Loading => None,
+        }
+    }
+
     fn auto_drive_cell_text(cell: &dyn HistoryCell) -> Option<String> {
         let text = Self::auto_drive_lines_to_string(cell.display_lines());
         if text.trim().is_empty() {
@@ -3658,31 +3684,12 @@ impl ChatWidget<'_> {
     pub(crate) fn export_auto_drive_items(&self) -> Vec<codex_protocol::models::ResponseItem> {
         let mut items = Vec::new();
         for cell in &self.history_cells {
-            match cell.kind() {
-                HistoryCellType::User => {
-                    if let Some(text) = Self::auto_drive_cell_text(cell.as_ref()) {
-                        if let Some(item) = Self::auto_drive_make_assistant_message(text) {
-                            items.push(item);
-                        }
-                    }
-                }
-                HistoryCellType::Assistant => {
-                    if let Some(text) = Self::auto_drive_cell_text(cell.as_ref()) {
-                        if let Some(item) = Self::auto_drive_make_user_message(text) {
-                            items.push(item);
-                        }
-                    }
-                }
-                HistoryCellType::Reasoning => {
-                    if let Some(text) = Self::auto_drive_cell_text(cell.as_ref()) {
-                        use codex_protocol::models::{ContentItem, ResponseItem};
-                        items.push(ResponseItem::Message {
-                            id: Some("auto-drive-reasoning".to_string()),
-                            role: "user".to_string(),
-                            content: vec![ContentItem::InputText { text }],
-                        });
-                    }
-                }
+            let Some(role) = Self::auto_drive_role_for_kind(cell.kind()) else {
+                continue;
+            };
+
+            let text = match cell.kind() {
+                HistoryCellType::Reasoning => Self::auto_drive_cell_text(cell.as_ref()).map(|text| (text, true)),
                 HistoryCellType::PlanUpdate => {
                     if let Some(plan) = cell.as_any().downcast_ref::<PlanUpdateCell>() {
                         let state = plan.state();
@@ -3711,22 +3718,45 @@ impl ChatWidget<'_> {
                             }
                         }
                         let text = lines.join("\n");
-                        if let Some(item) = Self::auto_drive_make_user_message(text) {
-                            items.push(item);
-                        }
+                        Some((text, false))
+                    } else {
+                        Self::auto_drive_cell_text(cell.as_ref()).map(|text| (text, false))
                     }
                 }
                 HistoryCellType::Diff => {
                     if let Some(diff_cell) = cell.as_any().downcast_ref::<DiffCell>() {
-                        if let Some(summary) = Self::auto_drive_diff_summary(diff_cell.record()) {
-                            if let Some(item) = Self::auto_drive_make_user_message(summary) {
-                                items.push(item);
-                            }
-                        }
+                        Self::auto_drive_diff_summary(diff_cell.record()).map(|text| (text, false))
+                    } else {
+                        Self::auto_drive_cell_text(cell.as_ref()).map(|text| (text, false))
                     }
                 }
-                _ => {}
-            }
+                _ => Self::auto_drive_cell_text(cell.as_ref()).map(|text| (text, false)),
+            };
+
+            let Some((text, is_reasoning)) = text else {
+                continue;
+            };
+
+            let item = if is_reasoning {
+                codex_protocol::models::ResponseItem::Message {
+                    id: Some("auto-drive-reasoning".to_string()),
+                    role: "user".to_string(),
+                    content: vec![codex_protocol::models::ContentItem::InputText { text }],
+                }
+            } else {
+                match role {
+                    AutoDriveRole::Assistant => match Self::auto_drive_make_assistant_message(text) {
+                        Some(item) => item,
+                        None => continue,
+                    },
+                    AutoDriveRole::User => match Self::auto_drive_make_user_message(text) {
+                        Some(item) => item,
+                        None => continue,
+                    },
+                }
+            };
+
+            items.push(item);
         }
         items
     }
