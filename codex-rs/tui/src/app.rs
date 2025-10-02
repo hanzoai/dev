@@ -159,7 +159,7 @@ pub(crate) struct App<'a> {
     /// repaint after focus/size changes until a manual resize occurs.
     last_frame_size: Option<ratatui::prelude::Size>,
 
-    // Double‑Esc timing for backtrack/edit‑previous
+    // Double‑Esc timing for undo timeline
     last_esc_time: Option<Instant>,
 
     /// If true, enable lightweight timing collection and report on exit.
@@ -1009,14 +1009,14 @@ impl App<'_> {
                     },
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::InsertBackgroundEvent { message, placement } => match &mut self.app_state {
+                AppEvent::InsertBackgroundEvent { message, placement, order } => match &mut self.app_state {
                     AppState::Chat { widget } => {
                         tracing::debug!(
                             "app: InsertBackgroundEvent placement={:?} len={}",
                             placement,
                             message.len()
                         );
-                        widget.insert_background_event_with_placement(message, placement);
+                        widget.insert_background_event_with_placement(message, placement, order);
                     }
                     AppState::Onboarding { .. } => {}
                 },
@@ -1142,7 +1142,7 @@ impl App<'_> {
                             // - Otherwise apply global Esc ordering:
                             //   1) If agent is running, stop it (even if the composer has text).
                             //   2) Else if there's text, clear it.
-                            //   3) Else double‑Esc engages backtrack/edit‑previous.
+                            //   3) Else double‑Esc opens the undo timeline.
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 // Modal-first: give active modal views priority to handle Esc.
                                 if widget.has_active_modal_view() {
@@ -1173,21 +1173,17 @@ impl App<'_> {
                                         continue;
                                     }
 
-                                    // Step 3: backtrack via double‑Esc.
+                                    // Step 3: double‑Esc opens the undo timeline.
                                     if let Some(prev) = self.last_esc_time {
                                         if now.duration_since(prev) <= THRESHOLD {
                                             self.last_esc_time = None;
-                                            if widget.has_pending_jump_back() {
-                                                widget.undo_jump_back();
-                                            } else {
-                                                widget.show_edit_previous_picker();
-                                            }
+                                            widget.handle_undo_command();
                                             continue;
                                         }
                                     }
                                     // First Esc in empty/idle state: show hint and arm timer.
                                     self.last_esc_time = Some(now);
-                                    widget.show_esc_backtrack_hint();
+                                    widget.show_esc_undo_hint();
                                     continue;
                                 }
                             }
@@ -1621,9 +1617,21 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::AutoCoordinatorDecision { status, summary, prompt, transcript } => {
+                AppEvent::AutoCoordinatorDecision {
+                    status,
+                    progress_past,
+                    progress_current,
+                    cli_prompt,
+                    transcript,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_decision(status, summary, prompt, transcript);
+                        widget.auto_handle_decision(
+                            status,
+                            progress_past,
+                            progress_current,
+                            cli_prompt,
+                            transcript,
+                        );
                     }
                 }
                 AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
@@ -2170,6 +2178,7 @@ impl App<'_> {
                                 tx.send(AppEvent::InsertBackgroundEvent {
                                     message: format!("Cloud task output for {task_id}:\n{joined}"),
                                     placement: crate::app_event::BackgroundPlacement::Tail,
+                                    order: None,
                                 });
                             }
                             Ok(_) => tx.send(AppEvent::CloudTasksError {
