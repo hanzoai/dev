@@ -1623,14 +1623,7 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
                         out.push_str(m.trim());
                         out.push_str("\n\n");
                     }
-                    // Disable legacy block that contained a NUL in its format string
-                    if false {
-                    for (i, m) in text.messages.iter().enumerate() {
-                        out.push_str(&format!("{}.  ", i + 1));
-                        out.push_str(m.trim());
-                        out.push_str("\n\n");
-                    }
-                    }
+                    // (legacy NUL-containing formatter removed)
                 }
                 match diff_opt {
                     Some(diff) => {

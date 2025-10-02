@@ -841,7 +841,7 @@ async fn execute_model_with_permissions(
                 crate::spawn::spawn_child_async(
                     program.clone(),
                     args.clone(),
-                    Some(&program.to_string_lossy()),
+                    Some(program.to_string_lossy().as_ref()),
                     working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
                     &SandboxPolicy::DangerFullAccess,
                     StdioPolicy::RedirectForShellTool,
@@ -940,7 +940,7 @@ async fn execute_cloud_built_in_streaming(
     let mut child = crate::spawn::spawn_child_async(
         program.clone(),
         args.clone(),
-        Some(&program.to_string_lossy()),
+        Some(program.to_string_lossy().as_ref()),
         working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
         &SandboxPolicy::DangerFullAccess,
         StdioPolicy::RedirectForShellTool,
