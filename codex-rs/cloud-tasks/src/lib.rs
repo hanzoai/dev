@@ -1631,6 +1631,8 @@ async fn run_submit(args: crate::cli::SubmitArgs) -> anyhow::Result<()> {
                     }
                     None => out.push_str("No diff available.\n"),
                 }
+                // Sanitize any embedded NULs that could corrupt downstream consumers.
+                let out = out.replace('\0', "");
                 print!("{}", out);
                 return Ok(());
             }

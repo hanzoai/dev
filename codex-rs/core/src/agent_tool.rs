@@ -697,7 +697,9 @@ async fn execute_model_with_permissions(
     // Proactively check for presence of external command before spawn when not
     // using the current executable fallback. This avoids confusing OS errors
     // like "program not found" and lets us surface a cleaner message.
-    if family != "codex" && family != "code" && !command_exists(&command) {
+    if !(family == "codex" || family == "code" || (family == "cloud" && config.is_none()))
+        && !command_exists(&command)
+    {
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
