@@ -50,7 +50,20 @@ pub fn default_params_for(name: &str, read_only: bool) -> Vec<String> {
                 ]
             }
         }
+        // Cloud agent: do not assume a prompt flag by default. Users can
+        // configure args via [[agents]]; we will append the prompt positionally.
+        "cloud" => Vec::new(),
         _ => Vec::new(),
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cloud_defaults_are_empty_both_modes() {
+        assert!(default_params_for("cloud", true).is_empty());
+        assert!(default_params_for("cloud", false).is_empty());
+    }
+}
