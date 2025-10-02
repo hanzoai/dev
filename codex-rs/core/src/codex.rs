@@ -2970,6 +2970,34 @@ async fn submission_loop(
 
                 let effective_user_instructions = computed_user_instructions.clone();
 
+                // Optionally resume an existing rollout.
+                let mut restored_items: Option<Vec<RolloutItem>> = None;
+                let mut restored_history_snapshot: Option<crate::history::HistorySnapshot> = None;
+                let mut resume_notice: Option<String> = None;
+                let mut rollout_recorder: Option<RolloutRecorder> = None;
+                if let Some(path) = resume_path.as_ref() {
+                    match RolloutRecorder::resume(&updated_config, path).await {
+                        Ok((rec, saved)) => {
+                            session_id = saved.session_id;
+                            if !saved.items.is_empty() {
+                                restored_items = Some(saved.items);
+                            }
+                            if let Some(snapshot) = saved.history_snapshot {
+                                restored_history_snapshot = Some(snapshot);
+                            }
+                            rollout_recorder = Some(rec);
+                        }
+                        Err(e) => {
+                            warn!("failed to resume rollout from {path:?}: {e}");
+                            resume_notice = Some(format!(
+                                "⚠️ Failed to load previous session from {}: {e}. Starting a new conversation instead.",
+                                path.display()
+                            ));
+                            updated_config.experimental_resume = None;
+                        }
+                    }
+                }
+
                 let new_config = Arc::new(updated_config);
 
                 if model_changed || effort_changed {
@@ -2986,31 +3014,6 @@ async fn submission_loop(
                 }
 
                 config = Arc::clone(&new_config);
-
-                // Optionally resume an existing rollout.
-                let mut restored_items: Option<Vec<RolloutItem>> = None;
-                let mut restored_history_snapshot: Option<crate::history::HistorySnapshot> = None;
-                let rollout_recorder: Option<RolloutRecorder> =
-                    if let Some(path) = resume_path.as_ref() {
-                        match RolloutRecorder::resume(&config, path).await {
-                            Ok((rec, saved)) => {
-                                session_id = saved.session_id;
-                                if !saved.items.is_empty() {
-                                    restored_items = Some(saved.items);
-                                }
-                                if let Some(snapshot) = saved.history_snapshot {
-                                    restored_history_snapshot = Some(snapshot);
-                                }
-                                Some(rec)
-                            }
-                            Err(e) => {
-                                warn!("failed to resume rollout from {path:?}: {e}");
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
 
                 let rollout_recorder = match rollout_recorder {
                     Some(rec) => Some(rec),
@@ -3269,6 +3272,16 @@ async fn submission_loop(
                     );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
+                    }
+                }
+
+                if let Some(notice) = resume_notice {
+                    let event = sess_arc.make_event(
+                        &sub.id,
+                        EventMsg::BackgroundEvent(BackgroundEventEvent { message: notice }),
+                    );
+                    if let Err(e) = tx_event.send(event).await {
+                        warn!("failed to send resume notice event: {e}");
                     }
                 }
 
