@@ -27,8 +27,8 @@ pub(crate) enum Overlay {
 }
 
 impl Overlay {
-    pub(crate) fn new_transcript(lines: Vec<Line<'static>>) -> Self {
-        Self::Transcript(TranscriptOverlay::new(lines))
+    pub(crate) fn new_transcript(lines: Vec<Line<'static>>, esc_hint: &'static str) -> Self {
+        Self::Transcript(TranscriptOverlay::new(lines, esc_hint))
     }
 
     pub(crate) fn new_static_with_title(lines: Vec<Line<'static>>, title: String) -> Self {
@@ -368,10 +368,11 @@ pub(crate) struct TranscriptOverlay {
     view: PagerView,
     highlight_range: Option<(usize, usize)>,
     is_done: bool,
+    esc_hint: &'static str,
 }
 
 impl TranscriptOverlay {
-    pub(crate) fn new(transcript_lines: Vec<Line<'static>>) -> Self {
+    pub(crate) fn new(transcript_lines: Vec<Line<'static>>, esc_hint: &'static str) -> Self {
         Self {
             view: PagerView::new(
                 transcript_lines,
@@ -380,6 +381,7 @@ impl TranscriptOverlay {
             ),
             highlight_range: None,
             is_done: false,
+            esc_hint,
         }
     }
 
@@ -396,7 +398,7 @@ impl TranscriptOverlay {
         let line1 = Rect::new(area.x, area.y, area.width, 1);
         let line2 = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);
         render_key_hints(line1, buf, PAGER_KEY_HINTS);
-        let mut pairs: Vec<(&str, &str)> = vec![("q", "quit"), ("Esc", "edit prev")];
+        let mut pairs: Vec<(&str, &str)> = vec![("q", "quit"), ("Esc", self.esc_hint)];
         if let Some((start, end)) = self.highlight_range {
             if end > start {
             pairs.push(("⏎", "edit message"));
@@ -544,9 +546,11 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
+    use crate::chatwidget::DOUBLE_ESC_HINT;
+
     #[test]
-    fn edit_prev_hint_is_visible() {
-        let mut overlay = TranscriptOverlay::new(vec![Line::from("hello")]);
+    fn undo_hint_is_visible() {
+        let mut overlay = TranscriptOverlay::new(vec![Line::from("hello")], DOUBLE_ESC_HINT);
 
         // Render into a small buffer and assert the backtrack hint is present
         let area = Rect::new(0, 0, 40, 10);
@@ -562,8 +566,8 @@ mod tests {
             s.push('\n');
         }
         assert!(
-            s.contains("edit prev"),
-            "expected 'edit prev' hint in overlay footer, got: {s:?}"
+            s.contains(DOUBLE_ESC_HINT),
+            "expected '{DOUBLE_ESC_HINT}' hint in overlay footer, got: {s:?}"
         );
     }
 
@@ -574,7 +578,7 @@ mod tests {
             Line::from("alpha"),
             Line::from("beta"),
             Line::from("gamma"),
-        ]);
+        ], DOUBLE_ESC_HINT);
         let mut term = Terminal::new(TestBackend::new(40, 10)).expect("term");
         term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
             .expect("draw");
@@ -661,7 +665,7 @@ mod tests {
         let exec_cell: Arc<dyn HistoryCell> = Arc::new(exec_cell);
         cells.push(exec_cell);
 
-        let mut overlay = TranscriptOverlay::new(cells);
+        let mut overlay = TranscriptOverlay::new(cells, DOUBLE_ESC_HINT);
         let area = Rect::new(0, 0, 80, 12);
         let mut buf = Buffer::empty(area);
 
