@@ -71,6 +71,7 @@ mod streaming;
 mod terminal_handlers;
 mod terminal;
 mod tools;
+mod running_tools;
 #[cfg(all(test, feature = "legacy_tests"))]
 mod tests_retry;
 use self::agent_install::{
@@ -129,6 +130,8 @@ use crate::bottom_pane::{
     CountdownState,
 };
 use crate::exec_command::strip_bash_lc_and_escape;
+
+pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -153,6 +156,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
+    if let Ok(value) = std::env::var("CODEX_TRACE_HISTORY") {
+        let trimmed = value.trim();
+        if !matches!(trimmed, "" | "0") {
+            return true;
+        }
+    }
     *ENABLED.get_or_init(|| {
         if let Ok(value) = std::env::var("CODE_BUFFER_DIFF_TRACE_CELLS") {
             return !matches!(value.trim(), "" | "0");
@@ -492,7 +501,9 @@ struct AutoCoordinatorUiState {
     active: bool,
     goal: Option<String>,
     current_summary: Option<String>,
-    current_prompt: Option<String>,
+    current_progress_past: Option<String>,
+    current_progress_current: Option<String>,
+    current_cli_prompt: Option<String>,
     current_display_line: Option<String>,
     current_display_is_summary: bool,
     current_reasoning_title: Option<String>,
@@ -508,6 +519,8 @@ struct AutoCoordinatorUiState {
     awaiting_goal_input: bool,
     last_broadcast_summary: Option<String>,
     last_decision_summary: Option<String>,
+    last_decision_progress_past: Option<String>,
+    last_decision_progress_current: Option<String>,
     last_decision_display: Option<String>,
     last_decision_display_is_summary: bool,
     observer_telemetry: Option<AutoObserverTelemetry>,
@@ -541,6 +554,7 @@ pub(crate) struct ChatWidget<'a> {
     history_snapshot_dirty: bool,
     history_snapshot_last_flush: Option<Instant>,
     config: Config,
+    history_debug_events: Option<RefCell<Vec<String>>>,
     latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -654,7 +668,6 @@ pub(crate) struct ChatWidget<'a> {
     session_id: Option<uuid::Uuid>,
 
     // Pending jump-back state (reversible until submit)
-    pending_jump_back: Option<PendingJumpBack>,
 
     // Track active task ids so we don't drop the working status while any
     // agent/sub‑agent is still running (long‑running sessions can interleave).
@@ -731,10 +744,6 @@ pub(crate) struct ChatWidget<'a> {
     // Track the largest order key we have assigned so far to keep tail inserts monotonic
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
-}
-
-struct PendingJumpBack {
-    removed_cells: Vec<Box<dyn HistoryCell>>, // cells removed from the end (from selected user message onward)
 }
 
 #[derive(Clone)]
@@ -1959,7 +1968,8 @@ impl ChatWidget<'_> {
     /// Render a single recorded ResponseItem into history without executing tools
     fn render_replay_item(&mut self, item: ResponseItem) {
         match item {
-            ResponseItem::Message { role, content, .. } => {
+            ResponseItem::Message { id, role, content } => {
+                let message_id = id;
                 let mut text = String::new();
                 for c in content {
                     match c {
@@ -2007,7 +2017,7 @@ impl ChatWidget<'_> {
                 }
                 let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                 crate::markdown::append_markdown(text, &mut lines, &self.config);
-                self.insert_final_answer_with_id(None, lines, text.to_string());
+                self.insert_final_answer_with_id(message_id, lines, text.to_string());
                 return;
             }
                 if role == "user" {
@@ -2848,8 +2858,9 @@ impl ChatWidget<'_> {
         }
 
         let mut has_wait_running = false;
-        for entry in self.tools_state.running_custom_tools.values() {
-            if let Some(idx) = self.resolve_running_tool_index(entry) {
+        for (call_id, entry) in self.tools_state.running_custom_tools.iter() {
+            if let Some(idx) = running_tools::resolve_entry_index(self, entry, &call_id.0)
+            {
                 if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
                     .as_any()
                     .downcast_ref::<history_cell::RunningToolCallCell>())
@@ -3046,6 +3057,11 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            history_debug_events: if history_cell_logging_enabled() {
+                Some(RefCell::new(Vec::new()))
+            } else {
+                None
+            },
             latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
@@ -3069,12 +3085,7 @@ impl ChatWidget<'_> {
                 suppressed_exec_end_order: VecDeque::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
-            tools_state: ToolState {
-                running_custom_tools: HashMap::new(),
-                running_web_search: HashMap::new(),
-                running_wait_tools: HashMap::new(),
-                running_kill_tools: HashMap::new(),
-            },
+            tools_state: ToolState::default(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -3170,7 +3181,6 @@ impl ChatWidget<'_> {
                 pending_scroll_rows: Cell::new(0),
             },
             session_id: None,
-            pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
@@ -3318,6 +3328,11 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            history_debug_events: if history_cell_logging_enabled() {
+                Some(RefCell::new(Vec::new()))
+            } else {
+                None
+            },
             latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
@@ -3437,7 +3452,6 @@ impl ChatWidget<'_> {
                 pending_scroll_rows: Cell::new(0),
             },
             session_id: None,
-            pending_jump_back: None,
             active_task_ids: HashSet::new(),
             queued_user_messages: std::collections::VecDeque::new(),
             pending_dispatched_user_messages: std::collections::VecDeque::new(),
@@ -4091,10 +4105,6 @@ impl ChatWidget<'_> {
                     self.bottom_pane.set_task_running(false);
                     self.handle_auto_command(Some(trimmed.to_string()));
                     return;
-                }
-                // Commit pending jump-back (make trimming permanent) before submission
-                if self.pending_jump_back.is_some() {
-                    self.pending_jump_back = None;
                 }
                 if self.try_handle_terminal_shortcut(&text) {
                     return;
@@ -5909,6 +5919,48 @@ impl ChatWidget<'_> {
         );
     }
 
+    pub(super) fn history_debug(&self, message: impl Into<String>) {
+        if !history_cell_logging_enabled() {
+            return;
+        }
+        let message = message.into();
+        tracing::trace!(target: "codex_history", "{message}");
+        if let Some(buffer) = &self.history_debug_events {
+            buffer.borrow_mut().push(message);
+        }
+    }
+
+    fn rehydrate_system_order_cache(&mut self, preserved: &[(String, HistoryId)]) {
+        let prev = self.system_cell_by_id.len();
+        self.system_cell_by_id.clear();
+
+        for (key, hid) in preserved {
+            if let Some(idx) = self
+                .history_cell_ids
+                .iter()
+                .position(|maybe| maybe.map(|stored| stored == *hid).unwrap_or(false))
+            {
+                self.system_cell_by_id.insert(key.clone(), idx);
+            }
+        }
+
+        self.history_debug(format!(
+            "system_order_cache.rehydrate prev={} restored={} entries={}",
+            prev,
+            preserved.len(),
+            self.system_cell_by_id.len()
+        ));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn history_debug_events(&self) -> Vec<String> {
+        self
+            .history_debug_events
+            .as_ref()
+            .map(|buf| buf.borrow().clone())
+            .unwrap_or_default()
+    }
+
     #[cfg(test)]
     pub(crate) fn test_set_request_state(&mut self, last_seen: u64, pending_prompts: usize) {
         self.last_seen_request_index = last_seen;
@@ -6001,25 +6053,6 @@ impl ChatWidget<'_> {
         self.refresh_explore_trailing_flags();
         // Keep debug info for this cell index as-is.
         self.mark_history_dirty();
-    }
-
-    fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
-        if let Some(id) = entry.history_id {
-            if let Some(pos) = self.cell_index_for_history_id(id) {
-                return Some(pos);
-            }
-        }
-        if let Some(pos) = self
-            .cell_order_seq
-            .iter()
-            .position(|key| *key == entry.order_key)
-        {
-            return Some(pos);
-        }
-        if entry.fallback_index < self.history_cells.len() {
-            return Some(entry.fallback_index);
-        }
-        None
     }
 
     fn history_remove_at(&mut self, idx: usize) {
@@ -7564,6 +7597,21 @@ impl ChatWidget<'_> {
 
     pub(crate) fn restore_history_snapshot(&mut self, snapshot: &HistorySnapshot) {
         let perf_timer = self.perf_state.enabled.then(Instant::now);
+        let preserved_system_entries: Vec<(String, HistoryId)> = self
+            .system_cell_by_id
+            .iter()
+            .filter_map(|(key, &idx)| {
+                self.history_cell_ids
+                    .get(idx)
+                    .and_then(|maybe| maybe.map(|hid| (key.clone(), hid)))
+            })
+            .collect();
+        self.history_debug(format!(
+            "restore_history_snapshot.start records={} cells_before={} order_before={}",
+            snapshot.records.len(),
+            self.history_cells.len(),
+            self.cell_order_seq.len()
+        ));
         self.history_state.restore(snapshot);
 
         self.history_render.invalidate_all();
@@ -7651,6 +7699,9 @@ impl ChatWidget<'_> {
         self.internal_seq = max_seq;
         self.last_assigned_order = self.cell_order_seq.iter().copied().max();
 
+        running_tools::rehydrate(self);
+        self.rehydrate_system_order_cache(&preserved_system_entries);
+
         self.bottom_pane
             .set_has_chat_history(!self.history_cells.is_empty());
         self.refresh_reasoning_collapsed_visibility();
@@ -7667,6 +7718,13 @@ impl ChatWidget<'_> {
         }
         self.history_snapshot_dirty = true;
         self.history_snapshot_last_flush = None;
+
+        self.history_debug(format!(
+            "restore_history_snapshot.done cells={} order={} system_cells={}",
+            self.history_cells.len(),
+            self.cell_order_seq.len(),
+            self.system_cell_by_id.len()
+        ));
     }
 
     pub(crate) fn perform_undo_restore(
@@ -7800,7 +7858,6 @@ impl ChatWidget<'_> {
         self.bottom_pane.clear_live_ring();
         self.bottom_pane.set_task_running(false);
         self.active_task_ids.clear();
-        self.pending_jump_back = None;
         if !self.agents_terminal.active {
             self.bottom_pane.ensure_input_focus();
         }
@@ -8031,7 +8088,14 @@ impl ChatWidget<'_> {
                 self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
-                tools::web_search_complete(self, ev.call_id, ev.query)
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on WebSearchComplete; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
+                tools::web_search_complete(self, ev.call_id, ev.query, ok)
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
@@ -9035,7 +9099,8 @@ impl ChatWidget<'_> {
                     .remove(&ToolCallId(call_id.clone()));
                 let resolved_idx = running_entry
                     .as_ref()
-                    .and_then(|entry| self.resolve_running_tool_index(entry));
+                    .and_then(|entry| running_tools::resolve_entry_index(self, entry, &call_id))
+                    .or_else(|| running_tools::find_by_call_id(self, &call_id));
 
                 if tool_name == "apply_patch" && success {
                     if let Some(idx) = resolved_idx {
@@ -9148,6 +9213,7 @@ impl ChatWidget<'_> {
                     if let Some(idx) = resolved_idx {
                         self.history_replace_at(idx, Box::new(completed));
                     } else {
+                        running_tools::collapse_spinner(self, &call_id);
                         let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                     }
 
@@ -9166,8 +9232,24 @@ impl ChatWidget<'_> {
                 );
                 completed.state_mut().call_id = Some(call_id.clone());
                 if let Some(idx) = resolved_idx {
+                    self.history_debug(format!(
+                        "custom_tool_end.in_place call_id={} idx={} order=({}, {}, {})",
+                        call_id,
+                        idx,
+                        ok.req,
+                        ok.out,
+                        ok.seq
+                    ));
                     self.history_replace_at(idx, Box::new(completed));
                 } else {
+                    self.history_debug(format!(
+                        "custom_tool_end.fallback_insert call_id={} order=({}, {}, {})",
+                        call_id,
+                        ok.req,
+                        ok.out,
+                        ok.seq
+                    ));
+                    running_tools::collapse_spinner(self, &call_id);
                     let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                 }
 
@@ -10999,6 +11081,9 @@ impl ChatWidget<'_> {
                 self.auto_state.active = true;
                 self.auto_state.goal = Some(goal_text.clone());
                 self.auto_state.current_summary = None;
+                self.auto_state.current_progress_past = None;
+                self.auto_state.current_progress_current = None;
+                self.auto_state.current_cli_prompt = None;
                 self.auto_state.current_display_line = None;
                 self.auto_state.current_display_is_summary = false;
                 self.auto_state.current_reasoning_title = None;
@@ -11007,6 +11092,8 @@ impl ChatWidget<'_> {
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
                 self.auto_state.thinking_prefix_stripped = false;
                 self.auto_state.last_broadcast_summary = None;
+                self.auto_state.last_decision_progress_past = None;
+                self.auto_state.last_decision_progress_current = None;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
@@ -11038,6 +11125,9 @@ impl ChatWidget<'_> {
             self.auto_state.waiting_for_response = true;
             self.auto_state.coordinator_waiting = true;
             self.auto_state.current_summary = None;
+            self.auto_state.current_progress_past = None;
+            self.auto_state.current_progress_current = None;
+            self.auto_state.current_cli_prompt = None;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
             self.auto_state.current_display_line = None;
@@ -11055,21 +11145,31 @@ impl ChatWidget<'_> {
     pub(crate) fn auto_handle_decision(
         &mut self,
         status: AutoCoordinatorStatus,
-        summary: String,
-        prompt: Option<String>,
+        progress_past: Option<String>,
+        progress_current: Option<String>,
+        cli_prompt: Option<String>,
         transcript: Vec<codex_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
             return;
         }
 
-        let summary = summary.trim().to_string();
+        let progress_past = Self::normalize_progress_field(progress_past);
+        let progress_current = Self::normalize_progress_field(progress_current);
+
         if !transcript.is_empty() {
             self.auto_history.append_raw(&transcript);
         }
-        self.auto_state.last_decision_summary = Some(summary.clone());
+
+        self.auto_state.current_progress_past = progress_past.clone();
+        self.auto_state.current_progress_current = progress_current.clone();
+        self.auto_state.last_decision_progress_past = progress_past.clone();
+        self.auto_state.last_decision_progress_current = progress_current.clone();
+
+        let summary_text = Self::compose_progress_summary(&progress_current, &progress_past);
+        self.auto_state.last_decision_summary = Some(summary_text.clone());
         self.auto_state.coordinator_waiting = false;
-        self.auto_on_reasoning_final(&summary);
+        self.auto_on_reasoning_final(&summary_text);
         self.auto_state.last_decision_display = self.auto_state.current_display_line.clone();
         self.auto_state.last_decision_display_is_summary =
             self.auto_state.current_display_is_summary;
@@ -11081,11 +11181,11 @@ impl ChatWidget<'_> {
 
         match status {
             AutoCoordinatorStatus::Continue => {
-                let Some(prompt_text) = prompt else {
+                let Some(prompt_text) = cli_prompt else {
                     self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
                     return;
                 };
-                self.auto_state.current_prompt = Some(prompt_text.clone());
+                self.auto_state.current_cli_prompt = Some(prompt_text.clone());
                 self.auto_state.awaiting_submission = true;
                 self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
                 self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
@@ -11095,21 +11195,31 @@ impl ChatWidget<'_> {
                 self.auto_start_countdown(countdown_id);
             }
             AutoCoordinatorStatus::Success => {
-                let lower = summary.to_ascii_lowercase();
-                let message = if lower.starts_with("coordinator success:") {
-                    summary
+                let normalized = summary_text.trim();
+                let message = if normalized.is_empty() {
+                    "Coordinator success.".to_string()
+                } else if normalized
+                    .to_ascii_lowercase()
+                    .starts_with("coordinator success:")
+                {
+                    summary_text
                 } else {
-                    format!("Coordinator success: {summary}")
+                    format!("Coordinator success: {summary_text}")
                 };
                 self.auto_stop(Some(message));
                 return;
             }
             AutoCoordinatorStatus::Failed => {
-                let lower = summary.to_ascii_lowercase();
-                let message = if lower.starts_with("coordinator error:") {
-                    summary
+                let normalized = summary_text.trim();
+                let message = if normalized.is_empty() {
+                    "Coordinator error.".to_string()
+                } else if normalized
+                    .to_ascii_lowercase()
+                    .starts_with("coordinator error:")
+                {
+                    summary_text
                 } else {
-                    format!("Coordinator error: {summary}")
+                    format!("Coordinator error: {summary_text}")
                 };
                 self.auto_stop(Some(message));
                 return;
@@ -11189,7 +11299,7 @@ impl ChatWidget<'_> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                self.auto_state.current_prompt = Some(message.to_string());
+                self.auto_state.current_cli_prompt = Some(message.to_string());
                 if self.auto_state.awaiting_submission {
                     self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
                     self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
@@ -11221,7 +11331,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active {
             return;
         }
-        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
             self.auto_stop(Some("Coordinator prompt missing when attempting to submit.".to_string()));
             return;
         };
@@ -11238,6 +11348,8 @@ impl ChatWidget<'_> {
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_summary = None;
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
         self.auto_state.last_broadcast_summary = None;
         self.auto_state.current_display_line = post_submit_display.clone();
         self.auto_state.current_display_is_summary =
@@ -11259,7 +11371,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || !self.auto_state.awaiting_submission {
             return;
         }
-        let Some(prompt) = self.auto_state.current_prompt.clone() else {
+        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
             return;
         };
 
@@ -11324,6 +11436,8 @@ impl ChatWidget<'_> {
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
         self.auto_state.current_summary = Some(String::new());
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
@@ -11366,19 +11480,31 @@ impl ChatWidget<'_> {
 
         let headline = self.auto_format_status_headline(&status_text);
         let mut status_lines = vec![headline];
+        self.auto_append_progress_lines(
+            &mut status_lines,
+            self.auto_state.current_progress_current.as_ref(),
+            self.auto_state.current_progress_past.as_ref(),
+        );
         if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
-            if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
-                let trimmed = summary.trim();
-                if !trimmed.is_empty() {
-                    let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if !collapsed.is_empty() {
-                        let current_line = status_lines
-                            .first()
-                            .map(|line| line.trim_end_matches('…').trim())
-                            .unwrap_or("");
-                        if collapsed != current_line {
-                            let display = Self::truncate_with_ellipsis(&collapsed, 160);
-                            status_lines.push(display);
+            let appended = self.auto_append_progress_lines(
+                &mut status_lines,
+                self.auto_state.last_decision_progress_current.as_ref(),
+                self.auto_state.last_decision_progress_past.as_ref(),
+            );
+            if !appended {
+                if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
+                    let trimmed = summary.trim();
+                    if !trimmed.is_empty() {
+                        let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if !collapsed.is_empty() {
+                            let current_line = status_lines
+                                .first()
+                                .map(|line| line.trim_end_matches('…').trim())
+                                .unwrap_or("");
+                            if collapsed != current_line {
+                                let display = Self::truncate_with_ellipsis(&collapsed, 160);
+                                status_lines.push(display);
+                            }
                         }
                     }
                 }
@@ -11407,9 +11533,9 @@ impl ChatWidget<'_> {
         }
         let cli_running = self.is_cli_running();
 
-        let prompt = self
+        let cli_prompt = self
             .auto_state
-            .current_prompt
+            .current_cli_prompt
             .clone()
             .filter(|p| !p.trim().is_empty());
 
@@ -11453,7 +11579,7 @@ impl ChatWidget<'_> {
         let model = AutoCoordinatorViewModel {
             goal: self.auto_state.goal.clone(),
             status_lines,
-            prompt,
+            cli_prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
             countdown,
@@ -11668,6 +11794,56 @@ impl ChatWidget<'_> {
         }
         out.push('…');
         out
+    }
+
+    fn normalize_progress_field(field: Option<String>) -> Option<String> {
+        field.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
+    fn compose_progress_summary(
+        progress_current: &Option<String>,
+        progress_past: &Option<String>,
+    ) -> String {
+        let mut lines = Vec::new();
+        if let Some(current) = progress_current.as_ref() {
+            lines.push(current.clone());
+        }
+        if let Some(past) = progress_past.as_ref() {
+            lines.push(past.clone());
+        }
+        lines.join("\n")
+    }
+
+    fn auto_append_progress_lines(
+        &self,
+        lines: &mut Vec<String>,
+        progress_current: Option<&String>,
+        progress_past: Option<&String>,
+    ) -> bool {
+        let initial_len = lines.len();
+        Self::append_progress_line(lines, progress_current);
+        Self::append_progress_line(lines, progress_past);
+        lines.len() > initial_len
+    }
+
+    fn append_progress_line(lines: &mut Vec<String>, progress: Option<&String>) {
+        if let Some(progress) = progress {
+            let trimmed = progress.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let display = Self::truncate_with_ellipsis(trimmed, 160);
+            if !lines.iter().any(|existing| existing.trim() == display) {
+                lines.push(display);
+            }
+        }
     }
 
     pub(crate) fn launch_update_command(
@@ -12719,7 +12895,7 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
-        lines.push(kv("Esc", "Edit previous message / close popups"));
+        lines.push(kv("Esc", &format!("{} / close popups", Self::double_esc_hint_label())));
         // Task control shortcuts
         lines.push(kv("Esc", "End current task"));
         lines.push(kv("Ctrl+C", "End current task"));
@@ -13748,88 +13924,13 @@ impl ChatWidget<'_> {
     }
 
     // --- Double‑Escape helpers ---
-    pub(crate) fn show_esc_backtrack_hint(&mut self) {
-        self.bottom_pane
-            .flash_footer_notice("Esc edit prev".to_string());
+    pub(crate) fn double_esc_hint_label() -> &'static str {
+        DOUBLE_ESC_HINT
     }
 
-    pub(crate) fn show_edit_previous_picker(&mut self) {
-        use crate::bottom_pane::list_selection_view::ListSelectionView;
-        use crate::bottom_pane::list_selection_view::SelectionItem;
-        // Collect recent user prompts (newest first)
-        let mut items: Vec<SelectionItem> = Vec::new();
-        let mut nth_counter = 0usize;
-        for cell in self.history_cells.iter().rev() {
-            if cell.kind() == crate::history_cell::HistoryCellType::User {
-                nth_counter += 1; // 1-based index for Nth last
-                let content_lines = cell.display_lines();
-                if content_lines.is_empty() {
-                    continue;
-                }
-                let full_text: String = content_lines
-                    .iter()
-                    .map(|l| {
-                        l.spans
-                            .iter()
-                            .map(|s| s.content.to_string())
-                            .collect::<String>()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                // Build a concise name from first line
-                let mut first = content_lines[0]
-                    .spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>();
-                const MAX: usize = 64;
-                if first.chars().count() > MAX {
-                    first = first.chars().take(MAX).collect::<String>() + "…";
-                }
-
-                let nth = nth_counter;
-                let actions: Vec<crate::bottom_pane::list_selection_view::SelectionAction> =
-                    vec![Box::new({
-                        let text = full_text.clone();
-                        move |tx: &crate::app_event_sender::AppEventSender| {
-                            tx.send(crate::app_event::AppEvent::JumpBack {
-                                nth,
-                                prefill: text.clone(),
-                                history_snapshot: None,
-                            });
-                        }
-                    })];
-
-                items.push(SelectionItem {
-                    name: first,
-                    description: None,
-                    is_current: false,
-                    actions,
-                });
-            }
-        }
-
-        if items.is_empty() {
-            self.bottom_pane
-                .flash_footer_notice("No previous messages to edit".to_string());
-            return;
-        }
-
-        let view: ListSelectionView = ListSelectionView::new(
-            " Jump back to a previous message ".to_string(),
-            Some("This will return the conversation to an earlier state".to_string()),
-            Some("Esc cancel".to_string()),
-            items,
-            self.app_event_tx.clone(),
-            8,
-        );
-        self.bottom_pane.show_list_selection(
-            "Jump back to a previous message".to_string(),
-            None,
-            None,
-            view,
-        );
+    pub(crate) fn show_esc_undo_hint(&mut self) {
+        self.bottom_pane
+            .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
     pub(crate) fn is_task_running(&self) -> bool {
@@ -13840,25 +13941,6 @@ impl ChatWidget<'_> {
             || !self.tools_state.running_web_search.is_empty()
             || !self.tools_state.running_wait_tools.is_empty()
             || !self.tools_state.running_kill_tools.is_empty()
-    }
-
-    // begin_jump_back no longer used: backend fork handles it.
-
-    pub(crate) fn undo_jump_back(&mut self) {
-        if let Some(mut st) = self.pending_jump_back.take() {
-            // Restore removed cells in original order
-            for cell in st.removed_cells.drain(..) {
-                self.history_cell_ids.push(None);
-                self.history_cells.push(cell);
-            }
-            // Clear composer (no reliable way to restore prior text)
-            self.insert_str("");
-            self.request_redraw();
-        }
-    }
-
-    pub(crate) fn has_pending_jump_back(&self) -> bool {
-        self.pending_jump_back.is_some()
     }
 
     /// Clear the composer text and any pending paste placeholders/history cursors.
@@ -22511,15 +22593,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     if next_is_collapsed_reasoning {
                         should_add_spacing = false;
                     }
-                }
-            }
-            if should_add_spacing {
-                let next_is_zero_height = visible_slice
-                    .get(offset + 1)
-                    .map(|next| next.height == 0)
-                    .unwrap_or(false);
-                if next_is_zero_height {
-                    should_add_spacing = false;
                 }
             }
             if should_add_spacing {

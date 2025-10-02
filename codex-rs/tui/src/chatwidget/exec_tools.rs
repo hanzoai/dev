@@ -1,6 +1,6 @@
 //! Exec and tool call lifecycle helpers for `ChatWidget`.
 
-use super::ChatWidget;
+use super::{running_tools, ChatWidget};
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
 use crate::history::state::{
@@ -215,8 +215,8 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
             .iter()
             .map(|(k, entry)| (k.clone(), *entry))
             .collect();
-        for (_k, entry) in entries {
-            if let Some(idx) = chat.resolve_running_tool_index(&entry) {
+        for (tool_id, entry) in entries {
+            if let Some(idx) = running_tools::resolve_entry_index(chat, &entry, &tool_id.0) {
                 if idx < chat.history_cells.len() {
                     let mut emphasis = TextEmphasis::default();
                     emphasis.bold = true;
@@ -380,31 +380,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
         chat.request_redraw();
     }
 
-    if !chat.tools_state.running_custom_tools.is_empty() {
-        let entries: Vec<(super::ToolCallId, super::RunningToolEntry)> = chat
-            .tools_state
-            .running_custom_tools
-            .iter()
-            .map(|(k, entry)| (k.clone(), *entry))
-            .collect();
-        for (_k, entry) in entries {
-            if let Some(idx) = chat.resolve_running_tool_index(&entry) {
-                if idx < chat.history_cells.len() {
-                    let completed = history_cell::new_completed_custom_tool_call(
-                        "custom".to_string(),
-                        None,
-                        std::time::Duration::from_millis(0),
-                        true,
-                        "Final answer received".to_string(),
-                    );
-                    chat.history_replace_at(idx, Box::new(completed));
-                }
-            }
-        }
-        chat.tools_state.running_custom_tools.clear();
-        chat.invalidate_height_cache();
-        chat.request_redraw();
-    }
+    crate::chatwidget::running_tools::finalize_all_due_to_answer(chat);
 
     if !chat.tools_state.running_web_search.is_empty() {
         let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
