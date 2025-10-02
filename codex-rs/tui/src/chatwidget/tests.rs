@@ -185,6 +185,57 @@ fn assistant_history_state_tracks_stream_and_final() {
 }
 
 #[test]
+fn replayed_assistant_message_with_id_dedupes_final_event() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let replay_item = ResponseItem::Message {
+        id: Some("answer-1".to_string()),
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: "Hello from resume".to_string(),
+        }],
+    };
+
+    chat.render_replay_item(replay_item);
+
+    let initial_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        initial_assistant_cells, 1,
+        "resume replay should seed exactly one assistant cell"
+    );
+
+    chat.handle_codex_event(Event {
+        id: "answer-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello from resume".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let final_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        final_assistant_cells, 1,
+        "AgentMessage replay should not duplicate assistant output"
+    );
+}
+
+#[test]
 fn history_snapshot_restore_rehydrates_state() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
 

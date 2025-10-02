@@ -1959,7 +1959,8 @@ impl ChatWidget<'_> {
     /// Render a single recorded ResponseItem into history without executing tools
     fn render_replay_item(&mut self, item: ResponseItem) {
         match item {
-            ResponseItem::Message { role, content, .. } => {
+            ResponseItem::Message { id, role, content } => {
+                let message_id = id;
                 let mut text = String::new();
                 for c in content {
                     match c {
@@ -2007,7 +2008,7 @@ impl ChatWidget<'_> {
                 }
                 let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                 crate::markdown::append_markdown(text, &mut lines, &self.config);
-                self.insert_final_answer_with_id(None, lines, text.to_string());
+                self.insert_final_answer_with_id(message_id, lines, text.to_string());
                 return;
             }
                 if role == "user" {
