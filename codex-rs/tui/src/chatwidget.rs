@@ -186,6 +186,9 @@ const STATUS_LABEL_TARGET_WIDTH: usize = 7;
 const STATUS_LABEL_GAP: usize = 2;
 const STATUS_CONTENT_PREFIX: &str = "    ";
 const STATUS_TOKENS_PREFIX: &str = "             ";
+const RESUME_PLACEHOLDER_MESSAGE: &str = "Resuming previous session...";
+const RESUME_NO_HISTORY_NOTICE: &str =
+    "No saved messages for this session. Start typing to continue.";
 const AUTO_COUNTDOWN_SECONDS: u8 = 10;
 const ENABLE_WARP_STRIPES: bool = false;
 
@@ -746,6 +749,7 @@ pub(crate) struct ChatWidget<'a> {
     // Track the largest order key we have assigned so far to keep tail inserts monotonic
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
+    resume_placeholder_visible: bool,
 }
 
 #[derive(Clone)]
@@ -1556,6 +1560,11 @@ impl ChatWidget<'_> {
     // Track latest request index observed from provider so internal inserts can anchor to it.
     fn note_order(&mut self, order: Option<&codex_core::protocol::OrderMeta>) {
         if let Some(om) = order {
+            let is_background_sentinel = om.output_index == Some(i32::MAX as u32);
+            let is_initial_session = self.last_seen_request_index == 0;
+            if is_background_sentinel && is_initial_session {
+                return;
+            }
             self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal);
         }
     }
@@ -2897,6 +2906,7 @@ impl ChatWidget<'_> {
         }
 
         // Fatal error path: show an error cell and clear running state.
+        self.clear_resume_placeholder();
         let key = self.next_internal_key();
         let state = history_cell::new_error_event(message.clone());
         let cell = crate::history_cell::PlainHistoryCell::from_state(state.clone());
@@ -3294,6 +3304,7 @@ impl ChatWidget<'_> {
             last_assigned_order: None,
             standard_terminal_mode: !config.tui.alternate_screen,
             replay_history_depth: 0,
+            resume_placeholder_visible: false,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -3335,6 +3346,7 @@ impl ChatWidget<'_> {
             w.welcome_shown = true;
         } else {
             w.welcome_shown = true;
+            w.insert_resume_placeholder();
         }
         w.maybe_start_auto_upgrade_task();
         w
@@ -3566,6 +3578,7 @@ impl ChatWidget<'_> {
             ui_background_seq_counters: HashMap::new(),
             last_assigned_order: None,
             replay_history_depth: 0,
+            resume_placeholder_visible: false,
         };
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
@@ -6373,12 +6386,27 @@ impl ChatWidget<'_> {
                 let preview = crate::slash_command::process_slash_command_message(
                     command_line.as_str(),
                 );
-                if !matches!(preview, ProcessedCommand::NotCommand(_)) {
-                    self.submit_user_message(command_line.clone().into());
-                    if !rest_text.trim().is_empty() {
-                        self.submit_user_message(rest_text.into());
+                match preview {
+                    ProcessedCommand::RegularCommand(SlashCommand::Auto, canonical_text) => {
+                        let goal = rest_text.trim();
+                        let command_text = if goal.is_empty() {
+                            canonical_text
+                        } else {
+                            format!("{canonical_text} {goal}")
+                        };
+                        self.app_event_tx
+                            .send(AppEvent::DispatchCommand(SlashCommand::Auto, command_text));
+                        return;
                     }
-                    return;
+                    ProcessedCommand::NotCommand(_) => {}
+                    _ => {
+                        self.submit_user_message(command_line.into());
+                        let trimmed_rest = rest_text.trim();
+                        if !trimmed_rest.is_empty() {
+                            self.submit_user_message(rest_text.into());
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -8072,7 +8100,7 @@ impl ChatWidget<'_> {
                     }
                     let session_state = history_cell::new_session_info(
                         &self.config,
-                        event,
+                        event.clone(),
                         is_first,
                         self.latest_upgrade_version.as_deref(),
                     );
@@ -8085,6 +8113,10 @@ impl ChatWidget<'_> {
                     // If the user provided an initial message, add it to the
                     // conversation history.
                     self.submit_user_message(user_message);
+                }
+
+                if self.resume_placeholder_visible && event.history_entry_count == 0 {
+                    self.replace_resume_placeholder_with_notice(RESUME_NO_HISTORY_NOTICE);
                 }
 
                 self.request_redraw();
@@ -8156,6 +8188,7 @@ impl ChatWidget<'_> {
                 self.auto_on_assistant_final();
             }
             EventMsg::ReplayHistory(ev) => {
+                self.clear_resume_placeholder();
                 let codex_core::protocol::ReplayHistoryEvent { items, history_snapshot } = ev;
                 self.replay_history_depth = self.replay_history_depth.saturating_add(1);
                 let max_req = self.last_seen_request_index;
@@ -17219,6 +17252,43 @@ impl ChatWidget<'_> {
 
     pub(crate) fn session_id(&self) -> Option<uuid::Uuid> {
         self.session_id
+    }
+
+    fn insert_resume_placeholder(&mut self) {
+        if self.resume_placeholder_visible {
+            return;
+        }
+        let key = self.next_req_key_top();
+        let cell = history_cell::new_background_event(RESUME_PLACEHOLDER_MESSAGE.to_string());
+        let _ = self.history_insert_with_key_global_tagged(Box::new(cell), key, "background", None);
+        self.resume_placeholder_visible = true;
+    }
+
+    fn clear_resume_placeholder(&mut self) {
+        if !self.resume_placeholder_visible {
+            return;
+        }
+        if let Some(idx) = self.history_cells.iter().position(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::BackgroundEventCell>()
+                .map(|c| c.state().description.trim() == RESUME_PLACEHOLDER_MESSAGE)
+                .unwrap_or(false)
+        }) {
+            self.history_remove_at(idx);
+        }
+        self.resume_placeholder_visible = false;
+    }
+
+    fn replace_resume_placeholder_with_notice(&mut self, message: &str) {
+        if !self.resume_placeholder_visible {
+            return;
+        }
+        self.clear_resume_placeholder();
+        self.insert_background_event_with_placement(
+            message.to_string(),
+            BackgroundPlacement::Tail,
+            None,
+        );
     }
 
     pub(crate) fn clear_token_usage(&mut self) {
