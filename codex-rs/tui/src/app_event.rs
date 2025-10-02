@@ -226,10 +226,14 @@ pub(crate) enum AppEvent {
         hint: String,
         preparation_label: Option<String>,
         metadata: Option<ReviewContextMetadata>,
+        auto_resolve: bool,
     },
 
     /// Run the review command with the given argument string (mirrors `/review <args>`)
     RunReviewCommand(String),
+
+    /// Toggle the persisted auto-resolve setting for reviews.
+    ToggleReviewAutoResolve,
 
     /// Open a bottom-pane form that lets the user select a commit to review.
     StartReviewCommitPicker,
