@@ -1161,11 +1161,8 @@ fn pump_app_events(
             AppEvent::DispatchCommand(SlashCommand::Update, command_text) => {
                 chat.handle_update_command(&command_text);
             }
-            AppEvent::ShowUndoOptions { index } => {
-                chat.show_undo_restore_options(index);
-            }
-            AppEvent::PerformUndoRestore { index, restore_files, restore_conversation } => {
-                chat.perform_undo_restore(index, restore_files, restore_conversation);
+            AppEvent::PerformUndoRestore { commit, restore_files, restore_conversation } => {
+                chat.perform_undo_restore(commit.as_deref(), restore_files, restore_conversation);
             }
             AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
             AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
@@ -1411,12 +1408,14 @@ fn undo_options_view_shows_toggles() {
 
     let plain = buffer_to_string(terminal.backend().buffer());
     let lower = plain.to_ascii_lowercase();
+    assert!(lower.contains("restore workspace snapshot"), "expected overlay title\n{plain}");
+    assert!(lower.contains("conversation preview"), "expected conversation preview block\n{plain}");
     assert!(
-        lower.contains("restore workspace files"),
-        "expected workspace toggle\n{plain}"
+        lower.contains("[x] files") || lower.contains("[ ] files"),
+        "expected files toggle\n{plain}"
     );
     assert!(
-        lower.contains("restore conversation"),
+        lower.contains("[x] conversation") || lower.contains("[ ] conversation"),
         "expected conversation toggle\n{plain}"
     );
 }

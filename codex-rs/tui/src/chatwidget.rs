@@ -13,6 +13,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
+use std::process::Command;
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -219,13 +220,13 @@ use crate::app_event::{
 };
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::CustomPromptView;
-use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionAction, SelectionItem};
+use crate::bottom_pane::list_selection_view::{ListSelectionView, SelectionItem};
 use crate::bottom_pane::CloudTasksView;
 use crate::bottom_pane::validation_settings_view;
 use crate::bottom_pane::validation_settings_view::{GroupStatus, ToolRow};
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
-use crate::bottom_pane::UndoRestoreView;
+use crate::bottom_pane::{UndoTimelineEntry, UndoTimelineEntryKind, UndoTimelineView};
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::InputResult;
 use crate::bottom_pane::LoginAccountsState;
@@ -313,6 +314,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyModifiers;
 use ratatui::style::Stylize;
 use ratatui::symbols::scrollbar as scrollbar_symbols;
+use ratatui::text::Span;
 use ratatui::text::Text as RtText;
 use textwrap::wrap;
 use unicode_segmentation::UnicodeSegmentation;
@@ -521,16 +523,6 @@ impl AutoCoordinatorUiState {
     fn countdown_active(&self) -> bool {
         self.awaiting_submission && !self.paused_for_manual_edit
     }
-}
-
-struct UndoSnapshotPreview {
-    index: usize,
-    short_id: String,
-    summary: Option<String>,
-    captured_at: DateTime<Local>,
-    age: Option<std::time::Duration>,
-    user_delta: usize,
-    assistant_delta: usize,
 }
 
 pub(crate) struct ChatWidget<'a> {
@@ -752,6 +744,12 @@ struct GhostSnapshot {
     summary: Option<String>,
     conversation: ConversationSnapshot,
     history: HistorySnapshot,
+}
+
+#[derive(Clone, Copy)]
+enum UndoPreviewRole {
+    User,
+    Assistant,
 }
 
 impl GhostSnapshot {
@@ -1254,6 +1252,10 @@ enum SystemPlacement {
 }
 
 impl ChatWidget<'_> {
+    const MAX_UNDO_CONVERSATION_MESSAGES: usize = 8;
+    const MAX_UNDO_PREVIEW_CHARS: usize = 160;
+    const MAX_UNDO_FILE_LINES: usize = 24;
+
     fn fmt_short_duration(&self, d: Duration) -> String {
         let s = d.as_secs();
         let h = s / 3600;
@@ -7086,21 +7088,6 @@ impl ChatWidget<'_> {
         self.spawn_next_ghost_snapshot();
     }
 
-    fn snapshot_preview(&self, index: usize) -> Option<UndoSnapshotPreview> {
-        self.ghost_snapshots.get(index).map(|snapshot| {
-            let (user_delta, assistant_delta) = self.conversation_delta_since(&snapshot.conversation);
-            UndoSnapshotPreview {
-                index,
-                short_id: snapshot.short_id(),
-                summary: snapshot.summary.clone(),
-                captured_at: snapshot.captured_at,
-                age: snapshot.age_from(Local::now()),
-                user_delta,
-                assistant_delta,
-            }
-        })
-    }
-
     pub(crate) fn handle_undo_command(&mut self) {
         if self.ghost_snapshots_disabled {
             let reason = self
@@ -7217,45 +7204,8 @@ impl ChatWidget<'_> {
     }
 
     fn show_undo_snapshot_picker(&mut self) {
-        let now = Local::now();
-        let mut entries: Vec<(usize, &GhostSnapshot)> = self
-            .ghost_snapshots
-            .iter()
-            .enumerate()
-            .collect();
-        entries.reverse();
-
-        let mut items: Vec<SelectionItem> = Vec::new();
-        for (display_idx, (actual_idx, snapshot)) in entries.into_iter().enumerate() {
-            let idx = actual_idx;
-            let short_id = snapshot.short_id();
-            let name = snapshot
-                .summary_snippet(80)
-                .unwrap_or_else(|| format!("Snapshot {short_id}"));
-
-            let mut details: Vec<String> = Vec::new();
-            if let Some(age) = snapshot.age_from(now) {
-                details.push(format!("captured {} ago", format_duration(age)));
-            } else {
-                details.push("captured moments ago".to_string());
-            }
-            details.push(snapshot.captured_at.format("%Y-%m-%d %H:%M:%S").to_string());
-            details.push(format!("commit {short_id}"));
-            let description = Some(details.join(" • "));
-
-            let actions: Vec<SelectionAction> = vec![Box::new(move |tx: &AppEventSender| {
-                tx.send(AppEvent::ShowUndoOptions { index: idx });
-            })];
-
-            items.push(SelectionItem {
-                name,
-                description,
-                is_current: display_idx == 0,
-                actions,
-            });
-        }
-
-        if items.is_empty() {
+        let entries = self.build_undo_timeline_entries();
+        if entries.len() <= 1 {
             self.push_background_tail(
                 "/undo unavailable: no snapshots captured yet. Run a file-modifying command to create one.".to_string(),
             );
@@ -7263,55 +7213,353 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let mut subtitle_lines: Vec<String> = Vec::new();
-        subtitle_lines.push("Restores workspace files only; chat history stays unchanged.".to_string());
-        subtitle_lines.push("Select a snapshot to jump back in time.".to_string());
-        let view = ListSelectionView::new(
-            " Restore a workspace snapshot ".to_string(),
-            Some(subtitle_lines.join("\n")),
-            Some("Enter restore • Esc cancel".to_string()),
-            items,
-            self.app_event_tx.clone(),
-            8,
-        );
-
-        self.bottom_pane.show_list_selection(
-            "Restore snapshot".to_string(),
-            Some(
-                "Restores workspace files only; chat history stays unchanged.".to_string(),
-            ),
-            Some("Enter restore • Esc cancel".to_string()),
-            view,
-        );
+        let current_index = entries.len().saturating_sub(1);
+        let view = UndoTimelineView::new(entries, current_index, self.app_event_tx.clone());
+        self.bottom_pane.show_undo_timeline_view(view);
     }
 
+    #[cfg(test)]
     pub(crate) fn show_undo_restore_options(&mut self, index: usize) {
-        let Some(preview) = self.snapshot_preview(index) else {
+        if index >= self.ghost_snapshots.len() {
             self.push_background_tail("Selected snapshot is no longer available.".to_string());
             return;
+        }
+        let entries = self.build_undo_timeline_entries();
+        let view = UndoTimelineView::new(entries, index, self.app_event_tx.clone());
+        self.bottom_pane.show_undo_timeline_view(view);
+    }
+
+    fn build_undo_timeline_entries(&self) -> Vec<UndoTimelineEntry> {
+        let mut entries: Vec<UndoTimelineEntry> = Vec::with_capacity(self.ghost_snapshots.len().saturating_add(1));
+        for snapshot in self.ghost_snapshots.iter() {
+            entries.push(self.timeline_entry_for_snapshot(snapshot));
+        }
+        entries.push(self.timeline_entry_for_current());
+        entries
+    }
+
+    fn timeline_entry_for_snapshot(&self, snapshot: &GhostSnapshot) -> UndoTimelineEntry {
+        let short_id = snapshot.short_id();
+        let label = format!("Snapshot {short_id}");
+        let summary = snapshot.summary.clone();
+        let timestamp_line = Some(snapshot.captured_at.format("%Y-%m-%d %H:%M:%S").to_string());
+        let relative_time = snapshot
+            .age_from(Local::now())
+            .map(|age| format!("captured {} ago", format_duration(age)));
+        let (user_delta, assistant_delta) = self.conversation_delta_since(&snapshot.conversation);
+        let stats_line = if user_delta == 0 && assistant_delta == 0 {
+            Some("conversation already matches current state".to_string())
+        } else if assistant_delta == 0 {
+            Some(format!(
+                "rewind {} user turn{}",
+                user_delta,
+                if user_delta == 1 { "" } else { "s" }
+            ))
+        } else {
+            Some(format!(
+                "rewind {} user turn{} and {} assistant repl{}",
+                user_delta,
+                if user_delta == 1 { "" } else { "s" },
+                assistant_delta,
+                if assistant_delta == 1 { "y" } else { "ies" }
+            ))
         };
 
-        let timestamp = preview.captured_at.format("%Y-%m-%d %H:%M:%S").to_string();
-        let timestamp_line = preview
-            .age
-            .map(|age| format!("Captured {} ({})", timestamp, format_duration(age)))
-            .unwrap_or_else(|| format!("Captured {}", timestamp));
-        let title_line = "Select what to restore".to_string();
-        let conversation_available = preview.user_delta > 0;
+        let conversation_lines = Self::conversation_preview_lines_from_snapshot(&snapshot.history);
+        let file_lines = self.timeline_file_lines_for_commit(snapshot.commit().id());
 
-        let view = UndoRestoreView::new(
-            preview.index,
-            preview.short_id.clone(),
-            title_line,
-            preview.summary.clone(),
+        UndoTimelineEntry {
+            label,
+            summary,
             timestamp_line,
-            preview.user_delta,
-            preview.assistant_delta,
-            false,
-            conversation_available,
-            self.app_event_tx.clone(),
+            relative_time,
+            stats_line,
+            commit_line: Some(format!("commit {short_id}")),
+            conversation_lines,
+            file_lines,
+            conversation_available: user_delta > 0,
+            files_available: true,
+            kind: UndoTimelineEntryKind::Snapshot {
+                commit: snapshot.commit().id().to_string(),
+            },
+        }
+    }
+
+    fn timeline_entry_for_current(&self) -> UndoTimelineEntry {
+        let history_snapshot = self.history_snapshot_for_persistence();
+        let conversation_lines = Self::conversation_preview_lines_from_snapshot(&history_snapshot);
+        let file_lines = self.timeline_file_lines_for_current();
+        UndoTimelineEntry {
+            label: "Current workspace".to_string(),
+            summary: None,
+            timestamp_line: Some(Local::now().format("%Y-%m-%d %H:%M:%S").to_string()),
+            relative_time: Some("current point".to_string()),
+            stats_line: Some("Already at this point in time".to_string()),
+            commit_line: None,
+            conversation_lines,
+            file_lines,
+            conversation_available: false,
+            files_available: false,
+            kind: UndoTimelineEntryKind::Current,
+        }
+    }
+
+    fn conversation_preview_lines_from_snapshot(snapshot: &HistorySnapshot) -> Vec<Line<'static>> {
+        let mut state = HistoryState::new();
+        state.restore(snapshot);
+        let mut messages: Vec<(UndoPreviewRole, String)> = Vec::new();
+        for record in &state.records {
+            match record {
+                HistoryRecord::PlainMessage(msg) => match msg.kind {
+                    PlainMessageKind::User => {
+                        let text = Self::message_lines_to_plain_preview(&msg.lines);
+                        if !text.is_empty() {
+                            messages.push((UndoPreviewRole::User, text));
+                        }
+                    }
+                    PlainMessageKind::Assistant => {
+                        let text = Self::message_lines_to_plain_preview(&msg.lines);
+                        if !text.is_empty() {
+                            messages.push((UndoPreviewRole::Assistant, text));
+                        }
+                    }
+                    _ => {}
+                },
+                HistoryRecord::AssistantMessage(msg) => {
+                    let text = Self::markdown_to_plain_preview(&msg.markdown);
+                    if !text.is_empty() {
+                        messages.push((UndoPreviewRole::Assistant, text));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if messages.is_empty() {
+            return vec![Line::from(Span::styled(
+                "No conversation captured in this snapshot.",
+                Style::default().fg(crate::colors::text_dim()),
+            ))];
+        }
+
+        let len = messages.len();
+        let start = len.saturating_sub(Self::MAX_UNDO_CONVERSATION_MESSAGES);
+        messages[start..]
+            .iter()
+            .map(|(role, text)| Self::conversation_line(*role, text.as_str()))
+            .collect()
+    }
+
+    fn conversation_line(role: UndoPreviewRole, text: &str) -> Line<'static> {
+        let (label, color) = match role {
+            UndoPreviewRole::User => ("You", crate::colors::text_bright()),
+            UndoPreviewRole::Assistant => ("Code", crate::colors::primary()),
+        };
+        let label_span = Span::styled(
+            format!("{label}: "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
         );
-        self.bottom_pane.show_undo_restore_view(view);
+        let content_span = Span::styled(text.to_string(), Style::default().fg(crate::colors::text()));
+        Line::from(vec![label_span, content_span])
+    }
+
+    fn message_lines_to_plain_preview(lines: &[MessageLine]) -> String {
+        let mut segments: Vec<String> = Vec::new();
+        for line in lines {
+            match line.kind {
+                MessageLineKind::Blank => continue,
+                MessageLineKind::Metadata => continue,
+                _ => {
+                    let mut text = String::new();
+                    for span in &line.spans {
+                        text.push_str(&span.text);
+                    }
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        segments.push(trimmed.to_string());
+                    }
+                }
+            }
+            if segments.len() >= Self::MAX_UNDO_CONVERSATION_MESSAGES {
+                break;
+            }
+        }
+        let joined = segments.join(" ");
+        Self::truncate_preview_text(joined, Self::MAX_UNDO_PREVIEW_CHARS)
+    }
+
+    fn markdown_to_plain_preview(markdown: &str) -> String {
+        let mut segments: Vec<String> = Vec::new();
+        for line in markdown.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with('#') {
+                segments.push(trimmed.trim_start_matches('#').trim().to_string());
+            } else {
+                segments.push(trimmed.to_string());
+            }
+            if segments.len() >= Self::MAX_UNDO_CONVERSATION_MESSAGES {
+                break;
+            }
+        }
+        if segments.is_empty() {
+            return String::new();
+        }
+        let joined = segments.join(" ");
+        Self::truncate_preview_text(joined, Self::MAX_UNDO_PREVIEW_CHARS)
+    }
+
+    fn truncate_preview_text(text: String, limit: usize) -> String {
+        if text.chars().count() <= limit {
+            return text;
+        }
+        let truncated: String = text.chars().take(limit.saturating_sub(1)).collect();
+        format!("{truncated}…")
+    }
+
+    fn timeline_file_lines_for_commit(&self, commit_id: &str) -> Vec<Line<'static>> {
+        match self.git_numstat(["show", "--numstat", "--format=", commit_id]) {
+            Ok(entries) => Self::file_change_lines(entries),
+            Err(err) => vec![Line::from(Span::styled(
+                err,
+                Style::default().fg(crate::colors::error()),
+            ))],
+        }
+    }
+
+    fn timeline_file_lines_for_current(&self) -> Vec<Line<'static>> {
+        match self.git_numstat(["diff", "--numstat", "HEAD"]) {
+            Ok(entries) => {
+                if entries.is_empty() {
+                    vec![Line::from(Span::styled(
+                        "Working tree clean",
+                        Style::default().fg(crate::colors::text_dim()),
+                    ))]
+                } else {
+                    Self::file_change_lines(entries)
+                }
+            }
+            Err(err) => vec![Line::from(Span::styled(
+                err,
+                Style::default().fg(crate::colors::error()),
+            ))],
+        }
+    }
+
+    fn git_numstat<I, S>(
+        &self,
+        args: I,
+    ) -> Result<Vec<(Option<u32>, Option<u32>, String)>, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.run_git_command(args, |stdout| {
+            let mut out = Vec::new();
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let mut parts = trimmed.splitn(3, '\t');
+                let added = parts.next();
+                let removed = parts.next();
+                let path = parts.next();
+                if let (Some(added), Some(removed), Some(path)) = (added, removed, path) {
+                    out.push((
+                        Self::parse_numstat_count(added),
+                        Self::parse_numstat_count(removed),
+                        path.to_string(),
+                    ));
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    fn run_git_command<I, S, F, T>(&self, args: I, parser: F) -> Result<T, String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+        F: FnOnce(String) -> Result<T, String>,
+    {
+        let args_vec: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
+        let output = Command::new("git")
+            .current_dir(&self.config.cwd)
+            .args(&args_vec)
+            .output()
+            .map_err(|err| format!("git {} failed: {err}", args_vec.join(" ")))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let msg = stderr.trim();
+            if msg.is_empty() {
+                Err(format!(
+                    "git {} exited with status {}",
+                    args_vec.join(" "),
+                    output.status
+                ))
+            } else {
+                Err(msg.to_string())
+            }
+        } else {
+            parser(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+    }
+
+    fn parse_numstat_count(raw: &str) -> Option<u32> {
+        if raw == "-" {
+            None
+        } else {
+            raw.parse::<u32>().ok()
+        }
+    }
+
+    fn file_change_lines(entries: Vec<(Option<u32>, Option<u32>, String)>) -> Vec<Line<'static>> {
+        if entries.is_empty() {
+            return vec![Line::from(Span::styled(
+                "No file changes recorded for this snapshot.",
+                Style::default().fg(crate::colors::text_dim()),
+            ))];
+        }
+
+        let max_entries = (Self::MAX_UNDO_FILE_LINES / 2).max(1);
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for (idx, (added, removed, path)) in entries.iter().enumerate() {
+            if idx >= max_entries {
+                break;
+            }
+            lines.push(Line::from(Span::styled(
+                path.clone(),
+                Style::default().fg(crate::colors::text()),
+            )));
+
+            let added_text = added.map_or("-".to_string(), |v| v.to_string());
+            let removed_text = removed.map_or("-".to_string(), |v| v.to_string());
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(
+                    format!("+{added_text}"),
+                    Style::default().fg(crate::colors::success()),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("-{removed_text}"),
+                    Style::default().fg(crate::colors::error()),
+                ),
+            ]));
+        }
+
+        if entries.len() > max_entries {
+            let remaining = entries.len() - max_entries;
+            lines.push(Line::from(Span::styled(
+                format!("… and {remaining} more file{}", if remaining == 1 { "" } else { "s" }),
+                Style::default().fg(crate::colors::text_dim()),
+            )));
+        }
+
+        lines
     }
 
     pub(crate) fn restore_history_snapshot(&mut self, snapshot: &HistorySnapshot) {
@@ -7423,21 +7671,33 @@ impl ChatWidget<'_> {
 
     pub(crate) fn perform_undo_restore(
         &mut self,
-        index: usize,
+        commit: Option<&str>,
         restore_files: bool,
         restore_conversation: bool,
     ) {
-        if index >= self.ghost_snapshots.len() {
-            self.push_background_tail("Selected snapshot is no longer available.".to_string());
+        let Some(commit_id) = commit else {
+            self.push_background_tail("No snapshot selected.".to_string());
             return;
-        }
+        };
+
+        let Some((index, snapshot)) = self
+            .ghost_snapshots
+            .iter()
+            .enumerate()
+            .find(|(_, snap)| snap.commit().id() == commit_id)
+            .map(|(idx, snap)| (idx, snap.clone()))
+        else {
+            self.push_background_tail(
+                "Selected snapshot is no longer available.".to_string(),
+            );
+            return;
+        };
 
         if !restore_files && !restore_conversation {
             self.push_background_tail("No restore options selected.".to_string());
             return;
         }
 
-        let snapshot = self.ghost_snapshots[index].clone();
         let mut files_restored = false;
         let mut conversation_rewind_requested = false;
         let mut errors: Vec<String> = Vec::new();
