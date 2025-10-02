@@ -1980,26 +1980,41 @@ fn auto_decision_persists_summary_through_cli_cycle() {
 
     chat.auto_handle_decision(
         AutoCoordinatorStatus::Continue,
-        "**Plan:** run tests".to_string(),
+        Some("Reviewed failing integration tests.".to_string()),
+        Some("Running tests now.".to_string()),
         Some("run tests".to_string()),
         Vec::new(),
     );
 
-    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
     assert!(!chat.auto_state.coordinator_waiting, "spinner should stop");
     assert!(!chat.auto_state.waiting_for_response, "coordinator finished");
     assert_eq!(
         chat.auto_state.last_decision_summary.as_deref(),
-        Some("**Plan:** run tests")
+        Some("Running tests now.\nReviewed failing integration tests.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_progress_current.as_deref(),
+        Some("Running tests now.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_progress_past.as_deref(),
+        Some("Reviewed failing integration tests.")
     );
 
     chat.auto_submit_prompt();
     assert!(chat.auto_state.waiting_for_response, "waiting on CLI");
     assert!(!chat.auto_state.coordinator_waiting, "spinner stays off during CLI");
-    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
     assert_eq!(
         chat.auto_state.last_decision_summary.as_deref(),
-        Some("**Plan:** run tests")
+        Some("Running tests now.\nReviewed failing integration tests.")
     );
 
     chat.auto_state.placeholder_phrase = None;
@@ -2009,7 +2024,10 @@ fn auto_decision_persists_summary_through_cli_cycle() {
 
     assert!(chat.auto_state.waiting_for_response, "next JSON in flight");
     assert!(chat.auto_state.coordinator_waiting, "spinner resumes for JSON");
-    assert_eq!(chat.auto_state.current_display_line.as_deref(), Some("Plan:"));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
 }
 
 #[test]
@@ -2031,7 +2049,8 @@ fn auto_history_captures_raw_transcript() {
 
     chat.auto_handle_decision(
         AutoCoordinatorStatus::Continue,
-        "Next".to_string(),
+        None,
+        Some("Next".to_string()),
         Some("do thing".to_string()),
         transcript.clone(),
     );
