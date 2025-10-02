@@ -1009,14 +1009,14 @@ impl App<'_> {
                     },
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::InsertBackgroundEvent { message, placement } => match &mut self.app_state {
+                AppEvent::InsertBackgroundEvent { message, placement, order } => match &mut self.app_state {
                     AppState::Chat { widget } => {
                         tracing::debug!(
                             "app: InsertBackgroundEvent placement={:?} len={}",
                             placement,
                             message.len()
                         );
-                        widget.insert_background_event_with_placement(message, placement);
+                        widget.insert_background_event_with_placement(message, placement, order);
                     }
                     AppState::Onboarding { .. } => {}
                 },
@@ -1617,9 +1617,21 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::AutoCoordinatorDecision { status, summary, prompt, transcript } => {
+                AppEvent::AutoCoordinatorDecision {
+                    status,
+                    progress_past,
+                    progress_current,
+                    cli_prompt,
+                    transcript,
+                } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_decision(status, summary, prompt, transcript);
+                        widget.auto_handle_decision(
+                            status,
+                            progress_past,
+                            progress_current,
+                            cli_prompt,
+                            transcript,
+                        );
                     }
                 }
                 AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
@@ -2166,6 +2178,7 @@ impl App<'_> {
                                 tx.send(AppEvent::InsertBackgroundEvent {
                                     message: format!("Cloud task output for {task_id}:\n{joined}"),
                                     placement: crate::app_event::BackgroundPlacement::Tail,
+                                    order: None,
                                 });
                             }
                             Ok(_) => tx.send(AppEvent::CloudTasksError {
