@@ -13,4 +13,4 @@ expression: snapshot
 ✓ Patch applied
 ─────────────────────────────────────────────────────────────────────────── 0% ─
  ↑/↓ scroll   PgUp/PgDn page   Home/End jump
- q quit   Esc edit prev
+ q quit   Esc undo timeline
