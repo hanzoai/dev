@@ -39,6 +39,8 @@ pub(crate) async fn apply_patch(
     sess: &Session,
     sub_id: &str,
     call_id: &str,
+    attempt_req: u64,
+    output_index: Option<u32>,
     action: ApplyPatchAction,
 ) -> ApplyPatchResult {
     let (harness_summary_json, harness_status_message) = {
@@ -130,7 +132,10 @@ pub(crate) async fn apply_patch(
     };
 
     if let Some(message) = harness_status_message.as_ref() {
-        sess.notify_background_event(sub_id, message.clone()).await;
+        let order = sess.next_background_order(sub_id, attempt_req, output_index);
+        sess
+            .notify_background_event_with_order(sub_id, order, message.clone())
+            .await;
     }
 
     let auto_approved = match assess_patch_safety(
