@@ -1651,18 +1651,13 @@ impl App<'_> {
                         );
                     }
                 }
-                AppEvent::ShowUndoOptions { index } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.show_undo_restore_options(index);
-                    }
-                }
                 AppEvent::PerformUndoRestore {
-                    index,
+                    commit,
                     restore_files,
                     restore_conversation,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.perform_undo_restore(index, restore_files, restore_conversation);
+                        widget.perform_undo_restore(commit.as_deref(), restore_files, restore_conversation);
                     }
                 }
                 AppEvent::DispatchCommand(command, command_text) => {

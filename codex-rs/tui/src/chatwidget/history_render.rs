@@ -511,12 +511,21 @@ mod tests {
         HistoryDomainRecord,
         HistoryMutation,
         HistoryRecord,
+        HistoryState,
+        InlineSpan,
+        MessageLine,
+        MessageLineKind,
         PlainMessageKind,
         PlainMessageRole,
         PlainMessageState,
-        HistoryState,
+        ReasoningBlock,
+        ReasoningSection,
+        ReasoningState,
+        TextEmphasis,
+        TextTone,
     };
     use crate::history_cell::assistant::AssistantSeg;
+    use crate::history_cell::CollapsibleReasoningCell;
     use std::time::{Duration, SystemTime};
 
     fn collect_lines(layout: &CachedLayout) -> Vec<String> {
@@ -609,6 +618,43 @@ mod tests {
         }) {
             HistoryMutation::Inserted { id, .. } => id,
             other => panic!("unexpected mutation inserting explore record: {other:?}"),
+        }
+    }
+
+    fn make_inline_span(text: &str) -> InlineSpan {
+        InlineSpan {
+            text: text.into(),
+            tone: TextTone::Default,
+            emphasis: TextEmphasis::default(),
+            entity: None,
+        }
+    }
+
+    fn make_reasoning_state(summary: &str) -> ReasoningState {
+        let span = make_inline_span(summary);
+        ReasoningState {
+            id: HistoryId::ZERO,
+            sections: vec![ReasoningSection {
+                heading: Some(format!("{summary} heading")),
+                summary: Some(vec![span.clone()]),
+                blocks: vec![ReasoningBlock::Paragraph(vec![span])],
+            }],
+            effort: None,
+            in_progress: false,
+        }
+    }
+
+    fn make_plain_message(text: &str) -> PlainMessageState {
+        PlainMessageState {
+            id: HistoryId::ZERO,
+            role: PlainMessageRole::Assistant,
+            kind: PlainMessageKind::Plain,
+            header: None,
+            lines: vec![MessageLine {
+                kind: MessageLineKind::Paragraph,
+                spans: vec![make_inline_span(text)],
+            }],
+            metadata: None,
         }
     }
 
@@ -1210,6 +1256,119 @@ mod tests {
         let text = collect_lines(&layout);
         assert!(text.iter().any(|line| line.contains("Explored")));
         assert!(text.iter().any(|line| line.contains("pattern")));
+    }
+
+    #[test]
+    fn collapsed_reasoning_cells_should_not_reserve_height_when_hidden() {
+        let mut state = HistoryState::new();
+        let explore_id = insert_explore_record(&mut state);
+        let first_reasoning_id = state.push(HistoryRecord::Reasoning(make_reasoning_state(
+            "first hidden reasoning",
+        )));
+        let second_reasoning_id = state.push(HistoryRecord::Reasoning(make_reasoning_state(
+            "second hidden reasoning",
+        )));
+        let thinking_id = state.push(HistoryRecord::PlainMessage(make_plain_message(
+            "Composing repository overview",
+        )));
+
+        let cfg = test_config();
+        let ids = [
+            explore_id,
+            first_reasoning_id,
+            second_reasoning_id,
+            thinking_id,
+        ];
+
+        let mut cells: Vec<Box<dyn HistoryCell>> = ids
+            .iter()
+            .map(|id| {
+                let record = state.record(*id).expect("record missing");
+                crate::history_cell::cell_from_record(record, &cfg)
+            })
+            .collect();
+
+        for cell in &mut cells {
+            if let Some(reasoning_cell) = cell
+                .as_any_mut()
+                .downcast_mut::<CollapsibleReasoningCell>()
+            {
+                reasoning_cell.set_collapsed(true);
+                reasoning_cell.set_hide_when_collapsed(true);
+            }
+        }
+
+        let cell_refs: Vec<&dyn HistoryCell> = cells.iter().map(|cell| cell.as_ref()).collect();
+
+        let mut render_requests: Vec<RenderRequest> = Vec::new();
+        for (idx, history_id) in ids.iter().enumerate() {
+            let record = state.record(*history_id).expect("record missing");
+            let (kind, fallback_lines) = match record {
+                HistoryRecord::Explore(_) => (RenderRequestKind::Explore { id: *history_id }, None),
+                other => (
+                    RenderRequestKind::Legacy,
+                    Some(crate::history_cell::lines_from_record(other, &cfg)),
+                ),
+            };
+
+            render_requests.push(RenderRequest {
+                history_id: *history_id,
+                cell: Some(cell_refs[idx]),
+                assistant: None,
+                use_cache: false,
+                fallback_lines,
+                kind,
+                config: &cfg,
+            });
+        }
+
+        let render_state = HistoryRenderState::new();
+        let settings = RenderSettings::new(80, 0, false);
+        let visible = render_state.visible_cells(&state, &render_requests, settings);
+        assert_eq!(visible.len(), ids.len());
+
+        let explore_height = visible[0].height;
+        assert_eq!(visible[1].height, 0, "hidden reasoning cell should have zero height");
+        assert_eq!(visible[2].height, 0, "hidden reasoning cell should have zero height");
+
+        let thinking_idx = 3usize;
+        let spacing = 1u16;
+        let mut accumulated = 0u16;
+        for (idx, cell) in visible.iter().enumerate() {
+            if idx == thinking_idx {
+                break;
+            }
+            accumulated = accumulated.saturating_add(cell.height);
+            if idx < thinking_idx && idx < visible.len().saturating_sub(1) {
+                let mut should_add_spacing = cell.height > 0;
+                if should_add_spacing {
+                    let this_collapsed = visible[idx]
+                        .cell
+                        .and_then(|c| c.as_any().downcast_ref::<CollapsibleReasoningCell>())
+                        .map(|rc| rc.is_collapsed())
+                        .unwrap_or(false);
+                    if this_collapsed {
+                        let next_collapsed = visible
+                            .get(idx + 1)
+                            .and_then(|next| next.cell)
+                            .and_then(|c| c.as_any().downcast_ref::<CollapsibleReasoningCell>())
+                            .map(|rc| rc.is_collapsed())
+                            .unwrap_or(false);
+                        if next_collapsed {
+                            should_add_spacing = false;
+                        }
+                    }
+                }
+                if should_add_spacing {
+                    accumulated = accumulated.saturating_add(spacing);
+                }
+            }
+        }
+
+        assert_eq!(
+            accumulated, explore_height,
+            "collapsed reasoning cells should not push the next visible cell"
+        );
     }
 }
 

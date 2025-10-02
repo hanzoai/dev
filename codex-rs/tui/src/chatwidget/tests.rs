@@ -192,6 +192,57 @@ fn assistant_history_state_tracks_stream_and_final() {
 }
 
 #[test]
+fn replayed_assistant_message_with_id_dedupes_final_event() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let replay_item = ResponseItem::Message {
+        id: Some("answer-1".to_string()),
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: "Hello from resume".to_string(),
+        }],
+    };
+
+    chat.render_replay_item(replay_item);
+
+    let initial_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        initial_assistant_cells, 1,
+        "resume replay should seed exactly one assistant cell"
+    );
+
+    chat.handle_codex_event(Event {
+        id: "answer-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello from resume".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let final_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        final_assistant_cells, 1,
+        "AgentMessage replay should not duplicate assistant output"
+    );
+}
+
+#[test]
 fn history_snapshot_restore_rehydrates_state() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
 
@@ -2005,11 +2056,8 @@ fn pump_app_events(
             AppEvent::DispatchCommand(SlashCommand::Update, command_text) => {
                 chat.handle_update_command(&command_text);
             }
-            AppEvent::ShowUndoOptions { index } => {
-                chat.show_undo_restore_options(index);
-            }
-            AppEvent::PerformUndoRestore { index, restore_files, restore_conversation } => {
-                chat.perform_undo_restore(index, restore_files, restore_conversation);
+            AppEvent::PerformUndoRestore { commit, restore_files, restore_conversation } => {
+                chat.perform_undo_restore(commit.as_deref(), restore_files, restore_conversation);
             }
             AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
             AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
@@ -2255,12 +2303,14 @@ fn undo_options_view_shows_toggles() {
 
     let plain = buffer_to_string(terminal.backend().buffer());
     let lower = plain.to_ascii_lowercase();
+    assert!(lower.contains("restore workspace snapshot"), "expected overlay title\n{plain}");
+    assert!(lower.contains("conversation preview"), "expected conversation preview block\n{plain}");
     assert!(
-        lower.contains("restore workspace files"),
-        "expected workspace toggle\n{plain}"
+        lower.contains("[x] files") || lower.contains("[ ] files"),
+        "expected files toggle\n{plain}"
     );
     assert!(
-        lower.contains("restore conversation"),
+        lower.contains("[x] conversation") || lower.contains("[ ] conversation"),
         "expected conversation toggle\n{plain}"
     );
 }
@@ -2511,6 +2561,90 @@ fn exec_output_delta_tracks_history_id_after_reorder() {
             .history_id_for_exec_call("call-reorder"),
         Some(exec_id)
     );
+}
+
+#[test]
+fn exec_end_before_begin_upgrades_history_record() {
+    use codex_core::parse_command::ParsedCommand;
+
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    let call_id = "call-out-of-order";
+
+    chat.handle_codex_event(Event {
+        id: call_id.into(),
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id.to_string(),
+            stdout: "done".into(),
+            stderr: String::new(),
+            aggregated_output: "done".into(),
+            exit_code: 0,
+            duration: std::time::Duration::from_millis(12),
+        }),
+        order: Some(order_meta(20)),
+    });
+
+    // Force the pending end to materialise the fallback record immediately.
+    chat.flush_pending_exec_ends();
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let command = vec!["bash".into(), "-lc".into(), "echo upgraded".into()];
+    let parsed = vec![ParsedCommand::Unknown {
+        cmd: "echo upgraded".into(),
+    }];
+
+    chat.handle_codex_event(Event {
+        id: call_id.into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.to_string(),
+            command: command.clone(),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: parsed.clone(),
+        }),
+        order: Some(order_meta(10)),
+    });
+
+    chat.flush_pending_exec_ends();
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) if rec.call_id.as_deref() == Some(call_id) => {
+                Some(rec.clone())
+            }
+            _ => None,
+        })
+        .expect("exec record tracked by history state");
+
+    assert_eq!(exec_record.command, command, "history_state kept fallback command");
+    assert_eq!(exec_record.parsed, parsed, "history_state kept fallback parsing");
+    assert_eq!(exec_record.status, ExecStatus::Success);
+    assert_eq!(exec_record.exit_code, Some(0));
+
+    let exec_id = exec_record.id;
+    assert_eq!(
+        chat.history_state().history_id_for_exec_call(call_id),
+        Some(exec_id),
+        "history_id mapping missing upgraded call_id",
+    );
+
+    let ui_exec_record = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| history_cell::record_from_cell(cell.as_ref()))
+        .and_then(|record| match record {
+            HistoryRecord::Exec(rec) if rec.id == exec_id => Some(rec),
+            _ => None,
+        })
+        .expect("exec cell present in UI");
+
+    assert_eq!(ui_exec_record.command, exec_record.command);
+    assert_eq!(ui_exec_record.parsed, exec_record.parsed);
+    assert_eq!(ui_exec_record.status, ExecStatus::Success);
 }
 
 #[tokio::test(flavor = "current_thread")]
