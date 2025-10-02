@@ -18298,6 +18298,10 @@ impl ChatWidget<'_> {
         let new_value = !self.config.tui.review_auto_resolve;
         self.config.tui.review_auto_resolve = new_value;
 
+        if !new_value {
+            self.auto_resolve_clear();
+        }
+
         let (_persisted, message) = if let Ok(home) = codex_core::config::find_codex_home() {
             match codex_core::config::set_tui_review_auto_resolve(&home, new_value) {
                 Ok(_) => {
