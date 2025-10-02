@@ -9463,6 +9463,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
+                self.clear_resume_placeholder();
                 // Route through unified system notice helper. If the core ties the
                 // event to a turn (order present), prefer placing it before the next
                 // provider output; else append to the tail. Use the event.id for
