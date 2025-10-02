@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -506,14 +507,18 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                         drop(manager);
 
                         // Execute with full permissions in the worktree
-                        execute_model_with_permissions(
-                            &model,
-                            &full_prompt,
-                            false,
-                            Some(worktree_path),
-                            config.clone(),
-                        )
-                        .await
+                        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
+                            execute_cloud_built_in_streaming(&agent_id, &full_prompt, Some(worktree_path), config.clone()).await
+                        } else {
+                            execute_model_with_permissions(
+                                &model,
+                                &full_prompt,
+                                false,
+                                Some(worktree_path),
+                                config.clone(),
+                            )
+                            .await
+                        }
                     }
                     Err(e) => Err(format!("Failed to setup worktree: {}", e)),
                 }
@@ -526,7 +531,11 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
             "{}\n\n[Running in read-only mode - no modifications allowed]",
             full_prompt
         );
-        execute_model_with_permissions(&model, &full_prompt, true, None, config).await
+        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
+            execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config).await
+        } else {
+            execute_model_with_permissions(&model, &full_prompt, true, None, config).await
+        }
     };
 
     // Update result
@@ -594,7 +603,7 @@ async fn execute_model_with_permissions(
     // `codex` binary to be present on PATH. This improves portability,
     // especially on Windows where global shims may be missing.
     let model_lower = model.to_lowercase();
-    let mut cmd = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+    let mut cmd = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
         match std::env::current_exe() {
             Ok(path) => Command::new(path),
             Err(e) => return Err(format!("Failed to resolve current executable: {}", e)),
@@ -646,6 +655,7 @@ async fn execute_model_with_permissions(
         model_lower.as_str()
     };
 
+    let built_in_cloud = family == "cloud" && config.is_none();
     match family {
         "claude" | "gemini" | "qwen" => {
             let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
@@ -664,8 +674,10 @@ async fn execute_model_with_permissions(
                 cmd.args(defaults);
             }
         }
-        // Cloud agent: append prompt positionally; do not assume a -p flag.
+        // Cloud agent: built-in path uses `code cloud submit <prompt>`; external
+        // command path falls back to positional prompt with optional defaults.
         "cloud" => {
+            if built_in_cloud { cmd.args(["cloud", "submit", "--wait"]); }
             // If config provided explicit args for this mode, do not append defaults.
             let have_mode_args = config
                 .as_ref()
@@ -757,7 +769,7 @@ async fn execute_model_with_permissions(
         // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
         // Rebuild the invocation as `command` + args set above.
         // We reconstruct to run under our sandbox helpers.
-        let program = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+        let program = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
             // Use current exe path
             std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?
         } else {
@@ -783,6 +795,7 @@ async fn execute_model_with_permissions(
             }
         }
 
+        let built_in_cloud = family == "cloud" && config.is_none();
         match family {
             "claude" | "gemini" | "qwen" => {
                 let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
@@ -801,6 +814,7 @@ async fn execute_model_with_permissions(
                 }
             }
             "cloud" => {
+                if built_in_cloud { args.extend(["cloud", "submit", "--wait"].map(String::from)); }
                 let have_mode_args = config
                     .as_ref()
                     .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
@@ -894,6 +908,85 @@ async fn execute_model_with_permissions(
             format!("{}\n{}", stderr.trim(), stdout.trim())
         };
         Err(format!("Command failed: {}", combined))
+    }
+}
+
+/// Execute the built-in cloud agent via the current `code` binary, streaming
+/// stderr lines into the HUD as progress and returning final stdout. Applies a
+/// modest truncation cap to very large outputs to keep UI responsive.
+async fn execute_cloud_built_in_streaming(
+    agent_id: &str,
+    prompt: &str,
+    working_dir: Option<std::path::PathBuf>,
+    _config: Option<AgentConfig>,
+) -> Result<String, String> {
+    // Program and argv
+    let program = std::env::current_exe()
+        .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+    let args: Vec<String> = vec![
+        "cloud".into(),
+        "submit".into(),
+        "--wait".into(),
+        prompt.into(),
+    ];
+
+    // Baseline env mirrors behavior in execute_model_with_permissions
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+
+    use crate::protocol::SandboxPolicy;
+    use crate::spawn::StdioPolicy;
+    let mut child = crate::spawn::spawn_child_async(
+        program.clone(),
+        args.clone(),
+        Some(&program.to_string_lossy()),
+        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+        &SandboxPolicy::DangerFullAccess,
+        StdioPolicy::RedirectForShellTool,
+        env,
+    )
+    .await
+    .map_err(|e| format!("Failed to spawn cloud submit: {}", e))?;
+
+    // Stream stderr to HUD
+    let stderr_task = if let Some(stderr) = child.stderr.take() {
+        let agent = agent_id.to_string();
+        Some(tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let msg = line.trim();
+                if msg.is_empty() { continue; }
+                let mut mgr = AGENT_MANAGER.write().await;
+                mgr.add_progress(&agent, msg.to_string()).await;
+            }
+        }))
+    } else { None };
+
+    // Collect stdout fully (final result)
+    let mut stdout_buf = String::new();
+    if let Some(stdout) = child.stdout.take() {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            stdout_buf.push_str(&line);
+            stdout_buf.push('\n');
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| format!("Failed to wait: {}", e))?;
+    if let Some(t) = stderr_task { let _ = t.await; }
+    if !status.success() {
+        return Err(format!("cloud submit exited with status {}", status));
+    }
+
+    // Truncate large outputs
+    const MAX_BYTES: usize = 500_000; // ~500 KB
+    if stdout_buf.len() > MAX_BYTES {
+        let omitted = stdout_buf.len() - MAX_BYTES;
+        let mut truncated = String::with_capacity(MAX_BYTES + 128);
+        truncated.push_str(&stdout_buf[..MAX_BYTES]);
+        truncated.push_str(&format!("\n… [truncated: {} bytes omitted]", omitted));
+        Ok(truncated)
+    } else {
+        Ok(stdout_buf)
     }
 }
 
