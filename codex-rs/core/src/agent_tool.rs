@@ -678,7 +678,6 @@ async fn execute_model_with_permissions(
         // command path falls back to positional prompt with optional defaults.
         "cloud" => {
             if built_in_cloud { cmd.args(["cloud", "submit", "--wait"]); }
-            // If config provided explicit args for this mode, do not append defaults.
             let have_mode_args = config
                 .as_ref()
                 .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })

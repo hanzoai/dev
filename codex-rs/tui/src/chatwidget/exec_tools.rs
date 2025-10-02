@@ -1002,10 +1002,14 @@ pub(super) fn handle_exec_end_now(
         chat
             .bottom_pane
             .update_status_text("command completed".to_string());
+        let gh_ticket = chat.make_background_tail_ticket();
+        let tx = chat.app_event_tx.clone();
+        let cfg = chat.config.clone();
         crate::chatwidget::gh_actions::maybe_watch_after_push(
-            chat.app_event_tx.clone(),
-            chat.config.clone(),
+            tx,
+            cfg,
             &command_for_watch,
+            gh_ticket,
         );
     } else {
         chat
