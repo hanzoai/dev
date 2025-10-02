@@ -85,6 +85,22 @@ pub(super) enum AutoCoordinatorCommand {
     Stop,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum TurnComplexity {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct TurnConfig {
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub complexity: Option<TurnComplexity>,
+}
+
 #[derive(Debug, Deserialize)]
 struct CoordinatorDecision {
     finish_status: String,
@@ -94,6 +110,8 @@ struct CoordinatorDecision {
     progress_current: Option<String>,
     #[serde(default)]
     cli_prompt: Option<String>,
+    #[serde(default)]
+    turn_config: Option<TurnConfig>,
 }
 
 struct ParsedCoordinatorDecision {
@@ -102,6 +120,7 @@ struct ParsedCoordinatorDecision {
     progress_current: Option<String>,
     cli_prompt: Option<String>,
     response_items: Vec<ResponseItem>,
+    turn_config: Option<TurnConfig>,
 }
 
 pub(super) fn start_auto_coordinator(
@@ -267,6 +286,7 @@ fn run_auto_loop(
                     progress_current,
                     cli_prompt,
                     response_items,
+                    turn_config,
                 }) => {
                     if matches!(status, AutoCoordinatorStatus::Continue) {
                         if let (Some(handle), Some(cadence)) =
@@ -295,6 +315,7 @@ fn run_auto_loop(
                             progress_current,
                             cli_prompt,
                             transcript: response_items,
+                            turn_config: turn_config.clone(),
                         };
                         app_event_tx.send(event);
                         continue;
@@ -354,6 +375,7 @@ fn run_auto_loop(
                         progress_current,
                         cli_prompt,
                         transcript: response_items,
+                        turn_config: turn_config.clone(),
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -370,6 +392,7 @@ fn run_auto_loop(
                         progress_current: Some(format!("Coordinator error: {err}")),
                         cli_prompt: None,
                         transcript: Vec::new(),
+                        turn_config: None,
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -527,6 +550,14 @@ fn build_schema() -> Value {
                 "type": ["string", "null"],
                 "minLength": 1,
                 "description": "This is the prompt sent to the CLI. It should be 1-2 sentences. Shorter commands are preferred - e.g. ('What do you think the solution is?', 'Please fix this') let the CLI do the work. You just direct it! Ignored unless finish_status is 'continue'"
+            },
+            "turn_config": {
+                "type": ["object", "null"],
+                "properties": {
+                    "read_only": { "type": "boolean", "description": "If true, this turn should not modify files." },
+                    "complexity": { "type": "string", "enum": ["low","medium","high"], "description": "Complexity estimate for this turn." }
+                },
+                "additionalProperties": false
             }
         },
         "required": ["finish_status", "progress_past", "progress_current", "cli_prompt"],
@@ -607,6 +638,7 @@ fn request_coordinator_decision(
         progress_current,
         cli_prompt,
         response_items,
+        turn_config: decision.turn_config,
     })
 }
 
