@@ -19195,12 +19195,55 @@ impl ChatWidget<'_> {
             };
             let repo_dirty = matches!(&repo_status_raw, Ok(s) if !s.trim().is_empty());
 
-            let default_branch_opt =
-                codex_core::git_worktree::detect_default_branch(&git_root).await;
-            let default_branch_hint = default_branch_opt
-                .clone()
-                .unwrap_or_else(|| "<detect default branch>".to_string());
+            let branch_metadata = codex_core::git_worktree::load_branch_metadata(&work_cwd);
+            let upstream = Command::new("git")
+                .current_dir(&work_cwd)
+                .args([
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "--symbolic-full-name",
+                    "@{u}",
+                ])
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| {
+                    let value = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if value.is_empty() { None } else { Some(value) }
+                });
+            let upstream_parts = upstream.as_ref().and_then(|u| u.split_once('/'));
+            let upstream_remote = upstream_parts.map(|(remote, _)| remote.to_string());
 
+            let mut default_branch_opt = branch_metadata
+                .as_ref()
+                .and_then(|meta| meta.base_branch.clone());
+            if default_branch_opt.is_none() {
+                default_branch_opt =
+                    codex_core::git_worktree::detect_default_branch(&git_root).await;
+            }
+
+            let canonical_remote = "origin".to_string();
+            let mut remote_candidates: Vec<String> = Vec::new();
+            if default_branch_opt.is_some() {
+                remote_candidates.push(canonical_remote.clone());
+                if let Some(remote) = upstream_remote
+                    .clone()
+                    .filter(|remote| remote != codex_core::git_worktree::LOCAL_DEFAULT_REMOTE)
+                {
+                    if remote != canonical_remote {
+                        remote_candidates.push(remote);
+                    }
+                }
+            }
+
+            let primary_remote_for_instructions = remote_candidates.first().cloned();
+            let alternate_remote_for_instructions = remote_candidates.iter().skip(1).next().cloned();
+            let remote_branch_ref_for_instructions = default_branch_opt.as_ref().and_then(|branch| {
+                primary_remote_for_instructions
+                    .as_ref()
+                    .map(|remote| format!("{remote}/{branch}"))
+            });
             let mut handoff_reasons: Vec<String> = Vec::new();
             if let Err(err) = &worktree_status_raw {
                 handoff_reasons.push(format!("unable to read worktree status: {}", err));
@@ -19223,12 +19266,17 @@ impl ChatWidget<'_> {
             let worktree_display = work_cwd.display().to_string();
             let tx_for_switch = tx.clone();
             let git_root_for_switch = git_root.clone();
+            let default_branch_for_instructions = default_branch_opt.clone();
+            let primary_remote_instr = primary_remote_for_instructions.clone();
+            let alternate_remote_instr = alternate_remote_for_instructions.clone();
+            let remote_branch_ref_instr = remote_branch_ref_for_instructions.clone();
             let send_agent_handoff =
                 |mut reasons: Vec<String>,
                  extra_note: Option<String>,
                  worktree_status: String,
                  repo_status: String,
-                 worktree_diff: Option<String>| {
+                 worktree_diff: Option<String>,
+                 merge_remote_ref: Option<String>| {
                     if reasons.is_empty() {
                         reasons.push("manual follow-up requested".to_string());
                     }
@@ -19237,25 +19285,68 @@ impl ChatWidget<'_> {
                         &tx,
                         format!("`/merge` — handing off to agent ({})", reason_text),
                     );
+                    let default_branch_display = default_branch_for_instructions
+                        .clone()
+                        .unwrap_or_else(|| "unknown (inspect branch metadata)".to_string());
+                    let step2 = if let (Some(branch), Some(remote)) =
+                        (default_branch_for_instructions.as_ref(), primary_remote_instr.as_ref())
+                    {
+                        let mut text = format!("2. git fetch {} {}", remote, branch);
+                        if let Some(alt_remote) = alternate_remote_instr.as_ref() {
+                            text.push_str(&format!(
+                                " (if that remote is unavailable, try `git fetch {} {}`)",
+                                alt_remote, branch
+                            ));
+                        }
+                        text
+                    } else {
+                        "2. Determine the correct default branch (metadata missing) and fetch it from the appropriate remote.".to_string()
+                    };
+                    let step3 = if let Some(remote_ref) = merge_remote_ref.as_ref() {
+                        format!(
+                            "3. Merge the default branch into the worktree branch (`git merge {}`) and resolve conflicts.",
+                            remote_ref
+                        )
+                    } else {
+                        "3. Merge that branch into the worktree branch and resolve any conflicts.".to_string()
+                    };
+                    let step4 = if let Some(ref branch) = default_branch_for_instructions {
+                        format!(
+                            "4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.",
+                            root_display, branch
+                        )
+                    } else {
+                        format!(
+                            "4. cd {}\n   - Ensure the chosen target branch exists locally. If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.",
+                            root_display
+                        )
+                    };
+                    let step5 = if let Some(ref branch) = default_branch_for_instructions {
+                        format!(
+                            "5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.",
+                            branch_label, branch, root_display, branch_label
+                        )
+                    } else {
+                        format!(
+                            "5. Merge {} into the chosen target branch from {} (`git merge --no-ff {}`) and resolve conflicts.",
+                            branch_label, root_display, branch_label
+                        )
+                    };
                     let mut preface = format!(
-                        "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n2. git fetch origin {}\n3. Merge the default branch into the worktree branch (`git merge origin/{}`) and resolve conflicts.\n4. cd {}\n   - Ensure the local {} branch exists (create tracking branch if needed). If checkout complains about local changes, stash safely, then checkout and pop/apply before finishing.\n5. Merge {} into {} from {} (`git merge --no-ff {}`) and resolve conflicts.\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
+                        "[developer] Non-trivial git state detected while finalizing the branch. Reasons: {}.\n\nRepository context:\n- Repo root: {}\n- Worktree: {}\n- Branch to merge: {}\n- Default branch target: {}\n\nCurrent git status:\nWorktree status:\n{}\n\nRepo root status:\n{}\n\nRequired actions:\n1. cd {}\n   - Inspect status. Review the diff summary below and stage/commit only the changes that belong in this merge (`git add -A` + `git commit -m \"merge {} via /merge\"`). Stash or drop anything that should stay local.\n{}\n{}\n{}\n{}\n6. Remove the worktree (`git worktree remove {} --force`) and delete the branch (`git branch -D {}`).\n7. End inside {} with a clean working tree and no leftover stashes. Pop/apply anything you created.\n\nReport back with a concise summary of the steps or explain any blockers.",
                         reason_text,
                         root_display,
                         worktree_display,
                         branch_label,
-                        default_branch_hint,
+                        default_branch_display,
                         worktree_status,
                         repo_status,
                         worktree_display,
                         branch_label,
-                        default_branch_hint,
-                        default_branch_hint,
-                        root_display,
-                        default_branch_hint,
-                        branch_label,
-                        default_branch_hint,
-                        root_display,
-                        branch_label,
+                        step2,
+                        step3,
+                        step4,
+                        step5,
                         worktree_display,
                         branch_label,
                         root_display
@@ -19284,6 +19375,7 @@ impl ChatWidget<'_> {
                     worktree_status_for_agent.clone(),
                     repo_status_for_agent.clone(),
                     worktree_diff_stat.clone(),
+                    remote_branch_ref_instr.clone(),
                 );
                 return;
             }
@@ -19325,13 +19417,106 @@ impl ChatWidget<'_> {
                 }
             }
 
-            let _ = Command::new("git")
-                .current_dir(&git_root)
-                .args(["fetch", "origin", &default_branch])
-                .output()
-                .await;
+            let mut selected_remote: Option<String> = None;
+            let mut fetch_notes: Vec<String> = Vec::new();
+            for remote in &remote_candidates {
+                let fetch_out = Command::new("git")
+                    .current_dir(&git_root)
+                    .args(["fetch", remote, &default_branch])
+                    .output()
+                    .await;
+                match fetch_out {
+                    Ok(ref out) if out.status.success() => {
+                        selected_remote = Some(remote.clone());
+                        break;
+                    }
+                    Ok(out) => {
+                        let stderr_s = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                        let stdout_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        let note = if !stderr_s.is_empty() {
+                            stderr_s
+                        } else if !stdout_s.is_empty() {
+                            stdout_s
+                        } else {
+                            "git fetch returned a non-zero status".to_string()
+                        };
+                        fetch_notes.push(format!("{}: {}", remote, note));
+                    }
+                    Err(err) => {
+                        fetch_notes.push(format!("{}: {}", remote, err));
+                    }
+                }
+            }
 
-            let remote_ref = format!("origin/{}", default_branch);
+            let (merge_remote_name, remote_ref) = if let Some(remote) = selected_remote {
+                (remote.clone(), format!("{remote}/{default_branch}"))
+            } else if let Some(existing_ref) = remote_branch_ref_instr.clone() {
+                if let Some((remote, _)) = existing_ref.split_once('/') {
+                    (remote.to_string(), existing_ref)
+                } else {
+                    let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                        .await
+                        .map(|s| {
+                            if s.trim().is_empty() { "clean".to_string() } else { s }
+                        })
+                        .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                    let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                        .await
+                        .ok()
+                        .map(|d| d.trim().to_string())
+                        .filter(|d| !d.is_empty())
+                        .or(worktree_diff_stat.clone());
+                    let reason = format!(
+                        "failed to parse remote reference for '{}'",
+                        default_branch
+                    );
+                    let note = if fetch_notes.is_empty() {
+                        None
+                    } else {
+                        Some(fetch_notes.join("; "))
+                    };
+                    send_agent_handoff(
+                        vec![reason],
+                        note,
+                        updated_worktree_status,
+                        repo_status_for_agent.clone(),
+                        updated_diff,
+                        remote_branch_ref_instr.clone(),
+                    );
+                    return;
+                }
+            } else {
+                let updated_worktree_status = ChatWidget::git_short_status(&work_cwd)
+                    .await
+                    .map(|s| {
+                        if s.trim().is_empty() { "clean".to_string() } else { s }
+                    })
+                    .unwrap_or_else(|err| format!("status unavailable: {}", err));
+                let updated_diff = ChatWidget::git_diff_stat(&work_cwd)
+                    .await
+                    .ok()
+                    .map(|d| d.trim().to_string())
+                    .filter(|d| !d.is_empty())
+                    .or(worktree_diff_stat.clone());
+                let reason = format!(
+                    "failed to determine remote reference for '{}'",
+                    default_branch
+                );
+                let note = if fetch_notes.is_empty() {
+                    None
+                } else {
+                    Some(fetch_notes.join("; "))
+                };
+                send_agent_handoff(
+                    vec![reason],
+                    note,
+                    updated_worktree_status,
+                    repo_status_for_agent.clone(),
+                    updated_diff,
+                    remote_branch_ref_instr.clone(),
+                );
+                return;
+            };
             let ff_only = Command::new("git")
                 .current_dir(&work_cwd)
                 .args(["merge", "--ff-only", &remote_ref])
@@ -19378,7 +19563,7 @@ impl ChatWidget<'_> {
                         send_agent_handoff(
                             vec![format!(
                                 "merge conflicts while merging '{}' into '{}'",
-                                default_branch, branch_label
+                                remote_ref, branch_label
                             )],
                             Some(
                                 "The worktree currently has an in-progress merge that needs to be resolved. Please complete it before retrying the final merge.".to_string(),
@@ -19386,6 +19571,7 @@ impl ChatWidget<'_> {
                             updated_worktree_status,
                             repo_status_for_agent.clone(),
                             updated_diff,
+                            Some(remote_ref.clone()),
                         );
                         return;
                     }
@@ -19457,6 +19643,7 @@ impl ChatWidget<'_> {
                                 updated_worktree_status,
                                 repo_status_for_agent.clone(),
                                 updated_diff,
+                                Some(remote_ref.clone()),
                             );
                             return;
                         }
@@ -19486,6 +19673,7 @@ impl ChatWidget<'_> {
                             updated_worktree_status,
                             repo_status_for_agent.clone(),
                             updated_diff,
+                            Some(remote_ref.clone()),
                         );
                         return;
                     }
@@ -19522,7 +19710,7 @@ impl ChatWidget<'_> {
                 if !has_local {
                     let _ = Command::new("git")
                         .current_dir(&git_root)
-                        .args(["fetch", "origin", &default_branch])
+                        .args(["fetch", &merge_remote_name, &default_branch])
                         .output()
                         .await;
                     let _ = Command::new("git")
@@ -19531,7 +19719,7 @@ impl ChatWidget<'_> {
                             "branch",
                             "--track",
                             &default_branch,
-                            &format!("origin/{}", default_branch),
+                            &remote_ref,
                         ])
                         .output()
                         .await;
@@ -19626,6 +19814,7 @@ impl ChatWidget<'_> {
                         worktree_status_for_agent.clone(),
                         updated_repo_status,
                         updated_diff,
+                        Some(remote_ref.clone()),
                     );
                     return;
                 }
@@ -19668,6 +19857,7 @@ impl ChatWidget<'_> {
                     worktree_status_for_agent.clone(),
                     updated_repo_status,
                     updated_diff,
+                    Some(remote_ref.clone()),
                 );
                 return;
             }
