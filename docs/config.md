@@ -424,6 +424,8 @@ tool_timeout_sec = 30
 
 Sub-agents are orchestrated helper workflows you can trigger with slash commands (for example `/plan`, `/solve`, `/code`). Each entry under `[[subagents.commands]]` defines the slash command name, whether spawned agents run in read-only mode, which `agents` to launch, and extra guidance for both the orchestrator (Code) and the individual agents.
 
+By default (when no `[[agents]]` are configured) Code advertises these agent names for multi-agent runs: `claude`, `gemini`, `qwen`, `code`, and `cloud`. You can override that set by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
+
 ```toml
 [[subagents.commands]]
 name = "context"
