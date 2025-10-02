@@ -631,12 +631,24 @@ async fn execute_model_with_permissions(
     }
 
     // Build command based on model and permissions
-    // Use command instead of model for matching if config provided
-    let model_name = if config.is_some() { command.as_str() } else { model_lower.as_str() };
+    // Determine agent family for behavior (claude/gemini/qwen/code/codex/cloud).
+    // Prefer the model name; if it's not a known family, fall back to the configured
+    // command so aliases like command = "cloud-agent" still get cloud behavior.
+    let command_lower = command.to_ascii_lowercase();
+    fn is_known_family(s: &str) -> bool {
+        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud")
+    }
+    let family = if is_known_family(model_lower.as_str()) {
+        model_lower.as_str()
+    } else if is_known_family(command_lower.as_str()) {
+        command_lower.as_str()
+    } else {
+        model_lower.as_str()
+    };
 
-    match model_name {
+    match family {
         "claude" | "gemini" | "qwen" => {
-            let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+            let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
             defaults.push("-p".into());
             defaults.push(prompt.to_string());
             cmd.args(defaults);
@@ -647,7 +659,7 @@ async fn execute_model_with_permissions(
             if have_mode_args {
                 cmd.arg(prompt);
             } else {
-                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                 defaults.push(prompt.to_string());
                 cmd.args(defaults);
             }
@@ -662,7 +674,7 @@ async fn execute_model_with_permissions(
             if have_mode_args {
                 cmd.arg(prompt);
             } else {
-                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                 defaults.push(prompt.to_string());
                 cmd.args(defaults);
             }
@@ -673,7 +685,7 @@ async fn execute_model_with_permissions(
     // Proactively check for presence of external command before spawn when not
     // using the current executable fallback. This avoids confusing OS errors
     // like "program not found" and lets us surface a cleaner message.
-    if model_name != "codex" && model_name != "code" && !command_exists(&command) {
+    if family != "codex" && family != "code" && !command_exists(&command) {
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
@@ -771,9 +783,9 @@ async fn execute_model_with_permissions(
             }
         }
 
-        match model_name {
+        match family {
             "claude" | "gemini" | "qwen" => {
-                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                 defaults.push("-p".into());
                 defaults.push(prompt.to_string());
                 args.extend(defaults);
@@ -783,7 +795,20 @@ async fn execute_model_with_permissions(
                 if have_mode_args {
                     args.push(prompt.to_string());
                 } else {
-                    let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
+                    defaults.push(prompt.to_string());
+                    args.extend(defaults);
+                }
+            }
+            "cloud" => {
+                let have_mode_args = config
+                    .as_ref()
+                    .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                    .unwrap_or(false);
+                if have_mode_args {
+                    args.push(prompt.to_string());
+                } else {
+                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                     defaults.push(prompt.to_string());
                     args.extend(defaults);
                 }
@@ -831,7 +856,7 @@ async fn execute_model_with_permissions(
             Ok(o) => o,
             Err(e) => {
                 // Only fall back for external CLIs (not the built-in code/codex path)
-                if model_name == "codex" || model_name == "code" {
+                if family == "codex" || family == "code" {
                     return Err(format!("Failed to execute {}: {}", model, e));
                 }
                 let mut fb = match std::env::current_exe() {
