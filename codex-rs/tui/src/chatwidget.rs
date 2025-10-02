@@ -3557,7 +3557,6 @@ impl ChatWidget<'_> {
             | HistoryCellType::Reasoning
             | HistoryCellType::Error
             | HistoryCellType::Exec { .. }
-            | HistoryCellType::Tool { .. }
             | HistoryCellType::Patch { .. }
             | HistoryCellType::PlanUpdate
             | HistoryCellType::BackgroundEvent
@@ -3565,6 +3564,11 @@ impl ChatWidget<'_> {
             | HistoryCellType::Diff
             | HistoryCellType::Plain
             | HistoryCellType::Image => Some(User),
+            HistoryCellType::Tool { status } => match status {
+                crate::history_cell::ToolCellStatus::Running => None,
+                crate::history_cell::ToolCellStatus::Success
+                | crate::history_cell::ToolCellStatus::Failed => Some(User),
+            },
             HistoryCellType::AnimatedWelcome | HistoryCellType::Loading => None,
         }
     }
