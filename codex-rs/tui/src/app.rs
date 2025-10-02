@@ -159,7 +159,7 @@ pub(crate) struct App<'a> {
     /// repaint after focus/size changes until a manual resize occurs.
     last_frame_size: Option<ratatui::prelude::Size>,
 
-    // Double‑Esc timing for backtrack/edit‑previous
+    // Double‑Esc timing for undo timeline
     last_esc_time: Option<Instant>,
 
     /// If true, enable lightweight timing collection and report on exit.
@@ -1142,7 +1142,7 @@ impl App<'_> {
                             // - Otherwise apply global Esc ordering:
                             //   1) If agent is running, stop it (even if the composer has text).
                             //   2) Else if there's text, clear it.
-                            //   3) Else double‑Esc engages backtrack/edit‑previous.
+                            //   3) Else double‑Esc opens the undo timeline.
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 // Modal-first: give active modal views priority to handle Esc.
                                 if widget.has_active_modal_view() {
@@ -1173,21 +1173,17 @@ impl App<'_> {
                                         continue;
                                     }
 
-                                    // Step 3: backtrack via double‑Esc.
+                                    // Step 3: double‑Esc opens the undo timeline.
                                     if let Some(prev) = self.last_esc_time {
                                         if now.duration_since(prev) <= THRESHOLD {
                                             self.last_esc_time = None;
-                                            if widget.has_pending_jump_back() {
-                                                widget.undo_jump_back();
-                                            } else {
-                                                widget.show_edit_previous_picker();
-                                            }
+                                            widget.handle_undo_command();
                                             continue;
                                         }
                                     }
                                     // First Esc in empty/idle state: show hint and arm timer.
                                     self.last_esc_time = Some(now);
-                                    widget.show_esc_backtrack_hint();
+                                    widget.show_esc_undo_hint();
                                     continue;
                                 }
                             }
