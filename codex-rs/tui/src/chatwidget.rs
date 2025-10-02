@@ -71,6 +71,7 @@ mod streaming;
 mod terminal_handlers;
 mod terminal;
 mod tools;
+mod running_tools;
 #[cfg(all(test, feature = "legacy_tests"))]
 mod tests_retry;
 use self::agent_install::{
@@ -155,6 +156,12 @@ use tokio::sync::mpsc::UnboundedSender;
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
+    if let Ok(value) = std::env::var("CODEX_TRACE_HISTORY") {
+        let trimmed = value.trim();
+        if !matches!(trimmed, "" | "0") {
+            return true;
+        }
+    }
     *ENABLED.get_or_init(|| {
         if let Ok(value) = std::env::var("CODE_BUFFER_DIFF_TRACE_CELLS") {
             return !matches!(value.trim(), "" | "0");
@@ -543,6 +550,7 @@ pub(crate) struct ChatWidget<'a> {
     history_snapshot_dirty: bool,
     history_snapshot_last_flush: Option<Instant>,
     config: Config,
+    history_debug_events: Option<RefCell<Vec<String>>>,
     latest_upgrade_version: Option<String>,
     initial_user_message: Option<UserMessage>,
     total_token_usage: TokenUsage,
@@ -1956,7 +1964,8 @@ impl ChatWidget<'_> {
     /// Render a single recorded ResponseItem into history without executing tools
     fn render_replay_item(&mut self, item: ResponseItem) {
         match item {
-            ResponseItem::Message { role, content, .. } => {
+            ResponseItem::Message { id, role, content } => {
+                let message_id = id;
                 let mut text = String::new();
                 for c in content {
                     match c {
@@ -2004,7 +2013,7 @@ impl ChatWidget<'_> {
                 }
                 let mut lines: Vec<ratatui::text::Line<'static>> = Vec::new();
                 crate::markdown::append_markdown(text, &mut lines, &self.config);
-                self.insert_final_answer_with_id(None, lines, text.to_string());
+                self.insert_final_answer_with_id(message_id, lines, text.to_string());
                 return;
             }
                 if role == "user" {
@@ -2845,8 +2854,9 @@ impl ChatWidget<'_> {
         }
 
         let mut has_wait_running = false;
-        for entry in self.tools_state.running_custom_tools.values() {
-            if let Some(idx) = self.resolve_running_tool_index(entry) {
+        for (call_id, entry) in self.tools_state.running_custom_tools.iter() {
+            if let Some(idx) = running_tools::resolve_entry_index(self, entry, &call_id.0)
+            {
                 if let Some(cell) = self.history_cells.get(idx).and_then(|c| c
                     .as_any()
                     .downcast_ref::<history_cell::RunningToolCallCell>())
@@ -3043,6 +3053,11 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            history_debug_events: if history_cell_logging_enabled() {
+                Some(RefCell::new(Vec::new()))
+            } else {
+                None
+            },
             latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: create_initial_user_message(
                 initial_prompt.unwrap_or_default(),
@@ -3066,12 +3081,7 @@ impl ChatWidget<'_> {
                 suppressed_exec_end_order: VecDeque::new(),
             },
             canceled_exec_call_ids: HashSet::new(),
-            tools_state: ToolState {
-                running_custom_tools: HashMap::new(),
-                running_web_search: HashMap::new(),
-                running_wait_tools: HashMap::new(),
-                running_kill_tools: HashMap::new(),
-            },
+            tools_state: ToolState::default(),
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
@@ -3314,6 +3324,11 @@ impl ChatWidget<'_> {
             active_exec_cell: None,
             history_cells,
             config: config.clone(),
+            history_debug_events: if history_cell_logging_enabled() {
+                Some(RefCell::new(Vec::new()))
+            } else {
+                None
+            },
             latest_upgrade_version: latest_upgrade_version.clone(),
             initial_user_message: None,
             total_token_usage: TokenUsage::default(),
@@ -5900,6 +5915,48 @@ impl ChatWidget<'_> {
         );
     }
 
+    pub(super) fn history_debug(&self, message: impl Into<String>) {
+        if !history_cell_logging_enabled() {
+            return;
+        }
+        let message = message.into();
+        tracing::trace!(target: "codex_history", "{message}");
+        if let Some(buffer) = &self.history_debug_events {
+            buffer.borrow_mut().push(message);
+        }
+    }
+
+    fn rehydrate_system_order_cache(&mut self, preserved: &[(String, HistoryId)]) {
+        let prev = self.system_cell_by_id.len();
+        self.system_cell_by_id.clear();
+
+        for (key, hid) in preserved {
+            if let Some(idx) = self
+                .history_cell_ids
+                .iter()
+                .position(|maybe| maybe.map(|stored| stored == *hid).unwrap_or(false))
+            {
+                self.system_cell_by_id.insert(key.clone(), idx);
+            }
+        }
+
+        self.history_debug(format!(
+            "system_order_cache.rehydrate prev={} restored={} entries={}",
+            prev,
+            preserved.len(),
+            self.system_cell_by_id.len()
+        ));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn history_debug_events(&self) -> Vec<String> {
+        self
+            .history_debug_events
+            .as_ref()
+            .map(|buf| buf.borrow().clone())
+            .unwrap_or_default()
+    }
+
     #[cfg(test)]
     pub(crate) fn test_set_request_state(&mut self, last_seen: u64, pending_prompts: usize) {
         self.last_seen_request_index = last_seen;
@@ -5992,25 +6049,6 @@ impl ChatWidget<'_> {
         self.refresh_explore_trailing_flags();
         // Keep debug info for this cell index as-is.
         self.mark_history_dirty();
-    }
-
-    fn resolve_running_tool_index(&self, entry: &RunningToolEntry) -> Option<usize> {
-        if let Some(id) = entry.history_id {
-            if let Some(pos) = self.cell_index_for_history_id(id) {
-                return Some(pos);
-            }
-        }
-        if let Some(pos) = self
-            .cell_order_seq
-            .iter()
-            .position(|key| *key == entry.order_key)
-        {
-            return Some(pos);
-        }
-        if entry.fallback_index < self.history_cells.len() {
-            return Some(entry.fallback_index);
-        }
-        None
     }
 
     fn history_remove_at(&mut self, idx: usize) {
@@ -7555,6 +7593,21 @@ impl ChatWidget<'_> {
 
     pub(crate) fn restore_history_snapshot(&mut self, snapshot: &HistorySnapshot) {
         let perf_timer = self.perf_state.enabled.then(Instant::now);
+        let preserved_system_entries: Vec<(String, HistoryId)> = self
+            .system_cell_by_id
+            .iter()
+            .filter_map(|(key, &idx)| {
+                self.history_cell_ids
+                    .get(idx)
+                    .and_then(|maybe| maybe.map(|hid| (key.clone(), hid)))
+            })
+            .collect();
+        self.history_debug(format!(
+            "restore_history_snapshot.start records={} cells_before={} order_before={}",
+            snapshot.records.len(),
+            self.history_cells.len(),
+            self.cell_order_seq.len()
+        ));
         self.history_state.restore(snapshot);
 
         self.history_render.invalidate_all();
@@ -7642,6 +7695,9 @@ impl ChatWidget<'_> {
         self.internal_seq = max_seq;
         self.last_assigned_order = self.cell_order_seq.iter().copied().max();
 
+        running_tools::rehydrate(self);
+        self.rehydrate_system_order_cache(&preserved_system_entries);
+
         self.bottom_pane
             .set_has_chat_history(!self.history_cells.is_empty());
         self.refresh_reasoning_collapsed_visibility();
@@ -7658,6 +7714,13 @@ impl ChatWidget<'_> {
         }
         self.history_snapshot_dirty = true;
         self.history_snapshot_last_flush = None;
+
+        self.history_debug(format!(
+            "restore_history_snapshot.done cells={} order={} system_cells={}",
+            self.history_cells.len(),
+            self.cell_order_seq.len(),
+            self.system_cell_by_id.len()
+        ));
     }
 
     pub(crate) fn perform_undo_restore(
@@ -8021,7 +8084,14 @@ impl ChatWidget<'_> {
                 self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
-                tools::web_search_complete(self, ev.call_id, ev.query)
+                let ok = match event.order.as_ref() {
+                    Some(om) => Self::order_key_from_order_meta(om),
+                    None => {
+                        tracing::warn!("missing OrderMeta on WebSearchComplete; using synthetic key");
+                        self.next_internal_key()
+                    }
+                };
+                tools::web_search_complete(self, ev.call_id, ev.query, ok)
             }
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 tracing::debug!("AgentMessageDelta: {:?}", delta);
@@ -9025,7 +9095,8 @@ impl ChatWidget<'_> {
                     .remove(&ToolCallId(call_id.clone()));
                 let resolved_idx = running_entry
                     .as_ref()
-                    .and_then(|entry| self.resolve_running_tool_index(entry));
+                    .and_then(|entry| running_tools::resolve_entry_index(self, entry, &call_id))
+                    .or_else(|| running_tools::find_by_call_id(self, &call_id));
 
                 if tool_name == "apply_patch" && success {
                     if let Some(idx) = resolved_idx {
@@ -9138,6 +9209,7 @@ impl ChatWidget<'_> {
                     if let Some(idx) = resolved_idx {
                         self.history_replace_at(idx, Box::new(completed));
                     } else {
+                        running_tools::collapse_spinner(self, &call_id);
                         let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                     }
 
@@ -9156,8 +9228,24 @@ impl ChatWidget<'_> {
                 );
                 completed.state_mut().call_id = Some(call_id.clone());
                 if let Some(idx) = resolved_idx {
+                    self.history_debug(format!(
+                        "custom_tool_end.in_place call_id={} idx={} order=({}, {}, {})",
+                        call_id,
+                        idx,
+                        ok.req,
+                        ok.out,
+                        ok.seq
+                    ));
                     self.history_replace_at(idx, Box::new(completed));
                 } else {
+                    self.history_debug(format!(
+                        "custom_tool_end.fallback_insert call_id={} order=({}, {}, {})",
+                        call_id,
+                        ok.req,
+                        ok.out,
+                        ok.seq
+                    ));
+                    running_tools::collapse_spinner(self, &call_id);
                     let _ = self.history_insert_with_key_global(Box::new(completed), ok);
                 }
 
@@ -22217,15 +22305,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     if next_is_collapsed_reasoning {
                         should_add_spacing = false;
                     }
-                }
-            }
-            if should_add_spacing {
-                let next_is_zero_height = visible_slice
-                    .get(offset + 1)
-                    .map(|next| next.height == 0)
-                    .unwrap_or(false);
-                if next_is_zero_height {
-                    should_add_spacing = false;
                 }
             }
             if should_add_spacing {
