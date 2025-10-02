@@ -1491,9 +1491,11 @@ impl ChatWidget<'_> {
     fn note_order(&mut self, order: Option<&codex_core::protocol::OrderMeta>) {
         if let Some(om) = order {
             let is_background_sentinel = om.output_index == Some(i32::MAX as u32);
-            if !is_background_sentinel {
-                self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal);
+            let is_initial_session = self.last_seen_request_index == 0;
+            if is_background_sentinel && is_initial_session {
+                return;
             }
+            self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal);
         }
     }
 
