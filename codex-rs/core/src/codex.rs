@@ -6516,8 +6516,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     "claude" => ("claude".to_string(), false),
                     "gemini" => ("gemini".to_string(), false),
                     "qwen" => ("qwen".to_string(), false),
-                    // Cloud agent treated as external CLI by default.
-                    "cloud" => ("cloud".to_string(), false),
+                    // Cloud agent: treat as built-in via current executable (code cloud submit)
+                    "cloud" => ("cloud".to_string(), true),
                     _ => (m, false),
                 }
             }
