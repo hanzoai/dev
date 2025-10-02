@@ -21452,8 +21452,15 @@ impl WidgetRef for &ChatWidget<'_> {
                             kind = RenderRequestKind::Assistant { id: history_id };
                         }
                         other => {
-                            fallback_lines =
-                                Some(history_cell::lines_from_record(other, &self.config));
+                            let lines = cell.display_lines_trimmed();
+                            if !lines.is_empty()
+                                || matches!(other, HistoryRecord::Reasoning(_))
+                            {
+                                fallback_lines = Some(lines);
+                            } else {
+                                fallback_lines =
+                                    Some(history_cell::lines_from_record(other, &self.config));
+                            }
                         }
                     }
                 }
@@ -22054,6 +22061,15 @@ impl WidgetRef for &ChatWidget<'_> {
                     if next_is_collapsed_reasoning {
                         should_add_spacing = false;
                     }
+                }
+            }
+            if should_add_spacing {
+                let next_is_zero_height = visible_slice
+                    .get(offset + 1)
+                    .map(|next| next.height == 0)
+                    .unwrap_or(false);
+                if next_is_zero_height {
+                    should_add_spacing = false;
                 }
             }
             if should_add_spacing {
