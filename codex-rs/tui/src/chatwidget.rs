@@ -22325,15 +22325,6 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
             if should_add_spacing {
-                let next_is_zero_height = visible_slice
-                    .get(offset + 1)
-                    .map(|next| next.height == 0)
-                    .unwrap_or(false);
-                if next_is_zero_height {
-                    should_add_spacing = false;
-                }
-            }
-            if should_add_spacing {
                 if screen_y < content_area.y + content_area.height {
                     screen_y += spacing
                         .min((content_area.y + content_area.height).saturating_sub(screen_y));
