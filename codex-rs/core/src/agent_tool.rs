@@ -652,6 +652,21 @@ async fn execute_model_with_permissions(
                 cmd.args(defaults);
             }
         }
+        // Cloud agent: append prompt positionally; do not assume a -p flag.
+        "cloud" => {
+            // If config provided explicit args for this mode, do not append defaults.
+            let have_mode_args = config
+                .as_ref()
+                .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                .unwrap_or(false);
+            if have_mode_args {
+                cmd.arg(prompt);
+            } else {
+                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                defaults.push(prompt.to_string());
+                cmd.args(defaults);
+            }
+        }
         _ => { return Err(format!("Unknown model: {}", model)); }
     }
 
