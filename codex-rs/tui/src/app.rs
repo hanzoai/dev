@@ -1627,6 +1627,7 @@ impl App<'_> {
                     progress_current,
                     cli_prompt,
                     transcript,
+                    turn_config,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_decision(
@@ -1635,6 +1636,7 @@ impl App<'_> {
                             progress_current,
                             cli_prompt,
                             transcript,
+                            turn_config,
                         );
                     }
                 }
