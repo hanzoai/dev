@@ -2,6 +2,7 @@
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::ApprovalRequest;
 use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
@@ -530,21 +531,25 @@ impl BottomPane<'_> {
     }
 
     /// Called when the agent requests user approval.
-    pub fn push_approval_request(&mut self, request: ApprovalRequest) {
-        let request = if let Some(view) = self.active_view.as_mut() {
-            match view.try_consume_approval_request(request) {
-                Some(request) => request,
+    pub fn push_approval_request(
+        &mut self,
+        request: ApprovalRequest,
+        ticket: BackgroundOrderTicket,
+    ) {
+        let (request, ticket) = if let Some(view) = self.active_view.as_mut() {
+            match view.try_consume_approval_request(request, ticket.clone()) {
+                Some((request, ticket)) => (request, ticket),
                 None => {
                     self.request_redraw();
                     return;
                 }
             }
         } else {
-            request
+            (request, ticket)
         };
 
         // Otherwise create a new approval modal overlay.
-        let modal = ApprovalModalView::new(request, self.app_event_tx.clone());
+        let modal = ApprovalModalView::new(request, ticket, self.app_event_tx.clone());
         self.active_view = Some(Box::new(modal));
         self.active_view_kind = ActiveViewKind::Other;
         // Hide any overlay status while a modal is visible.
@@ -569,10 +574,17 @@ impl BottomPane<'_> {
     }
 
     /// Show the theme selection UI
-    pub fn show_theme_selection(&mut self, _current_theme: ThemeName) {
+    pub fn show_theme_selection(
+        &mut self,
+        _current_theme: ThemeName,
+        tail_ticket: BackgroundOrderTicket,
+        before_ticket: BackgroundOrderTicket,
+    ) {
         let view = ThemeSelectionView::new(
             crate::theme::current_theme_name(),
             self.app_event_tx.clone(),
+            tail_ticket,
+            before_ticket,
         );
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
@@ -1045,6 +1057,7 @@ impl WidgetRef for &BottomPane<'_> {
 mod tests_removed {
     use super::*;
     use crate::app_event::AppEvent;
+    use crate::chatwidget::BackgroundOrderTicket;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use std::sync::mpsc::channel;
@@ -1067,7 +1080,7 @@ mod tests_removed {
             enhanced_keys_supported: false,
             using_chatgpt_auth: false,
         });
-        pane.push_approval_request(exec_request());
+        pane.push_approval_request(exec_request(), BackgroundOrderTicket::test_for_request(1));
         assert_eq!(CancellationEvent::Handled, pane.on_ctrl_c());
         assert!(pane.ctrl_c_quit_hint_visible());
         assert_eq!(CancellationEvent::Ignored, pane.on_ctrl_c());
@@ -1085,7 +1098,7 @@ mod tests_removed {
         });
 
         // Create an approval modal (active view).
-        pane.push_approval_request(exec_request());
+        pane.push_approval_request(exec_request(), BackgroundOrderTicket::test_for_request(1));
         // Attempt to update status; this should NOT create an overlay while modal is visible.
         pane.update_status_text("running command".to_string());
 
@@ -1119,7 +1132,7 @@ mod tests_removed {
         pane.update_status_text("waiting for model".to_string());
 
         // Push an approval modal (e.g., command approval) which should hide the status view.
-        pane.push_approval_request(exec_request());
+        pane.push_approval_request(exec_request(), BackgroundOrderTicket::test_for_request(1));
 
         // Simulate pressing 'n' (No) on the modal.
         use crossterm::event::KeyCode;
