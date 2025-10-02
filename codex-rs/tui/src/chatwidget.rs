@@ -154,7 +154,7 @@ use ratatui::widgets::WidgetRef;
 use ratatui_image::picker::Picker;
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
@@ -175,7 +175,6 @@ fn history_cell_logging_enabled() -> bool {
     })
 }
 use serde_json::Value as JsonValue;
-use tokio::sync::mpsc::unbounded_channel;
 use tracing::info;
 // use image::GenericImageView;
 
@@ -753,6 +752,8 @@ pub(crate) struct ChatWidget<'a> {
     cloud_tasks_last_tasks: Vec<TaskSummary>,
     cloud_tasks_best_of_n: usize,
     cloud_tasks_creation_inflight: bool,
+    cloud_task_apply_tickets: HashMap<(String, bool), BackgroundOrderTicket>,
+    cloud_task_create_ticket: Option<BackgroundOrderTicket>,
 
     // Event sequencing to preserve original order across streaming/tool events
     // and stream-related flags moved into stream_state
@@ -803,18 +804,26 @@ pub(crate) struct ChatWidget<'a> {
 }
 
 #[derive(Clone)]
-struct UiBackgroundOrderHandle {
+pub(crate) struct BackgroundOrderTicket {
     request_ordinal: u64,
     seq_counter: Arc<AtomicU64>,
 }
 
-impl UiBackgroundOrderHandle {
-    fn next_order(&self) -> codex_core::protocol::OrderMeta {
+impl BackgroundOrderTicket {
+    pub(crate) fn next_order(&self) -> codex_core::protocol::OrderMeta {
         let seq = self.seq_counter.fetch_add(1, Ordering::SeqCst);
         codex_core::protocol::OrderMeta {
             request_ordinal: self.request_ordinal,
             output_index: Some(i32::MAX as u32),
             sequence_number: Some(seq),
+        }
+    }
+
+    #[cfg(any(test, feature = "legacy_tests"))]
+    pub(crate) fn test_for_request(request_ordinal: u64) -> Self {
+        Self {
+            request_ordinal,
+            seq_counter: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -1519,21 +1528,123 @@ impl ChatWidget<'_> {
         req
     }
 
-    fn background_tail_order_handle(&mut self) -> UiBackgroundOrderHandle {
-        let req = self.background_tail_request_ordinal();
+    fn background_order_ticket_for_req(&mut self, req: u64) -> BackgroundOrderTicket {
         let counter = self
             .ui_background_seq_counters
             .entry(req)
             .or_insert_with(|| Arc::new(AtomicU64::new(0)))
             .clone();
-        UiBackgroundOrderHandle {
+        BackgroundOrderTicket {
             request_ordinal: req,
             seq_counter: counter,
         }
     }
 
+    fn background_tail_order_ticket_internal(&mut self) -> BackgroundOrderTicket {
+        let req = self.background_tail_request_ordinal();
+        self.background_order_ticket_for_req(req)
+    }
+
+    fn background_before_next_output_request_ordinal(&mut self) -> u64 {
+        if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            *self.synthetic_system_req.get_or_insert(1)
+        }
+    }
+
+    fn background_before_next_output_ticket_internal(&mut self) -> BackgroundOrderTicket {
+        let req = self.background_before_next_output_request_ordinal();
+        self.background_order_ticket_for_req(req)
+    }
+
+    pub(crate) fn make_background_tail_ticket(&mut self) -> BackgroundOrderTicket {
+        self.background_tail_order_ticket_internal()
+    }
+
+    pub(crate) fn make_background_before_next_output_ticket(&mut self) -> BackgroundOrderTicket {
+        self.background_before_next_output_ticket_internal()
+    }
+
+    fn spawn_conversation_runtime(
+        &mut self,
+        config: Config,
+        auth_manager: Arc<AuthManager>,
+        codex_op_rx: UnboundedReceiver<Op>,
+    ) {
+        let ticket = self.make_background_tail_ticket();
+        let ticket_for_submit = ticket.clone();
+        let app_event_tx_clone = self.app_event_tx.clone();
+
+        tokio::spawn(async move {
+            let mut codex_op_rx = codex_op_rx;
+            let conversation_manager = ConversationManager::new(auth_manager.clone());
+            let resume_path = config.experimental_resume.clone();
+            let new_conversation = match resume_path {
+                Some(path) => conversation_manager
+                    .resume_conversation_from_rollout(config.clone(), path, auth_manager.clone())
+                    .await,
+                None => conversation_manager.new_conversation(config).await,
+            };
+
+            let new_conversation = match new_conversation {
+                Ok(conv) => conv,
+                Err(e) => {
+                    tracing::error!("failed to initialize conversation: {e}");
+                    app_event_tx_clone.send_background_event_with_ticket(
+                        &ticket,
+                        format!(
+                            "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
+                            e
+                        ),
+                    );
+                    return;
+                }
+            };
+
+            let event = Event {
+                id: new_conversation.conversation_id.to_string(),
+                event_seq: 0,
+                msg: EventMsg::SessionConfigured(new_conversation.session_configured),
+                order: None,
+            };
+            app_event_tx_clone.send(AppEvent::CodexEvent(event));
+
+            let conversation = new_conversation.conversation;
+            let conversation_clone = conversation.clone();
+            let app_event_tx_submit = app_event_tx_clone.clone();
+            let ticket_for_submit = ticket_for_submit.clone();
+
+            tokio::spawn(async move {
+                while let Some(op) = codex_op_rx.recv().await {
+                    if let Err(e) = conversation_clone.submit(op).await {
+                        tracing::error!("failed to submit op: {e}");
+                        app_event_tx_submit.send_background_event_with_ticket(
+                            &ticket_for_submit,
+                            format!("⚠️ Failed to submit Op to core: {}", e),
+                        );
+                    }
+                }
+            });
+
+            while let Ok(event) = conversation.next_event().await {
+                app_event_tx_clone.send(AppEvent::CodexEvent(event));
+            }
+            // (debug end notice removed)
+        });
+    }
+
+    fn consume_pending_prompt_for_ui_only_turn(&mut self) {
+        if self.pending_user_prompts_for_next_turn > 0 {
+            self.pending_user_prompts_for_next_turn -= 1;
+        }
+        if !self.pending_dispatched_user_messages.is_empty() {
+            self.pending_dispatched_user_messages.pop_front();
+        }
+    }
+
     fn background_tail_order_meta(&mut self) -> codex_core::protocol::OrderMeta {
-        self.background_tail_order_handle().next_order()
+        self.background_tail_order_ticket_internal().next_order()
     }
 
     fn send_background_tail_ordered(&mut self, message: impl Into<String>) {
@@ -2524,12 +2635,13 @@ impl ChatWidget<'_> {
         // Use call_id as the approval correlation id so responses map to the
         // exact pending approval in core (supports multiple approvals per turn).
         let approval_id = ev.call_id.clone();
+        let ticket = self.make_background_before_next_output_ticket();
         self.bottom_pane
             .push_approval_request(ApprovalRequest::Exec {
                 id: approval_id,
                 command: ev.command,
                 reason: ev.reason,
-            });
+            }, ticket);
     }
 
     /// Handle apply patch approval request immediately
@@ -2598,7 +2710,8 @@ impl ChatWidget<'_> {
             reason,
             grant_root,
         };
-        self.bottom_pane.push_approval_request(request);
+        let ticket = self.make_background_before_next_output_ticket();
+        self.bottom_pane.push_approval_request(request, ticket);
     }
 
     /// Handle exec command begin immediately
@@ -2951,11 +3064,7 @@ impl ChatWidget<'_> {
             self.bottom_pane.update_status_text(message.clone());
             // Add a dim background event instead of a hard error cell to avoid
             // alarming users during auto-retries.
-            self.insert_background_event_with_placement(
-                message,
-                BackgroundPlacement::Tail,
-                None,
-            );
+            self.push_background_tail(message);
             // Do NOT clear running state or streams; the retry will resume them.
             self.request_redraw();
             return;
@@ -3106,67 +3215,6 @@ impl ChatWidget<'_> {
             AuthMode::ApiKey,
             config.responses_originator_header.clone(),
         );
-
-        let app_event_tx_clone = app_event_tx.clone();
-        let auth_manager_for_spawn = auth_manager.clone();
-        let config_for_agent_loop = config.clone();
-        tokio::spawn(async move {
-            let mut codex_op_rx = codex_op_rx;
-            let conversation_manager = ConversationManager::new(auth_manager_for_spawn.clone());
-            let resume_path = config_for_agent_loop.experimental_resume.clone();
-            let new_conversation = match resume_path {
-                Some(path) => conversation_manager
-                    .resume_conversation_from_rollout(
-                        config_for_agent_loop,
-                        path,
-                        auth_manager_for_spawn,
-                    )
-                    .await,
-                None => conversation_manager.new_conversation(config_for_agent_loop).await,
-            };
-
-            let new_conversation = match new_conversation {
-                Ok(conv) => conv,
-                Err(e) => {
-                    tracing::error!("failed to initialize conversation: {e}");
-                    // Surface a visible background event so users see why nothing starts.
-                    app_event_tx_clone.send_background_event(format!(
-                        "❌ Failed to initialize model session: {}.\n• Ensure an OpenAI API key is set (CODE_OPENAI_API_KEY / OPENAI_API_KEY) or run `code login`.\n• Also verify config.cwd is an absolute path.",
-                        e
-                    ));
-                    return;
-                }
-            };
-
-            // Forward the SessionConfigured event to the UI
-            let event = Event {
-                id: new_conversation.conversation_id.to_string(),
-                event_seq: 0,
-                msg: EventMsg::SessionConfigured(new_conversation.session_configured),
-                order: None,
-            };
-            app_event_tx_clone.send(AppEvent::CodexEvent(event));
-
-            let conversation = new_conversation.conversation;
-            let conversation_clone = conversation.clone();
-            let app_event_tx_submit = app_event_tx_clone.clone();
-            tokio::spawn(async move {
-                while let Some(op) = codex_op_rx.recv().await {
-                    if let Err(e) = conversation_clone.submit(op).await {
-                        tracing::error!("failed to submit op: {e}");
-                        app_event_tx_submit.send_background_event(format!(
-                            "⚠️ Failed to submit Op to core: {}",
-                            e
-                        ));
-                    }
-                }
-            });
-
-            while let Ok(event) = conversation.next_event().await {
-                app_event_tx_clone.send(AppEvent::CodexEvent(event));
-            }
-            // (debug end notice removed)
-        });
 
         // Browser manager is now handled through the global state
         // The core session will use the same global manager when browser tools are invoked
@@ -3339,6 +3387,8 @@ impl ChatWidget<'_> {
             cloud_tasks_last_tasks: Vec::new(),
             cloud_tasks_best_of_n: 1,
             cloud_tasks_creation_inflight: false,
+            cloud_task_apply_tickets: HashMap::new(),
+            cloud_task_create_ticket: None,
             browser_is_external: false,
             // Stable ordering & routing init
             cell_order_seq: vec![OrderKey {
@@ -3364,6 +3414,7 @@ impl ChatWidget<'_> {
             replay_history_depth: 0,
             resume_placeholder_visible: false,
         };
+        new_widget.spawn_conversation_runtime(config.clone(), auth_manager.clone(), codex_op_rx);
         if let Ok(Some(active_id)) = auth_accounts::get_active_account_id(&config.codex_home) {
             if let Ok(records) = account_usage::list_rate_limit_snapshots(&config.codex_home) {
                 if let Some(record) = records.into_iter().find(|r| r.account_id == active_id) {
@@ -3615,6 +3666,8 @@ impl ChatWidget<'_> {
             cloud_tasks_last_tasks: Vec::new(),
             cloud_tasks_best_of_n: 1,
             cloud_tasks_creation_inflight: false,
+            cloud_task_apply_tickets: HashMap::new(),
+            cloud_task_create_ticket: None,
             browser_is_external: false,
             // Strict ordering init for forked widget
             cell_order_seq: vec![OrderKey {
@@ -6049,10 +6102,11 @@ impl ChatWidget<'_> {
     /// Insert a background event near the top of the current request so it appears
     /// before imminent provider output (e.g. Exec begin).
     pub(crate) fn insert_background_event_early(&mut self, message: String) {
+        let ticket = self.make_background_before_next_output_ticket();
         self.insert_background_event_with_placement(
             message,
             BackgroundPlacement::BeforeNextOutput,
-            None,
+            Some(ticket.next_order()),
         );
     }
     /// Insert a background event using the specified placement semantics.
@@ -6062,14 +6116,18 @@ impl ChatWidget<'_> {
         placement: BackgroundPlacement,
         order: Option<codex_core::protocol::OrderMeta>,
     ) {
-        let mut order = order;
+        let order = order;
         if order.is_none() {
             if matches!(placement, BackgroundPlacement::Tail) {
-                order = Some(self.background_tail_order_meta());
+                tracing::error!(
+                    target: "codex_order",
+                    "missing order metadata for tail background event; dropping message"
+                );
+                return;
             } else {
                 tracing::warn!(
                     target: "codex_order",
-                    "legacy background event without order placement={:?}",
+                    "background event without order metadata placement={:?}",
                     placement
                 );
             }
@@ -6097,14 +6155,20 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn push_background_tail(&mut self, message: impl Into<String>) {
-        self.insert_background_event_with_placement(message.into(), BackgroundPlacement::Tail, None);
+        let ticket = self.make_background_tail_ticket();
+        self.insert_background_event_with_placement(
+            message.into(),
+            BackgroundPlacement::Tail,
+            Some(ticket.next_order()),
+        );
     }
 
     pub(crate) fn push_background_before_next_output(&mut self, message: impl Into<String>) {
+        let ticket = self.make_background_before_next_output_ticket();
         self.insert_background_event_with_placement(
             message.into(),
             BackgroundPlacement::BeforeNextOutput,
-            None,
+            Some(ticket.next_order()),
         );
     }
 
@@ -6162,8 +6226,8 @@ impl ChatWidget<'_> {
     }
 
     #[cfg(test)]
-    pub(crate) fn test_background_tail_order_handle(&mut self) -> UiBackgroundOrderHandle {
-        self.background_tail_order_handle()
+    pub(crate) fn test_background_tail_order_handle(&mut self) -> BackgroundOrderTicket {
+        self.background_tail_order_ticket_internal()
     }
 
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
@@ -7040,6 +7104,7 @@ impl ChatWidget<'_> {
 
         let repo_path = self.config.cwd.clone();
         let app_event_tx = self.app_event_tx.clone();
+        let notice_ticket = self.make_background_tail_ticket();
         let started_at = request.started_at;
         self.active_ghost_snapshot = Some((job_id, request));
 
@@ -7084,11 +7149,7 @@ impl ChatWidget<'_> {
                             "Git snapshot still running… {} elapsed.",
                             format_duration(elapsed)
                         );
-                        let _ = app_event_tx.send(AppEvent::InsertBackgroundEvent {
-                            message,
-                            placement: BackgroundPlacement::Tail,
-                            order: None,
-                        });
+                        app_event_tx.send_background_event_with_ticket(&notice_ticket, message);
                     }
                 }
             };
@@ -8273,7 +8334,12 @@ impl ChatWidget<'_> {
                 // the status spinner can hide promptly when nothing else is running.
                 self.active_task_ids.remove(&id);
                 self.maybe_hide_spinner();
-                self.auto_on_assistant_final();
+                // Important: do not advance Auto Drive here. The StreamController will emit
+                // AppEvent::InsertFinalAnswer, and the App thread will finalize the assistant
+                // cell slightly later. Advancing at this point can start the next Auto Drive
+                // step before the final answer is actually inserted, which appears as a
+                // mid-turn re-trigger. We instead advance immediately after insertion inside
+                // insert_final_answer_with_id().
             }
             EventMsg::ReplayHistory(ev) => {
                 self.clear_resume_placeholder();
@@ -10291,7 +10357,11 @@ impl ChatWidget<'_> {
                 Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
             };
 
-            let view = NotificationsSettingsView::new(mode, self.app_event_tx.clone());
+            let view = NotificationsSettingsView::new(
+                mode,
+                self.app_event_tx.clone(),
+                self.make_background_tail_ticket(),
+            );
             self.bottom_pane.show_notifications_settings(view);
             return;
         }
@@ -10548,9 +10618,11 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_login_accounts_view(&mut self) {
+        let ticket = self.make_background_tail_ticket();
         let (view, state_rc) = LoginAccountsView::new(
             self.config.codex_home.clone(),
             self.app_event_tx.clone(),
+            ticket,
         );
         self.login_view_state = Some(LoginAccountsState::weak_handle(&state_rc));
         self.login_add_view_state = None;
@@ -10559,9 +10631,11 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_login_add_account_view(&mut self) {
+        let ticket = self.make_background_tail_ticket();
         let (view, state_rc) = LoginAddAccountView::new(
             self.config.codex_home.clone(),
             self.app_event_tx.clone(),
+            ticket,
         );
         self.login_add_view_state = Some(LoginAddAccountState::weak_handle(&state_rc));
         self.login_view_state = None;
@@ -10650,6 +10724,7 @@ impl ChatWidget<'_> {
 
         let view = UpdateSettingsView::new(
             self.app_event_tx.clone(),
+            self.make_background_tail_ticket(),
             codex_version::version().to_string(),
             self.config.auto_upgrade_enabled,
             command.clone(),
@@ -12491,10 +12566,14 @@ impl ChatWidget<'_> {
                 overlay.push_assistant_message("Awaiting approval to run this command…");
                 overlay.running = false;
             }
-            self.bottom_pane.push_approval_request(ApprovalRequest::TerminalCommand {
-                id,
-                command: command_string,
-            });
+            let ticket = self.make_background_before_next_output_ticket();
+            self.bottom_pane.push_approval_request(
+                ApprovalRequest::TerminalCommand {
+                    id,
+                    command: command_string,
+                },
+                ticket,
+            );
             self.request_redraw();
             return;
         }
@@ -13809,8 +13888,13 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_theme_selection(&mut self) {
-        self.bottom_pane
-            .show_theme_selection(crate::theme::current_theme_name());
+        let tail_ticket = self.make_background_tail_ticket();
+        let before_ticket = self.make_background_before_next_output_ticket();
+        self.bottom_pane.show_theme_selection(
+            crate::theme::current_theme_name(),
+            tail_ticket,
+            before_ticket,
+        );
     }
 
     // Ctrl+Y syntax cycling disabled intentionally.
@@ -13822,7 +13906,7 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
-    fn maybe_start_auto_upgrade_task(&self) {
+    fn maybe_start_auto_upgrade_task(&mut self) {
         if !crate::updates::auto_upgrade_runtime_enabled() {
             return;
         }
@@ -13832,6 +13916,7 @@ impl ChatWidget<'_> {
 
         let cfg = self.config.clone();
         let tx = self.app_event_tx.clone();
+        let upgrade_ticket = self.make_background_tail_ticket();
         tokio::spawn(async move {
             match crate::updates::auto_upgrade_if_enabled(&cfg).await {
                 Ok(outcome) => {
@@ -13839,11 +13924,7 @@ impl ChatWidget<'_> {
                         tx.send(AppEvent::AutoUpgradeCompleted { version });
                     }
                     if let Some(message) = outcome.user_notice {
-                        tx.send(AppEvent::InsertBackgroundEvent {
-                            message,
-                            placement: BackgroundPlacement::Tail,
-                            order: None,
-                        });
+                        tx.send_background_event_with_ticket(&upgrade_ticket, message);
                     }
                 }
                 Err(err) => {
@@ -14798,6 +14879,8 @@ impl ChatWidget<'_> {
             }
             self.last_assistant_message = Some(final_source.clone());
             let _ = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            // Advance Auto Drive after the assistant message has been finalized.
+            self.auto_on_assistant_final();
             return;
         }
         // Debug: list last few history cell kinds so we can see what's present
@@ -14926,6 +15009,8 @@ impl ChatWidget<'_> {
                     .insert(StreamId(want.clone()));
             }
             self.autoscroll_if_near_bottom();
+            // Final cell committed via replacement; now advance Auto Drive.
+            self.auto_on_assistant_final();
             return;
         }
 
@@ -14955,6 +15040,8 @@ impl ChatWidget<'_> {
                     .closed_answer_ids
                     .insert(StreamId(want.clone()));
                 self.autoscroll_if_near_bottom();
+                // Final cell replaced in-place; advance Auto Drive now.
+                self.auto_on_assistant_final();
                 return;
             }
         }
@@ -14994,13 +15081,15 @@ impl ChatWidget<'_> {
                 tracing::debug!(
                     "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/superset"
                 );
-                let state =
-                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
-                let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
-                self.history_replace_at(idx, Box::new(cell));
-                self.autoscroll_if_near_bottom();
-                return;
-            }
+            let state =
+                self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
+            self.history_replace_at(idx, Box::new(cell));
+            self.autoscroll_if_near_bottom();
+            // Final assistant content revised; advance Auto Drive now.
+            self.auto_on_assistant_final();
+            return;
+        }
         }
 
         // Fallback: no prior assistant cell found; insert at stable sequence position.
@@ -15036,6 +15125,9 @@ impl ChatWidget<'_> {
                 .closed_answer_ids
                 .insert(StreamId(want.clone()));
         }
+        // Ordered insert completed; advance Auto Drive now that the assistant
+        // message is present in history.
+        self.auto_on_assistant_final();
     }
 
     // Assign or fetch a stable sequence for a stream kind+id within its originating turn
@@ -15165,6 +15257,7 @@ impl ChatWidget<'_> {
         use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
 
         let launch_port = port.unwrap_or(9222);
+        let ticket = self.make_background_tail_ticket();
 
         match option {
             ChromeLaunchOption::CloseAndUseProfile => {
@@ -15196,13 +15289,13 @@ impl ChatWidget<'_> {
                 }
                 self.launch_chrome_with_profile(launch_port);
                 // Connect to Chrome after launching
-                self.connect_to_chrome_after_launch(launch_port);
+                self.connect_to_chrome_after_launch(launch_port, ticket.clone());
             }
             ChromeLaunchOption::UseTempProfile => {
                 // Launch with temporary profile
                 self.launch_chrome_with_temp_profile(launch_port);
                 // Connect to Chrome after launching
-                self.connect_to_chrome_after_launch(launch_port);
+                self.connect_to_chrome_after_launch(launch_port, ticket.clone());
             }
             ChromeLaunchOption::UseInternalBrowser => {
                 // Redirect to internal browser command
@@ -15312,7 +15405,11 @@ impl ChatWidget<'_> {
             .update_status_text("using browser".to_string());
     }
 
-    fn connect_to_chrome_after_launch(&mut self, port: u16) {
+    fn connect_to_chrome_after_launch(
+        &mut self,
+        port: u16,
+        ticket: BackgroundOrderTicket,
+    ) {
         // Wait a moment for Chrome to start, then reuse the existing connection logic
         let app_event_tx = self.app_event_tx.clone();
         let latest_screenshot = self.latest_browser_screenshot.clone();
@@ -15322,7 +15419,13 @@ impl ChatWidget<'_> {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
             // Now try to connect using the shared CDP connection logic
-            ChatWidget::connect_to_cdp_chrome(None, Some(port), latest_screenshot, app_event_tx)
+            ChatWidget::connect_to_cdp_chrome(
+                None,
+                Some(port),
+                latest_screenshot,
+                app_event_tx,
+                ticket,
+            )
             .await;
         });
     }
@@ -15333,6 +15436,7 @@ impl ChatWidget<'_> {
         port: Option<u16>,
         latest_screenshot: Arc<Mutex<Option<(PathBuf, String)>>>,
         app_event_tx: AppEventSender,
+        ticket: BackgroundOrderTicket,
     ) {
         tracing::info!(
             "[cdp] connect_to_cdp_chrome() begin, host={:?}, port={:?}",
@@ -15393,12 +15497,15 @@ impl ChatWidget<'_> {
                     "[cdp] connect_to_chrome_only timed out after {:?}",
                     connect_deadline
                 );
-                app_event_tx.send_background_event(format!(
-                    "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
-                    connect_deadline.as_secs(),
-                    port.unwrap_or(0),
-                    port.unwrap_or(0)
-                ));
+                app_event_tx.send_background_event_with_ticket(
+                    &ticket,
+                    format!(
+                        "❌ CDP connect timed out after {}s. Ensure Chrome is running with --remote-debugging-port={} and http://127.0.0.1:{}/json/version is reachable",
+                        connect_deadline.as_secs(),
+                        port.unwrap_or(0),
+                        port.unwrap_or(0)
+                    ),
+                );
                 // Offer launch options popup to help recover quickly
                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                 return;
@@ -15442,7 +15549,8 @@ impl ChatWidget<'_> {
                     };
 
                     // Immediately notify success (do not block on screenshots)
-                    app_event_tx.send_background_event(success_msg.clone());
+                    app_event_tx
+                        .send_background_event_with_ticket(&ticket, success_msg.clone());
 
                     // Persist last connection cache to disk (best-effort)
                     tokio::spawn(async move {
@@ -15661,7 +15769,8 @@ impl ChatWidget<'_> {
                                     }
                                     _ => "✅ Connected to Chrome via CDP".to_string(),
                                 };
-                                app_event_tx.send_background_event(success_msg);
+                                app_event_tx
+                                    .send_background_event_with_ticket(&ticket, success_msg);
 
                                 // Persist last connection cache
                                 tokio::spawn(async move {
@@ -15792,10 +15901,13 @@ impl ChatWidget<'_> {
                             }
                             Ok(Err(e2)) => {
                                 tracing::error!("[cdp] Fallback connect failed: {}", e2);
-                                app_event_tx.send_background_event(format!(
-                                    "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
-                                    e2, err_msg
-                                ));
+                                app_event_tx.send_background_event_with_ticket(
+                                    &ticket,
+                                    format!(
+                                        "❌ Failed to connect to Chrome after WS fallback: {} (original: {})",
+                                        e2, err_msg
+                                    ),
+                                );
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -15805,10 +15917,13 @@ impl ChatWidget<'_> {
                                     "[cdp] Fallback connect timed out after {:?}",
                                     retry_deadline
                                 );
-                                app_event_tx.send_background_event(format!(
-                                    "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
-                                    retry_deadline.as_secs()
-                                ));
+                                app_event_tx.send_background_event_with_ticket(
+                                    &ticket,
+                                    format!(
+                                        "❌ CDP connect timed out after {}s during fallback. Ensure Chrome is running with --remote-debugging-port and /json/version is reachable",
+                                        retry_deadline.as_secs()
+                                    ),
+                                );
                                 // Also surface the Chrome launch options UI to assist the user
                                 app_event_tx.send(AppEvent::ShowChromeOptions(port));
                                 return;
@@ -15819,8 +15934,10 @@ impl ChatWidget<'_> {
                             "[cdp] connect_to_chrome_only failed immediately: {}",
                             err_msg
                         );
-                        app_event_tx
-                            .send_background_event(format!("❌ Failed to connect to Chrome: {}", err_msg));
+                        app_event_tx.send_background_event_with_ticket(
+                            &ticket,
+                            format!("❌ Failed to connect to Chrome: {}", err_msg),
+                        );
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
@@ -15936,6 +16053,7 @@ impl ChatWidget<'_> {
 
     fn schedule_browser_autofix(
         app_event_tx: AppEventSender,
+        ticket: BackgroundOrderTicket,
         autofix_state: Arc<AtomicBool>,
         failure_context: &str,
         raw_error: String,
@@ -15971,7 +16089,7 @@ impl ChatWidget<'_> {
             failure_context,
             truncated
         );
-        app_event_tx.send_background_event(visible_message);
+        app_event_tx.send_background_event_with_ticket(&ticket, visible_message);
 
         let command_text = format!(
             "/code The /browser command failed to {context}. Recent error: {error}. Please diagnose and fix the environment (for example, install or configure Chrome) so /browser works in this workspace.",
@@ -15987,6 +16105,8 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_browser_command(&mut self, command_text: String) {
         // Parse the browser subcommand
         let trimmed = command_text.trim();
+        let browser_ticket = self.make_background_tail_ticket();
+        self.consume_pending_prompt_for_ui_only_turn();
 
         // Handle the case where just "/browser" was typed
         if trimmed.is_empty() {
@@ -16000,6 +16120,7 @@ impl ChatWidget<'_> {
             // Toggle asynchronously: if internal browser is active, disable it; otherwise enable and open about:blank
             let app_event_tx = self.app_event_tx.clone();
             let browser_autofix_flag = self.browser_autofix_requested.clone();
+            let ticket = browser_ticket.clone();
             tokio::spawn(async move {
                 let browser_manager = ChatWidget::get_browser_manager().await;
                 // Determine if internal browser is currently active
@@ -16015,7 +16136,8 @@ impl ChatWidget<'_> {
                     if let Err(e) = browser_manager.set_enabled(false).await {
                         tracing::warn!("[/browser] failed to disable internal browser: {}", e);
                     }
-                    app_event_tx.send_background_event("🔌 Browser disabled".to_string());
+                    app_event_tx
+                        .send_background_event_with_ticket(&ticket, "🔌 Browser disabled".to_string());
                 } else {
                     // Not in internal mode → enable internal and open about:blank
                     // Reuse existing helper (ensures config + start + global manager + screenshot)
@@ -16037,12 +16159,13 @@ impl ChatWidget<'_> {
                             "[/browser] failed to start internal browser: {}",
                             error_text
                         );
-                        app_event_tx.send_background_event(format!(
-                            "❌ Failed to start internal browser: {}",
-                            error_text
-                        ));
+                        app_event_tx.send_background_event_with_ticket(
+                            &ticket,
+                            format!("❌ Failed to start internal browser: {}", error_text),
+                        );
                         ChatWidget::schedule_browser_autofix(
                             app_event_tx.clone(),
+                            ticket.clone(),
                             browser_autofix_flag.clone(),
                             "start the internal browser",
                             error_text,
@@ -16063,7 +16186,10 @@ impl ChatWidget<'_> {
 
                     // Emit confirmation
                     app_event_tx
-                        .send_background_event("✅ Browser enabled (about:blank)".to_string());
+                        .send_background_event_with_ticket(
+                            &ticket,
+                            "✅ Browser enabled (about:blank)".to_string(),
+                        );
                 }
             });
             return;
@@ -16095,6 +16221,7 @@ impl ChatWidget<'_> {
                 let app_event_tx = self.app_event_tx.clone();
                 let browser_autofix_flag = self.browser_autofix_requested.clone();
                 let url_for_goto = full_url.clone();
+                let ticket = browser_ticket.clone();
 
                 // Add status message
                 let status_msg = format!("🌐 Opening internal browser: {}", full_url);
@@ -16127,12 +16254,13 @@ impl ChatWidget<'_> {
                             "Failed to start TUI browser manager: {}",
                             error_text
                         );
-                        app_event_tx.send_background_event(format!(
-                            "❌ Failed to start internal browser: {}",
-                            error_text
-                        ));
+                        app_event_tx.send_background_event_with_ticket(
+                            &ticket,
+                            format!("❌ Failed to start internal browser: {}", error_text),
+                        );
                         ChatWidget::schedule_browser_autofix(
                             app_event_tx.clone(),
+                            ticket.clone(),
                             browser_autofix_flag.clone(),
                             "launch the internal browser",
                             error_text,
@@ -16269,10 +16397,10 @@ impl ChatWidget<'_> {
                             );
 
                             // Send success message to chat
-                            app_event_tx.send_background_event(format!(
-                                "✅ Internal browser opened: {}",
-                                result.url
-                            ));
+                            app_event_tx.send_background_event_with_ticket(
+                                &ticket,
+                                format!("✅ Internal browser opened: {}", result.url),
+                            );
 
                             // Capture initial screenshot
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -16442,13 +16570,15 @@ impl ChatWidget<'_> {
             "Browser commands:\n• /browser <url> - Open URL in internal browser\n• /browser off - Disable browser mode\n• /browser status - Show current status\n• /browser fullpage [on|off] - Toggle full-page mode\n• /browser config <key> <value> - Update configuration\n\nUse /chrome [port] to connect to external Chrome browser".to_string()
         };
 
-        // Add the response to the UI as a background event using the helper
-        // so the first content line is not hidden by the renderer.
-        self.push_background_tail(response);
+        // Add the response to the UI as a ticketed background event so it stays with
+        // the originating slash command turn.
+        self.app_event_tx
+            .send_background_event_with_ticket(&browser_ticket, response);
     }
 
     pub(crate) fn handle_github_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
+        self.consume_pending_prompt_for_ui_only_turn();
         let enabled = self.config.github.check_workflows_on_push;
 
         // If no args or 'status', show interactive settings in the footer
@@ -17113,8 +17243,10 @@ impl ChatWidget<'_> {
         self.browser_is_external = false;
         let latest_screenshot = self.latest_browser_screenshot.clone();
         let app_event_tx = self.app_event_tx.clone();
+        let ticket = self.make_background_tail_ticket();
 
         tokio::spawn(async move {
+            let ticket = ticket;
             let browser_manager = ChatWidget::get_browser_manager().await;
 
             // First, close any existing Chrome connection
@@ -17139,7 +17271,10 @@ impl ChatWidget<'_> {
             if let Err(e) = browser_manager.start().await {
                 tracing::error!("Failed to start internal browser: {}", e);
                 app_event_tx
-                    .send_background_event(format!("❌ Failed to start internal browser: {}", e));
+                    .send_background_event_with_ticket(
+                        &ticket,
+                        format!("❌ Failed to start internal browser: {}", e),
+                    );
                 return;
             }
 
@@ -17147,7 +17282,8 @@ impl ChatWidget<'_> {
             codex_browser::global::set_global_browser_manager(browser_manager.clone()).await;
 
             // Notify about successful switch/reconnect
-            app_event_tx.send_background_event(
+            app_event_tx.send_background_event_with_ticket(
+                &ticket,
                 "✅ Switched to internal browser mode (reconnected)".to_string(),
             );
 
@@ -17192,7 +17328,12 @@ impl ChatWidget<'_> {
         });
     }
 
-    fn handle_chrome_connection(&mut self, host: Option<String>, port: Option<u16>) {
+    fn handle_chrome_connection(
+        &mut self,
+        host: Option<String>,
+        port: Option<u16>,
+        ticket: BackgroundOrderTicket,
+    ) {
         tracing::info!(
             "[cdp] handle_chrome_connection begin, host={:?}, port={:?}",
             host,
@@ -17224,6 +17365,7 @@ impl ChatWidget<'_> {
                 port,
                 latest_screenshot.clone(),
                 app_event_tx.clone(),
+                ticket,
             )
             .await;
         });
@@ -17233,6 +17375,8 @@ impl ChatWidget<'_> {
         tracing::info!("[cdp] handle_chrome_command start: '{}'", command_text);
         // Parse the chrome command arguments
         let parts: Vec<&str> = command_text.trim().split_whitespace().collect();
+        let chrome_ticket = self.make_background_tail_ticket();
+        self.consume_pending_prompt_for_ui_only_turn();
 
         // Handle empty command - just "/chrome"
         if parts.is_empty() || command_text.trim().is_empty() {
@@ -17242,6 +17386,7 @@ impl ChatWidget<'_> {
             // Otherwise, start a connection (auto-detect).
             let (tx, rx) = std::sync::mpsc::channel();
             let app_event_tx = self.app_event_tx.clone();
+            let ticket = chrome_ticket.clone();
             tokio::spawn(async move {
                 let browser_manager = ChatWidget::get_browser_manager().await;
                 // Check if we're currently connected to an external Chrome
@@ -17259,7 +17404,10 @@ impl ChatWidget<'_> {
                         tracing::warn!("[cdp] failed to stop external Chrome connection: {}", e);
                     }
                     // Notify UI
-                    app_event_tx.send_background_event("🔌 Disconnected from Chrome".to_string());
+                    app_event_tx.send_background_event_with_ticket(
+                        &ticket,
+                        "🔌 Disconnected from Chrome".to_string(),
+                    );
                     let _ = tx.send(true);
                 } else {
                     // Not connected externally; proceed to connect
@@ -17271,7 +17419,7 @@ impl ChatWidget<'_> {
             let handled_disconnect = rx.recv().unwrap_or(false);
             if !handled_disconnect {
                 // Switch to external Chrome mode with default/auto-detected port
-                self.handle_chrome_connection(None, None);
+                self.handle_chrome_connection(None, None, chrome_ticket.clone());
             } else {
                 // We just disconnected; reflect in title immediately
                 self.browser_is_external = false;
@@ -17389,7 +17537,7 @@ impl ChatWidget<'_> {
             }
         }
         tracing::info!("[cdp] parsed host={:?}, port={:?}", host, port);
-        self.handle_chrome_connection(host, port);
+        self.handle_chrome_connection(host, port, chrome_ticket);
     }
 
     /// Programmatically submit a user text message as if typed in the
@@ -17495,11 +17643,7 @@ impl ChatWidget<'_> {
             return;
         }
         self.clear_resume_placeholder();
-        self.insert_background_event_with_placement(
-            message.to_string(),
-            BackgroundPlacement::Tail,
-            None,
-        );
+        self.push_background_tail(message.to_string());
     }
 
     pub(crate) fn clear_token_usage(&mut self) {
@@ -19105,6 +19249,7 @@ impl ChatWidget<'_> {
     /// into the worktree. If `task` is non-empty, submits it immediately.
     pub(crate) fn handle_cloud_command(&mut self, args: String) {
         let trimmed = args.trim();
+        self.consume_pending_prompt_for_ui_only_turn();
         if trimmed.is_empty() {
             self.open_cloud_menu();
             return;
@@ -19135,6 +19280,7 @@ impl ChatWidget<'_> {
                         );
                     } else {
                         self.cloud_tasks_creation_inflight = true;
+                        self.cloud_task_create_ticket = Some(self.make_background_tail_ticket());
                         self.app_event_tx.send(AppEvent::SubmitCloudTaskCreate {
                             env_id: env.id.clone(),
                             prompt: rest.to_string(),
@@ -19518,10 +19664,14 @@ impl ChatWidget<'_> {
         self.cloud_tasks_creation_inflight = false;
         match result {
             Ok(created) => {
-                self.app_event_tx.send_background_event(format!(
-                    "✅ Created cloud task {} in {env_id}",
-                    created.id.0
-                ));
+                let ticket = self
+                    .cloud_task_create_ticket
+                    .take()
+                    .unwrap_or_else(|| self.make_background_tail_ticket());
+                self.app_event_tx.send_background_event_with_ticket(
+                    &ticket,
+                    format!("✅ Created cloud task {} in {env_id}", created.id.0),
+                );
                 self.request_cloud_task_refresh(None);
             }
             Err(err) => {
@@ -19534,12 +19684,25 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn show_cloud_task_apply_status(&mut self, task_id: &str, preflight: bool) {
+        let key = (task_id.to_string(), preflight);
+        if !self.cloud_task_apply_tickets.contains_key(&key) {
+            let ticket = self.make_background_tail_ticket();
+            self.cloud_task_apply_tickets.insert(key.clone(), ticket);
+        }
+        let ticket = self
+            .cloud_task_apply_tickets
+            .get_mut(&key)
+            .expect("ticket just inserted");
         if preflight {
-            self.app_event_tx
-                .send_background_event(format!("Preflighting cloud task {task_id}…"));
+            self.app_event_tx.send_background_event_with_ticket(
+                ticket,
+                format!("Preflighting cloud task {task_id}…"),
+            );
         } else {
-            self.app_event_tx
-                .send_background_event(format!("Applying cloud task {task_id}…"));
+            self.app_event_tx.send_background_event_with_ticket(
+                ticket,
+                format!("Applying cloud task {task_id}…"),
+            );
         }
     }
 
@@ -19564,7 +19727,13 @@ impl ChatWidget<'_> {
                     message.push_str("\nConflicts: ");
                     message.push_str(&result.conflict_paths.join(", "));
                 }
-                self.app_event_tx.send_background_event(message);
+                let key = (task_id.clone(), preflight);
+                let ticket = self
+                    .cloud_task_apply_tickets
+                    .remove(&key)
+                    .unwrap_or_else(|| self.make_background_tail_ticket());
+                self.app_event_tx
+                    .send_background_event_with_ticket(&ticket, message);
                 if !preflight {
                     self.request_cloud_task_refresh(None);
                 }
@@ -19584,6 +19753,7 @@ impl ChatWidget<'_> {
             .find(|task| task.id.0 == task_id)
     }
     pub(crate) fn handle_branch_command(&mut self, args: String) {
+        self.consume_pending_prompt_for_ui_only_turn();
         if Self::is_branch_worktree_path(&self.config.cwd) {
             self.history_push_plain_state(crate::history_cell::new_error_event(
                 "`/branch` — already inside a branch worktree; switch to the repo root before creating another branch."
@@ -19595,6 +19765,7 @@ impl ChatWidget<'_> {
         let args_trim = args.trim().to_string();
         let cwd = self.config.cwd.clone();
         let tx = self.app_event_tx.clone();
+        let branch_tail_ticket = self.make_background_tail_ticket();
         // Add a quick notice into history, include task preview if provided
         if args_trim.is_empty() {
             self.insert_background_event_with_placement(
@@ -19613,11 +19784,15 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             use tokio::process::Command;
+            let ticket = branch_tail_ticket;
             // Resolve git root
             let git_root = match codex_core::git_worktree::get_git_root_from(&cwd).await {
                 Ok(p) => p,
                 Err(e) => {
-                    tx.send_background_event(format!("`/branch` — not a git repo: {}", e));
+                    tx.send_background_event_with_ticket(
+                        &ticket,
+                        format!("`/branch` — not a git repo: {}", e),
+                    );
                     return;
                 }
             };
@@ -19644,10 +19819,10 @@ impl ChatWidget<'_> {
                 match codex_core::git_worktree::setup_worktree(&git_root, &branch_name).await {
                     Ok((p, b)) => (p, b),
                     Err(e) => {
-                        tx.send_background_event(format!(
-                            "`/branch` — failed to create worktree: {}",
-                            e
-                        ));
+                        tx.send_background_event_with_ticket(
+                            &ticket,
+                            format!("`/branch` — failed to create worktree: {}", e),
+                        );
                         return;
                     }
                 };
@@ -19658,10 +19833,10 @@ impl ChatWidget<'_> {
                 {
                     Ok(n) => n,
                     Err(e) => {
-                        tx.send_background_event(format!(
-                            "`/branch` — failed to copy changes: {}",
-                            e
-                        ));
+                        tx.send_background_event_with_ticket(
+                            &ticket,
+                            format!("`/branch` — failed to copy changes: {}", e),
+                        );
                         // Still switch to the branch even if copy fails
                         0
                     }
@@ -19678,19 +19853,22 @@ impl ChatWidget<'_> {
                     if let Some(meta) = meta_option.clone() {
                         if let Err(e) = codex_core::git_worktree::write_branch_metadata(&worktree, &meta).await
                         {
-                            tx.send_background_event(format!(
-                                "`/branch` — failed to record branch metadata: {}",
-                                e
-                            ));
+                            tx.send_background_event_with_ticket(
+                                &ticket,
+                                format!("`/branch` — failed to record branch metadata: {}", e),
+                            );
                         }
                         branch_metadata = meta_option;
                     }
                 }
                 Err(err) => {
-                    tx.send_background_event(format!(
-                        "`/branch` — failed to configure local-default remote: {}",
-                        err
-                    ));
+                    tx.send_background_event_with_ticket(
+                        &ticket,
+                        format!(
+                            "`/branch` — failed to configure local-default remote: {}",
+                            err
+                        ),
+                    );
                 }
             }
 
@@ -19779,9 +19957,7 @@ impl ChatWidget<'_> {
                     base = base_summary
                 )
             };
-            {
-                tx.send_background_event(msg);
-            }
+            tx.send_background_event_with_ticket(&ticket, msg);
 
             // Switch cwd and optionally submit the task
             // Prefix the auto-submitted task so it's obvious it started in the new branch
@@ -19855,13 +20031,15 @@ impl ChatWidget<'_> {
     ) {
         let previous_cwd = self.config.cwd.clone();
         self.config.cwd = new_cwd.clone();
+        let ticket = self.make_background_tail_ticket();
 
         let msg = format!(
             "✅ Working directory changed\n  from: {}\n  to:   {}",
             previous_cwd.display(),
             new_cwd.display()
         );
-        self.app_event_tx.send_background_event(msg);
+        self.app_event_tx
+            .send_background_event_with_ticket(&ticket, msg);
 
         let worktree_hint = new_cwd
             .file_name()
@@ -19954,6 +20132,7 @@ impl ChatWidget<'_> {
     /// default branch. Hands off to the agent when the repository state is
     /// non-trivial.
     pub(crate) fn handle_merge_command(&mut self) {
+        self.consume_pending_prompt_for_ui_only_turn();
         if !Self::is_branch_worktree_path(&self.config.cwd) {
             self.history_push_plain_state(crate::history_cell::new_error_event(
                 "`/merge` — run this command from inside a branch worktree created with '/branch'."
@@ -19963,8 +20142,10 @@ impl ChatWidget<'_> {
             return;
         }
 
+        let merge_ticket = self.make_background_tail_ticket();
         let tx = self.app_event_tx.clone();
         let work_cwd = self.config.cwd.clone();
+        let ticket = merge_ticket.clone();
         self.push_background_before_next_output(
             "Evaluating repository state before merging current branch...".to_string(),
         );
@@ -19973,19 +20154,27 @@ impl ChatWidget<'_> {
         tokio::spawn(async move {
             use tokio::process::Command;
 
-            fn send_background(tx: &AppEventSender, message: String) {
-                tx.send_background_event(message);
+            fn send_background(
+                tx: &AppEventSender,
+                ticket: &BackgroundOrderTicket,
+                message: String,
+            ) {
+                tx.send_background_event_with_ticket(ticket, message);
             }
 
-            fn send_background_late(tx: &AppEventSender, message: String) {
-                tx.send_background_event(message);
+            fn send_background_late(
+                tx: &AppEventSender,
+                ticket: &BackgroundOrderTicket,
+                message: String,
+            ) {
+                tx.send_background_event_with_ticket(ticket, message);
             }
 
             let git_root = match codex_core::git_info::resolve_root_git_project_for_trust(&work_cwd)
             {
                 Some(p) => p,
                 None => {
-                    send_background(&tx, "`/merge` — not a git repo".to_string());
+                    send_background(&tx, &ticket, "`/merge` — not a git repo".to_string());
                     return;
                 }
             };
@@ -20000,7 +20189,7 @@ impl ChatWidget<'_> {
                     String::from_utf8_lossy(&out.stdout).trim().to_string()
                 }
                 _ => {
-                    send_background(&tx, "`/merge` — failed to detect branch name".to_string());
+                    send_background(&tx, &ticket, "`/merge` — failed to detect branch name".to_string());
                     return;
                 }
             };
@@ -20119,6 +20308,7 @@ impl ChatWidget<'_> {
                     let reason_text = reasons.join(", ");
                     send_background(
                         &tx,
+                        &ticket,
                         format!("`/merge` — handing off to agent ({})", reason_text),
                     );
                     let default_branch_display = default_branch_for_instructions
@@ -20239,6 +20429,7 @@ impl ChatWidget<'_> {
                     if !benign {
                         send_background(
                             &tx,
+                            &ticket,
                             format!(
                                 "`/merge` — commit failed before merge: {}",
                                 if !stderr_s.trim().is_empty() {
@@ -20715,7 +20906,7 @@ impl ChatWidget<'_> {
                 default_branch,
                 git_root.display()
             );
-            send_background_late(&tx, msg);
+            send_background_late(&tx, &ticket, msg);
             tx.send(AppEvent::SwitchCwd(git_root, None));
         });
     }
