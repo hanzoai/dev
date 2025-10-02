@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::colors;
 use crate::util::buffer::fill_rect;
 use super::bottom_pane_view::BottomPaneView;
@@ -23,6 +24,7 @@ pub struct UpdateSharedState {
 
 pub(crate) struct UpdateSettingsView {
     app_event_tx: AppEventSender,
+    ticket: BackgroundOrderTicket,
     field: usize,
     is_complete: bool,
     auto_enabled: bool,
@@ -36,6 +38,7 @@ pub(crate) struct UpdateSettingsView {
 impl UpdateSettingsView {
     pub fn new(
         app_event_tx: AppEventSender,
+        ticket: BackgroundOrderTicket,
         current_version: String,
         auto_enabled: bool,
         command: Option<Vec<String>>,
@@ -45,6 +48,7 @@ impl UpdateSettingsView {
     ) -> Self {
         Self {
             app_event_tx,
+            ticket,
             field: 0,
             is_complete: false,
             auto_enabled,
@@ -69,49 +73,61 @@ impl UpdateSettingsView {
             .expect("update shared state poisoned")
             .clone();
 
-        if self.command.is_none() {
-            if let Some(instructions) = &self.manual_instructions {
-                self.app_event_tx
-                    .send_background_event(instructions.clone());
+            if self.command.is_none() {
+                if let Some(instructions) = &self.manual_instructions {
+                    self.app_event_tx
+                        .send_background_event_with_ticket(&self.ticket, instructions.clone());
+                }
+                return;
             }
-            return;
-        }
 
-        if state.checking {
-            self.app_event_tx
-                .send_background_event("Still checking for updates…".to_string());
-            return;
-        }
-        if let Some(err) = &state.error {
-            self.app_event_tx
-                .send_background_event(format!("❌ /update failed: {err}"));
-            return;
-        }
-        let Some(latest) = state.latest_version.clone() else {
-            self.app_event_tx
-                .send_background_event("✅ Code is already up to date.".to_string());
-            return;
-        };
+            if state.checking {
+                self.app_event_tx.send_background_event_with_ticket(
+                    &self.ticket,
+                    "Still checking for updates…".to_string(),
+                );
+                return;
+            }
+            if let Some(err) = &state.error {
+                self.app_event_tx.send_background_event_with_ticket(
+                    &self.ticket,
+                    format!("❌ /update failed: {err}"),
+                );
+                return;
+            }
+            let Some(latest) = state.latest_version.clone() else {
+                self.app_event_tx.send_background_event_with_ticket(
+                    &self.ticket,
+                    "✅ Code is already up to date.".to_string(),
+                );
+                return;
+            };
 
-        let command = self.command.clone().expect("command checked above");
+            let command = self.command.clone().expect("command checked above");
         let display = self
             .command_display
             .clone()
             .unwrap_or_else(|| command.join(" "));
 
-        self.app_event_tx.send_background_event(format!(
-            "⬆️ Update available: {} → {}. Opening guided upgrade with `{}`…",
-            self.current_version, latest, display
-        ));
+        self.app_event_tx.send_background_event_with_ticket(
+            &self.ticket,
+            format!(
+                "⬆️ Update available: {} → {}. Opening guided upgrade with `{}`…",
+                self.current_version, latest, display
+            ),
+        );
         self.app_event_tx.send(AppEvent::RunUpdateCommand {
             command,
             display: display.clone(),
             latest_version: Some(latest.clone()),
         });
-        self.app_event_tx.send_background_event(format!(
-            "↻ Complete the guided terminal steps for `{}` then restart Code to finish upgrading to {}.",
-            display, latest
-        ));
+        self.app_event_tx.send_background_event_with_ticket(
+            &self.ticket,
+            format!(
+                "↻ Complete the guided terminal steps for `{}` then restart Code to finish upgrading to {}.",
+                display, latest
+            ),
+        );
         self.is_complete = true;
     }
 
