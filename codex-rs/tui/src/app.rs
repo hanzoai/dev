@@ -2083,14 +2083,26 @@ impl App<'_> {
                         widget.handle_review_command(args);
                     }
                 }
+                AppEvent::ToggleReviewAutoResolve => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.toggle_review_auto_resolve();
+                    }
+                }
                 AppEvent::RunReviewWithScope {
                     prompt,
                     hint,
                     preparation_label,
                     metadata,
+                    auto_resolve,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.start_review_with_scope(prompt, hint, preparation_label, metadata);
+                        widget.start_review_with_scope(
+                            prompt,
+                            hint,
+                            preparation_label,
+                            metadata,
+                            auto_resolve,
+                        );
                     }
                 }
                 AppEvent::OpenReviewCustomPrompt => {
