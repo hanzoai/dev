@@ -135,6 +135,24 @@ fn final_answer_without_newline_is_flushed_immediately() {
 }
 
 #[test]
+fn auto_resolve_decision_parses_inline_json() {
+    let decision = ChatWidget::auto_resolve_parse_decision(
+        "{\"status\":\"no_issue\",\"rationale\":\"all set\"}"
+    )
+    .expect("decision");
+    assert_eq!(decision.status, "no_issue");
+    assert_eq!(decision.rationale.as_deref(), Some("all set"));
+}
+
+#[test]
+fn auto_resolve_decision_parses_json_fence() {
+    let payload = "```json\n{\"status\":\"continue_fix\"}\n```";
+    let decision = ChatWidget::auto_resolve_parse_decision(payload).expect("decision");
+    assert_eq!(decision.status, "continue_fix");
+    assert!(decision.rationale.is_none());
+}
+
+#[test]
 fn assistant_history_state_tracks_stream_and_final() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
 

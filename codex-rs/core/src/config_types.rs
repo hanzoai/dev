@@ -697,6 +697,10 @@ pub struct Tui {
     /// with Ctrl+T. Defaults to true.
     #[serde(default = "default_true")]
     pub alternate_screen: bool,
+
+    /// Remember whether Auto Resolve is enabled for `/review` flows.
+    #[serde(default)]
+    pub review_auto_resolve: bool,
 }
 
 // Important: Provide a manual Default so that when no config file exists and we
@@ -715,6 +719,7 @@ impl Default for Tui {
             spinner: SpinnerSelection::default(),
             notifications: Notifications::default(),
             alternate_screen: true,
+            review_auto_resolve: false,
         }
     }
 }
