@@ -2464,9 +2464,16 @@ impl Session {
     }
 
 
-    pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
+    // Removed older `get_pending_input`; callers should use
+    // `get_pending_input_filtered` to control review-mode behavior.
+
+    /// Returns pending input for the current turn, with an option to exclude
+    /// queued user inputs. Review mode uses this to avoid accidentally routing
+    /// user messages into the review thread; those are handled after the review
+    /// task finishes.
+    pub fn get_pending_input_filtered(&self, include_queued_user_inputs: bool) -> Vec<ResponseInputItem> {
         let mut state = self.state.lock().unwrap();
-        if state.pending_input.is_empty() && state.pending_user_input.is_empty() {
+        if state.pending_input.is_empty() && (!include_queued_user_inputs || state.pending_user_input.is_empty()) {
             Vec::with_capacity(0)
         } else {
             let mut ret = Vec::new();
@@ -2476,7 +2483,7 @@ impl Session {
                 ret.extend(model_inputs);
             }
 
-            if !state.pending_user_input.is_empty() {
+            if include_queued_user_inputs && !state.pending_user_input.is_empty() {
                 let mut queued_user_inputs = Vec::new();
                 std::mem::swap(&mut queued_user_inputs, &mut state.pending_user_input);
                 ret.extend(
@@ -3874,8 +3881,13 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
-        let pending_input = sess
-            .get_pending_input()
+    // IMPORTANT: Do not inject queued user inputs into the review thread.
+    // Doing so routes user messages (e.g., auto-resolve fix prompts) to the
+    // review model, causing loops. Only include queued user inputs when not in
+    // review mode. They will be picked up after TaskComplete via
+    // pop_next_queued_user_input.
+    let pending_input = sess
+            .get_pending_input_filtered(!is_review_mode)
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
@@ -6504,6 +6516,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     "claude" => ("claude".to_string(), false),
                     "gemini" => ("gemini".to_string(), false),
                     "qwen" => ("qwen".to_string(), false),
+                    // Cloud agent treated as external CLI by default.
+                    "cloud" => ("cloud".to_string(), false),
                     _ => (m, false),
                 }
             }
