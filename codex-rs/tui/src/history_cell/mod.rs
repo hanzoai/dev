@@ -6150,7 +6150,8 @@ impl HistoryCell for PatchSummaryCell {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        let lines = self.build_lines(width);
+        // Trim leading/trailing empty lines to keep height in sync with render.
+        let lines = trim_empty_lines(self.build_lines(width));
         Paragraph::new(Text::from(lines))
             .wrap(Wrap { trim: false })
             .line_count(width)
@@ -6159,13 +6160,28 @@ impl HistoryCell for PatchSummaryCell {
     }
 
     fn custom_render_with_skip(&self, area: Rect, buf: &mut Buffer, skip_rows: u16) {
-        let text = Text::from(self.build_lines(area.width));
-        let bg_block = Block::default().style(Style::default().bg(crate::colors::background()));
+        // Render with trimmed lines and pre-clear the area to avoid residual glyphs
+        // when content shrinks (e.g., after width changes or trimming).
+        let lines = trim_empty_lines(self.build_lines(area.width));
+        let text = Text::from(lines);
+
+        let cell_bg = crate::colors::background();
+        let bg_block = Block::default().style(Style::default().bg(cell_bg));
+
+        // Proactively fill the full draw area with the background.
+        // This mirrors other cells that ensure a clean slate before drawing.
+        crate::util::buffer::fill_rect(
+            buf,
+            area,
+            Some(' '),
+            Style::default().bg(cell_bg).fg(crate::colors::text()),
+        );
+
         Paragraph::new(text)
             .block(bg_block)
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
-            .style(Style::default().bg(crate::colors::background()))
+            .style(Style::default().bg(cell_bg))
             .render(area, buf);
     }
 }
