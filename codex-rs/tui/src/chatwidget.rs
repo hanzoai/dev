@@ -2819,6 +2819,7 @@ impl ChatWidget<'_> {
             self.insert_background_event_with_placement(
                 message,
                 BackgroundPlacement::Tail,
+                None,
             );
             // Do NOT clear running state or streams; the retry will resume them.
             self.request_redraw();
@@ -5878,6 +5879,7 @@ impl ChatWidget<'_> {
         self.insert_background_event_with_placement(
             message,
             BackgroundPlacement::BeforeNextOutput,
+            None,
         );
     }
     /// Insert a background event using the specified placement semantics.
@@ -5885,6 +5887,7 @@ impl ChatWidget<'_> {
         &mut self,
         message: String,
         placement: BackgroundPlacement,
+        order: Option<codex_core::protocol::OrderMeta>,
     ) {
         let system_placement = match placement {
             BackgroundPlacement::Tail => SystemPlacement::EndOfCurrent,
@@ -5902,20 +5905,21 @@ impl ChatWidget<'_> {
             Box::new(cell),
             system_placement,
             None,
-            None,
+            order.as_ref(),
             "background",
             Some(record),
         );
     }
 
     pub(crate) fn push_background_tail(&mut self, message: impl Into<String>) {
-        self.insert_background_event_with_placement(message.into(), BackgroundPlacement::Tail);
+        self.insert_background_event_with_placement(message.into(), BackgroundPlacement::Tail, None);
     }
 
     pub(crate) fn push_background_before_next_output(&mut self, message: impl Into<String>) {
         self.insert_background_event_with_placement(
             message.into(),
             BackgroundPlacement::BeforeNextOutput,
+            None,
         );
     }
 
@@ -6873,6 +6877,7 @@ impl ChatWidget<'_> {
                         let _ = app_event_tx.send(AppEvent::InsertBackgroundEvent {
                             message,
                             placement: BackgroundPlacement::Tail,
+                            order: None,
                         });
                     }
                 }
@@ -9282,10 +9287,10 @@ impl ChatWidget<'_> {
                 // event to a turn (order present), prefer placing it before the next
                 // provider output; else append to the tail. Use the event.id for
                 // in-place replacement.
-                let placement = if event.order.as_ref().is_some() {
-                    SystemPlacement::EarlyInCurrent
-                } else {
-                    SystemPlacement::EndOfCurrent
+                let placement = match event.order.as_ref().and_then(|om| om.output_index) {
+                    Some(v) if v == i32::MAX as u32 => SystemPlacement::EndOfCurrent,
+                    Some(_) => SystemPlacement::EarlyInCurrent,
+                    None => SystemPlacement::EndOfCurrent,
                 };
                 let id_for_replace = Some(id.clone());
                 let message_clone = message.clone();
@@ -13506,6 +13511,7 @@ impl ChatWidget<'_> {
                         tx.send(AppEvent::InsertBackgroundEvent {
                             message,
                             placement: BackgroundPlacement::Tail,
+                            order: None,
                         });
                     }
                 }
@@ -18849,11 +18855,13 @@ impl ChatWidget<'_> {
             self.insert_background_event_with_placement(
                 "Creating branch worktree...".to_string(),
                 BackgroundPlacement::BeforeNextOutput,
+                None,
             );
         } else {
             self.insert_background_event_with_placement(
                 format!("Creating branch worktree... Task: {}", args_trim),
                 BackgroundPlacement::BeforeNextOutput,
+                None,
             );
         }
         self.request_redraw();
@@ -19070,6 +19078,7 @@ impl ChatWidget<'_> {
             self.insert_background_event_with_placement(
                 notice,
                 BackgroundPlacement::BeforeNextOutput,
+                None,
             );
             self.request_redraw();
             self.submit_op(Op::RunProjectCommand { name: cmd.name });
