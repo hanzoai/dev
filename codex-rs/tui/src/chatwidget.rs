@@ -541,6 +541,51 @@ impl AutoCoordinatorUiState {
     }
 }
 
+const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
+const AUTO_RESOLVE_REVIEW_FOLLOWUP: &str = "This issue has been resolved. Please continue your search and return all remaining issues you find.";
+
+#[derive(Clone)]
+struct AutoResolveState {
+    prompt: String,
+    hint: String,
+    metadata: Option<ReviewContextMetadata>,
+    attempt: u32,
+    max_attempts: u32,
+    phase: AutoResolvePhase,
+    last_review: Option<ReviewOutputEvent>,
+    last_fix_message: Option<String>,
+}
+
+impl AutoResolveState {
+    fn new(prompt: String, hint: String, metadata: Option<ReviewContextMetadata>) -> Self {
+        Self {
+            prompt,
+            hint,
+            metadata,
+            attempt: 0,
+            max_attempts: AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
+            phase: AutoResolvePhase::WaitingForReview,
+            last_review: None,
+            last_fix_message: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum AutoResolvePhase {
+    WaitingForReview,
+    PendingFix { review: ReviewOutputEvent },
+    AwaitingFix { review: ReviewOutputEvent },
+    AwaitingJudge { review: ReviewOutputEvent },
+}
+
+#[derive(Deserialize)]
+struct AutoResolveDecision {
+    status: String,
+    #[serde(default)]
+    rationale: Option<String>,
+}
+
 pub(crate) struct ChatWidget<'a> {
     app_event_tx: AppEventSender,
     codex_op_tx: UnboundedSender<Op>,
@@ -609,6 +654,7 @@ pub(crate) struct ChatWidget<'a> {
     recent_agent_hint: Option<String>,
     active_review_hint: Option<String>,
     active_review_prompt: Option<String>,
+    auto_resolve_state: Option<AutoResolveState>,
     overall_task_status: String,
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
@@ -744,10 +790,29 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    // Per-request counters for UI-issued background order metadata
+    ui_background_seq_counters: HashMap<u64, Arc<AtomicU64>>,
     // Track the largest order key we have assigned so far to keep tail inserts monotonic
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
     resume_placeholder_visible: bool,
+}
+
+#[derive(Clone)]
+struct UiBackgroundOrderHandle {
+    request_ordinal: u64,
+    seq_counter: Arc<AtomicU64>,
+}
+
+impl UiBackgroundOrderHandle {
+    fn next_order(&self) -> codex_core::protocol::OrderMeta {
+        let seq = self.seq_counter.fetch_add(1, Ordering::SeqCst);
+        codex_core::protocol::OrderMeta {
+            request_ordinal: self.request_ordinal,
+            output_index: Some(i32::MAX as u32),
+            sequence_number: Some(seq),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1436,6 +1501,57 @@ impl ChatWidget<'_> {
         });
 
         key
+    }
+
+    fn background_tail_request_ordinal(&mut self) -> u64 {
+        let mut req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            *self.synthetic_system_req.get_or_insert(1)
+        };
+        if self.pending_user_prompts_for_next_turn > 0 {
+            req = req.saturating_add(1);
+        }
+        req
+    }
+
+    fn background_tail_order_handle(&mut self) -> UiBackgroundOrderHandle {
+        let req = self.background_tail_request_ordinal();
+        let counter = self
+            .ui_background_seq_counters
+            .entry(req)
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .clone();
+        UiBackgroundOrderHandle {
+            request_ordinal: req,
+            seq_counter: counter,
+        }
+    }
+
+    fn background_tail_order_meta(&mut self) -> codex_core::protocol::OrderMeta {
+        self.background_tail_order_handle().next_order()
+    }
+
+    fn send_background_tail_ordered(&mut self, message: impl Into<String>) {
+        let order = self.background_tail_order_meta();
+        self.app_event_tx
+            .send_background_event_with_order(message.into(), order);
+    }
+
+    fn rebuild_ui_background_seq_counters(&mut self) {
+        self.ui_background_seq_counters.clear();
+        let mut next_per_req: HashMap<u64, u64> = HashMap::new();
+        for key in &self.cell_order_seq {
+            if key.out == i32::MAX {
+                let next = key.seq.saturating_add(1);
+                let entry = next_per_req.entry(key.req).or_insert(0);
+                *entry = (*entry).max(next);
+            }
+        }
+        for (req, next) in next_per_req {
+            self.ui_background_seq_counters
+                .insert(req, Arc::new(AtomicU64::new(next)));
+        }
     }
 
     /// Insert or replace a system notice cell with consistent ordering.
@@ -3137,6 +3253,7 @@ impl ChatWidget<'_> {
             recent_agent_hint: None,
             active_review_hint: None,
             active_review_prompt: None,
+            auto_resolve_state: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -3236,6 +3353,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            ui_background_seq_counters: HashMap::new(),
             last_assigned_order: None,
             standard_terminal_mode: !config.tui.alternate_screen,
             replay_history_depth: 0,
@@ -3410,6 +3528,7 @@ impl ChatWidget<'_> {
             recent_agent_hint: None,
             active_review_hint: None,
             active_review_prompt: None,
+            auto_resolve_state: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -3510,6 +3629,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            ui_background_seq_counters: HashMap::new(),
             last_assigned_order: None,
             replay_history_depth: 0,
             resume_placeholder_visible: false,
@@ -5936,6 +6056,18 @@ impl ChatWidget<'_> {
         placement: BackgroundPlacement,
         order: Option<codex_core::protocol::OrderMeta>,
     ) {
+        let mut order = order;
+        if order.is_none() {
+            if matches!(placement, BackgroundPlacement::Tail) {
+                order = Some(self.background_tail_order_meta());
+            } else {
+                tracing::warn!(
+                    target: "codex_order",
+                    "legacy background event without order placement={:?}",
+                    placement
+                );
+            }
+        }
         let system_placement = match placement {
             BackgroundPlacement::Tail => SystemPlacement::EndOfCurrent,
             BackgroundPlacement::BeforeNextOutput => {
@@ -6016,6 +6148,16 @@ impl ChatWidget<'_> {
     pub(crate) fn test_set_request_state(&mut self, last_seen: u64, pending_prompts: usize) {
         self.last_seen_request_index = last_seen;
         self.pending_user_prompts_for_next_turn = pending_prompts;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_background_tail_order_meta(&mut self) -> codex_core::protocol::OrderMeta {
+        self.background_tail_order_meta()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_background_tail_order_handle(&mut self) -> UiBackgroundOrderHandle {
+        self.background_tail_order_handle()
     }
 
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
@@ -6298,7 +6440,7 @@ impl ChatWidget<'_> {
                         missing.display(),
                         fallback_root.display()
                     );
-                    self.app_event_tx.send_background_event(msg);
+                    self.send_background_tail_ordered(msg);
                     // Re-submit this exact message after switching cwd
                     self.app_event_tx.send(AppEvent::SwitchCwd(
                         fallback_root,
@@ -7762,9 +7904,11 @@ impl ChatWidget<'_> {
         let max_seq = self.cell_order_seq.iter().map(|key| key.seq).max().unwrap_or(0);
 
         self.last_seen_request_index = max_req;
-        self.current_request_index = max_req;
-        self.internal_seq = max_seq;
-        self.last_assigned_order = self.cell_order_seq.iter().copied().max();
+       self.current_request_index = max_req;
+       self.internal_seq = max_seq;
+       self.last_assigned_order = self.cell_order_seq.iter().copied().max();
+
+        self.rebuild_ui_background_seq_counters();
 
         running_tools::rehydrate(self);
         self.rehydrate_system_order_cache(&preserved_system_entries);
@@ -8349,6 +8493,9 @@ impl ChatWidget<'_> {
                 }
                 // Remove this id from the active set (it may be a sub‑agent)
                 self.active_task_ids.remove(&id);
+                if self.auto_resolve_enabled() {
+                    self.auto_resolve_on_task_complete(last_agent_message.clone());
+                }
                 // Defensive: clear transient agents-preparing state
                 self.agents_ready_to_start = false;
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
@@ -9350,6 +9497,7 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
+                self.clear_resume_placeholder();
                 // Route through unified system notice helper. If the core ties the
                 // event to a turn (order present), prefer placing it before the next
                 // provider output; else append to the tail. Use the event.id for
@@ -9536,6 +9684,9 @@ impl ChatWidget<'_> {
             EventMsg::TurnAborted(_) => {}
             EventMsg::ConversationPath(_) => {}
             EventMsg::EnteredReviewMode(review_request) => {
+                if self.auto_resolve_enabled() {
+                    self.auto_resolve_handle_review_enter();
+                }
                 let hint = review_request.user_facing_hint.trim();
                 let banner = if hint.is_empty() {
                     ">> Code review started <<".to_string()
@@ -9566,6 +9717,9 @@ impl ChatWidget<'_> {
                 self.request_redraw();
             }
             EventMsg::ExitedReviewMode(review_output) => {
+                if self.auto_resolve_enabled() {
+                    self.auto_resolve_handle_review_exit(review_output.clone());
+                }
                 let hint = self.active_review_hint.take();
                 let prompt = self.active_review_prompt.take();
                 match review_output {
@@ -10069,7 +10223,7 @@ impl ChatWidget<'_> {
 
     pub(crate) fn handle_update_command(&mut self, command_args: &str) {
         if !crate::updates::upgrade_ui_enabled() {
-            self.app_event_tx.send_background_event(
+            self.send_background_tail_ordered(
                 "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                     to_string(),
             );
@@ -10455,7 +10609,7 @@ impl ChatWidget<'_> {
         use crate::bottom_pane::UpdateSettingsView;
 
         if !crate::updates::upgrade_ui_enabled() {
-            self.app_event_tx.send_background_event(
+            self.send_background_tail_ordered(
                 "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                     to_string(),
             );
@@ -14006,6 +14160,15 @@ impl ChatWidget<'_> {
             .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
+    /// Returns true when the global Esc handler should defer to the Auto Drive
+    /// key path so that a subsequent Esc will fully stop the run instead of
+    /// routing through the generic interrupt logic.
+    pub(crate) fn auto_should_handle_global_esc(&self) -> bool {
+        self.auto_state.active
+            && self.auto_state.awaiting_submission
+            && self.auto_state.paused_for_manual_edit
+    }
+
     pub(crate) fn is_task_running(&self) -> bool {
         self.bottom_pane.is_task_running()
             || self.terminal_is_running()
@@ -15050,7 +15213,7 @@ impl ChatWidget<'_> {
 
             // Now try to connect using the shared CDP connection logic
             ChatWidget::connect_to_cdp_chrome(None, Some(port), latest_screenshot, app_event_tx)
-                .await;
+            .await;
         });
     }
 
@@ -15546,10 +15709,8 @@ impl ChatWidget<'_> {
                             "[cdp] connect_to_chrome_only failed immediately: {}",
                             err_msg
                         );
-                        app_event_tx.send_background_event(format!(
-                            "❌ Failed to connect to Chrome: {}",
-                            err_msg
-                        ));
+                        app_event_tx
+                            .send_background_event(format!("❌ Failed to connect to Chrome: {}", err_msg));
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
@@ -17964,6 +18125,289 @@ fn strip_role_prefix_if_present(input: &str) -> (&str, bool) {
 }
 
 impl ChatWidget<'_> {
+    fn auto_resolve_enabled(&self) -> bool {
+        self.auto_resolve_state.is_some()
+    }
+
+    fn auto_resolve_clear(&mut self) {
+        self.auto_resolve_state = None;
+    }
+
+    fn auto_resolve_notice<S: Into<String>>(&mut self, message: S) {
+        self.push_background_tail(message.into());
+        self.request_redraw();
+    }
+
+    fn auto_resolve_format_findings(review: &ReviewOutputEvent) -> String {
+        let mut sections: Vec<String> = Vec::new();
+        if !review.findings.is_empty() {
+            sections.push(format_review_findings_block(&review.findings, None));
+        }
+        let explanation = review.overall_explanation.trim();
+        if !explanation.is_empty() {
+            sections.push(explanation.to_string());
+        }
+        sections
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    fn auto_resolve_handle_review_enter(&mut self) {
+        if let Some(state) = self.auto_resolve_state.as_mut() {
+            state.phase = AutoResolvePhase::WaitingForReview;
+            state.last_review = None;
+            state.last_fix_message = None;
+        }
+    }
+
+    fn auto_resolve_handle_review_exit(&mut self, review_output: Option<ReviewOutputEvent>) {
+        if self.auto_resolve_state.is_none() {
+            return;
+        }
+
+        let notice: Option<String>;
+        let mut should_clear = false;
+        {
+            let state = self.auto_resolve_state.as_mut().unwrap();
+            match review_output {
+                Some(ref output) => {
+                    state.attempt = state.attempt.saturating_add(1);
+                    state.last_review = Some(output.clone());
+                    state.last_fix_message = None;
+
+                    if output.findings.is_empty() {
+                        notice = Some("Auto-resolve: review reported no actionable findings. Exiting.".to_string());
+                        should_clear = true;
+                    } else if state.attempt > state.max_attempts {
+                        notice = Some(format!(
+                            "Auto-resolve: reached {attempts} review attempts; handing control back to you.",
+                            attempts = state.max_attempts
+                        ));
+                        should_clear = true;
+                    } else {
+                        state.phase = AutoResolvePhase::PendingFix {
+                            review: output.clone(),
+                        };
+                        notice = Some("Auto-resolve: review found issues. Preparing follow-up fix request.".to_string());
+                    }
+                }
+                None => {
+                    notice = Some(
+                        "Auto-resolve: review ended without findings. Please inspect manually.".to_string(),
+                    );
+                    should_clear = true;
+                }
+            }
+        }
+
+        if should_clear {
+            self.auto_resolve_clear();
+        }
+        if let Some(message) = notice {
+            self.auto_resolve_notice(message);
+        }
+    }
+
+    fn auto_resolve_on_task_complete(&mut self, last_agent_message: Option<String>) {
+        let Some(state_snapshot) = self.auto_resolve_state.clone() else {
+            return;
+        };
+
+        match state_snapshot.phase {
+            AutoResolvePhase::PendingFix { review } => {
+                if let Some(state) = self.auto_resolve_state.as_mut() {
+                    state.phase = AutoResolvePhase::AwaitingFix {
+                        review: review.clone(),
+                    };
+                }
+                self.dispatch_auto_fix(&review);
+            }
+            AutoResolvePhase::AwaitingFix { review } => {
+                if let Some(state) = self.auto_resolve_state.as_mut() {
+                    state.last_fix_message = last_agent_message.clone();
+                    state.phase = AutoResolvePhase::AwaitingJudge {
+                        review: review.clone(),
+                    };
+                }
+                self.dispatch_auto_judge(&review, last_agent_message);
+            }
+            AutoResolvePhase::AwaitingJudge { review } => {
+                let message = last_agent_message.unwrap_or_default();
+                self.auto_resolve_process_judge(review, message);
+            }
+            AutoResolvePhase::WaitingForReview => {}
+        }
+    }
+
+    fn dispatch_auto_fix(&mut self, review: &ReviewOutputEvent) {
+        let summary = Self::auto_resolve_format_findings(review);
+        let mut preface = String::from(
+            "You are continuing an automated /review resolution loop. Review the listed findings and determine whether they represent real issues introduced by our changes. If they are, apply the necessary fixes and resolve any similar issues you can identify before responding."
+        );
+        if !summary.is_empty() {
+            preface.push_str("\n\nFindings:\n");
+            preface.push_str(&summary);
+        }
+        self.auto_resolve_notice("Auto-resolve: asking the agent to verify and address the review findings.");
+        self.submit_text_message_with_preface(
+            "Is this a real issue introduced by our changes? If so, please fix and resolve all similar issues.".to_string(),
+            preface,
+        );
+    }
+
+    fn dispatch_auto_judge(&mut self, review: &ReviewOutputEvent, fix_message: Option<String>) {
+        let summary = Self::auto_resolve_format_findings(review);
+        let mut preface = String::from(
+            "You are evaluating whether the latest fixes resolved the findings from `/review`. Respond with a strict JSON object containing `status` and optional `rationale`. Valid `status` values: `review_again`, `no_issue`, `continue_fix`. Do not include any additional text before or after the JSON."
+        );
+        if !summary.is_empty() {
+            preface.push_str("\n\nOriginal findings:\n");
+            preface.push_str(&summary);
+        }
+        if let Some(fix) = fix_message.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            preface.push_str("\n\nLatest agent response:\n");
+            preface.push_str(fix);
+        }
+        preface.push_str("\n\nReturn JSON: {\"status\": \"...\", \"rationale\": \"optional explanation\"}.");
+
+        self.auto_resolve_notice("Auto-resolve: requesting status JSON from the agent.");
+        self.submit_text_message_with_preface(
+            "Auto-resolve status check".to_string(),
+            preface,
+        );
+    }
+
+    fn dispatch_auto_continue(&mut self, review: &ReviewOutputEvent) {
+        let summary = Self::auto_resolve_format_findings(review);
+        let mut preface = String::from(
+            "The previous status check indicated more work is required on the review findings. Continue addressing the remaining issues before responding."
+        );
+        if !summary.is_empty() {
+            preface.push_str("\n\nOutstanding findings:\n");
+            preface.push_str(&summary);
+        }
+        self.auto_resolve_notice("Auto-resolve: asking the agent to continue working on the findings.");
+        self.submit_text_message_with_preface("Please continue".to_string(), preface);
+    }
+
+    fn restart_auto_resolve_review(&mut self) {
+        let Some(state_snapshot) = self.auto_resolve_state.clone() else {
+            return;
+        };
+        let next_attempt = state_snapshot.attempt.saturating_add(1);
+        let bounded_attempt = next_attempt.min(state_snapshot.max_attempts);
+        let max_attempts = state_snapshot.max_attempts;
+        let prep_label = format!(
+            "Preparing follow-up code review (attempt {bounded_attempt} of {max_attempts})"
+        );
+        let continued_prompt = format!(
+            "{}\n\n{}",
+            state_snapshot.prompt.trim_end(),
+            AUTO_RESOLVE_REVIEW_FOLLOWUP
+        );
+        self.begin_review(
+            continued_prompt,
+            state_snapshot.hint.clone(),
+            Some(prep_label),
+            state_snapshot.metadata.clone(),
+        );
+        if let Some(state) = self.auto_resolve_state.as_mut() {
+            state.phase = AutoResolvePhase::WaitingForReview;
+            state.last_review = None;
+            state.last_fix_message = None;
+        }
+    }
+
+    fn auto_resolve_process_judge(&mut self, review: ReviewOutputEvent, message: String) {
+        let trimmed = message.trim();
+        let Some(decision) = Self::auto_resolve_parse_decision(trimmed) else {
+            self.auto_resolve_notice("Auto-resolve: expected JSON status but received something else. Stopping automation.");
+            self.auto_resolve_clear();
+            return;
+        };
+
+        let status = decision.status.to_ascii_lowercase();
+        let rationale = decision.rationale.unwrap_or_default();
+
+        match status.as_str() {
+            "no_issue" => {
+                if rationale.trim().is_empty() {
+                    self.auto_resolve_notice("Auto-resolve: agent reported no remaining issues. Done.");
+                } else {
+                    let rationale_text = rationale.trim();
+                    self.auto_resolve_notice(format!(
+                        "Auto-resolve: no remaining issues. {rationale_text}"
+                    ));
+                }
+                self.auto_resolve_clear();
+            }
+            "continue_fix" => {
+                if let Some(state) = self.auto_resolve_state.as_mut() {
+                    state.phase = AutoResolvePhase::AwaitingFix {
+                        review: review.clone(),
+                    };
+                }
+                self.dispatch_auto_continue(&review);
+            }
+            "review_again" => {
+                let stop = self
+                    .auto_resolve_state
+                    .as_ref()
+                    .is_some_and(|state| state.attempt >= state.max_attempts);
+                if stop {
+                    self.auto_resolve_notice("Auto-resolve: review-again requested but attempt limit reached. Stopping.");
+                    self.auto_resolve_clear();
+                } else {
+                    if rationale.trim().is_empty() {
+                        self.auto_resolve_notice("Auto-resolve: running another /review pass.".to_string());
+                    } else {
+                        let rationale_text = rationale.trim();
+                        self.auto_resolve_notice(format!(
+                            "Auto-resolve: running another /review pass. {rationale_text}"
+                        ));
+                    }
+                    self.restart_auto_resolve_review();
+                }
+            }
+            other => {
+                self.auto_resolve_notice(format!(
+                    "Auto-resolve: unexpected status '{other}'. Stopping automation."
+                ));
+                self.auto_resolve_clear();
+            }
+        }
+    }
+
+    fn auto_resolve_parse_decision(raw: &str) -> Option<AutoResolveDecision> {
+        if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(raw) {
+            return Some(decision);
+        }
+
+        if let Some(start) = raw.find("{" ) {
+            if let Some(end) = raw.rfind("}") {
+                let slice = &raw[start..=end];
+                if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(slice) {
+                    return Some(decision);
+                }
+            }
+        }
+
+        // try to strip ```json fences
+        if let Some(json_start) = raw.find("```") {
+            if let Some(rest) = raw[json_start + 3..].split_once("```") {
+                let candidate = rest.0.trim_start_matches("json").trim();
+                if let Ok(decision) = serde_json::from_str::<AutoResolveDecision>(candidate) {
+                    return Some(decision);
+                }
+            }
+        }
+
+        None
+    }
+
     pub(crate) fn open_review_dialog(&mut self) {
         if self.is_task_running() {
             self.history_push_plain_state(crate::history_cell::new_error_event(
@@ -17974,6 +18418,20 @@ impl ChatWidget<'_> {
         }
 
         let mut items: Vec<SelectionItem> = Vec::new();
+
+        let auto_label = if self.config.tui.review_auto_resolve {
+            "On"
+        } else {
+            "Off"
+        };
+        items.push(SelectionItem {
+            name: format!("Auto Resolve reviews — {auto_label}"),
+            description: Some("Automatically rerun fixes and follow-up checks after each review.".to_string()),
+            is_current: false,
+            actions: vec![Box::new(|tx: &crate::app_event_sender::AppEventSender| {
+                tx.send(crate::app_event::AppEvent::ToggleReviewAutoResolve);
+            })],
+        });
 
         items.push(SelectionItem {
             name: "Review /branch changes".to_string(),
@@ -18044,6 +18502,47 @@ impl ChatWidget<'_> {
         self.bottom_pane.show_custom_prompt(view);
     }
 
+    pub(crate) fn toggle_review_auto_resolve(&mut self) {
+        let new_value = !self.config.tui.review_auto_resolve;
+        self.config.tui.review_auto_resolve = new_value;
+
+        if !new_value {
+            self.auto_resolve_clear();
+        }
+
+        let (_persisted, message) = if let Ok(home) = codex_core::config::find_codex_home() {
+            match codex_core::config::set_tui_review_auto_resolve(&home, new_value) {
+                Ok(_) => {
+                    tracing::info!("Persisted review auto resolve toggle: {}", new_value);
+                    (true, if new_value {
+                        "Auto Resolve enabled for /review."
+                    } else {
+                        "Auto Resolve disabled for /review."
+                    })
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to persist review auto resolve toggle: {}", e);
+                    (false, if new_value {
+                        "Auto Resolve enabled for this session (failed to persist)."
+                    } else {
+                        "Auto Resolve disabled for this session (failed to persist)."
+                    })
+                }
+            }
+        } else {
+            tracing::warn!("Could not locate Codex home to persist review auto resolve toggle");
+            (false, if new_value {
+                "Auto Resolve enabled for this session."
+            } else {
+                "Auto Resolve disabled for this session."
+            })
+        };
+
+        self.bottom_pane.flash_footer_notice(message.to_string());
+        // Reopen selection view to reflect new label.
+        self.open_review_dialog();
+    }
+
     pub(crate) fn show_review_commit_loading(&mut self) {
         let loading_item = SelectionItem {
             name: "Loading recent commits…".to_string(),
@@ -18075,6 +18574,7 @@ impl ChatWidget<'_> {
             return;
         }
 
+        let auto_resolve = self.config.tui.review_auto_resolve;
         let mut items: Vec<SelectionItem> = Vec::with_capacity(commits.len());
         for entry in commits {
             let subject = entry.subject.trim().to_string();
@@ -18107,6 +18607,7 @@ impl ChatWidget<'_> {
                 commit: Some(sha.clone()),
                 ..Default::default()
             });
+            let auto_flag = auto_resolve;
             items.push(SelectionItem {
                 name: title,
                 description: None,
@@ -18117,6 +18618,7 @@ impl ChatWidget<'_> {
                         hint: hint_closure.clone(),
                         preparation_label: Some(prep_closure.clone()),
                         metadata: metadata_option.clone(),
+                        auto_resolve: auto_flag,
                     });
                 })],
             });
@@ -18176,6 +18678,7 @@ impl ChatWidget<'_> {
     ) {
         let current_trimmed = current_branch.as_ref().map(|s| s.trim().to_string());
         let mut items: Vec<SelectionItem> = Vec::new();
+        let auto_resolve = self.config.tui.review_auto_resolve;
         for branch in branches {
             let branch_trimmed = branch.trim();
             if branch_trimmed.is_empty() {
@@ -18214,6 +18717,7 @@ impl ChatWidget<'_> {
                 current_branch: current_trimmed.clone(),
                 ..Default::default()
             });
+            let auto_flag = auto_resolve;
             items.push(SelectionItem {
                 name: title,
                 description: None,
@@ -18224,6 +18728,7 @@ impl ChatWidget<'_> {
                         hint: hint_closure.clone(),
                         preparation_label: Some(prep_closure.clone()),
                         metadata: metadata_option.clone(),
+                        auto_resolve: auto_flag,
                     });
                 })],
             });
@@ -18268,6 +18773,7 @@ impl ChatWidget<'_> {
         }
 
         let trimmed = args.trim();
+        let auto_resolve = self.config.tui.review_auto_resolve;
         if trimmed.is_empty() {
             if Self::is_branch_worktree_path(&self.config.cwd) {
                 if let Some(git_root) =
@@ -18275,6 +18781,7 @@ impl ChatWidget<'_> {
                 {
                     let worktree_cwd = self.config.cwd.clone();
                     let tx = self.app_event_tx.clone();
+                    let auto_flag = auto_resolve;
                     tokio::spawn(async move {
                     let branch_metadata =
                         codex_core::git_worktree::load_branch_metadata(&worktree_cwd);
@@ -18323,6 +18830,7 @@ impl ChatWidget<'_> {
                                     hint,
                                     preparation_label,
                                     metadata,
+                                    auto_resolve: auto_flag,
                                 });
                                 return;
                             }
@@ -18336,6 +18844,7 @@ impl ChatWidget<'_> {
                                 scope: Some("workspace".to_string()),
                                 ..Default::default()
                             }),
+                            auto_resolve: auto_flag,
                         });
                     });
                     return;
@@ -18351,6 +18860,7 @@ impl ChatWidget<'_> {
                 "current workspace changes".to_string(),
                 Some("Preparing code review request...".to_string()),
                 Some(metadata),
+                auto_resolve,
             );
         } else {
             let value = trimmed.to_string();
@@ -18359,11 +18869,32 @@ impl ChatWidget<'_> {
                 scope: Some("custom".to_string()),
                 ..Default::default()
             };
-            self.start_review_with_scope(value.clone(), value, Some(preparation), Some(metadata));
+            self.start_review_with_scope(value.clone(), value, Some(preparation), Some(metadata), auto_resolve);
         }
     }
 
     pub(crate) fn start_review_with_scope(
+        &mut self,
+        prompt: String,
+        hint: String,
+        preparation_label: Option<String>,
+        metadata: Option<ReviewContextMetadata>,
+        auto_resolve: bool,
+    ) {
+        if auto_resolve {
+            self.auto_resolve_state = Some(AutoResolveState::new(
+                prompt.clone(),
+                hint.clone(),
+                metadata.clone(),
+            ));
+        } else {
+            self.auto_resolve_state = None;
+        }
+
+        self.begin_review(prompt, hint, preparation_label, metadata);
+    }
+
+    fn begin_review(
         &mut self,
         prompt: String,
         hint: String,
@@ -20083,6 +20614,9 @@ impl ChatWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_event::BackgroundPlacement;
+    use crate::history_cell;
+    use crate::history_cell::PlainMessageKind;
     use codex_core::config::Config;
     use codex_core::config::ConfigOverrides;
     use codex_core::config::ConfigToml;
@@ -20218,6 +20752,103 @@ mod tests {
 
         assert!(later_idx > earlier_idx, "later background should append; dump: {:?}", dump);
         assert!(dump.last().is_some_and(|line| line.contains("later")), "later background should be final entry; dump: {:?}", dump);
+    }
+
+    #[test]
+    fn tail_background_event_keeps_position_vs_next_output() {
+        let mut chat = make_widget();
+        chat.test_set_request_state(1, 0);
+        let handle = chat.test_background_tail_order_handle();
+        let captured_order = handle.next_order();
+
+        chat.insert_background_event_with_placement(
+            "📎 background banner".to_string(),
+            BackgroundPlacement::Tail,
+            Some(captured_order.clone()),
+        );
+
+        let provider_order = codex_core::protocol::OrderMeta {
+            request_ordinal: captured_order.request_ordinal,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        };
+        let provider_key = ChatWidget::order_key_from_order_meta(&provider_order);
+        let provider_state = history_cell::plain_message_state_from_paragraphs(
+            PlainMessageKind::Assistant,
+            history_cell::plain_role_for_kind(PlainMessageKind::Assistant),
+            vec!["tool output".to_string()],
+        );
+        chat.history_insert_plain_state_with_key(provider_state, provider_key, "test");
+
+        let mut banner_idx = None;
+        let mut provider_idx = None;
+
+        for (idx, cell) in chat.history_cells.iter().enumerate() {
+            let text = cell
+                .display_lines()
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            if text.contains("📎 background banner") {
+                banner_idx = Some(idx);
+            }
+            if text.contains("tool output") {
+                provider_idx = Some(idx);
+            }
+        }
+
+        let banner_idx = banner_idx.expect("background banner not inserted");
+        let provider_idx = provider_idx.expect("provider output missing");
+
+        assert!(
+            provider_idx < banner_idx,
+            "provider output should precede tail background banner"
+        );
+
+        let banner_key = chat.cell_order_seq[banner_idx];
+        let provider_key_recorded = chat.cell_order_seq[provider_idx];
+        assert_eq!(banner_key.req, captured_order.request_ordinal);
+        assert_eq!(banner_key.out, i32::MAX);
+        assert!(provider_key_recorded < banner_key);
+    }
+
+    #[test]
+    fn tail_background_sequence_rehydrates_after_restore() {
+        let mut chat = make_widget();
+        chat.test_set_request_state(1, 0);
+        chat.push_background_tail("orig tail".to_string());
+
+        let snapshot = chat.history_snapshot_for_persistence();
+
+        let mut restored = make_widget();
+        restored.restore_history_snapshot(&snapshot);
+        restored.test_set_request_state(1, 0);
+        restored.push_background_tail("restored tail".to_string());
+
+        let dump = restored.test_dump_history_text();
+        let orig_idx = dump
+            .iter()
+            .position(|line| line.contains("orig tail"))
+            .expect("restored history missing original tail background");
+        let new_idx = dump
+            .iter()
+            .position(|line| line.contains("restored tail"))
+            .expect("restored history missing new tail background");
+
+        assert!(
+            new_idx > orig_idx,
+            "restored tail background should appear after original; dump: {:?}",
+            dump
+        );
+
+        let orig_key = restored.cell_order_seq[orig_idx];
+        let new_key = restored.cell_order_seq[new_idx];
+        assert_eq!(orig_key.req, new_key.req, "restored tail should remain in same request");
+        assert!(
+            new_key.seq > orig_key.seq,
+            "expected sequence to advance beyond restored entries"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
