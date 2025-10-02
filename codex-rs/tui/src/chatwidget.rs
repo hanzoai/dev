@@ -129,6 +129,8 @@ use crate::bottom_pane::{
     CountdownState,
 };
 use crate::exec_command::strip_bash_lc_and_escape;
+
+pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 use codex_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -12707,7 +12709,7 @@ impl ChatWidget<'_> {
         lines.push(kv("Ctrl+R", "Toggle reasoning"));
         lines.push(kv("Ctrl+T", "Toggle screen"));
         lines.push(kv("Ctrl+D", "Diff viewer"));
-        lines.push(kv("Esc", "Undo timeline / close popups"));
+        lines.push(kv("Esc", &format!("{} / close popups", Self::double_esc_hint_label())));
         // Task control shortcuts
         lines.push(kv("Esc", "End current task"));
         lines.push(kv("Ctrl+C", "End current task"));
@@ -13736,9 +13738,13 @@ impl ChatWidget<'_> {
     }
 
     // --- Double‑Escape helpers ---
+    pub(crate) fn double_esc_hint_label() -> &'static str {
+        DOUBLE_ESC_HINT
+    }
+
     pub(crate) fn show_esc_undo_hint(&mut self) {
         self.bottom_pane
-            .flash_footer_notice("Esc undo timeline".to_string());
+            .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
     pub(crate) fn is_task_running(&self) -> bool {
