@@ -2465,8 +2465,14 @@ impl Session {
 
 
     pub fn get_pending_input(&self) -> Vec<ResponseInputItem> {
+        self.get_pending_input_filtered(true)
+    }
+
+    pub fn get_pending_input_filtered(&self, drain_user_inputs: bool) -> Vec<ResponseInputItem> {
         let mut state = self.state.lock().unwrap();
-        if state.pending_input.is_empty() && state.pending_user_input.is_empty() {
+        if state.pending_input.is_empty()
+            && (drain_user_inputs || state.pending_user_input.is_empty())
+        {
             Vec::with_capacity(0)
         } else {
             let mut ret = Vec::new();
@@ -2477,13 +2483,22 @@ impl Session {
             }
 
             if !state.pending_user_input.is_empty() {
-                let mut queued_user_inputs = Vec::new();
-                std::mem::swap(&mut queued_user_inputs, &mut state.pending_user_input);
-                ret.extend(
-                    queued_user_inputs
-                        .into_iter()
-                        .map(|queued| queued.response_item),
-                );
+                if drain_user_inputs {
+                    let mut queued_user_inputs = Vec::new();
+                    std::mem::swap(&mut queued_user_inputs, &mut state.pending_user_input);
+                    ret.extend(
+                        queued_user_inputs
+                            .into_iter()
+                            .map(|queued| queued.response_item),
+                    );
+                } else {
+                    ret.extend(
+                        state
+                            .pending_user_input
+                            .iter()
+                            .map(|queued| queued.response_item.clone()),
+                    );
+                }
             }
             ret
         }
@@ -3861,8 +3876,11 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
-        let pending_input = sess
-            .get_pending_input()
+        let pending_input = if is_review_mode {
+            sess.get_pending_input_filtered(false)
+        } else {
+            sess.get_pending_input()
+        }
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
