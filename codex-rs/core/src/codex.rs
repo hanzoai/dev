@@ -7025,8 +7025,21 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                             AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
                         ) {
                             // Include output/error preview and file path
+                            // Avoid holding manager lock during filesystem I/O
+                            drop(manager);
                             let cwd = sess.get_cwd().to_path_buf();
-                            let dir = ensure_agent_dir(&cwd, &agent.id).unwrap_or_else(|_| cwd.clone());
+                            let dir = match ensure_agent_dir(&cwd, &agent.id) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput {
+                                        call_id: call_id_clone,
+                                        output: FunctionCallOutputPayload {
+                                            content: format!("Failed to prepare agent output dir: {}", e),
+                                            success: Some(false),
+                                        },
+                                    };
+                                }
+                            };
                             let (preview_key, file_key, preview, file_path, total_lines) = match agent.status {
                                 AgentStatus::Completed => {
                                     let text = agent.result.clone().unwrap_or_default();
@@ -7101,10 +7114,23 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                         // Wait for ALL agents in the batch to reach a terminal state
                         if !any_in_progress {
                             // Enriched response: include per-agent previews and file paths
+                            // Avoid holding manager lock during filesystem I/O
+                            drop(manager);
                             let cwd = sess.get_cwd().to_path_buf();
                             let mut summaries: Vec<serde_json::Value> = Vec::new();
                             for a in &completed_agents {
-                                let dir = ensure_agent_dir(&cwd, &a.id).unwrap_or_else(|_| cwd.clone());
+                                let dir = match ensure_agent_dir(&cwd, &a.id) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        return ResponseInputItem::FunctionCallOutput {
+                                            call_id: call_id_clone,
+                                            output: FunctionCallOutputPayload {
+                                                content: format!("Failed to prepare agent output dir: {}", e),
+                                                success: Some(false),
+                                            },
+                                        };
+                                    }
+                                };
                                 let (preview_key, file_key, preview, file_path, total_lines) = match a.status {
                                     AgentStatus::Completed => {
                                         let text = a.result.clone().unwrap_or_default();
@@ -7181,8 +7207,21 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                             drop(state);
 
                             // Include output/error preview for the unseen completed agent
+                            // Avoid holding manager lock during filesystem I/O
+                            drop(manager);
                             let cwd = sess.get_cwd().to_path_buf();
-                            let dir = ensure_agent_dir(&cwd, &unseen.id).unwrap_or_else(|_| cwd.clone());
+                            let dir = match ensure_agent_dir(&cwd, &unseen.id) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput {
+                                        call_id: call_id_clone,
+                                        output: FunctionCallOutputPayload {
+                                            content: format!("Failed to prepare agent output dir: {}", e),
+                                            success: Some(false),
+                                        },
+                                    };
+                                }
+                            };
                             let (preview_key, file_key, preview, file_path, total_lines) = match unseen.status {
                                 AgentStatus::Completed => {
                                     let text = unseen.result.clone().unwrap_or_default();
