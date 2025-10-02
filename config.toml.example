@@ -99,8 +99,8 @@ env = { MODEL_PATH = "/models/custom.bin", TEMP = "0.7" }
 
 # Cloud agent example
 [[agents]]
-name = "cloud"
-command = "cloud" # or a fully-qualified CLI if different
+name = "cloud"    # keep name = "cloud" so built-in /plan,/solve default lists include it
+command = "cloud"  # can be any CLI or path (e.g., "cloud-agent"); behavior keys off the agent name
 enabled = true
 read-only = true   # cloud work typically runs remotely; local writes aren’t needed
 description = "Submit tasks to a remote cloud worker"
