@@ -302,10 +302,12 @@ fn background_events_append_in_arrival_order() {
     chat.insert_background_event_with_placement(
         "first background".to_string(),
         BackgroundPlacement::Tail,
+        None,
     );
     chat.insert_background_event_with_placement(
         "second background".to_string(),
         BackgroundPlacement::Tail,
+        None,
     );
 
     let texts = cell_texts(&chat);
@@ -361,10 +363,12 @@ fn background_event_before_next_output_precedes_later_cells() {
     chat.insert_background_event_with_placement(
         "initial".to_string(),
         BackgroundPlacement::Tail,
+        None,
     );
     chat.insert_background_event_with_placement(
         "guard".to_string(),
         BackgroundPlacement::BeforeNextOutput,
+        None,
     );
     chat.push_background_tail("tail".to_string());
 
