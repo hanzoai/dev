@@ -518,8 +518,8 @@ fn try_upgrade_fallback_exec_cell(
 ) -> bool {
     for i in (0..chat.history_cells.len()).rev() {
         if let Some(exec) = chat.history_cells[i]
-            .as_any_mut()
-            .downcast_mut::<history_cell::ExecCell>()
+            .as_any()
+            .downcast_ref::<history_cell::ExecCell>()
         {
             let looks_like_fallback = exec.output.is_some()
                 && exec.parsed.is_empty()
@@ -529,8 +529,55 @@ fn try_upgrade_fallback_exec_cell(
                     .map(|cmd| cmd == &ev.call_id)
                     .unwrap_or(false);
             if looks_like_fallback {
-                exec.replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
-                try_merge_completed_exec_at(chat, i);
+                let mut upgraded = false;
+                if let Some(HistoryRecord::Exec(mut exec_record)) =
+                    history_record_for_cell(chat, i)
+                {
+                    exec_record.command = ev.command.clone();
+                    exec_record.parsed = ev.parsed_cmd.clone();
+                    exec_record.action = history_cell::action_enum_from_parsed(&exec_record.parsed);
+                    exec_record.call_id = Some(ev.call_id.clone());
+                    if exec_record.working_dir.is_none() {
+                        exec_record.working_dir = Some(ev.cwd.clone());
+                    }
+
+                    let record_index = chat
+                        .record_index_for_cell(i)
+                        .unwrap_or_else(|| chat.record_index_for_position(i));
+                    let mutation = chat.history_state.apply_domain_event(
+                        HistoryDomainEvent::Replace {
+                            index: record_index,
+                            record: HistoryDomainRecord::Exec(exec_record.clone()),
+                        },
+                    );
+
+                    if let HistoryMutation::Replaced {
+                        id,
+                        record: HistoryRecord::Exec(updated_record),
+                        ..
+                    } = mutation
+                    {
+                        chat.update_cell_from_record(
+                            id,
+                            HistoryRecord::Exec(updated_record.clone()),
+                        );
+                        if let Some(idx) = chat.cell_index_for_history_id(id) {
+                            crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+                        }
+                        upgraded = true;
+                    }
+                }
+
+                if !upgraded {
+                    if let Some(exec_mut) = chat.history_cells[i]
+                        .as_any_mut()
+                        .downcast_mut::<history_cell::ExecCell>()
+                    {
+                        exec_mut.replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
+                    }
+                    try_merge_completed_exec_at(chat, i);
+                }
+
                 chat.invalidate_height_cache();
                 chat.request_redraw();
                 return true;
