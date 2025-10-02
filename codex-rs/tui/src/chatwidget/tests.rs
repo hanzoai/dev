@@ -11,12 +11,17 @@ use crate::app_event::{
 };
 use crate::app_event_sender::AppEventSender;
 use crate::history::state::{
+    ArgumentValue,
     ExecStatus,
     ExploreEntryStatus,
     HistoryDomainRecord,
     HistoryId,
     HistoryRecord,
     HistoryState,
+    ToolArgument,
+    ToolCallState,
+    ToolResultPreview,
+    ToolStatus,
 };
 use crate::slash_command::SlashCommand;
 use super::auto_coordinator::AutoCoordinatorHandle;
@@ -3735,6 +3740,24 @@ fn export_auto_drive_items_includes_cli_outputs() {
     let diff = "diff --git a/foo.rs b/foo.rs\n--- a/foo.rs\n+++ b/foo.rs\n@@ -1 +1,2 @@\n-println!(\"old\");\n+println!(\"new\");\n+println!(\"extra\");\n";
     chat.add_diff_output(diff.to_string());
 
+    let tool_state = ToolCallState {
+        id: HistoryId::ZERO,
+        call_id: Some("tool-1".to_string()),
+        status: ToolStatus::Success,
+        title: "Run formatter".to_string(),
+        duration: None,
+        arguments: vec![ToolArgument {
+            name: "command".to_string(),
+            value: ArgumentValue::Text("just fmt".to_string()),
+        }],
+        result_preview: Some(ToolResultPreview {
+            lines: vec!["Formatted 12 files".to_string()],
+            truncated: false,
+        }),
+        error_message: None,
+    };
+    chat.history_push(history_cell::ToolCallCell::new(tool_state));
+
     let items = chat.export_auto_drive_items();
 
     let coordinator = items
@@ -3779,6 +3802,12 @@ fn export_auto_drive_items_includes_cli_outputs() {
             .map(|text| text.contains("Files changed") && text.contains("foo.rs"))
             .unwrap_or(false)
     }), "diff summary present");
+
+    assert!(items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Run formatter") && text.contains("Formatted 12 files"))
+            .unwrap_or(false)
+    }), "tool call output present");
 }
 
 #[test]

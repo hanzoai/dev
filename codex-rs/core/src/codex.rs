@@ -2468,6 +2468,10 @@ impl Session {
         self.get_pending_input_filtered(true)
     }
 
+    /// Returns pending input for the current turn. Callers can decide whether
+    /// queued user inputs should be drained immediately (`drain_user_inputs = true`)
+    /// or preserved for a later turn—for example, review mode keeps them queued
+    /// so the primary agent can resume once the review finishes.
     pub fn get_pending_input_filtered(&self, drain_user_inputs: bool) -> Vec<ResponseInputItem> {
         let mut state = self.state.lock().unwrap();
         if state.pending_input.is_empty()
@@ -2985,6 +2989,34 @@ async fn submission_loop(
 
                 let effective_user_instructions = computed_user_instructions.clone();
 
+                // Optionally resume an existing rollout.
+                let mut restored_items: Option<Vec<RolloutItem>> = None;
+                let mut restored_history_snapshot: Option<crate::history::HistorySnapshot> = None;
+                let mut resume_notice: Option<String> = None;
+                let mut rollout_recorder: Option<RolloutRecorder> = None;
+                if let Some(path) = resume_path.as_ref() {
+                    match RolloutRecorder::resume(&updated_config, path).await {
+                        Ok((rec, saved)) => {
+                            session_id = saved.session_id;
+                            if !saved.items.is_empty() {
+                                restored_items = Some(saved.items);
+                            }
+                            if let Some(snapshot) = saved.history_snapshot {
+                                restored_history_snapshot = Some(snapshot);
+                            }
+                            rollout_recorder = Some(rec);
+                        }
+                        Err(e) => {
+                            warn!("failed to resume rollout from {path:?}: {e}");
+                            resume_notice = Some(format!(
+                                "⚠️ Failed to load previous session from {}: {e}. Starting a new conversation instead.",
+                                path.display()
+                            ));
+                            updated_config.experimental_resume = None;
+                        }
+                    }
+                }
+
                 let new_config = Arc::new(updated_config);
 
                 if model_changed || effort_changed {
@@ -3001,31 +3033,6 @@ async fn submission_loop(
                 }
 
                 config = Arc::clone(&new_config);
-
-                // Optionally resume an existing rollout.
-                let mut restored_items: Option<Vec<RolloutItem>> = None;
-                let mut restored_history_snapshot: Option<crate::history::HistorySnapshot> = None;
-                let rollout_recorder: Option<RolloutRecorder> =
-                    if let Some(path) = resume_path.as_ref() {
-                        match RolloutRecorder::resume(&config, path).await {
-                            Ok((rec, saved)) => {
-                                session_id = saved.session_id;
-                                if !saved.items.is_empty() {
-                                    restored_items = Some(saved.items);
-                                }
-                                if let Some(snapshot) = saved.history_snapshot {
-                                    restored_history_snapshot = Some(snapshot);
-                                }
-                                Some(rec)
-                            }
-                            Err(e) => {
-                                warn!("failed to resume rollout from {path:?}: {e}");
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
 
                 let rollout_recorder = match rollout_recorder {
                     Some(rec) => Some(rec),
@@ -3284,6 +3291,16 @@ async fn submission_loop(
                     );
                     if let Err(e) = tx_event.send(event).await {
                         warn!("failed to send ReplayHistory event: {e}");
+                    }
+                }
+
+                if let Some(notice) = resume_notice {
+                    let event = sess_arc.make_event(
+                        &sub.id,
+                        EventMsg::BackgroundEvent(BackgroundEventEvent { message: notice }),
+                    );
+                    if let Err(e) = tx_event.send(event).await {
+                        warn!("failed to send resume notice event: {e}");
                     }
                 }
 
@@ -3876,11 +3893,13 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
-        let pending_input = if is_review_mode {
-            sess.get_pending_input_filtered(false)
-        } else {
-            sess.get_pending_input()
-        }
+        // IMPORTANT: Do not inject queued user inputs into the review thread.
+        // Doing so routes user messages (e.g., auto-resolve fix prompts) to the
+        // review model, causing loops. Only include queued user inputs when not in
+        // review mode. They will be picked up after TaskComplete via
+        // pop_next_queued_user_input.
+        let pending_input = sess
+            .get_pending_input_filtered(!is_review_mode)
             .into_iter()
             .map(ResponseItem::from)
             .collect::<Vec<ResponseItem>>();
@@ -6509,6 +6528,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     "claude" => ("claude".to_string(), false),
                     "gemini" => ("gemini".to_string(), false),
                     "qwen" => ("qwen".to_string(), false),
+                    // Cloud agent: treat as built-in via current executable (code cloud submit)
+                    "cloud" => ("cloud".to_string(), true),
                     _ => (m, false),
                 }
             }
@@ -7030,8 +7051,21 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                             AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
                         ) {
                             // Include output/error preview and file path
+                            // Avoid holding manager lock during filesystem I/O
+                            drop(manager);
                             let cwd = sess.get_cwd().to_path_buf();
-                            let dir = ensure_agent_dir(&cwd, &agent.id).unwrap_or_else(|_| cwd.clone());
+                            let dir = match ensure_agent_dir(&cwd, &agent.id) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput {
+                                        call_id: call_id_clone,
+                                        output: FunctionCallOutputPayload {
+                                            content: format!("Failed to prepare agent output dir: {}", e),
+                                            success: Some(false),
+                                        },
+                                    };
+                                }
+                            };
                             let (preview_key, file_key, preview, file_path, total_lines) = match agent.status {
                                 AgentStatus::Completed => {
                                     let text = agent.result.clone().unwrap_or_default();
@@ -7060,11 +7094,14 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 _ => unreachable!(),
                             };
 
+                            let hint = format!("agent_result {{\"agent_id\":\"{}\"}}", agent.id);
                             let mut response = serde_json::json!({
                                 "agent_id": agent.id,
                                 "status": agent.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
+                                "agent_result_hint": hint,
+                                "agent_result_params": { "agent_id": agent.id },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7102,9 +7139,71 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                     if params.return_all.unwrap_or(false) {
                         // Wait for ALL agents in the batch to reach a terminal state
                         if !any_in_progress {
+                            // Enriched response: include per-agent previews and file paths
+                            // Avoid holding manager lock during filesystem I/O
+                            drop(manager);
+                            let cwd = sess.get_cwd().to_path_buf();
+                            let mut summaries: Vec<serde_json::Value> = Vec::new();
+                            for a in &completed_agents {
+                                let dir = match ensure_agent_dir(&cwd, &a.id) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        return ResponseInputItem::FunctionCallOutput {
+                                            call_id: call_id_clone,
+                                            output: FunctionCallOutputPayload {
+                                                content: format!("Failed to prepare agent output dir: {}", e),
+                                                success: Some(false),
+                                            },
+                                        };
+                                    }
+                                };
+                                let (preview_key, file_key, preview, file_path, total_lines) = match a.status {
+                                    AgentStatus::Completed => {
+                                        let text = a.result.clone().unwrap_or_default();
+                                        let (p, total) = preview_first_n_lines(&text, 500);
+                                        let fp = write_agent_file(&dir, "result.txt", &text)
+                                            .map(|p| p.display().to_string())
+                                            .unwrap_or_else(|e| format!("Failed to write result file: {}", e));
+                                        ("output_preview", "output_file", p, fp, total)
+                                    }
+                                    AgentStatus::Failed => {
+                                        let text = a.error.clone().unwrap_or_else(|| "Unknown error".to_string());
+                                        let (p, total) = preview_first_n_lines(&text, 500);
+                                        let fp = write_agent_file(&dir, "error.txt", &text)
+                                            .map(|p| p.display().to_string())
+                                            .unwrap_or_else(|e| format!("Failed to write error file: {}", e));
+                                        ("error_preview", "error_file", p, fp, total)
+                                    }
+                                    AgentStatus::Cancelled => {
+                                        let text = "Agent cancelled".to_string();
+                                        let (p, total) = preview_first_n_lines(&text, 500);
+                                        let fp = write_agent_file(&dir, "status.txt", &text)
+                                            .map(|p| p.display().to_string())
+                                            .unwrap_or_else(|e| format!("Failed to write status file: {}", e));
+                                        ("status_preview", "status_file", p, fp, total)
+                                    }
+                                    _ => unreachable!(),
+                                };
+
+                                let hint = format!("agent_result {{\"agent_id\":\"{}\"}}", a.id);
+                                let mut obj = serde_json::json!({
+                                    "agent_id": a.id,
+                                    "status": a.status,
+                                    "total_lines": total_lines,
+                                    "agent_result_hint": hint,
+                                    "agent_result_params": { "agent_id": a.id },
+                                });
+                                if let Some(map) = obj.as_object_mut() {
+                                    map.insert(preview_key.to_string(), serde_json::Value::String(preview));
+                                    map.insert(file_key.to_string(), serde_json::Value::String(file_path));
+                                }
+                                summaries.push(obj);
+                            }
+
                             let response = serde_json::json!({
                                 "batch_id": batch_id,
                                 "completed_agents": completed_agents.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+                                "completed_summaries": summaries,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                             });
                             return ResponseInputItem::FunctionCallOutput {
@@ -7134,8 +7233,21 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                             drop(state);
 
                             // Include output/error preview for the unseen completed agent
+                            // Avoid holding manager lock during filesystem I/O
+                            drop(manager);
                             let cwd = sess.get_cwd().to_path_buf();
-                            let dir = ensure_agent_dir(&cwd, &unseen.id).unwrap_or_else(|_| cwd.clone());
+                            let dir = match ensure_agent_dir(&cwd, &unseen.id) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    return ResponseInputItem::FunctionCallOutput {
+                                        call_id: call_id_clone,
+                                        output: FunctionCallOutputPayload {
+                                            content: format!("Failed to prepare agent output dir: {}", e),
+                                            success: Some(false),
+                                        },
+                                    };
+                                }
+                            };
                             let (preview_key, file_key, preview, file_path, total_lines) = match unseen.status {
                                 AgentStatus::Completed => {
                                     let text = unseen.result.clone().unwrap_or_default();
@@ -7164,11 +7276,14 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 _ => unreachable!(),
                             };
 
+                            let hint = format!(r#"agent_result {{"agent_id":"{}"}}"#, unseen.id);
                             let mut response = serde_json::json!({
                                 "agent_id": unseen.id,
                                 "status": unseen.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
+                                "agent_result_hint": hint,
+                                "agent_result_params": { "agent_id": unseen.id },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));

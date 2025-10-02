@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -506,14 +507,18 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
                         drop(manager);
 
                         // Execute with full permissions in the worktree
-                        execute_model_with_permissions(
-                            &model,
-                            &full_prompt,
-                            false,
-                            Some(worktree_path),
-                            config.clone(),
-                        )
-                        .await
+                        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
+                            execute_cloud_built_in_streaming(&agent_id, &full_prompt, Some(worktree_path), config.clone()).await
+                        } else {
+                            execute_model_with_permissions(
+                                &model,
+                                &full_prompt,
+                                false,
+                                Some(worktree_path),
+                                config.clone(),
+                            )
+                            .await
+                        }
                     }
                     Err(e) => Err(format!("Failed to setup worktree: {}", e)),
                 }
@@ -526,7 +531,11 @@ async fn execute_agent(agent_id: String, config: Option<AgentConfig>) {
             "{}\n\n[Running in read-only mode - no modifications allowed]",
             full_prompt
         );
-        execute_model_with_permissions(&model, &full_prompt, true, None, config).await
+        if model.to_ascii_lowercase() == "cloud" && config.is_none() {
+            execute_cloud_built_in_streaming(&agent_id, &full_prompt, None, config).await
+        } else {
+            execute_model_with_permissions(&model, &full_prompt, true, None, config).await
+        }
     };
 
     // Update result
@@ -594,7 +603,7 @@ async fn execute_model_with_permissions(
     // `codex` binary to be present on PATH. This improves portability,
     // especially on Windows where global shims may be missing.
     let model_lower = model.to_lowercase();
-    let mut cmd = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+    let mut cmd = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
         match std::env::current_exe() {
             Ok(path) => Command::new(path),
             Err(e) => return Err(format!("Failed to resolve current executable: {}", e)),
@@ -631,12 +640,25 @@ async fn execute_model_with_permissions(
     }
 
     // Build command based on model and permissions
-    // Use command instead of model for matching if config provided
-    let model_name = if config.is_some() { command.as_str() } else { model_lower.as_str() };
+    // Determine agent family for behavior (claude/gemini/qwen/code/codex/cloud).
+    // Prefer the model name; if it's not a known family, fall back to the configured
+    // command so aliases like command = "cloud-agent" still get cloud behavior.
+    let command_lower = command.to_ascii_lowercase();
+    fn is_known_family(s: &str) -> bool {
+        matches!(s, "claude" | "gemini" | "qwen" | "codex" | "code" | "cloud")
+    }
+    let family = if is_known_family(model_lower.as_str()) {
+        model_lower.as_str()
+    } else if is_known_family(command_lower.as_str()) {
+        command_lower.as_str()
+    } else {
+        model_lower.as_str()
+    };
 
-    match model_name {
+    let built_in_cloud = family == "cloud" && config.is_none();
+    match family {
         "claude" | "gemini" | "qwen" => {
-            let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+            let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
             defaults.push("-p".into());
             defaults.push(prompt.to_string());
             cmd.args(defaults);
@@ -647,21 +669,23 @@ async fn execute_model_with_permissions(
             if have_mode_args {
                 cmd.arg(prompt);
             } else {
-                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                 defaults.push(prompt.to_string());
                 cmd.args(defaults);
             }
         }
+        // Cloud agent: built-in path uses `code cloud submit <prompt>`; external
+        // command path falls back to positional prompt with optional defaults.
         "cloud" => {
-            // The cloud agent CLI expects the prompt as a positional argument. If
-            // the configuration already provided explicit args for this mode, we
-            // append the prompt directly; otherwise we fall back to any shared
-            // defaults (if present) before adding the prompt.
-            let have_mode_args = config.as_ref().map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() }).unwrap_or(false);
+            if built_in_cloud { cmd.args(["cloud", "submit", "--wait"]); }
+            let have_mode_args = config
+                .as_ref()
+                .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                .unwrap_or(false);
             if have_mode_args {
                 cmd.arg(prompt);
             } else {
-                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                 defaults.push(prompt.to_string());
                 cmd.args(defaults);
             }
@@ -672,7 +696,9 @@ async fn execute_model_with_permissions(
     // Proactively check for presence of external command before spawn when not
     // using the current executable fallback. This avoids confusing OS errors
     // like "program not found" and lets us surface a cleaner message.
-    if model_name != "codex" && model_name != "code" && !command_exists(&command) {
+    if !(family == "codex" || family == "code" || (family == "cloud" && config.is_none()))
+        && !command_exists(&command)
+    {
         return Err(format!("Required agent '{}' is not installed or not in PATH", command));
     }
 
@@ -744,7 +770,7 @@ async fn execute_model_with_permissions(
         // Intentionally build args fresh for sandbox helpers; `Command` does not expose argv.
         // Rebuild the invocation as `command` + args set above.
         // We reconstruct to run under our sandbox helpers.
-        let program = if (model_lower == "code" || model_lower == "codex") && config.is_none() {
+        let program = if ((model_lower == "code" || model_lower == "codex") || model_lower == "cloud") && config.is_none() {
             // Use current exe path
             std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?
         } else {
@@ -770,9 +796,10 @@ async fn execute_model_with_permissions(
             }
         }
 
-        match model_name {
+        let built_in_cloud = family == "cloud" && config.is_none();
+        match family {
             "claude" | "gemini" | "qwen" => {
-                let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                 defaults.push("-p".into());
                 defaults.push(prompt.to_string());
                 args.extend(defaults);
@@ -782,7 +809,21 @@ async fn execute_model_with_permissions(
                 if have_mode_args {
                     args.push(prompt.to_string());
                 } else {
-                    let mut defaults = crate::agent_defaults::default_params_for(model_name, read_only);
+                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
+                    defaults.push(prompt.to_string());
+                    args.extend(defaults);
+                }
+            }
+            "cloud" => {
+                if built_in_cloud { args.extend(["cloud", "submit", "--wait"].map(String::from)); }
+                let have_mode_args = config
+                    .as_ref()
+                    .map(|c| if read_only { c.args_read_only.is_some() } else { c.args_write.is_some() })
+                    .unwrap_or(false);
+                if have_mode_args {
+                    args.push(prompt.to_string());
+                } else {
+                    let mut defaults = crate::agent_defaults::default_params_for(family, read_only);
                     defaults.push(prompt.to_string());
                     args.extend(defaults);
                 }
@@ -799,7 +840,7 @@ async fn execute_model_with_permissions(
                 crate::spawn::spawn_child_async(
                     program.clone(),
                     args.clone(),
-                    Some(&program.to_string_lossy()),
+                    Some(program.to_string_lossy().as_ref()),
                     working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
                     &SandboxPolicy::DangerFullAccess,
                     StdioPolicy::RedirectForShellTool,
@@ -830,7 +871,7 @@ async fn execute_model_with_permissions(
             Ok(o) => o,
             Err(e) => {
                 // Only fall back for external CLIs (not the built-in code/codex path)
-                if model_name == "codex" || model_name == "code" {
+                if family == "codex" || family == "code" {
                     return Err(format!("Failed to execute {}: {}", model, e));
                 }
                 let mut fb = match std::env::current_exe() {
@@ -871,6 +912,85 @@ async fn execute_model_with_permissions(
     }
 }
 
+/// Execute the built-in cloud agent via the current `code` binary, streaming
+/// stderr lines into the HUD as progress and returning final stdout. Applies a
+/// modest truncation cap to very large outputs to keep UI responsive.
+async fn execute_cloud_built_in_streaming(
+    agent_id: &str,
+    prompt: &str,
+    working_dir: Option<std::path::PathBuf>,
+    _config: Option<AgentConfig>,
+) -> Result<String, String> {
+    // Program and argv
+    let program = std::env::current_exe()
+        .map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+    let args: Vec<String> = vec![
+        "cloud".into(),
+        "submit".into(),
+        "--wait".into(),
+        prompt.into(),
+    ];
+
+    // Baseline env mirrors behavior in execute_model_with_permissions
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+
+    use crate::protocol::SandboxPolicy;
+    use crate::spawn::StdioPolicy;
+    let mut child = crate::spawn::spawn_child_async(
+        program.clone(),
+        args.clone(),
+        Some(program.to_string_lossy().as_ref()),
+        working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+        &SandboxPolicy::DangerFullAccess,
+        StdioPolicy::RedirectForShellTool,
+        env,
+    )
+    .await
+    .map_err(|e| format!("Failed to spawn cloud submit: {}", e))?;
+
+    // Stream stderr to HUD
+    let stderr_task = if let Some(stderr) = child.stderr.take() {
+        let agent = agent_id.to_string();
+        Some(tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let msg = line.trim();
+                if msg.is_empty() { continue; }
+                let mut mgr = AGENT_MANAGER.write().await;
+                mgr.add_progress(&agent, msg.to_string()).await;
+            }
+        }))
+    } else { None };
+
+    // Collect stdout fully (final result)
+    let mut stdout_buf = String::new();
+    if let Some(stdout) = child.stdout.take() {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            stdout_buf.push_str(&line);
+            stdout_buf.push('\n');
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| format!("Failed to wait: {}", e))?;
+    if let Some(t) = stderr_task { let _ = t.await; }
+    if !status.success() {
+        return Err(format!("cloud submit exited with status {}", status));
+    }
+
+    // Truncate large outputs
+    const MAX_BYTES: usize = 500_000; // ~500 KB
+    if stdout_buf.len() > MAX_BYTES {
+        let omitted = stdout_buf.len() - MAX_BYTES;
+        let mut truncated = String::with_capacity(MAX_BYTES + 128);
+        truncated.push_str(&stdout_buf[..MAX_BYTES]);
+        truncated.push_str(&format!("\n… [truncated: {} bytes omitted]", omitted));
+        Ok(truncated)
+    } else {
+        Ok(stdout_buf)
+    }
+}
+
 // Tool creation functions
 pub fn create_run_agent_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
@@ -887,7 +1007,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
         JsonSchema::Array {
             items: Box::new(JsonSchema::String { description: None }),
             description: Some(
-                "Optional: Array of model names (e.g., ['claude','gemini','qwen','code'])".to_string(),
+                "Optional: Array of model names (e.g., ['claude','gemini','qwen','code','cloud'])".to_string(),
             ),
         },
     );
@@ -971,7 +1091,7 @@ pub fn create_get_agent_result_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent_result".to_string(),
-        description: "Get the final result of a completed agent.".to_string(),
+        description: "Get the final result of a completed agent. Returns a preview (first 500 lines) and a file path to the full output/error.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
@@ -1056,8 +1176,7 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
 
     OpenAiTool::Function(ResponsesApiTool {
         name: "agent_wait".to_string(),
-        description: "Wait for a agent or any agent in a batch to complete, fail, or be cancelled."
-            .to_string(),
+        description: "Wait for an agent or any agent in a batch to complete, fail, or be cancelled. Returns status plus a preview (first 500 lines) and a file path to the full output/error. For batches, set return_all:true to receive per-agent summaries. Use agent_result with {\"agent_id\": \"...\"} to fetch after completion.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
