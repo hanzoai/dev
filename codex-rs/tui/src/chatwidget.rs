@@ -6290,12 +6290,27 @@ impl ChatWidget<'_> {
                 let preview = crate::slash_command::process_slash_command_message(
                     command_line.as_str(),
                 );
-                if !matches!(preview, ProcessedCommand::NotCommand(_)) {
-                    self.submit_user_message(command_line.clone().into());
-                    if !rest_text.trim().is_empty() {
-                        self.submit_user_message(rest_text.into());
+                match preview {
+                    ProcessedCommand::RegularCommand(SlashCommand::Auto, canonical_text) => {
+                        let goal = rest_text.trim();
+                        let command_text = if goal.is_empty() {
+                            canonical_text
+                        } else {
+                            format!("{canonical_text} {goal}")
+                        };
+                        self.app_event_tx
+                            .send(AppEvent::DispatchCommand(SlashCommand::Auto, command_text));
+                        return;
                     }
-                    return;
+                    ProcessedCommand::NotCommand(_) => {}
+                    _ => {
+                        self.submit_user_message(command_line.into());
+                        let trimmed_rest = rest_text.trim();
+                        if !trimmed_rest.is_empty() {
+                            self.submit_user_message(rest_text.into());
+                        }
+                        return;
+                    }
                 }
             }
         }
