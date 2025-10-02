@@ -1,4 +1,5 @@
 use super::*;
+use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history::state::{
     ExecAction,
     ExploreEntry,
@@ -375,6 +376,245 @@ mod tests {
         let completed_lines = explore_lines_from_record(&completed);
         assert_eq!(line_text(&completed_lines[0]), "Explored");
     }
+
+    #[test]
+    fn build_command_summary_skips_redundant_annotations_for_simple_commands() {
+        let summary = build_command_summary(
+            "git --no-pager log -5 --oneline",
+            &vec![
+                "git".into(),
+                "--no-pager".into(),
+                "log".into(),
+                "-5".into(),
+                "--oneline".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git --no-pager log -5 --oneline");
+        assert_eq!(summary.annotation, None);
+    }
+
+    #[test]
+    fn build_command_summary_annotates_line_filter_pipes_with_ranges() {
+        let summary = build_command_summary(
+            "git --no-pager log -5 --oneline",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "git --no-pager log -5 --oneline | head -n 10".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git --no-pager log -5 --oneline");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 10)"));
+    }
+
+    #[test]
+    fn build_command_summary_preserves_literal_pipes_inside_quotes() {
+        let summary = build_command_summary(
+            "rg 'foo|bar' file | head -n 5",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "rg 'foo|bar' file | head -n 5".into(),
+            ],
+        );
+        assert_eq!(summary.display, "rg 'foo|bar' file");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 5)"));
+    }
+
+    #[test]
+    fn build_command_summary_ignores_literal_head_strings_without_filter() {
+        let summary = build_command_summary(
+            "git log --grep 'head -n 5'",
+            &vec![
+                "git".into(),
+                "log".into(),
+                "--grep".into(),
+                "head -n 5".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git log --grep head -n 5");
+        assert_eq!(summary.annotation, None);
+    }
+
+    #[test]
+    fn build_command_summary_handles_standalone_head_commands() {
+        let summary = build_command_summary(
+            "head -n 3 foo.txt",
+            &vec!["head".into(), "-n".into(), "3".into(), "foo.txt".into()],
+        );
+        assert_eq!(summary.display, "head -n 3 foo.txt");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 3)"));
+    }
+
+    #[test]
+    fn build_command_summary_handles_pipe_ampersand_filters() {
+        let summary = build_command_summary(
+            "git log |& head -n 5",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "git log |& head -n 5".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git log");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 5)"));
+    }
+
+    #[test]
+    fn build_command_summary_ignores_pipes_inside_subshells() {
+        let summary = build_command_summary(
+            "git log $(cat foo | head -n 1)",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "git log $(cat foo | head -n 1)".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git log $(cat foo | head -n 1)");
+        assert_eq!(summary.annotation, None);
+    }
+
+    #[test]
+    fn build_command_summary_skips_tail_follow_annotations() {
+        let summary = build_command_summary(
+            "tail -f foo.txt",
+            &vec!["tail".into(), "-f".into(), "foo.txt".into()],
+        );
+        assert_eq!(summary.display, "tail -f foo.txt");
+        assert_eq!(summary.annotation, None);
+    }
+
+    #[test]
+    fn build_command_summary_supports_absolute_path_filters() {
+        let summary = build_command_summary(
+            "git log | /usr/bin/head -n 2",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "git log | /usr/bin/head -n 2".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git log");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 2)"));
+    }
+
+    #[test]
+    fn build_command_summary_detects_filters_through_shell_wrappers() {
+        let summary = build_command_summary(
+            "git --no-pager log -5 --oneline",
+            &vec![
+                "bash".into(),
+                "-c".into(),
+                "git --no-pager log -5 --oneline | head -n 10".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git --no-pager log -5 --oneline");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 10)"));
+    }
+
+    #[test]
+    fn build_command_summary_ignores_commented_filters() {
+        let summary = build_command_summary(
+            "git log --oneline",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "git log --oneline # debugging | head -n 5".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git log --oneline");
+        assert_eq!(summary.annotation, None);
+    }
+
+    #[test]
+    fn build_command_summary_handles_sudo_wrapped_filters() {
+        let summary = build_command_summary(
+            "sudo head -n 2 /etc/hosts",
+            &vec![
+                "sudo".into(),
+                "head".into(),
+                "-n".into(),
+                "2".into(),
+                "/etc/hosts".into(),
+            ],
+        );
+        assert_eq!(summary.display, "sudo head -n 2 /etc/hosts");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 2)"));
+    }
+
+    #[test]
+    fn build_command_summary_handles_pipeline_with_sudo_filter() {
+        let summary = build_command_summary(
+            "git log",
+            &vec![
+                "bash".into(),
+                "-lc".into(),
+                "git log | sudo head -n 3".into(),
+            ],
+        );
+        assert_eq!(summary.display, "git log");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 3)"));
+    }
+
+    #[test]
+    fn build_command_summary_handles_env_wrapped_filters() {
+        let summary = build_command_summary(
+            "env VAR=1 head -n 4 foo.txt",
+            &vec![
+                "env".into(),
+                "VAR=1".into(),
+                "head".into(),
+                "-n".into(),
+                "4".into(),
+                "foo.txt".into(),
+            ],
+        );
+        assert_eq!(summary.display, "env VAR=1 head -n 4 foo.txt");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 4)"));
+    }
+
+    #[test]
+    fn build_command_summary_handles_stdbuf_wrapped_filters() {
+        let summary = build_command_summary(
+            "stdbuf -oL head -n 5 foo.txt",
+            &vec![
+                "stdbuf".into(),
+                "-oL".into(),
+                "head".into(),
+                "-n".into(),
+                "5".into(),
+                "foo.txt".into(),
+            ],
+        );
+        assert_eq!(summary.display, "stdbuf -oL head -n 5 foo.txt");
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 5)"));
+    }
+
+    #[test]
+    fn build_command_summary_handles_nested_wrappers() {
+        let summary = build_command_summary(
+            "sudo env VAR=1 ionice -c 2 -n 7 head -n 6 foo.txt",
+            &vec![
+                "sudo".into(),
+                "env".into(),
+                "VAR=1".into(),
+                "ionice".into(),
+                "-c".into(),
+                "2".into(),
+                "-n".into(),
+                "7".into(),
+                "head".into(),
+                "-n".into(),
+                "6".into(),
+                "foo.txt".into(),
+            ],
+        );
+        assert_eq!(
+            summary.display,
+            "sudo env VAR=1 ionice -c 2 -n 7 head -n 6 foo.txt"
+        );
+        assert_eq!(summary.annotation.as_deref(), Some("(lines 1 to 6)"));
+    }
 }
 
 
@@ -469,31 +709,299 @@ struct CommandSummary {
 
 fn build_command_summary(cmd: &str, original_command: &[String]) -> CommandSummary {
     let trimmed = cmd.trim();
-    if trimmed.is_empty() {
-        return CommandSummary {
-            display: original_command.join(" "),
-            annotation: None,
-        };
-    }
+    let full_command = strip_bash_lc_and_escape(original_command);
+    let annotation_command = command_string_for_annotation(original_command);
 
     let shlex = Shlex::new(trimmed);
     let parts: Vec<String> = shlex.collect();
-
-    if parts.is_empty() {
-        return CommandSummary {
-            display: trimmed.to_string(),
-            annotation: None,
-        };
-    }
-
-    let display = parts.join(" ");
-    let annotation = if parts.len() > 1 {
-        Some(format!("({})", parts[1..].join(" ")))
+    let mut display = if trimmed.is_empty() {
+        full_command.clone()
+    } else if parts.is_empty() {
+        trimmed.to_string()
     } else {
-        None
+        parts.join(" ")
     };
 
+    let mut annotation = None;
+
+    if let Some((head, filter)) = split_pipeline_for_filter(&annotation_command) {
+        if looks_like_line_filter(&filter) {
+            if let Some(ann) = super::parse_read_line_annotation(&filter) {
+                annotation = Some(ann);
+                display = head;
+            }
+        }
+    }
+
+    if annotation.is_none() && looks_like_line_filter(&annotation_command) {
+        annotation = super::parse_read_line_annotation(&annotation_command);
+    }
+
     CommandSummary { display, annotation }
+}
+
+fn split_pipeline_for_filter(cmd: &str) -> Option<(String, String)> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escape_next = false;
+    let mut paren_depth = 0_i32;
+
+    let mut last_pipe: Option<usize> = None;
+    let mut iter = cmd.char_indices().peekable();
+    while let Some((idx, ch)) = iter.next() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if !in_single => {
+                escape_next = true;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
+            '(' if !in_single && !in_double => {
+                paren_depth = paren_depth.saturating_add(1);
+            }
+            ')' if !in_single && !in_double => {
+                if paren_depth > 0 {
+                    paren_depth -= 1;
+                }
+            }
+            '|' if !in_single && !in_double => {
+                if paren_depth > 0 {
+                    continue;
+                }
+                if idx > 0 && cmd.as_bytes()[idx - 1] == b'|' {
+                    continue;
+                }
+                if let Some(&(_, next_ch)) = iter.peek() {
+                    if next_ch == '|' {
+                        continue;
+                    }
+                }
+                last_pipe = Some(idx);
+            }
+            '#' if !in_single && !in_double => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let idx = last_pipe?;
+    let head = cmd[..idx].trim_end();
+
+    let mut tail_slice = cmd[idx + 1..].trim_start();
+    if tail_slice.starts_with('&') {
+        tail_slice = tail_slice[1..].trim_start();
+    }
+
+    if tail_slice.is_empty() {
+        return None;
+    }
+
+    Some((head.to_string(), tail_slice.to_string()))
+}
+
+fn command_string_for_annotation(original_command: &[String]) -> String {
+    unwrap_shell_script(original_command)
+        .unwrap_or_else(|| strip_bash_lc_and_escape(original_command))
+}
+
+fn unwrap_shell_script(command: &[String]) -> Option<String> {
+    for idx in 0..command.len() {
+        if is_shell_like(&command[idx]) {
+            let mut j = idx + 1;
+            while j < command.len() {
+                let arg = &command[j];
+                if arg == "-c" || arg == "-lc" {
+                    return command.get(j + 1).cloned();
+                }
+                if arg.starts_with('-') {
+                    j += 1;
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+    None
+}
+
+fn is_shell_like(token: &str) -> bool {
+    filter_command_name(token)
+        .map(|name| match name.as_str() {
+            "bash" | "sh" | "dash" | "zsh" | "ksh" | "busybox" => true,
+            _ => false,
+        })
+        .unwrap_or(false)
+}
+
+fn looks_like_line_filter(cmd: &str) -> bool {
+    let mut shlex = Shlex::new(cmd);
+    let mut tokens: Vec<String> = Vec::new();
+
+    while let Some(token) = shlex.next() {
+        if tokens.is_empty() && is_env_assignment(&token) {
+            continue;
+        }
+        tokens.push(token);
+    }
+
+    if tokens.is_empty() {
+        return false;
+    }
+
+    let command_name = first_filter_command(&tokens);
+    let Some(command_name) = command_name else {
+        return false;
+    };
+
+    match command_name.as_str() {
+        "tail" => {
+            let has_follow_flag = tokens.iter().skip(1).any(|token| {
+                let lower = token.to_ascii_lowercase();
+                lower == "-f"
+                    || lower == "--follow"
+                    || lower.starts_with("--follow=")
+                    || lower == "-F"
+            });
+            if has_follow_flag {
+                return false;
+            }
+            true
+        }
+        "head" | "sed" => true,
+        _ => false,
+    }
+}
+
+fn is_env_assignment(token: &str) -> bool {
+    token.contains('=') && !token.starts_with('-')
+}
+
+fn first_filter_command(tokens: &[String]) -> Option<String> {
+    let mut idx = 0;
+    while idx < tokens.len() {
+        let token = tokens[idx].as_str();
+
+        if is_env_assignment(token) {
+            idx += 1;
+            continue;
+        }
+
+        if let Some(wrapper) = classify_wrapper(token) {
+            idx = skip_wrapper_tokens(wrapper, tokens, idx + 1);
+            continue;
+        }
+
+        return filter_command_name(token);
+    }
+
+    None
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum WrapperKind {
+    Sudo,
+    Doas,
+    Env,
+    Nice,
+    Ionice,
+    Stdbuf,
+    Chronic,
+}
+
+fn classify_wrapper(token: &str) -> Option<WrapperKind> {
+    let Some(name) = filter_command_name(token) else {
+        return None;
+    };
+
+    match name.as_str() {
+        "sudo" => Some(WrapperKind::Sudo),
+        "doas" => Some(WrapperKind::Doas),
+        "env" => Some(WrapperKind::Env),
+        "nice" => Some(WrapperKind::Nice),
+        "ionice" => Some(WrapperKind::Ionice),
+        "stdbuf" => Some(WrapperKind::Stdbuf),
+        "chronic" => Some(WrapperKind::Chronic),
+        _ => None,
+    }
+}
+
+fn skip_wrapper_tokens(wrapper: WrapperKind, tokens: &[String], mut idx: usize) -> usize {
+    while idx < tokens.len() {
+        let token = tokens[idx].as_str();
+
+        if token == "--" {
+            idx += 1;
+            break;
+        }
+
+        if is_env_assignment(token) {
+            idx += 1;
+            continue;
+        }
+
+        if wrapper == WrapperKind::Env && token.contains('=') {
+            idx += 1;
+            continue;
+        }
+
+        if token.starts_with('-') {
+            let requires_value = wrapper_option_requires_value(wrapper, token);
+            idx += 1;
+            if requires_value && !token.contains('=') && idx < tokens.len() {
+                idx += 1;
+            }
+            continue;
+        }
+
+        break;
+    }
+
+    idx
+}
+
+fn wrapper_option_requires_value(wrapper: WrapperKind, option: &str) -> bool {
+    let opt = option.trim_start_matches('-');
+    let opt_norm = opt.trim_start_matches('-').to_ascii_lowercase();
+
+    match wrapper {
+        WrapperKind::Sudo | WrapperKind::Doas => matches!(
+            opt_norm.as_str(),
+            "u" | "user" | "g" | "group" | "h" | "host" | "p" | "prompt" | "c" | "close-fds" | "a" | "chdir"
+        ),
+        WrapperKind::Env => matches!(opt_norm.as_str(), "u" | "unset" | "s" | "split-string"),
+        WrapperKind::Nice => matches!(opt_norm.as_str(), "n" | "adjustment"),
+        WrapperKind::Ionice => matches!(opt_norm.as_str(), "c" | "class" | "n" | "level" | "t" | "type" | "p" | "pid"),
+        WrapperKind::Stdbuf => matches!(opt_norm.as_str(), "i" | "o" | "e"),
+        WrapperKind::Chronic => false,
+    }
+}
+
+fn filter_command_name(token: &str) -> Option<String> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let base = Path::new(trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+
+    if base.is_empty() {
+        None
+    } else {
+        Some(base)
+    }
 }
 
 fn normalize_separators(mut value: String) -> String {
