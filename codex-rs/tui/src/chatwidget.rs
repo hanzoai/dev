@@ -3054,11 +3054,7 @@ impl ChatWidget<'_> {
             self.bottom_pane.update_status_text(message.clone());
             // Add a dim background event instead of a hard error cell to avoid
             // alarming users during auto-retries.
-            self.insert_background_event_with_placement(
-                message,
-                BackgroundPlacement::Tail,
-                None,
-            );
+            self.push_background_tail(message);
             // Do NOT clear running state or streams; the retry will resume them.
             self.request_redraw();
             return;
@@ -17486,11 +17482,7 @@ impl ChatWidget<'_> {
             return;
         }
         self.clear_resume_placeholder();
-        self.insert_background_event_with_placement(
-            message.to_string(),
-            BackgroundPlacement::Tail,
-            None,
-        );
+        self.push_background_tail(message.to_string());
     }
 
     pub(crate) fn clear_token_usage(&mut self) {
