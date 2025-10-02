@@ -1633,6 +1633,7 @@ fn make_chatwidget_manual() -> (
         task_complete_pending: false,
         interrupts: InterruptManager::new(),
         needs_redraw: false,
+        ui_background_seq_counters: HashMap::new(),
         agents_terminal: AgentsTerminalState::new(),
     };
     (widget, rx, op_rx)

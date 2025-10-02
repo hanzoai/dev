@@ -741,9 +741,28 @@ pub(crate) struct ChatWidget<'a> {
     synthetic_system_req: Option<u64>,
     // Map of system notice ids to their history index for in-place replacement
     system_cell_by_id: std::collections::HashMap<String, usize>,
+    // Per-request counters for UI-issued background order metadata
+    ui_background_seq_counters: HashMap<u64, Arc<AtomicU64>>,
     // Track the largest order key we have assigned so far to keep tail inserts monotonic
     last_assigned_order: Option<OrderKey>,
     replay_history_depth: usize,
+}
+
+#[derive(Clone)]
+struct UiBackgroundOrderHandle {
+    request_ordinal: u64,
+    seq_counter: Arc<AtomicU64>,
+}
+
+impl UiBackgroundOrderHandle {
+    fn next_order(&self) -> codex_core::protocol::OrderMeta {
+        let seq = self.seq_counter.fetch_add(1, Ordering::SeqCst);
+        codex_core::protocol::OrderMeta {
+            request_ordinal: self.request_ordinal,
+            output_index: Some(i32::MAX as u32),
+            sequence_number: Some(seq),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1426,6 +1445,57 @@ impl ChatWidget<'_> {
         });
 
         key
+    }
+
+    fn background_tail_request_ordinal(&mut self) -> u64 {
+        let mut req = if self.last_seen_request_index > 0 {
+            self.last_seen_request_index
+        } else {
+            *self.synthetic_system_req.get_or_insert(1)
+        };
+        if self.pending_user_prompts_for_next_turn > 0 {
+            req = req.saturating_add(1);
+        }
+        req
+    }
+
+    fn background_tail_order_handle(&mut self) -> UiBackgroundOrderHandle {
+        let req = self.background_tail_request_ordinal();
+        let counter = self
+            .ui_background_seq_counters
+            .entry(req)
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .clone();
+        UiBackgroundOrderHandle {
+            request_ordinal: req,
+            seq_counter: counter,
+        }
+    }
+
+    fn background_tail_order_meta(&mut self) -> codex_core::protocol::OrderMeta {
+        self.background_tail_order_handle().next_order()
+    }
+
+    fn send_background_tail_ordered(&mut self, message: impl Into<String>) {
+        let order = self.background_tail_order_meta();
+        self.app_event_tx
+            .send_background_event_with_order(message.into(), order);
+    }
+
+    fn rebuild_ui_background_seq_counters(&mut self) {
+        self.ui_background_seq_counters.clear();
+        let mut next_per_req: HashMap<u64, u64> = HashMap::new();
+        for key in &self.cell_order_seq {
+            if key.out == i32::MAX {
+                let next = key.seq.saturating_add(1);
+                let entry = next_per_req.entry(key.req).or_insert(0);
+                *entry = (*entry).max(next);
+            }
+        }
+        for (req, next) in next_per_req {
+            self.ui_background_seq_counters
+                .insert(req, Arc::new(AtomicU64::new(next)));
+        }
     }
 
     /// Insert or replace a system notice cell with consistent ordering.
@@ -3220,6 +3290,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            ui_background_seq_counters: HashMap::new(),
             last_assigned_order: None,
             standard_terminal_mode: !config.tui.alternate_screen,
             replay_history_depth: 0,
@@ -3492,6 +3563,7 @@ impl ChatWidget<'_> {
             pending_agent_notes: Vec::new(),
             synthetic_system_req: None,
             system_cell_by_id: HashMap::new(),
+            ui_background_seq_counters: HashMap::new(),
             last_assigned_order: None,
             replay_history_depth: 0,
         };
@@ -5889,6 +5961,18 @@ impl ChatWidget<'_> {
         placement: BackgroundPlacement,
         order: Option<codex_core::protocol::OrderMeta>,
     ) {
+        let mut order = order;
+        if order.is_none() {
+            if matches!(placement, BackgroundPlacement::Tail) {
+                order = Some(self.background_tail_order_meta());
+            } else {
+                tracing::warn!(
+                    target: "codex_order",
+                    "legacy background event without order placement={:?}",
+                    placement
+                );
+            }
+        }
         let system_placement = match placement {
             BackgroundPlacement::Tail => SystemPlacement::EndOfCurrent,
             BackgroundPlacement::BeforeNextOutput => {
@@ -5969,6 +6053,16 @@ impl ChatWidget<'_> {
     pub(crate) fn test_set_request_state(&mut self, last_seen: u64, pending_prompts: usize) {
         self.last_seen_request_index = last_seen;
         self.pending_user_prompts_for_next_turn = pending_prompts;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_background_tail_order_meta(&mut self) -> codex_core::protocol::OrderMeta {
+        self.background_tail_order_meta()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_background_tail_order_handle(&mut self) -> UiBackgroundOrderHandle {
+        self.background_tail_order_handle()
     }
 
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
@@ -6251,7 +6345,7 @@ impl ChatWidget<'_> {
                         missing.display(),
                         fallback_root.display()
                     );
-                    self.app_event_tx.send_background_event(msg);
+                    self.send_background_tail_ordered(msg);
                     // Re-submit this exact message after switching cwd
                     self.app_event_tx.send(AppEvent::SwitchCwd(
                         fallback_root,
@@ -7700,9 +7794,11 @@ impl ChatWidget<'_> {
         let max_seq = self.cell_order_seq.iter().map(|key| key.seq).max().unwrap_or(0);
 
         self.last_seen_request_index = max_req;
-        self.current_request_index = max_req;
-        self.internal_seq = max_seq;
-        self.last_assigned_order = self.cell_order_seq.iter().copied().max();
+       self.current_request_index = max_req;
+       self.internal_seq = max_seq;
+       self.last_assigned_order = self.cell_order_seq.iter().copied().max();
+
+        self.rebuild_ui_background_seq_counters();
 
         running_tools::rehydrate(self);
         self.rehydrate_system_order_cache(&preserved_system_entries);
@@ -10002,7 +10098,7 @@ impl ChatWidget<'_> {
 
     pub(crate) fn handle_update_command(&mut self, command_args: &str) {
         if !crate::updates::upgrade_ui_enabled() {
-            self.app_event_tx.send_background_event(
+            self.send_background_tail_ordered(
                 "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                     to_string(),
             );
@@ -10388,7 +10484,7 @@ impl ChatWidget<'_> {
         use crate::bottom_pane::UpdateSettingsView;
 
         if !crate::updates::upgrade_ui_enabled() {
-            self.app_event_tx.send_background_event(
+            self.send_background_tail_ordered(
                 "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                     to_string(),
             );
@@ -14983,7 +15079,7 @@ impl ChatWidget<'_> {
 
             // Now try to connect using the shared CDP connection logic
             ChatWidget::connect_to_cdp_chrome(None, Some(port), latest_screenshot, app_event_tx)
-                .await;
+            .await;
         });
     }
 
@@ -15479,10 +15575,8 @@ impl ChatWidget<'_> {
                             "[cdp] connect_to_chrome_only failed immediately: {}",
                             err_msg
                         );
-                        app_event_tx.send_background_event(format!(
-                            "❌ Failed to connect to Chrome: {}",
-                            err_msg
-                        ));
+                        app_event_tx
+                            .send_background_event(format!("❌ Failed to connect to Chrome: {}", err_msg));
                         // Offer launch options popup to help recover quickly
                         app_event_tx.send(AppEvent::ShowChromeOptions(port));
                         return;
@@ -19979,6 +20073,9 @@ impl ChatWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_event::BackgroundPlacement;
+    use crate::history_cell;
+    use crate::history_cell::PlainMessageKind;
     use codex_core::config::Config;
     use codex_core::config::ConfigOverrides;
     use codex_core::config::ConfigToml;
@@ -20114,6 +20211,103 @@ mod tests {
 
         assert!(later_idx > earlier_idx, "later background should append; dump: {:?}", dump);
         assert!(dump.last().is_some_and(|line| line.contains("later")), "later background should be final entry; dump: {:?}", dump);
+    }
+
+    #[test]
+    fn tail_background_event_keeps_position_vs_next_output() {
+        let mut chat = make_widget();
+        chat.test_set_request_state(1, 0);
+        let handle = chat.test_background_tail_order_handle();
+        let captured_order = handle.next_order();
+
+        chat.insert_background_event_with_placement(
+            "📎 background banner".to_string(),
+            BackgroundPlacement::Tail,
+            Some(captured_order.clone()),
+        );
+
+        let provider_order = codex_core::protocol::OrderMeta {
+            request_ordinal: captured_order.request_ordinal,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        };
+        let provider_key = ChatWidget::order_key_from_order_meta(&provider_order);
+        let provider_state = history_cell::plain_message_state_from_paragraphs(
+            PlainMessageKind::Assistant,
+            history_cell::plain_role_for_kind(PlainMessageKind::Assistant),
+            vec!["tool output".to_string()],
+        );
+        chat.history_insert_plain_state_with_key(provider_state, provider_key, "test");
+
+        let mut banner_idx = None;
+        let mut provider_idx = None;
+
+        for (idx, cell) in chat.history_cells.iter().enumerate() {
+            let text = cell
+                .display_lines()
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            if text.contains("📎 background banner") {
+                banner_idx = Some(idx);
+            }
+            if text.contains("tool output") {
+                provider_idx = Some(idx);
+            }
+        }
+
+        let banner_idx = banner_idx.expect("background banner not inserted");
+        let provider_idx = provider_idx.expect("provider output missing");
+
+        assert!(
+            provider_idx < banner_idx,
+            "provider output should precede tail background banner"
+        );
+
+        let banner_key = chat.cell_order_seq[banner_idx];
+        let provider_key_recorded = chat.cell_order_seq[provider_idx];
+        assert_eq!(banner_key.req, captured_order.request_ordinal);
+        assert_eq!(banner_key.out, i32::MAX);
+        assert!(provider_key_recorded < banner_key);
+    }
+
+    #[test]
+    fn tail_background_sequence_rehydrates_after_restore() {
+        let mut chat = make_widget();
+        chat.test_set_request_state(1, 0);
+        chat.push_background_tail("orig tail".to_string());
+
+        let snapshot = chat.history_snapshot_for_persistence();
+
+        let mut restored = make_widget();
+        restored.restore_history_snapshot(&snapshot);
+        restored.test_set_request_state(1, 0);
+        restored.push_background_tail("restored tail".to_string());
+
+        let dump = restored.test_dump_history_text();
+        let orig_idx = dump
+            .iter()
+            .position(|line| line.contains("orig tail"))
+            .expect("restored history missing original tail background");
+        let new_idx = dump
+            .iter()
+            .position(|line| line.contains("restored tail"))
+            .expect("restored history missing new tail background");
+
+        assert!(
+            new_idx > orig_idx,
+            "restored tail background should appear after original; dump: {:?}",
+            dump
+        );
+
+        let orig_key = restored.cell_order_seq[orig_idx];
+        let new_key = restored.cell_order_seq[new_idx];
+        assert_eq!(orig_key.req, new_key.req, "restored tail should remain in same request");
+        assert!(
+            new_key.seq > orig_key.seq,
+            "expected sequence to advance beyond restored entries"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
