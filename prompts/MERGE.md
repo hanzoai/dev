@@ -8,13 +8,14 @@ Constraints
 
 Essential Steps
 ◦ Prep:
-  · Stash if dirty. (Optional) create a throwaway local branch from `main` so you can abandon it if the merge goes sideways.
+  · Stash if dirty.
   · Ensure the `upstream` remote exists (`git remote add upstream https://github.com/openai/codex.git` if needed).
   · Pull latest `origin/main` and fetch `upstream/main` (`git fetch origin main && git fetch upstream main`).
 ◦ Merge:
-  · Merge `upstream/main` with `-X ours` (e.g. `git merge upstream/main -X ours`).
+  · Merge `upstream/main` with `-X ours` (`git merge upstream/main -X ours`). This ensures our branch incorporates the upstream history while defaulting to our side of conflicts.
+  · Review the resulting diffs and selectively bring in upstream improvements that `-X ours` skipped—especially in areas where upstream fixed bugs or polished UX. Use manual edits for the pieces you want.
   · Resolve conflicts; don’t blanket keep ours for TUI — review diffs and integrate upstream fixes that don’t break our themes/browser/agents. Most of the time you WILL keep our TUI changes, but still review to make sure there's nothing we can merge which is missed.
-  · For TUI files (chatwidget, history_cell, bottom_pane/*), pull in upstream improvements selectively; keep our theme hooks (mod colors;), browser HUD, and agent UI.
+  · For TUI files (chatwidget, history_cell, bottom_pane/*), pull in upstream improvements selectively; keep our theme hooks (mod colors;), browser HUD, and agent UI. If upstream introduces TUI changes, please rewrite them to use our themes and helpers.
   · Keep our versions of AGENTS.md, CHANGELOG.md and README.md
   · Apply merge-policy cleanups: consult `.github/merge-policy.json` and remove any `purge_globs`/`perma_removed_paths` entries that reappear after the merge.
   · Double-check TUI invariants: confirm the ordering tokens (`request_ordinal`, `output_index`, `sequence_number`) still exist under `codex-rs/tui/`.
@@ -25,8 +26,7 @@ Essential Steps
   · Fix all warnings
 ◦ Finalize:
   · Commit the result locally (no push required yet).
-  · Ensure `git merge-base --is-ancestor 5b038135dead11f9aa44ecbe5341a859b5ceec69 HEAD` (or whichever upstream commit you targeted) succeeds.
-  · If you created a temporary branch, fast-forward `main` locally or cherry-pick as needed once you’re satisfied.
+  · Ensure `git merge-base --is-ancestor <hash> HEAD` (of the latest upstream commit you merged) succeeds so `main` ends up with the full upstream history once you fast-forward.
   · If you stashed files, unstash them.
 
 Report:
