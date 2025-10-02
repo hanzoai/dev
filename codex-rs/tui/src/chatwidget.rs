@@ -47,7 +47,7 @@ use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
 use codex_protocol::num_format::format_with_separators;
 
 
-mod auto_coordinator;
+pub(crate) mod auto_coordinator;
 mod auto_drive_history;
 mod auto_observer;
 #[cfg(feature = "dev-faults")]
@@ -82,7 +82,9 @@ use self::agent_install::{
     wrap_command,
 };
 use self::auto_drive_history::AutoDriveHistory;
-use self::auto_coordinator::{start_auto_coordinator, AutoCoordinatorCommand, AutoCoordinatorHandle};
+use self::auto_coordinator::{
+    start_auto_coordinator, AutoCoordinatorCommand, AutoCoordinatorHandle, TurnComplexity, TurnConfig,
+};
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{
@@ -654,6 +656,8 @@ pub(crate) struct ChatWidget<'a> {
     active_review_hint: Option<String>,
     active_review_prompt: Option<String>,
     auto_resolve_state: Option<AutoResolveState>,
+    // New: coordinator-provided hints for the next Auto turn
+    pending_auto_turn_config: Option<TurnConfig>,
     overall_task_status: String,
     active_plan_title: Option<String>,
     /// Runtime timing per-agent (by id) to improve visibility in the HUD
@@ -3302,6 +3306,7 @@ impl ChatWidget<'_> {
             active_review_hint: None,
             active_review_prompt: None,
             auto_resolve_state: None,
+            pending_auto_turn_config: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -3580,6 +3585,7 @@ impl ChatWidget<'_> {
             active_review_hint: None,
             active_review_prompt: None,
             auto_resolve_state: None,
+            pending_auto_turn_config: None,
             overall_task_status: "preparing".to_string(),
             active_plan_title: None,
             agent_runtime: HashMap::new(),
@@ -8562,6 +8568,14 @@ impl ChatWidget<'_> {
                 if self.auto_resolve_enabled() {
                     self.auto_resolve_on_task_complete(last_agent_message.clone());
                 }
+                // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
+                if self.auto_state.active {
+                    if let Some(cfg) = self.pending_auto_turn_config.take() {
+                        if !cfg.read_only && !self.is_review_flow_active() {
+                            self.auto_start_post_turn_review();
+                        }
+                    }
+                }
                 // Defensive: clear transient agents-preparing state
                 self.agents_ready_to_start = false;
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
@@ -11450,6 +11464,7 @@ impl ChatWidget<'_> {
         progress_current: Option<String>,
         cli_prompt: Option<String>,
         transcript: Vec<codex_protocol::models::ResponseItem>,
+        turn_config: Option<TurnConfig>,
     ) {
         if !self.auto_state.active {
             return;
@@ -11479,6 +11494,9 @@ impl ChatWidget<'_> {
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = false;
         self.update_header_border_activation();
+
+        // Stash coordinator-provided hints for the upcoming turn
+        self.pending_auto_turn_config = turn_config;
 
         match status {
             AutoCoordinatorStatus::Continue => {
@@ -11661,9 +11679,26 @@ impl ChatWidget<'_> {
         });
         self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
+        // If coordinator hinted medium/high complexity, prime the Agents HUD
+        let should_prepare_agents = self
+            .pending_auto_turn_config
+            .as_ref()
+            .and_then(|cfg| cfg.complexity)
+            .is_some_and(|c| matches!(c, TurnComplexity::Medium | TurnComplexity::High));
+        if should_prepare_agents {
+            self.prepare_agents();
+        }
+
+        // Build hidden preface with explicit agent_run guidance
+        let preface = self.build_auto_turn_preface(&prompt);
+
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
-        self.submit_text_message(prompt);
+        if preface.trim().is_empty() {
+            self.submit_text_message(prompt);
+        } else {
+            self.submit_text_message_with_preface(prompt, preface);
+        }
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -11689,6 +11724,66 @@ impl ChatWidget<'_> {
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
+    }
+
+    // Build a hidden preface for the next Auto turn based on coordinator hints.
+    fn build_auto_turn_preface(&self, prompt_cli: &str) -> String {
+        let Some(cfg) = self.pending_auto_turn_config.as_ref() else {
+            return String::new();
+        };
+        let complexity = cfg.complexity.unwrap_or(TurnComplexity::Low);
+        let complexity_str = match complexity {
+            TurnComplexity::Low => "low",
+            TurnComplexity::Medium => "medium",
+            TurnComplexity::High => "high",
+        };
+        let ro_str = if cfg.read_only { "true" } else { "false" };
+
+        // Build single-paragraph guidance as requested
+        let mut parts: Vec<String> = Vec::new();
+        if !prompt_cli.trim().is_empty() {
+            parts.push(format!("Start with prompt: {}.", prompt_cli.trim()));
+        }
+        // Mode sentence
+        if cfg.read_only {
+            parts.push(format!(
+                "This is a {} complexity read-only turn: do not modify files or apply patches this turn.",
+                complexity_str
+            ));
+        } else {
+            parts.push(format!(
+                "This is a {} complexity write turn: you may modify files and apply patches this turn.",
+                complexity_str
+            ));
+        }
+
+        match complexity {
+            TurnComplexity::Low => {
+                parts.push("This turn is likely low complexity, so you should focus on addressing it directly without using agents.".to_string());
+            }
+            TurnComplexity::Medium => {
+                parts.push(format!(
+                    "This turn is likely medium complexity, so you should use at least 2 agents using `agent_run` and read_only: {}.",
+                    ro_str
+                ));
+            }
+            TurnComplexity::High => {
+                parts.push(format!(
+                    "This turn is likely high complexity, you should use `agent_run` with all models [\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"] and read_only: {}.",
+                    ro_str
+                ));
+            }
+        }
+
+        if matches!(complexity, TurnComplexity::Medium | TurnComplexity::High) {
+            if cfg.read_only {
+                parts.push("Use `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete automatically. Once they complete you should collate their output into your final output.".to_string());
+            } else {
+                parts.push("Use `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete automatically. Once they complete inspect each worktree using git and merge in the best solution (or the best parts from each agent). Test to ensure the changes are valid.".to_string());
+            }
+        }
+
+        parts.join(" ")
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
@@ -11747,6 +11842,21 @@ impl ChatWidget<'_> {
         self.request_redraw();
         self.rebuild_auto_history();
         self.auto_send_conversation();
+    }
+
+    fn auto_start_post_turn_review(&mut self) {
+        // Initialize auto-resolve state for this ad-hoc review cycle
+        let prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
+        let hint = "current workspace changes".to_string();
+        self.auto_resolve_state = Some(AutoResolveState::new(prompt.clone(), hint.clone(), Some(ReviewContextMetadata {
+            scope: Some("workspace".to_string()),
+            ..Default::default()
+        })));
+        // Begin the review request immediately
+        self.begin_review(prompt, hint, Some("Preparing code review request...".to_string()), Some(ReviewContextMetadata {
+            scope: Some("workspace".to_string()),
+            ..Default::default()
+        }));
     }
 
     fn auto_rebuild_live_ring(&mut self) {

@@ -26,6 +26,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
 use crate::cloud_tasks_service::CloudEnvironment;
+use crate::chatwidget::auto_coordinator::TurnConfig;
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -156,6 +157,7 @@ pub(crate) enum AppEvent {
         progress_current: Option<String>,
         cli_prompt: Option<String>,
         transcript: Vec<ResponseItem>,
+        turn_config: Option<TurnConfig>,
     },
     AutoCoordinatorThinking {
         delta: String,
