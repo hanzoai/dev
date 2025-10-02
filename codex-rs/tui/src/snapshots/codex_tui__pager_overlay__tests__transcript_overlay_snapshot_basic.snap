@@ -10,5 +10,5 @@ expression: term.backend()
 "gamma                                   "
 "───────────────────────────────── 100% ─"
 " ↑/↓ scroll   PgUp/PgDn page   Home/End "
-" q quit   Esc edit prev                 "
+" q quit   Esc undo timeline             "
 "                                        "
