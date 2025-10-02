@@ -174,11 +174,9 @@ pub(crate) enum AppEvent {
     /// layer so it can be handled centrally. Includes the full command text.
     DispatchCommand(SlashCommand, String),
 
-    /// Open undo options for a previously captured snapshot.
-    ShowUndoOptions { index: usize },
     /// Restore workspace state according to the chosen undo scope.
     PerformUndoRestore {
-        index: usize,
+        commit: Option<String>,
         restore_files: bool,
         restore_conversation: bool,
     },
