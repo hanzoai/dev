@@ -1,6 +1,7 @@
 use std::sync::mpsc::Sender;
 
 use crate::app_event::{AppEvent, BackgroundPlacement};
+use crate::chatwidget::BackgroundOrderTicket;
 use crate::session_log;
 use codex_core::protocol::OrderMeta;
 
@@ -61,21 +62,6 @@ impl AppEventSender {
         }
     }
 
-    /// Emit a background event using the provided placement strategy. Defaults
-    /// to appending at the end of the current history window.
-    ///
-    /// IMPORTANT: UI code should call this (or other history helpers) rather
-    /// than constructing `Event { event_seq: 0, .. }` manually. Protocol events
-    /// must come from `codex-core` via `Session::make_event` so the per-turn
-    /// sequence stays consistent.
-    pub(crate) fn send_background_event_with_placement(
-        &self,
-        message: impl Into<String>,
-        placement: BackgroundPlacement,
-    ) {
-        self.send_background_event_with_placement_and_order(message, placement, None);
-    }
-
     pub(crate) fn send_background_event_with_placement_and_order(
         &self,
         message: impl Into<String>,
@@ -89,9 +75,30 @@ impl AppEventSender {
         });
     }
 
-    /// Convenience: append a background event at the end of the history.
-    pub(crate) fn send_background_event(&self, message: impl Into<String>) {
-        self.send_background_event_with_placement(message, BackgroundPlacement::Tail);
+    pub(crate) fn send_background_event_with_ticket(
+        &self,
+        ticket: &BackgroundOrderTicket,
+        message: impl Into<String>,
+    ) {
+        let order = ticket.next_order();
+        self.send_background_event_with_placement_and_order(
+            message,
+            BackgroundPlacement::Tail,
+            Some(order),
+        );
+    }
+
+    pub(crate) fn send_background_before_next_output_with_ticket(
+        &self,
+        ticket: &BackgroundOrderTicket,
+        message: impl Into<String>,
+    ) {
+        let order = ticket.next_order();
+        self.send_background_event_with_placement_and_order(
+            message,
+            BackgroundPlacement::BeforeNextOutput,
+            Some(order),
+        );
     }
 
     pub(crate) fn send_background_event_with_order(
@@ -103,17 +110,6 @@ impl AppEventSender {
             message,
             BackgroundPlacement::Tail,
             Some(order),
-        );
-    }
-
-    /// Convenience: place a background event before the next provider/tool output.
-    pub(crate) fn send_background_event_before_next_output(
-        &self,
-        message: impl Into<String>,
-    ) {
-        self.send_background_event_with_placement(
-            message,
-            BackgroundPlacement::BeforeNextOutput,
         );
     }
 
