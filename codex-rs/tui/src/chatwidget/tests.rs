@@ -3217,6 +3217,35 @@ fn status_widget_active_snapshot() {
 }
 
 #[test]
+fn fallback_lines_skip_custom_render_patch_cells() {
+    let (chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "one\ntwo\nthree".to_string(),
+        },
+    );
+
+    let record = PatchRecord {
+        id: HistoryId::ZERO,
+        patch_type: HistoryPatchEventType::ApplySuccess,
+        changes,
+        failure: None,
+    };
+
+    let cell: Box<dyn HistoryCell> =
+        Box::new(history_cell::PatchSummaryCell::from_record(record.clone()));
+    assert!(
+        chat
+            .fallback_lines_for_record(cell.as_ref(), &HistoryRecord::Patch(record))
+            .is_none(),
+        "expected custom-render patch cell to skip fallback lines",
+    );
+}
+
+#[test]
 fn apply_patch_events_emit_history_cells() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
 

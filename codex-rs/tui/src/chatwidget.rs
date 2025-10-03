@@ -2632,6 +2632,22 @@ impl ChatWidget<'_> {
         self.history_render.invalidate_height_cache();
     }
 
+    fn fallback_lines_for_record(
+        &self,
+        cell: &dyn HistoryCell,
+        record: &HistoryRecord,
+    ) -> Option<Vec<Line<'static>>> {
+        if cell.has_custom_render() {
+            return None;
+        }
+
+        let lines = cell.display_lines_trimmed();
+        if !lines.is_empty() || matches!(record, HistoryRecord::Reasoning(_)) {
+            Some(lines)
+        } else {
+            Some(history_cell::lines_from_record(record, &self.config))
+        }
+    }
     /// Handle exec approval request immediately
     fn handle_exec_approval_now(&mut self, _id: String, ev: ExecApprovalRequestEvent) {
         // Use call_id as the approval correlation id so responses map to the
@@ -23047,6 +23063,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 (HistoryId::ZERO, false)
             };
 
+            let cell_has_custom_render = cell.has_custom_render();
             let is_streaming = cell
                 .as_any()
                 .downcast_ref::<crate::history_cell::StreamingContentCell>()
@@ -23054,7 +23071,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
             let mut cacheable = history_id != HistoryId::ZERO
                 && has_record
-                && !cell.has_custom_render()
+                && !cell_has_custom_render
                 && !cell.is_animating()
                 && !is_streaming;
 
@@ -23089,17 +23106,17 @@ impl WidgetRef for &ChatWidget<'_> {
                             kind = RenderRequestKind::Assistant { id: history_id };
                         }
                         other => {
-                            let lines = cell.display_lines_trimmed();
-                            if !lines.is_empty()
-                                || matches!(other, HistoryRecord::Reasoning(_))
-                            {
-                                fallback_lines = Some(lines);
-                            } else {
-                                fallback_lines =
-                                    Some(history_cell::lines_from_record(other, &self.config));
-                            }
+                            fallback_lines =
+                                self.fallback_lines_for_record(*cell, other);
                         }
                     }
+                }
+            }
+
+            if fallback_lines.is_none() && !cell_has_custom_render && history_id == HistoryId::ZERO {
+                let lines = cell.display_lines_trimmed();
+                if !lines.is_empty() {
+                    fallback_lines = Some(lines);
                 }
             }
 
