@@ -155,6 +155,7 @@ pub(crate) enum AppEvent {
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
+        cli_context: Option<String>,
         cli_prompt: Option<String>,
         transcript: Vec<ResponseItem>,
         turn_config: Option<TurnConfig>,
