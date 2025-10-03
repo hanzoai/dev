@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.184] - 2025-10-03
+
+- Core: Record pid alongside port in server info to simplify local process debugging. (3778659)
+- CLI: Support CODEX_API_KEY in `codex exec` so credentials can be set via environment. (2f6fb37)
+- TUI: Make the model switcher a two-stage flow to prevent accidental model swaps. (06e34d4)
+- TUI: Surface live context window usage while tasks run to clarify token budgets. (2f370e9)
+- TUI: Show a placeholder when commands produce no output to keep history legible. (751b3b5)
+
 ## [0.2.183] - 2025-10-03
 
 - TUI/Explore: keep the Exploring header until the next non-reasoning entry to maintain exploration context. (7048793)
