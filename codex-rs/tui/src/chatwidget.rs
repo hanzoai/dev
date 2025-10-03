@@ -11381,7 +11381,11 @@ impl ChatWidget<'_> {
 
     fn update_header_border_activation(&self) {
         let now = Instant::now();
-        let should_enable_header = self.auto_state.active && self.is_cli_running();
+        let auto_waiting = self.auto_state.waiting_for_response
+            || self.auto_state.coordinator_waiting
+            || self.auto_state.awaiting_submission;
+        let should_enable_header = self.auto_state.active
+            && (self.is_cli_running() || auto_waiting);
         let currently_enabled = self.header_border.is_enabled();
         if should_enable_header && !currently_enabled {
             self.header_border.set_enabled(true, now);
