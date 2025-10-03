@@ -636,7 +636,9 @@ pub fn create_wait_tool() -> OpenAiTool {
     let mut properties = BTreeMap::new();
     properties.insert(
         "call_id".to_string(),
-        JsonSchema::String { description: Some("Optional: specific background call_id to wait for. If omitted, waits for any background completion.".to_string()) },
+        JsonSchema::String {
+            description: Some("Background call_id to wait for.".to_string()),
+        },
     );
     properties.insert(
         "timeout_ms".to_string(),
@@ -649,11 +651,11 @@ pub fn create_wait_tool() -> OpenAiTool {
     );
     OpenAiTool::Function(ResponsesApiTool {
         name: "wait".to_string(),
-        description: "Wait for background work to complete. If call_id is provided waits for that, otherwise returns when any background function completes (returns early).".to_string(),
+        description: "Wait for the background command identified by call_id to finish (optionally bounded by timeout_ms).".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
-            required: None,
+            required: Some(vec!["call_id".to_string()]),
             additional_properties: Some(false),
         },
     })
