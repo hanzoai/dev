@@ -3,6 +3,13 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.182] - 2025-10-03
+
+- Agents: add first-class cloud agent flows with submit --wait support and richer previews. (6556ac9, 51e60cb, cdc833d)
+- Protocol: introduce MCP shim and sync the tool stack for new runtime integrations. (d0a0f01)
+- Auto-drive: forward CLI context, export rendered history, and surface progress for coordinator runs. (0d2e51f, ec0bbc4, bccd39f)
+- TUI: open the undo timeline overlay on double Esc and persist auto-resolve workflows between sessions. (a658b1a, e1916f7, 4e35c09)
+
 ## [0.2.180] - 2025-10-01
 
 - Auto-drive: add final observer validation before finishing runs so missed work is caught. (94061ee)

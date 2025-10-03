@@ -11153,10 +11153,64 @@ impl ChatWidget<'_> {
 
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         {
-            let script = format!(
-                "{cmd} --version || (echo \"Please install {cmd} via your package manager\" && false)",
-                cmd = cmd
-            );
+            fn linux_agent_install_script(agent_cmd: &str, npm_package: &str) -> String {
+                format!(
+                    "set -euo pipefail\n\
+if ! command -v npm >/dev/null 2>&1; then\n\
+    echo \"npm is required to install {agent_cmd}. Install Node.js 20+ and rerun.\" >&2\n\
+    exit 1\n\
+fi\n\
+prefix=\"$(npm config get prefix 2>/dev/null || true)\"\n\
+if [ -z \"$prefix\" ] || [ ! -w \"$prefix\" ]; then\n\
+    prefix=\"$HOME/.npm-global\"\n\
+fi\n\
+mkdir -p \"$prefix/bin\"\n\
+export PATH=\"$prefix/bin:$PATH\"\n\
+export npm_config_prefix=\"$prefix\"\n\
+node_major=0\n\
+if command -v node >/dev/null 2>&1; then\n\
+    node_major=\"$(node -v | sed 's/^v\\([0-9][0-9]*\\).*/\\1/')\"\n\
+fi\n\
+if [ \"$node_major\" -lt 20 ]; then\n\
+    npm install -g n\n\
+    export N_PREFIX=\"${{N_PREFIX:-$HOME/.n}}\"\n\
+    mkdir -p \"$N_PREFIX/bin\"\n\
+    export PATH=\"$N_PREFIX/bin:$PATH\"\n\
+    n 20.18.1\n\
+    hash -r\n\
+    node_major=\"$(node -v | sed 's/^v\\([0-9][0-9]*\\).*/\\1/')\"\n\
+    if [ \"$node_major\" -lt 20 ]; then\n\
+        echo \"Failed to activate Node.js 20+. Check that $N_PREFIX/bin is on PATH.\" >&2\n\
+        exit 1\n\
+    fi\n\
+else\n\
+    export N_PREFIX=\"${{N_PREFIX:-$HOME/.n}}\"\n\
+    if [ -d \"$N_PREFIX/bin\" ]; then\n\
+        export PATH=\"$N_PREFIX/bin:$PATH\"\n\
+    fi\n\
+fi\n\
+npm install -g {npm_package}\n\
+hash -r\n\
+if ! command -v {agent_cmd} >/dev/null 2>&1; then\n\
+    echo \"{agent_cmd} installed but not found on PATH. Add 'export PATH=\\\"$prefix/bin:$PATH\\\"' to your shell profile.\" >&2\n\
+    exit 1\n\
+fi\n\
+{agent_cmd} --version\n",
+                    agent_cmd = agent_cmd,
+                    npm_package = npm_package,
+                )
+            }
+
+            let lowercase = agent_name.trim().to_ascii_lowercase();
+            let script = match lowercase.as_str() {
+                "claude" => linux_agent_install_script(&cmd, "@anthropic-ai/claude-code"),
+                "gemini" => linux_agent_install_script(&cmd, "@google/gemini-cli"),
+                "qwen" => linux_agent_install_script(&cmd, "@qwen-code/qwen-code"),
+                _ => format!(
+                    "{cmd} --version || (echo \"Please install {cmd} via your package manager\" && false)",
+                    cmd = cmd
+                ),
+            };
             let command = vec!["/bin/bash".to_string(), "-lc".to_string(), script.clone()];
             return Some((command, script));
         }
