@@ -2012,6 +2012,7 @@ fn auto_decision_persists_summary_through_cli_cycle() {
         AutoCoordinatorStatus::Continue,
         Some("Reviewed failing integration tests.".to_string()),
         Some("Running tests now.".to_string()),
+        None,
         Some("run tests".to_string()),
         Vec::new(),
     );
@@ -2119,11 +2120,35 @@ fn auto_history_captures_raw_transcript() {
         AutoCoordinatorStatus::Continue,
         None,
         Some("Next".to_string()),
+        None,
         Some("do thing".to_string()),
         transcript.clone(),
     );
 
     assert_eq!(chat.auto_history.raw_items(), transcript.as_slice());
+}
+
+#[test]
+fn auto_cli_context_is_prefixed_before_prompt() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_cli_prompt = Some("Run diagnostics".to_string());
+    chat.auto_state.current_cli_context = Some("Project background: mock services are offline.".to_string());
+
+    assert!(chat.pending_dispatched_user_messages.is_empty());
+
+    chat.auto_submit_prompt();
+
+    let sent = chat
+        .pending_dispatched_user_messages
+        .back()
+        .cloned();
+
+    assert_eq!(
+        sent.as_deref(),
+        Some("Project background: mock services are offline.\n\nRun diagnostics")
+    );
 }
 
 fn pump_app_events(
