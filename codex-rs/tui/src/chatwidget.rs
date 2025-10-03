@@ -519,6 +519,7 @@ struct AutoCoordinatorUiState {
     waiting_for_response: bool,
     paused_for_manual_edit: bool,
     resume_after_manual_submit: bool,
+    waiting_for_review: bool,
     countdown_id: u64,
     seconds_remaining: u8,
     awaiting_goal_input: bool,
@@ -2648,6 +2649,22 @@ impl ChatWidget<'_> {
         self.history_render.invalidate_height_cache();
     }
 
+    fn fallback_lines_for_record(
+        &self,
+        cell: &dyn HistoryCell,
+        record: &HistoryRecord,
+    ) -> Option<Vec<Line<'static>>> {
+        if cell.has_custom_render() {
+            return None;
+        }
+
+        let lines = cell.display_lines_trimmed();
+        if !lines.is_empty() || matches!(record, HistoryRecord::Reasoning(_)) {
+            Some(lines)
+        } else {
+            Some(history_cell::lines_from_record(record, &self.config))
+        }
+    }
     /// Handle exec approval request immediately
     fn handle_exec_approval_now(&mut self, _id: String, ev: ExecApprovalRequestEvent) {
         // Use call_id as the approval correlation id so responses map to the
@@ -9814,6 +9831,10 @@ impl ChatWidget<'_> {
                     );
                     self.history_push_plain_state(state);
                 }
+                if self.auto_state.active {
+                    self.auto_state.waiting_for_review = true;
+                    self.auto_rebuild_live_ring();
+                }
                 self.request_redraw();
             }
             EventMsg::ExitedReviewMode(review_output) => {
@@ -9855,7 +9876,12 @@ impl ChatWidget<'_> {
                         ));
                     }
                 }
-                self.request_redraw();
+                if self.auto_state.active && self.auto_state.waiting_for_review {
+                    self.auto_state.waiting_for_review = false;
+                    self.auto_send_conversation();
+                } else {
+                    self.request_redraw();
+                }
             }
         }
     }
@@ -11448,6 +11474,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active || self.auto_state.waiting_for_response {
             return;
         }
+        self.auto_state.waiting_for_review = false;
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
@@ -12004,10 +12031,24 @@ impl ChatWidget<'_> {
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
+
+        let review_pending = self.is_review_flow_active()
+            || self
+                .pending_auto_turn_config
+                .as_ref()
+                .is_some_and(|cfg| !cfg.read_only);
+
+        self.auto_state.waiting_for_review = review_pending;
+
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.rebuild_auto_history();
+
+        if review_pending {
+            return;
+        }
+
         self.auto_send_conversation();
     }
 
@@ -12074,7 +12115,9 @@ impl ChatWidget<'_> {
 
         self.bottom_pane.clear_live_ring();
 
-        let status_text = if let Some(line) = self
+        let status_text = if self.auto_state.waiting_for_review {
+            "waiting for code review...".to_string()
+        } else if let Some(line) = self
             .auto_state
             .current_display_line
             .as_ref()
@@ -12091,30 +12134,35 @@ impl ChatWidget<'_> {
 
         let headline = self.auto_format_status_headline(&status_text);
         let mut status_lines = vec![headline];
-        self.auto_append_progress_lines(
-            &mut status_lines,
-            self.auto_state.current_progress_current.as_ref(),
-            self.auto_state.current_progress_past.as_ref(),
-        );
-        if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
-            let appended = self.auto_append_progress_lines(
+        if !self.auto_state.waiting_for_review {
+            self.auto_append_progress_lines(
                 &mut status_lines,
-                self.auto_state.last_decision_progress_current.as_ref(),
-                self.auto_state.last_decision_progress_past.as_ref(),
+                self.auto_state.current_progress_current.as_ref(),
+                self.auto_state.current_progress_past.as_ref(),
             );
-            if !appended {
-                if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
-                    let trimmed = summary.trim();
-                    if !trimmed.is_empty() {
-                        let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
-                        if !collapsed.is_empty() {
-                            let current_line = status_lines
-                                .first()
-                                .map(|line| line.trim_end_matches('…').trim())
-                                .unwrap_or("");
-                            if collapsed != current_line {
-                                let display = Self::truncate_with_ellipsis(&collapsed, 160);
-                                status_lines.push(display);
+            if self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting {
+                let appended = self.auto_append_progress_lines(
+                    &mut status_lines,
+                    self.auto_state.last_decision_progress_current.as_ref(),
+                    self.auto_state.last_decision_progress_past.as_ref(),
+                );
+                if !appended {
+                    if let Some(summary) = self.auto_state.last_decision_summary.as_ref() {
+                        let trimmed = summary.trim();
+                        if !trimmed.is_empty() {
+                            let collapsed = trimmed
+                                .split_whitespace()
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if !collapsed.is_empty() {
+                                let current_line = status_lines
+                                    .first()
+                                    .map(|line| line.trim_end_matches('…').trim())
+                                    .unwrap_or("");
+                                if collapsed != current_line {
+                                    let display = Self::truncate_with_ellipsis(&collapsed, 160);
+                                    status_lines.push(display);
+                                }
                             }
                         }
                     }
@@ -23187,6 +23235,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 (HistoryId::ZERO, false)
             };
 
+            let cell_has_custom_render = cell.has_custom_render();
             let is_streaming = cell
                 .as_any()
                 .downcast_ref::<crate::history_cell::StreamingContentCell>()
@@ -23194,7 +23243,7 @@ impl WidgetRef for &ChatWidget<'_> {
 
             let mut cacheable = history_id != HistoryId::ZERO
                 && has_record
-                && !cell.has_custom_render()
+                && !cell_has_custom_render
                 && !cell.is_animating()
                 && !is_streaming;
 
@@ -23229,17 +23278,17 @@ impl WidgetRef for &ChatWidget<'_> {
                             kind = RenderRequestKind::Assistant { id: history_id };
                         }
                         other => {
-                            let lines = cell.display_lines_trimmed();
-                            if !lines.is_empty()
-                                || matches!(other, HistoryRecord::Reasoning(_))
-                            {
-                                fallback_lines = Some(lines);
-                            } else {
-                                fallback_lines =
-                                    Some(history_cell::lines_from_record(other, &self.config));
-                            }
+                            fallback_lines =
+                                self.fallback_lines_for_record(*cell, other);
                         }
                     }
+                }
+            }
+
+            if fallback_lines.is_none() && !cell_has_custom_render && history_id == HistoryId::ZERO {
+                let lines = cell.display_lines_trimmed();
+                if !lines.is_empty() {
+                    fallback_lines = Some(lines);
                 }
             }
 
