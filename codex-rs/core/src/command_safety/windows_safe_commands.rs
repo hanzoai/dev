@@ -239,8 +239,11 @@ fn is_safe_git_command(words: &[String]) -> bool {
 
         if arg.starts_with('-') {
             if arg.eq_ignore_ascii_case("-c") || arg.eq_ignore_ascii_case("--config") {
-                if iter.next().is_none() {
+                let Some(value) = iter.next() else {
                     // Examples rejected here: "pwsh -Command 'git -c'" and "pwsh -Command 'git --config'".
+                    return false;
+                };
+                if !is_safe_git_config_override(value) {
                     return false;
                 }
                 continue;
@@ -251,6 +254,14 @@ fn is_safe_git_command(words: &[String]) -> bool {
                 || arg_lc.starts_with("--git-dir=")
                 || arg_lc.starts_with("--work-tree=")
             {
+                if arg_lc.starts_with("-c=") || arg_lc.starts_with("--config=") {
+                    let Some((_, value)) = arg.split_once('=') else {
+                        return false;
+                    };
+                    if !is_safe_git_config_override(value) {
+                        return false;
+                    }
+                }
                 continue;
             }
 
@@ -270,6 +281,24 @@ fn is_safe_git_command(words: &[String]) -> bool {
 
     // Examples rejected here: "pwsh -Command 'git'" and "pwsh -Command 'git status --short | Remove-Item foo'".
     false
+}
+
+fn is_safe_git_config_override(raw: &str) -> bool {
+    let (key, value) = match raw.split_once('=') {
+        Some(parts) => parts,
+        None => return false,
+    };
+
+    let key = key.trim().to_ascii_lowercase();
+    let value = value
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\''));
+    let value_lc = value.to_ascii_lowercase();
+
+    matches!(
+        (key.as_str(), value_lc.as_str()),
+        ("core.pager", "cat") | ("core.pager", "type")
+    )
 }
 
 #[cfg(test)]
@@ -426,6 +455,18 @@ mod tests {
             "powershell.exe",
             "-Command",
             "Get-Content (New-Item bar.txt)",
+        ])));
+
+        assert!(!is_safe_command_windows(&vec_str(&[
+            "powershell.exe",
+            "-Command",
+            "git -c core.pager=\"powershell -Command Remove-Item foo\" status",
+        ])));
+
+        assert!(!is_safe_command_windows(&vec_str(&[
+            "powershell.exe",
+            "-Command",
+            "git -c color.ui=always status",
         ])));
     }
 }
