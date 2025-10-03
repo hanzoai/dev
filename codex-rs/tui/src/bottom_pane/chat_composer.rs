@@ -23,7 +23,7 @@ use super::command_popup::CommandItem;
 use super::command_popup::CommandPopup;
 use super::file_search_popup::FileSearchPopup;
 use super::paste_burst::PasteBurst;
-use crate::slash_command::SlashCommand;
+use crate::slash_command::{built_in_slash_commands, SlashCommand};
 use codex_protocol::custom_prompts::CustomPrompt;
 use codex_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 
@@ -50,6 +50,23 @@ const LARGE_PASTE_CHAR_THRESHOLD: usize = 1000;
 struct PostPasteSpaceGuard {
     expires_at: Instant,
     cursor_pos: usize,
+}
+
+fn parse_slash_name(line: &str) -> Option<(&str, &str)> {
+    let stripped = line.strip_prefix('/')?;
+    let mut name_end = stripped.len();
+    for (idx, ch) in stripped.char_indices() {
+        if ch.is_whitespace() {
+            name_end = idx;
+            break;
+        }
+    }
+    if name_end == 0 {
+        return None;
+    }
+    let name = &stripped[..name_end];
+    let rest = stripped[name_end..].trim_start();
+    Some((name, rest))
 }
 
 /// Result returned when the user interacts with the text area.
@@ -1493,6 +1510,25 @@ impl ChatComposer {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
+                let command_text = self.textarea.text().to_string();
+                let first_line = command_text.lines().next().unwrap_or("");
+                if let Some((name, rest)) = parse_slash_name(first_line)
+                    && rest.is_empty()
+                    && let Some((_label, cmd)) = built_in_slash_commands()
+                        .into_iter()
+                        .find(|(n, _)| *n == name)
+                {
+                    if cmd.is_prompt_expanding() {
+                        self.app_event_tx.send(crate::app_event::AppEvent::PrepareAgents);
+                    }
+                    self.history.record_local_submission(&command_text);
+                    self.app_event_tx
+                        .send(crate::app_event::AppEvent::DispatchCommand(cmd, command_text));
+                    self.textarea.set_text("");
+                    self.active_popup = ActivePopup::None;
+                    return (InputResult::Command(cmd), true);
+                }
+
                 // Record the exact text that was typed (before replacement)
                 let original_text = self.textarea.text().to_string();
 
@@ -2518,6 +2554,38 @@ mod tests {
 
         assert_eq!(composer.textarea.text(), "/compact ");
         assert_eq!(composer.textarea.cursor(), composer.textarea.text().len());
+    }
+
+    #[test]
+    fn slash_tab_then_enter_dispatches_builtin_command() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            true,
+            sender,
+            false,
+            "Ask Codex to do anything".to_string(),
+            false,
+        );
+
+        // Type a prefix and complete with Tab, which inserts a trailing space
+        // and moves the cursor beyond the '/name' token (hides the popup).
+        type_chars_humanlike(&mut composer, &['/', 'd', 'i']);
+        let (_res, _redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(composer.textarea.text(), "/diff ");
+
+        // Press Enter: should dispatch the command, not submit literal text.
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match result {
+            InputResult::Command(cmd) => assert_eq!(cmd.command(), "diff"),
+            InputResult::Submitted(text) => {
+                panic!("expected command dispatch after Tab completion, got literal submit: {text}")
+            }
+            InputResult::None => panic!("expected Command result for '/diff'"),
+        }
+        assert!(composer.textarea.is_empty());
     }
 
     #[test]
