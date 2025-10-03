@@ -64,6 +64,9 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
+use codex_core::protocol::ReviewCodeLocation;
+use codex_core::protocol::ReviewFinding;
+use codex_core::protocol::ReviewLineRange;
 use codex_core::protocol::ReviewOutputEvent;
 use codex_core::protocol::ReviewRequest;
 use codex_protocol::models::{ContentItem, ResponseItem};
@@ -2343,6 +2346,125 @@ fn auto_waits_for_review_before_continuing() {
     assert!(
         !chat.auto_state.waiting_for_review,
         "auto drive should clear review wait flag after resuming"
+    );
+}
+
+#[test]
+fn auto_start_post_turn_review_respects_auto_resolve_toggle() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+
+    chat.config.tui.review_auto_resolve = true;
+    chat.auto_start_post_turn_review(None);
+    assert!(
+        chat.auto_resolve_state.is_some(),
+        "auto drive should seed auto resolve state when toggle is enabled"
+    );
+
+    chat.config.tui.review_auto_resolve = false;
+    chat.auto_start_post_turn_review(None);
+    assert!(
+        chat.auto_resolve_state.is_none(),
+        "auto drive should clear auto resolve state when toggle is disabled"
+    );
+}
+
+#[test]
+fn auto_blocks_until_auto_resolve_completes() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.goal = Some("demo goal".to_string());
+    chat.config.tui.review_auto_resolve = true;
+
+    let (tx, auto_rx) = channel();
+    chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
+    chat.pending_auto_turn_config = Some(TurnConfig {
+        read_only: false,
+        complexity: None,
+    });
+
+    chat.auto_on_assistant_final();
+
+    chat.handle_codex_event(Event {
+        id: "auto-turn".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    chat.handle_codex_event(Event {
+        id: "auto-review".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::EnteredReviewMode(ReviewRequest {
+            prompt: "workspace prompt".to_string(),
+            user_facing_hint: "workspace".to_string(),
+            metadata: None,
+        }),
+    });
+
+    let review_output = ReviewOutputEvent {
+        findings: vec![ReviewFinding {
+            title: "issue".to_string(),
+            body: "found bug".to_string(),
+            confidence_score: 0.6,
+            priority: 1,
+            code_location: ReviewCodeLocation {
+                absolute_file_path: PathBuf::from("src/lib.rs"),
+                line_range: ReviewLineRange { start: 1, end: 1 },
+            },
+        }],
+        overall_correctness: String::new(),
+        overall_explanation: String::new(),
+        overall_confidence_score: 0.0,
+    };
+
+    chat.handle_codex_event(Event {
+        id: "auto-review".into(),
+        event_seq: 1,
+        order: None,
+        msg: EventMsg::ExitedReviewMode(Some(review_output)),
+    });
+
+    assert!(
+        chat.auto_state.waiting_for_review,
+        "auto drive should remain paused while auto resolve follow-ups run"
+    );
+    assert!(chat
+        .auto_resolve_state
+        .as_ref()
+        .is_some_and(|state| matches!(state.phase, AutoResolvePhase::PendingFix { .. })),
+        "auto resolve should enter pending fix phase"
+    );
+    assert!(matches!(auto_rx.try_recv(), Err(TryRecvError::Empty)));
+
+    chat.auto_resolve_clear();
+
+    let command = auto_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("auto drive should resume after auto resolve clears");
+    match command {
+        AutoCoordinatorCommand::UpdateConversation(_) => {}
+        other => panic!("unexpected auto coordinator command: {:?}", other),
+    }
+
+    assert!(
+        chat.auto_state.waiting_for_response,
+        "auto drive should wait for coordinator after resuming"
+    );
+    assert!(
+        !chat.auto_state.waiting_for_review,
+        "auto drive should clear review wait flag after auto resolve clears"
     );
 }
 
