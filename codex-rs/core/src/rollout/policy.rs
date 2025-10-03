@@ -1,3 +1,4 @@
+use crate::protocol::event_msg_from_protocol;
 use crate::protocol::EventMsg;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::RolloutItem;
@@ -7,7 +8,8 @@ use codex_protocol::protocol::RolloutItem;
 pub(crate) fn should_persist_rollout_item(item: &RolloutItem) -> bool {
     match item {
         RolloutItem::ResponseItem(item) => should_persist_response_item(item),
-        RolloutItem::Event(_) => true,
+        RolloutItem::Event(ev) => event_msg_from_protocol(&ev.msg)
+            .is_some_and(|msg| should_persist_event_msg(&msg)),
         // Always persist session meta
         RolloutItem::SessionMeta(_) => true,
         // Persist compacted summaries and turn context for accurate history reconstruction.

@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use codex_app_server_protocol::AuthMode;
 use codex_core::ContentItem;
 use codex_core::ModelClient;
 use codex_core::ModelProviderInfo;
@@ -19,7 +20,7 @@ use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
-use codex_protocol::mcp_protocol::{AuthMode, ConversationId};
+use codex_protocol::ConversationId;
 
 fn network_disabled() -> bool {
     std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
