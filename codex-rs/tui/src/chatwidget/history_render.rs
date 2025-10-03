@@ -10,7 +10,7 @@ use crate::history::state::{HistoryId, HistoryRecord, HistoryState};
 use crate::history_cell::{
     assistant_markdown_lines,
     compute_assistant_layout,
-    explore_lines_from_record,
+    explore_lines_from_record_with_force,
     diff_lines_from_record,
     exec_display_lines_from_record,
     merged_exec_lines_from_record,
@@ -446,7 +446,8 @@ impl<'a> RenderRequest<'a> {
 
         if let RenderRequestKind::Explore { id } = self.kind {
             if let Some(HistoryRecord::Explore(record)) = history_state.record(id) {
-                return explore_lines_from_record(record);
+                let hold_title = explore_should_hold_title(history_state, id);
+                return explore_lines_from_record_with_force(record, hold_title);
             }
         }
 
@@ -491,6 +492,29 @@ pub(crate) enum RenderRequestKind {
     Diff { id: HistoryId },
     Streaming { id: HistoryId },
     Assistant { id: HistoryId },
+}
+
+pub(crate) fn explore_should_hold_title(history_state: &HistoryState, explore_id: HistoryId) -> bool {
+    if explore_id == HistoryId::ZERO {
+        return true;
+    }
+
+    let Some(mut idx) = history_state.index_of(explore_id) else {
+        return true;
+    };
+
+    idx += 1;
+    while let Some(record) = history_state.get(idx) {
+        match record {
+            HistoryRecord::Reasoning(_) => {
+                idx += 1;
+                continue;
+            }
+            _ => return false,
+        }
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -1254,7 +1278,7 @@ mod tests {
             .expect("explore layout missing")
             .layout();
         let text = collect_lines(&layout);
-        assert!(text.iter().any(|line| line.contains("Explored")));
+        assert!(text.iter().any(|line| line.contains("Exploring")));
         assert!(text.iter().any(|line| line.contains("pattern")));
     }
 
@@ -1370,8 +1394,24 @@ mod tests {
             "collapsed reasoning cells should not push the next visible cell"
         );
     }
-}
 
+    #[test]
+    fn explore_should_hold_title_until_non_reasoning_block() {
+        let mut state = HistoryState::new();
+        let explore_id = insert_explore_record(&mut state);
+        assert!(explore_should_hold_title(&state, explore_id));
+
+        let _reasoning_id = state.push(HistoryRecord::Reasoning(make_reasoning_state(
+            "reasoning only",
+        )));
+        assert!(explore_should_hold_title(&state, explore_id));
+
+        let _plain_id = state.push(HistoryRecord::PlainMessage(make_plain_message(
+            "ready to summarize",
+        )));
+        assert!(!explore_should_hold_title(&state, explore_id));
+    }
+}
 /// Output from `HistoryRenderState::visible_cells()`. Contains the resolved
 /// layout (if any), plus the optional `HistoryCell` pointer so the caller can
 /// reuse existing caches.
