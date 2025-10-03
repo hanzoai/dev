@@ -82,7 +82,7 @@ export class Thread {
 
       for (const event of threadEvents) {
         if (event.type === "thread.started") {
-          this.id = event.thread_id;
+          this._id = event.thread_id;
         }
         yield event;
       }
@@ -142,7 +142,7 @@ function mapCliEventToThreadEvents(
       const text = typeof msg?.text === "string" ? (msg.text as string) : "";
       const reasoningItem: ThreadItem = {
         id: extractEventId(event),
-        item_type: "reasoning",
+        type: "reasoning",
         text,
       };
       return [
@@ -156,7 +156,7 @@ function mapCliEventToThreadEvents(
       const message = typeof msg?.message === "string" ? (msg.message as string) : "";
       const assistantItem: ThreadItem = {
         id: extractEventId(event),
-        item_type: "assistant_message",
+        type: "agent_message",
         text: message,
       };
       return [

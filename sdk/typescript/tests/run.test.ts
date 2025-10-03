@@ -31,10 +31,10 @@ describe("Codex", () => {
       const thread = client.startThread();
       const result = await thread.run("Hello, world!");
 
-      const assistantItem = result.items.find((item) => item.item_type === "assistant_message");
+      const assistantItem = result.items.find((item) => item.type === "agent_message");
       expect(assistantItem).toEqual(
         expect.objectContaining({
-          item_type: "assistant_message",
+          type: "agent_message",
           text: "Hi!",
         }),
       );

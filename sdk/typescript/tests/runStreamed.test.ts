@@ -42,8 +42,7 @@ describe("Codex", () => {
       ]);
 
       const assistantMessage = events.find(
-        (event) =>
-          event.type === "item.completed" && event.item.item_type === "assistant_message",
+        (event) => event.type === "item.completed" && event.item.type === "agent_message",
       );
       expect(assistantMessage).toEqual(
         expect.objectContaining({
@@ -89,8 +88,7 @@ describe("Codex", () => {
       }
 
       const finalMessage = collected.find(
-        (event) =>
-          event.type === "item.completed" && event.item.item_type === "assistant_message",
+        (event) => event.type === "item.completed" && event.item.type === "agent_message",
       );
       expect(finalMessage).toEqual(
         expect.objectContaining({
@@ -138,8 +136,7 @@ describe("Codex", () => {
 
       expect(resumedThread.id).toBe(originalThread.id);
       const finalMessage = collected.find(
-        (event) =>
-          event.type === "item.completed" && event.item.item_type === "assistant_message",
+        (event) => event.type === "item.completed" && event.item.type === "agent_message",
       );
       expect(finalMessage).toEqual(
         expect.objectContaining({
