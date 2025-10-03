@@ -40,6 +40,7 @@ pub(crate) fn create_apply_patch_json_tool() -> OpenAiTool {
         "input".to_string(),
         JsonSchema::String {
             description: Some(r#"The entire contents of the apply_patch command"#.to_string()),
+            allowed_values: None,
         },
     );
 

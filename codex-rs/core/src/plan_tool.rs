@@ -19,11 +19,18 @@ pub use codex_protocol::plan_tool::UpdatePlanArgs;
 
 pub(crate) static PLAN_TOOL: LazyLock<OpenAiTool> = LazyLock::new(|| {
     let mut plan_item_props = BTreeMap::new();
-    plan_item_props.insert("step".to_string(), JsonSchema::String { description: None });
+    plan_item_props.insert(
+        "step".to_string(),
+        JsonSchema::String {
+            description: None,
+            allowed_values: None,
+        },
+    );
     plan_item_props.insert(
         "status".to_string(),
         JsonSchema::String {
             description: Some("One of: pending, in_progress, completed".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -41,6 +48,7 @@ pub(crate) static PLAN_TOOL: LazyLock<OpenAiTool> = LazyLock::new(|| {
         "name".to_string(),
         JsonSchema::String {
             description: Some("2-5 word title describing the plan e.g. 'Fix Box Rendering'".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert("plan".to_string(), plan_items_schema);

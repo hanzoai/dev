@@ -55,9 +55,11 @@ use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
-use codex_app_server_protocol::AuthMode;
+use codex_protocol::mcp_protocol::AuthMode;
 use crate::account_usage;
 use crate::auth_accounts;
+
+const DEFAULT_AGENT_MODELS: &[&str] = &["claude", "gemini", "qwen", "code", "cloud"];
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
@@ -521,6 +523,7 @@ async fn build_turn_status_items(sess: &Session) -> Vec<ResponseItem> {
 }
 use crate::agent_tool::AGENT_MANAGER;
 use crate::agent_tool::AgentStatus;
+use crate::agent_tool::AgentToolRequest;
 use crate::agent_tool::CancelAgentParams;
 use crate::agent_tool::CheckAgentStatusParams;
 use crate::agent_tool::GetAgentResultParams;
@@ -564,6 +567,7 @@ use codex_protocol::models::ShellToolCallParams;
 use crate::openai_model_info::get_model_info;
 use crate::openai_tools::ToolsConfig;
 use crate::openai_tools::get_openai_tools;
+use crate::slash_commands::get_enabled_agents;
 use crate::dry_run_guard::{analyze_command, DryRunAnalysis, DryRunDisposition, DryRunGuardState};
 use crate::parse_command::parse_command;
 use crate::plan_tool::handle_update_plan;
@@ -829,7 +833,8 @@ struct State {
     pending_user_input: Vec<QueuedUserInput>,
     history: ConversationHistory,
     /// Tracks which completed agents (by id) have already been returned to the
-    /// model for a given batch when using `agent_wait` without `return_all`.
+    /// model for a given batch when using `agent` with `action="wait"` and
+    /// `return_all=false`.
     /// This enables sequential waiting behavior across multiple calls.
     seen_completed_agents_by_batch: HashMap<String, HashSet<String>>,
     /// Scratchpad that buffers streamed items/deltas for the current HTTP attempt
@@ -3041,7 +3046,7 @@ async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                codex_protocol::ConversationId::from(session_id),
+                                codex_protocol::mcp_protocol::ConversationId::from(session_id),
                                 effective_user_instructions.clone(),
                                 SessionSource::Cli,
                             ),
@@ -3069,7 +3074,7 @@ async fn submission_loop(
                     }
                 };
 
-                let conversation_id = codex_protocol::ConversationId::from(session_id);
+                let conversation_id = codex_protocol::mcp_protocol::ConversationId::from(session_id);
                 let auth_snapshot = auth_manager.as_ref().and_then(|mgr| mgr.auth());
                 let otel_event_manager = {
                     let manager = OtelEventManager::new(
@@ -3186,6 +3191,24 @@ async fn submission_loop(
                 );
                 tools_config.web_search_allowed_domains =
                     config.tools_web_search_allowed_domains.clone();
+
+                let mut agent_models: Vec<String> = if config.agents.is_empty() {
+                    DEFAULT_AGENT_MODELS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect()
+                } else {
+                    get_enabled_agents(&config.agents)
+                };
+                if agent_models.is_empty() {
+                    agent_models = DEFAULT_AGENT_MODELS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect();
+                }
+                agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+                agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+                tools_config.set_agent_models(agent_models);
 
                 let mut new_session = Arc::new(Session {
                     id: session_id,
@@ -5042,13 +5065,8 @@ async fn handle_function_call(
                 .await
         }
         "update_plan" => handle_update_plan(sess, &ctx, arguments).await,
-        // agent_* tools
-        "agent_run" => handle_run_agent(sess, &ctx, arguments).await,
-        "agent_check" => handle_check_agent_status(sess, &ctx, arguments).await,
-        "agent_result" => handle_get_agent_result(sess, &ctx, arguments).await,
-        "agent_cancel" => handle_cancel_agent(sess, &ctx, arguments).await,
-        "agent_wait" => handle_wait_for_agent(sess, &ctx, arguments).await,
-        "agent_list" => handle_list_agents(sess, &ctx, arguments).await,
+        // agent tool
+        "agent" => handle_agent_tool(sess, &ctx, arguments).await,
         // browser_* tools
         "browser_open" => handle_browser_open(sess, &ctx, arguments).await,
         "browser_close" => handle_browser_close(sess, &ctx).await,
@@ -6474,6 +6492,127 @@ fn maybe_run_with_user_profile(params: ExecParams, sess: &Session) -> ExecParams
     params
 }
 
+fn agent_tool_failure(ctx: &ToolCallCtx, message: impl Into<String>) -> ResponseInputItem {
+    ResponseInputItem::FunctionCallOutput {
+        call_id: ctx.call_id.clone(),
+        output: FunctionCallOutputPayload {
+            content: message.into(),
+            success: Some(false),
+        },
+    }
+}
+
+pub(crate) async fn handle_agent_tool(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+) -> ResponseInputItem {
+    let parsed = serde_json::from_str::<AgentToolRequest>(&arguments);
+    let mut req = match parsed {
+        Ok(req) => req,
+        Err(e) => {
+            return agent_tool_failure(ctx, format!("Invalid agent arguments: {}", e));
+        }
+    };
+
+    let action = req.action.to_ascii_lowercase();
+    match action.as_str() {
+        "create" => {
+            let task = match req.task.take() {
+                Some(task) if !task.trim().is_empty() => task,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=create requires a non-empty 'task' field",
+                    );
+                }
+            };
+
+            let run_params = RunAgentParams {
+                task,
+                models: std::mem::take(&mut req.models),
+                context: req.context.take(),
+                output: req.output.take(),
+                files: req.files.take(),
+                read_only: req.read_only.take(),
+            };
+
+            match serde_json::to_string(&run_params) {
+                Ok(json) => handle_run_agent(sess, ctx, json).await,
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode create arguments: {}", e)),
+            }
+        }
+        "status" => {
+            let agent_id = match req.agent_id.take() {
+                Some(id) => id,
+                None => return agent_tool_failure(ctx, "action=status requires 'agent_id'"),
+            };
+            let params = CheckAgentStatusParams { agent_id };
+            match serde_json::to_string(&params) {
+                Ok(json) => handle_check_agent_status(sess, ctx, json).await,
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode status arguments: {}", e)),
+            }
+        }
+        "result" => {
+            let agent_id = match req.agent_id.take() {
+                Some(id) => id,
+                None => return agent_tool_failure(ctx, "action=result requires 'agent_id'"),
+            };
+            let params = GetAgentResultParams { agent_id };
+            match serde_json::to_string(&params) {
+                Ok(json) => handle_get_agent_result(sess, ctx, json).await,
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode result arguments: {}", e)),
+            }
+        }
+        "cancel" => {
+            if req.agent_id.is_none() && req.batch_id.is_none() {
+                return agent_tool_failure(
+                    ctx,
+                    "action=cancel requires 'agent_id' or 'batch_id'",
+                );
+            }
+            let params = CancelAgentParams {
+                agent_id: req.agent_id.take(),
+                batch_id: req.batch_id.take(),
+            };
+            match serde_json::to_string(&params) {
+                Ok(json) => handle_cancel_agent(sess, ctx, json).await,
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode cancel arguments: {}", e)),
+            }
+        }
+        "wait" => {
+            if req.agent_id.is_none() && req.batch_id.is_none() {
+                return agent_tool_failure(
+                    ctx,
+                    "action=wait requires 'agent_id' or 'batch_id'",
+                );
+            }
+            let params = WaitForAgentParams {
+                agent_id: req.agent_id.take(),
+                batch_id: req.batch_id.take(),
+                timeout_seconds: req.timeout_seconds,
+                return_all: req.return_all,
+            };
+            match serde_json::to_string(&params) {
+                Ok(json) => handle_wait_for_agent(sess, ctx, json).await,
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode wait arguments: {}", e)),
+            }
+        }
+        "list" => {
+            let params = ListAgentsParams {
+                status_filter: req.status_filter.take(),
+                batch_id: req.batch_id.take(),
+                recent_only: req.recent_only,
+            };
+            match serde_json::to_string(&params) {
+                Ok(json) => handle_list_agents(sess, ctx, json).await,
+                Err(e) => agent_tool_failure(ctx, format!("Failed to encode list arguments: {}", e)),
+            }
+        }
+        other => agent_tool_failure(ctx, format!("Unsupported agent action: {}", other)),
+    }
+}
+
 pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
     let params_for_event = serde_json::from_str(&arguments).ok();
     let arguments_clone = arguments.clone();
@@ -6481,7 +6620,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
     execute_custom_tool(
         sess,
         ctx,
-        "agent_run".to_string(),
+        "agent".to_string(),
         params_for_event,
         || async move {
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
@@ -6539,8 +6678,21 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
             }
 
             if models.is_empty() {
-                models.push("code".to_string());
+                if sess.tools_config.agent_model_allowed_values.is_empty() {
+                    models.push("code".to_string());
+                } else {
+                    models.extend(
+                        sess
+                            .tools_config
+                            .agent_model_allowed_values
+                            .iter()
+                            .cloned(),
+                    );
+                }
             }
+
+            models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+            models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
 
             // Helper: derive the command to check for a given model/config pair.
             fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
@@ -6694,7 +6846,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     .map(|(id, _)| id.as_str())
                     .unwrap_or(batch.as_str());
                 format!(
-                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent_wait {{\"batch_id\":\"{batch}\",\"return_all\":true}}` to wait for all agents, then `agent_result {{\"agent_id\":\"{first_agent}\"}}` for a detailed report."
+                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"batch_id\":\"{batch}\",\"return_all\":true}}` to wait for all agents, then `agent {{\"action\":\"result\",\"agent_id\":\"{first_agent}\"}}` for a detailed report."
                 )
             } else {
                 let (single_id, single_model) = agent_labels
@@ -6702,7 +6854,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     .map(|(id, model)| (id.as_str(), model.as_str()))
                     .unwrap();
                 format!(
-                    "🤖 Agent {} [{}] started. Use `agent_wait {{\"agent_id\":\"{}\",\"return_all\":true}}` to follow progress, or `agent_result {{\"agent_id\":\"{}\"}}` when it finishes.",
+                    "🤖 Agent {} [{}] started. Use `agent {{\"action\":\"wait\",\"agent_id\":\"{}\",\"return_all\":true}}` to follow progress, or `agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}` when it finishes.",
                     short_id(single_id),
                     single_model,
                     single_id,
@@ -6746,7 +6898,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid agent_run arguments: {}", e),
+                content: format!("Invalid agent arguments: {}", e),
                 success: None,
             },
         },
@@ -6766,7 +6918,7 @@ async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments:
     execute_custom_tool(
         sess,
         ctx,
-        "agent_check".to_string(),
+        "agent".to_string(),
         params_for_event,
         || async move {
     match serde_json::from_str::<CheckAgentStatusParams>(&arguments_clone) {
@@ -6860,7 +7012,7 @@ async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments:
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid agent_check arguments: {}", e),
+                content: format!("Invalid agent arguments for action=status: {}", e),
                 success: None,
             },
         },
@@ -6876,7 +7028,7 @@ async fn handle_get_agent_result(sess: &Session, ctx: &ToolCallCtx, arguments: S
     execute_custom_tool(
         sess,
         ctx,
-        "agent_result".to_string(),
+        "agent".to_string(),
         params_for_event,
         || async move {
     match serde_json::from_str::<GetAgentResultParams>(&arguments_clone) {
@@ -6968,7 +7120,7 @@ async fn handle_get_agent_result(sess: &Session, ctx: &ToolCallCtx, arguments: S
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid agent_result arguments: {}", e),
+                content: format!("Invalid agent arguments for action=result: {}", e),
                 success: None,
             },
         },
@@ -6984,7 +7136,7 @@ async fn handle_cancel_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
     execute_custom_tool(
         sess,
         ctx,
-        "agent_cancel".to_string(),
+        "agent".to_string(),
         params_for_event,
         || async move {
     match serde_json::from_str::<CancelAgentParams>(&arguments_clone) {
@@ -7031,7 +7183,7 @@ async fn handle_cancel_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid agent_cancel arguments: {}", e),
+                content: format!("Invalid agent arguments for action=cancel: {}", e),
                 success: None,
             },
         },
@@ -7047,7 +7199,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
     execute_custom_tool(
         sess,
         ctx,
-        "agent_wait".to_string(),
+        "agent".to_string(),
         params_for_event,
         || async move {
     match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
@@ -7119,14 +7271,17 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 _ => unreachable!(),
                             };
 
-                            let hint = format!("agent_result {{\"agent_id\":\"{}\"}}", agent.id);
+                            let hint = format!(
+                                "agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}",
+                                agent.id
+                            );
                             let mut response = serde_json::json!({
                                 "agent_id": agent.id,
                                 "status": agent.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "agent_id": agent.id },
+                                "agent_result_params": { "action": "result", "agent_id": agent.id },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7210,13 +7365,16 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                     _ => unreachable!(),
                                 };
 
-                                let hint = format!("agent_result {{\"agent_id\":\"{}\"}}", a.id);
+                                let hint = format!(
+                                    "agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}",
+                                    a.id
+                                );
                                 let mut obj = serde_json::json!({
                                     "agent_id": a.id,
                                     "status": a.status,
                                     "total_lines": total_lines,
                                     "agent_result_hint": hint,
-                                    "agent_result_params": { "agent_id": a.id },
+                                    "agent_result_params": { "action": "result", "agent_id": a.id },
                                 });
                                 if let Some(map) = obj.as_object_mut() {
                                     map.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7301,14 +7459,17 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 _ => unreachable!(),
                             };
 
-                            let hint = format!(r#"agent_result {{"agent_id":"{}"}}"#, unseen.id);
+                            let hint = format!(
+                                "agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}",
+                                unseen.id
+                            );
                             let mut response = serde_json::json!({
                                 "agent_id": unseen.id,
                                 "status": unseen.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "agent_id": unseen.id },
+                                "agent_result_params": { "action": "result", "agent_id": unseen.id },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7354,7 +7515,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid wait_for_agent arguments: {}", e),
+                content: format!("Invalid agent arguments for action=wait: {}", e),
                 success: None,
             },
         },
@@ -7370,7 +7531,7 @@ async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String
     execute_custom_tool(
         sess,
         ctx,
-        "agent_list".to_string(),
+        "agent".to_string(),
         params_for_event,
         || async move {
     match serde_json::from_str::<ListAgentsParams>(&arguments_clone) {
@@ -7468,7 +7629,7 @@ async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String
         Err(e) => ResponseInputItem::FunctionCallOutput {
             call_id: call_id_clone,
             output: FunctionCallOutputPayload {
-                content: format!("Invalid list_agents arguments: {}", e),
+                content: format!("Invalid agent arguments for action=list: {}", e),
                 success: None,
             },
         },
