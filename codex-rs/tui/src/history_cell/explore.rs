@@ -13,11 +13,15 @@ use std::path::{Component, Path};
 
 pub(crate) struct ExploreAggregationCell {
     record: ExploreRecord,
+    force_exploring_header: bool,
 }
 
 impl ExploreAggregationCell {
     pub(crate) fn from_record(record: ExploreRecord) -> Self {
-        Self { record }
+        Self {
+            record,
+            force_exploring_header: false,
+        }
     }
 
     pub(crate) fn record(&self) -> &ExploreRecord {
@@ -26,6 +30,14 @@ impl ExploreAggregationCell {
 
     pub(crate) fn record_mut(&mut self) -> &mut ExploreRecord {
         &mut self.record
+    }
+
+    pub(crate) fn set_force_exploring_header(&mut self, force: bool) -> bool {
+        if self.force_exploring_header == force {
+            return false;
+        }
+        self.force_exploring_header = force;
+        true
     }
 
     fn current_exec_status(&self) -> ExecStatus {
@@ -66,7 +78,7 @@ impl HistoryCell for ExploreAggregationCell {
     }
 
     fn display_lines(&self) -> Vec<Line<'static>> {
-        explore_lines_from_record(&self.record)
+        explore_lines_from_record_with_force(&self.record, self.force_exploring_header)
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -255,7 +267,15 @@ pub(crate) fn explore_record_update_status(
 }
 
 pub(crate) fn explore_lines_from_record(record: &ExploreRecord) -> Vec<Line<'static>> {
-    let exploring = record.entries.is_empty()
+    explore_lines_from_record_with_force(record, false)
+}
+
+pub(crate) fn explore_lines_from_record_with_force(
+    record: &ExploreRecord,
+    force_exploring: bool,
+) -> Vec<Line<'static>> {
+    let exploring = force_exploring
+        || record.entries.is_empty()
         || record
             .entries
             .iter()
@@ -375,6 +395,9 @@ mod tests {
         }
         let completed_lines = explore_lines_from_record(&completed);
         assert_eq!(line_text(&completed_lines[0]), "Explored");
+
+        let forced_lines = explore_lines_from_record_with_force(&completed, true);
+        assert_eq!(line_text(&forced_lines[0]), "Exploring...");
     }
 
     #[test]

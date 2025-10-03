@@ -88,8 +88,8 @@ use self::auto_coordinator::{
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{
-    CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings,
-    VisibleCell,
+    explore_should_hold_title, CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind,
+    RenderSettings, VisibleCell,
 };
 use codex_core::parse_command::ParsedCommand;
 use codex_core::protocol::AgentMessageDeltaEvent;
@@ -2514,7 +2514,7 @@ impl ChatWidget<'_> {
 
     fn refresh_reasoning_collapsed_visibility(&mut self) {
         let show = self.config.tui.show_reasoning;
-        let mut changed = false;
+        let mut needs_invalidate = false;
         if show {
             for cell in &self.history_cells {
                 if let Some(reasoning_cell) = cell
@@ -2522,70 +2522,78 @@ impl ChatWidget<'_> {
                     .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                 {
                     if reasoning_cell.set_hide_when_collapsed(false) {
-                        changed = true;
+                        needs_invalidate = true;
                     }
                 }
             }
-            if changed {
-                self.invalidate_height_cache();
-            }
-            return;
-        }
-
-        use std::collections::HashSet;
-        let mut hide_indices: HashSet<usize> = HashSet::new();
-        let len = self.history_cells.len();
-        let mut idx = 0usize;
-        while idx < len {
-            let is_explore = self.history_cells[idx]
-                .as_any()
-                .downcast_ref::<history_cell::ExploreAggregationCell>()
-                .is_some();
-            if !is_explore {
-                idx += 1;
-                continue;
-            }
-            let mut reasoning_indices: Vec<usize> = Vec::new();
-            let mut j = idx + 1;
-            while j < len {
-                if self.history_cells[j]
+        } else {
+            use std::collections::HashSet;
+            let mut hide_indices: HashSet<usize> = HashSet::new();
+            let len = self.history_cells.len();
+            let mut idx = 0usize;
+            while idx < len {
+                let is_explore = self.history_cells[idx]
                     .as_any()
-                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
-                    .is_some()
-                {
-                    reasoning_indices.push(j);
-                    j += 1;
+                    .downcast_ref::<history_cell::ExploreAggregationCell>()
+                    .is_some();
+                if !is_explore {
+                    idx += 1;
                     continue;
                 }
-                break;
+                let mut reasoning_indices: Vec<usize> = Vec::new();
+                let mut j = idx + 1;
+                while j < len {
+                    if self.history_cells[j]
+                        .as_any()
+                        .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                        .is_some()
+                    {
+                        reasoning_indices.push(j);
+                        j += 1;
+                        continue;
+                    }
+                    break;
+                }
+                if reasoning_indices.len() > 1 {
+                    for &ri in &reasoning_indices[..reasoning_indices.len() - 1] {
+                        hide_indices.insert(ri);
+                    }
+                }
+                idx = j;
             }
-            if reasoning_indices.len() > 1 {
-                for &ri in &reasoning_indices[..reasoning_indices.len() - 1] {
-                    hide_indices.insert(ri);
+
+            for (i, cell) in self.history_cells.iter().enumerate() {
+                if let Some(reasoning_cell) = cell
+                    .as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                {
+                    if hide_indices.contains(&i) {
+                        if reasoning_cell.set_hide_when_collapsed(true) {
+                            needs_invalidate = true;
+                        }
+                    } else if reasoning_cell.set_hide_when_collapsed(false) {
+                        needs_invalidate = true;
+                    }
                 }
             }
-            idx = j;
         }
 
-        for (i, cell) in self.history_cells.iter().enumerate() {
-            if let Some(reasoning_cell) = cell
-                .as_any()
-                .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+        for cell in &mut self.history_cells {
+            if let Some(explore_cell) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::ExploreAggregationCell>()
             {
-                if hide_indices.contains(&i) {
-                    if reasoning_cell.set_hide_when_collapsed(true) {
-                        changed = true;
-                    }
-                } else {
-                    if reasoning_cell.set_hide_when_collapsed(false) {
-                        changed = true;
-                    }
+                let should_force =
+                    explore_should_hold_title(&self.history_state, explore_cell.record().id);
+                if explore_cell.set_force_exploring_header(should_force) {
+                    needs_invalidate = true;
                 }
             }
         }
 
-        if changed {
+        if needs_invalidate {
             self.invalidate_height_cache();
+            self.request_redraw();
         }
     }
 
@@ -5879,9 +5887,12 @@ impl ChatWidget<'_> {
             HistoryRecord::Patch(state) => {
                 Some(Box::new(history_cell::PatchSummaryCell::from_record(state.clone())))
             }
-            HistoryRecord::Explore(state) => Some(Box::new(
-                history_cell::ExploreAggregationCell::from_record(state.clone()),
-            )),
+            HistoryRecord::Explore(state) => {
+                let mut cell = history_cell::ExploreAggregationCell::from_record(state.clone());
+                let hold_title = explore_should_hold_title(&self.history_state, state.id);
+                cell.set_force_exploring_header(hold_title);
+                Some(Box::new(cell))
+            }
             HistoryRecord::RateLimits(state) => Some(Box::new(
                 history_cell::RateLimitsCell::from_record(state.clone()),
             )),
