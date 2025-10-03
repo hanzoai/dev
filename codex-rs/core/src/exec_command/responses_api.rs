@@ -12,6 +12,7 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
         "cmd".to_string(),
         JsonSchema::String {
             description: Some("The shell command to execute.".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -30,6 +31,7 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
         "shell".to_string(),
         JsonSchema::String {
             description: Some("The shell to use. Defaults to \"/bin/bash\".".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -49,7 +51,7 @@ pub fn create_exec_command_tool_for_responses_api() -> ResponsesApiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["cmd".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     }
 }
@@ -66,6 +68,7 @@ pub fn create_write_stdin_tool_for_responses_api() -> ResponsesApiTool {
         "chars".to_string(),
         JsonSchema::String {
             description: Some("The characters to write to stdin.".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -92,7 +95,7 @@ Can write control characters (\u0003 for Ctrl-C), or an empty string to just pol
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["session_id".to_string(), "chars".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     }
 }

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 
 use crate::token_data::TokenData;
 use crate::token_data::parse_id_token;
@@ -197,11 +197,19 @@ impl CodexAuth {
 }
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
+pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
 
 fn read_openai_api_key_from_env() -> Option<String> {
     env::var(OPENAI_API_KEY_ENV_VAR)
         .ok()
         .filter(|s| !s.is_empty())
+}
+
+pub fn read_codex_api_key_from_env() -> Option<String> {
+    env::var(CODEX_API_KEY_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn get_auth_file(codex_home: &Path) -> PathBuf {
@@ -777,6 +785,7 @@ pub struct AuthManager {
     codex_home: PathBuf,
     originator: String,
     inner: RwLock<CachedAuth>,
+    enable_codex_api_key_env: bool,
 }
 
 impl AuthManager {
@@ -785,16 +794,23 @@ impl AuthManager {
     /// simply return `None` in that case so callers can treat it as an
     /// unauthenticated state.
     pub fn new(codex_home: PathBuf, preferred_auth_mode: AuthMode, originator: String) -> Self {
-        let auth = CodexAuth::from_codex_home(&codex_home, preferred_auth_mode, &originator)
-            .ok()
-            .flatten();
+        let mut effective_mode = preferred_auth_mode;
+        let auth = if let Some(api_key) = read_codex_api_key_from_env() {
+            effective_mode = AuthMode::ApiKey;
+            Some(CodexAuth::from_api_key(&api_key))
+        } else {
+            CodexAuth::from_codex_home(&codex_home, preferred_auth_mode, &originator)
+                .ok()
+                .flatten()
+        };
         Self {
             codex_home,
             originator,
             inner: RwLock::new(CachedAuth {
-                preferred_auth_mode,
+                preferred_auth_mode: effective_mode,
                 auth,
             }),
+            enable_codex_api_key_env: true,
         }
     }
 
@@ -809,6 +825,7 @@ impl AuthManager {
             codex_home: PathBuf::new(),
             originator: "codex_cli_rs".to_string(),
             inner: RwLock::new(cached),
+            enable_codex_api_key_env: false,
         })
     }
 
@@ -829,12 +846,23 @@ impl AuthManager {
     /// whether the auth value changed.
     pub fn reload(&self) -> bool {
         let preferred = self.preferred_auth_method();
-        let new_auth = CodexAuth::from_codex_home(&self.codex_home, preferred, &self.originator)
-            .ok()
-            .flatten();
+        let env_auth = if self.enable_codex_api_key_env {
+            read_codex_api_key_from_env().map(|api_key| CodexAuth::from_api_key(&api_key))
+        } else {
+            None
+        };
+        let new_auth = env_auth.clone().or_else(|| {
+            CodexAuth::from_codex_home(&self.codex_home, preferred, &self.originator)
+                .ok()
+                .flatten()
+        });
         if let Ok(mut guard) = self.inner.write() {
             let changed = !AuthManager::auths_equal(&guard.auth, &new_auth);
             guard.auth = new_auth;
+            guard.preferred_auth_mode = env_auth
+                .as_ref()
+                .map(|auth| auth.mode)
+                .unwrap_or(preferred);
             changed
         } else {
             false

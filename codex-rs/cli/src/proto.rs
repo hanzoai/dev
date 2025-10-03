@@ -10,6 +10,7 @@ use codex_core::config::ConfigOverrides;
 use codex_core::protocol::Event;
 use codex_core::protocol::EventMsg;
 use codex_core::protocol::Submission;
+use codex_protocol::protocol::SessionSource;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tracing::error;
@@ -37,18 +38,19 @@ pub async fn run_main(opts: ProtoCli) -> anyhow::Result<()> {
 
     let config = Config::load_with_cli_overrides(overrides_vec, ConfigOverrides::default())?;
     // Use conversation_manager API to start a conversation
-    let conversation_manager = ConversationManager::new(
-        AuthManager::shared_with_mode_and_originator(
-            config.codex_home.clone(),
-            codex_login::AuthMode::ApiKey,
-            config.responses_originator_header.clone(),
-        ),
+    let auth_manager = AuthManager::shared_with_mode_and_originator(
+        config.codex_home.clone(),
+        codex_login::AuthMode::ApiKey,
+        config.responses_originator_header.clone(),
     );
+    let conversation_manager = ConversationManager::new(auth_manager.clone(), SessionSource::Cli);
     let NewConversation {
         conversation_id: _,
         conversation,
         session_configured,
-    } = conversation_manager.new_conversation(config).await?;
+    } = conversation_manager
+        .new_conversation(config.clone())
+        .await?;
 
     // Simulate streaming the session_configured event.
     let synthetic_event = Event {
