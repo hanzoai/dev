@@ -2373,6 +2373,33 @@ fn auto_start_post_turn_review_respects_auto_resolve_toggle() {
 }
 
 #[test]
+fn auto_resume_clears_review_flag_even_when_waiting_for_response() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_review = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.goal = Some("demo goal".to_string());
+
+    chat.auto_resolve_state = Some(AutoResolveState::new(
+        "Review workspace".to_string(),
+        "workspace".to_string(),
+        None,
+    ));
+
+    chat.auto_resolve_clear();
+
+    assert!(chat.auto_state.waiting_for_response);
+    assert!(
+        !chat.auto_state.waiting_for_review,
+        "auto drive should clear review wait flag even when still waiting for coordinator"
+    );
+}
+
+#[test]
 fn auto_blocks_until_auto_resolve_completes() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
     drop(rx);
