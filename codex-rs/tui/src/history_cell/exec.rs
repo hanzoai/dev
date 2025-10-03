@@ -575,6 +575,7 @@ impl ExecCell {
         let wait_state = self.wait_state_snapshot();
         let status_label = if wait_state.waiting { "Waiting" } else { "Running" };
 
+        let elapsed_since_start = self.elapsed_since_start();
         let (pre, mut out, status) = if self.parsed.is_empty() {
             self.exec_render_parts_generic(status_label)
         } else {
@@ -584,14 +585,14 @@ impl ExecCell {
                     meta,
                     self.output.as_ref(),
                     self.stream_preview.as_ref(),
-                    self.start_time,
+                    elapsed_since_start,
                     status_label,
                 ),
                 None => exec_render_parts_parsed(
                     &self.parsed,
                     self.output.as_ref(),
                     self.stream_preview.as_ref(),
-                    self.start_time,
+                    elapsed_since_start,
                     status_label,
                 ),
             }
@@ -740,6 +741,16 @@ impl ExecCell {
         highlighted_cmd
     }
 
+    fn elapsed_since_start(&self) -> Option<Duration> {
+        if !matches!(self.record.status, ExecStatus::Running) {
+            return None;
+        }
+        match SystemTime::now().duration_since(self.record.started_at) {
+            Ok(duration) => Some(duration),
+            Err(_) => self.start_time.map(|start| start.elapsed()),
+        }
+    }
+
     fn streaming_status_line_for_label(&self, status_label: &str) -> Option<Line<'static>> {
         if self.output.is_some() {
             return None;
@@ -747,8 +758,7 @@ impl ExecCell {
 
         if self.parsed.is_empty() {
             let mut message = format!("{status_label}...");
-            if let Some(start) = self.start_time {
-                let elapsed = start.elapsed();
+            if let Some(elapsed) = self.elapsed_since_start() {
                 if !elapsed.is_zero() {
                     message = format!("{message} ({})", format_duration(elapsed));
                 }
@@ -768,8 +778,7 @@ impl ExecCell {
             Some(p) => format!("{status_label}... in {p}"),
             None => format!("{status_label}..."),
         };
-        if let Some(start) = self.start_time {
-            let elapsed = start.elapsed();
+        if let Some(elapsed) = self.elapsed_since_start() {
             if !elapsed.is_zero() {
                 message = format!("{message} ({})", format_duration(elapsed));
             }
