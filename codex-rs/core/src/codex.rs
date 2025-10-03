@@ -3898,11 +3898,14 @@ async fn run_agent(sess: Arc<Session>, turn_context: Arc<TurnContext>, sub_id: S
         // review model, causing loops. Only include queued user inputs when not in
         // review mode. They will be picked up after TaskComplete via
         // pop_next_queued_user_input.
-        let pending_input = sess
-            .get_pending_input_filtered(!is_review_mode)
-            .into_iter()
-            .map(ResponseItem::from)
-            .collect::<Vec<ResponseItem>>();
+        let pending_input = if is_review_mode {
+            sess.get_pending_input_filtered(false)
+        } else {
+            sess.get_pending_input()
+        }
+        .into_iter()
+        .map(ResponseItem::from)
+        .collect::<Vec<ResponseItem>>();
         let mut pending_input_tail = pending_input.clone();
 
         if initial_response_item.is_none() {
