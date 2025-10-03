@@ -1052,7 +1052,7 @@ pub fn create_run_agent_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["task".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1074,7 +1074,7 @@ pub fn create_check_agent_status_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["agent_id".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1096,7 +1096,7 @@ pub fn create_get_agent_result_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["agent_id".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1130,7 +1130,7 @@ pub fn create_cancel_agent_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1181,7 +1181,7 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1219,7 +1219,7 @@ pub fn create_list_agents_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }

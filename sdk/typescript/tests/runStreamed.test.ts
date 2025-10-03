@@ -1,4 +1,4 @@
-import path from "path";
+import path from "node:path";
 
 import { describe, expect, it } from "@jest/globals";
 
@@ -23,7 +23,7 @@ describe("Codex", () => {
     });
 
     try {
-      const client = new Codex({ executablePath: codexExecPath, baseUrl: url, apiKey: "test" });
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
 
       const thread = client.startThread();
       const result = await thread.runStreamed("Hello, world!");
@@ -42,8 +42,7 @@ describe("Codex", () => {
       ]);
 
       const assistantMessage = events.find(
-        (event) =>
-          event.type === "item.completed" && event.item.item_type === "assistant_message",
+        (event) => event.type === "item.completed" && event.item.type === "agent_message",
       );
       expect(assistantMessage).toEqual(
         expect.objectContaining({
@@ -76,7 +75,7 @@ describe("Codex", () => {
     });
 
     try {
-      const client = new Codex({ executablePath: codexExecPath, baseUrl: url, apiKey: "test" });
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
 
       const thread = client.startThread();
       const firstRun = await thread.runStreamed("first input");
@@ -89,8 +88,7 @@ describe("Codex", () => {
       }
 
       const finalMessage = collected.find(
-        (event) =>
-          event.type === "item.completed" && event.item.item_type === "assistant_message",
+        (event) => event.type === "item.completed" && event.item.type === "agent_message",
       );
       expect(finalMessage).toEqual(
         expect.objectContaining({
@@ -123,7 +121,7 @@ describe("Codex", () => {
     });
 
     try {
-      const client = new Codex({ executablePath: codexExecPath, baseUrl: url, apiKey: "test" });
+      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
 
       const originalThread = client.startThread();
       const firstRun = await originalThread.runStreamed("first input");
@@ -138,8 +136,7 @@ describe("Codex", () => {
 
       expect(resumedThread.id).toBe(originalThread.id);
       const finalMessage = collected.find(
-        (event) =>
-          event.type === "item.completed" && event.item.item_type === "assistant_message",
+        (event) => event.type === "item.completed" && event.item.type === "agent_message",
       );
       expect(finalMessage).toEqual(
         expect.objectContaining({

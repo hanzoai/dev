@@ -1,7 +1,7 @@
 #![cfg(feature = "dev-faults")]
 
 use anyhow::anyhow;
-use codex_core::error::{CodexErr, UsageLimitReachedError};
+use codex_core::error::{CodexErr, UnexpectedResponseError, UsageLimitReachedError};
 use once_cell::sync::OnceCell;
 use rand::Rng;
 use std::collections::HashMap;
@@ -129,19 +129,26 @@ pub fn fault_to_error(fault: InjectedFault) -> anyhow::Error {
                 resets_in_seconds: Some(secs),
             })),
             Some(FaultReset::Timestamp(instant)) => {
-                let reset_at = chrono::Utc::now() + ChronoDuration::from_std(instant.saturating_duration_since(Instant::now())).unwrap_or_else(|_| ChronoDuration::seconds(0));
+                let reset_at = chrono::Utc::now()
+                    + ChronoDuration::from_std(instant.saturating_duration_since(Instant::now()))
+                        .unwrap_or_else(|_| ChronoDuration::seconds(0));
                 let body = json!({
                     "error": {
                         "reset_at": reset_at.to_rfc3339(),
                     }
                 })
                 .to_string();
-                anyhow!(CodexErr::UnexpectedStatus( StatusCode::TOO_MANY_REQUESTS, body ))
+                anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                    status: StatusCode::TOO_MANY_REQUESTS,
+                    body,
+                    request_id: None,
+                }))
             }
-            None => anyhow!(CodexErr::UnexpectedStatus(
-                StatusCode::TOO_MANY_REQUESTS,
-                json!({ "error": { "message": "fault injector 429" } }).to_string()
-            )),
+            None => anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                body: json!({ "error": { "message": "fault injector 429" } }).to_string(),
+                request_id: None,
+            })),
         },
     }
 }

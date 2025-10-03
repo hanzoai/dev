@@ -10,7 +10,7 @@ This document describes Codex’s experimental MCP interface: a JSON‑RPC API t
 
 ## Overview
 
-Codex exposes a small set of MCP‑compatible methods to create and manage conversations, send user input, receive live events, and handle approval prompts. The types are defined in `protocol/src/mcp_protocol.rs` and re‑used by the MCP server implementation in `mcp-server/`.
+Codex exposes a small set of MCP‑compatible methods to create and manage conversations, send user input, receive live events, and handle approval prompts. The types are defined in `app-server-protocol/src/protocol.rs` and re-used by the MCP server implementation in `mcp-server/`.
 
 At a glance:
 
@@ -31,7 +31,7 @@ At a glance:
   - `loginChatGptComplete`, `authStatusChange`
   - `codex/event` stream with agent events
 
-See code for full type definitions and exact shapes: `protocol/src/mcp_protocol.rs`.
+See code for full type definitions and exact shapes: `app-server-protocol/src/protocol.rs`.
 
 ## Starting the server
 
@@ -123,4 +123,4 @@ While processing, the server emits `codex/event` notifications containing agent 
 
 ## Compatibility and stability
 
-This interface is experimental. Method names, fields, and event shapes may evolve. For the authoritative schema, consult `protocol/src/mcp_protocol.rs` and the corresponding server wiring in `mcp-server/`.
+This interface is experimental. Method names, fields, and event shapes may evolve. For the authoritative schema, consult `app-server-protocol/src/protocol.rs` and the corresponding server wiring in `mcp-server/`.

@@ -44,6 +44,7 @@ use codex_core::auth_accounts::{self, StoredAccount};
 use codex_login::AuthManager;
 use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::num_format::format_with_separators;
 
 
@@ -1601,7 +1602,10 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             let mut codex_op_rx = codex_op_rx;
-            let conversation_manager = ConversationManager::new(auth_manager.clone());
+            let conversation_manager = ConversationManager::new(
+                auth_manager.clone(),
+                SessionSource::Cli,
+            );
             let resume_path = config.experimental_resume.clone();
             let new_conversation = match resume_path {
                 Some(path) => conversation_manager

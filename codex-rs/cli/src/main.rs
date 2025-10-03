@@ -14,7 +14,6 @@ use codex_cli::login::run_login_with_api_key;
 use codex_cli::login::run_login_with_chatgpt;
 use codex_cli::login::run_login_with_device_code;
 use codex_cli::login::run_logout;
-use codex_cli::proto;
 mod llm;
 use llm::{LlmCli, run_llm};
 use codex_common::CliConfigOverrides;
@@ -34,7 +33,6 @@ use tokio::runtime::{Builder as TokioRuntimeBuilder, Handle as TokioHandle};
 mod mcp_cmd;
 
 use crate::mcp_cmd::McpCli;
-use crate::proto::ProtoCli;
 
 const CLI_COMMAND_NAME: &str = "code";
 pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
@@ -105,10 +103,6 @@ enum Subcommand {
 
     /// [experimental] Run the app server.
     AppServer,
-
-    /// Run the Protocol stream via stdin/stdout
-    #[clap(visible_alias = "p")]
-    Proto(ProtoCli),
 
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
@@ -380,13 +374,6 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
             );
             run_logout(logout_cli.config_overrides).await;
         }
-        Some(Subcommand::Proto(mut proto_cli)) => {
-            prepend_config_flags(
-                &mut proto_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
-            proto::run_main(proto_cli).await?;
-        }
         Some(Subcommand::Completion(completion_cli)) => {
             print_completion(completion_cli);
         }
@@ -591,7 +578,7 @@ fn resolve_resume_path(session_id: Option<&str>, last: bool) -> anyhow::Result<O
                 .context("failed to look up session by id")?;
             Ok(maybe)
         } else if last {
-            let page = RolloutRecorder::list_conversations(&codex_home, 1, None)
+            let page = RolloutRecorder::list_conversations(&codex_home, 1, None, &[])
                 .await
                 .context("failed to list recorded sessions")?;
             Ok(page.items.first().map(|it| it.path.clone()))

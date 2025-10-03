@@ -18,6 +18,7 @@ use codex_core::protocol::EventMsg;
 use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::TaskCompleteEvent;
+use codex_protocol::protocol::SessionSource;
 use codex_ollama::DEFAULT_OSS_MODEL;
 use codex_protocol::config_types::SandboxMode;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
@@ -219,11 +220,12 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         std::process::exit(1);
     }
 
-    let conversation_manager = ConversationManager::new(AuthManager::shared_with_mode_and_originator(
+    let auth_manager = AuthManager::shared_with_mode_and_originator(
         config.codex_home.clone(),
         codex_protocol::mcp_protocol::AuthMode::ApiKey,
         config.responses_originator_header.clone(),
-    ));
+    );
+    let conversation_manager = ConversationManager::new(auth_manager.clone(), SessionSource::Exec);
 
     // Handle resume subcommand by resolving a rollout path and using explicit resume API.
     let NewConversation {
@@ -235,22 +237,19 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
 
         if let Some(path) = resume_path {
             conversation_manager
-                .resume_conversation_from_rollout(
-                    config.clone(),
-                    path,
-                    AuthManager::shared_with_mode_and_originator(
-                        config.codex_home.clone(),
-                        codex_protocol::mcp_protocol::AuthMode::ApiKey,
-                        config.responses_originator_header.clone(),
-                    ),
-                )
+                .resume_conversation_from_rollout(config.clone(), path, auth_manager.clone())
                 .await?
         } else {
-            conversation_manager.new_conversation(config).await?
+            conversation_manager
+                .new_conversation(config.clone())
+                .await?
         }
     } else {
-        conversation_manager.new_conversation(config).await?
+        conversation_manager
+            .new_conversation(config.clone())
+            .await?
     };
+    event_processor.print_config_summary(&config, &prompt);
     info!("Codex initialized with event: {session_configured:?}");
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
@@ -353,7 +352,7 @@ async fn resolve_resume_path(
     args: &crate::cli::ResumeArgs,
 ) -> anyhow::Result<Option<PathBuf>> {
     if args.last {
-        match codex_core::RolloutRecorder::list_conversations(&config.codex_home, 1, None).await {
+        match codex_core::RolloutRecorder::list_conversations(&config.codex_home, 1, None, &[]).await {
             Ok(page) => Ok(page.items.first().map(|it| it.path.clone())),
             Err(e) => {
                 error!("Error listing conversations: {e}");

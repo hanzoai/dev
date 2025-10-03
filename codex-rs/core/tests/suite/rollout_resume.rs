@@ -1,7 +1,8 @@
 use codex_core::protocol::{event_msg_to_protocol, AgentMessageEvent, EventMsg, RecordedEvent};
 use codex_core::rollout::RolloutRecorder;
 use codex_core::rollout::recorder::RolloutRecorderParams;
-use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::ConversationId;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::models::{ContentItem, ResponseItem};
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -14,8 +15,11 @@ async fn resume_restores_recorded_events() {
     let mut config = load_default_config_for_test(&codex_home);
     config.cwd = codex_home.path().to_path_buf();
 
-    let conversation_id = ConversationId(Uuid::new_v4());
-    let recorder = RolloutRecorder::new(&config, RolloutRecorderParams::new(conversation_id, None))
+    let conversation_id = ConversationId::from(Uuid::new_v4());
+    let recorder = RolloutRecorder::new(
+        &config,
+        RolloutRecorderParams::new(conversation_id, None, SessionSource::Cli),
+    )
         .await
         .expect("create recorder");
 
