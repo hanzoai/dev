@@ -9,7 +9,7 @@ use codex_core::ModelProviderInfo;
 use codex_core::AuthManager;
 use codex_core::Prompt;
 use codex_core::TextFormat;
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use codex_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
 

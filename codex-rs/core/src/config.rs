@@ -42,7 +42,7 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use crate::config_types::ReasoningSummary;
 use crate::project_features::{load_project_commands, ProjectCommand, ProjectHooks};
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use codex_protocol::config_types::SandboxMode;
 use std::time::Duration;
 use dirs::home_dir;
@@ -219,6 +219,9 @@ pub struct Config {
 
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: usize,
+
+    /// Ordered list of fallback filenames to consider when loading project docs.
+    pub project_doc_fallback_filenames: Vec<String>,
 
     /// Directory containing all Codex state (defaults to `~/.code`; can be
     /// overridden by the `CODE_HOME` or `CODEX_HOME` environment variables).
@@ -1617,6 +1620,9 @@ pub struct ConfigToml {
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: Option<usize>,
 
+    /// Ordered list of fallback filenames to look for when AGENTS.md is missing.
+    pub project_doc_fallback_filenames: Option<Vec<String>>,
+
     /// Profile to use from the `profiles` map.
     pub profile: Option<String>,
 
@@ -2161,6 +2167,19 @@ impl Config {
             agents,
             model_providers,
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
+            project_doc_fallback_filenames: cfg
+                .project_doc_fallback_filenames
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|name| {
+                    let trimmed = name.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                })
+                .collect(),
             codex_home,
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
@@ -2239,7 +2258,7 @@ impl Config {
 
     /// Check if we're using ChatGPT authentication
     fn is_using_chatgpt_auth(codex_home: &Path) -> bool {
-        use codex_protocol::mcp_protocol::AuthMode;
+        use codex_app_server_protocol::AuthMode;
         use crate::CodexAuth;
         
         // Prefer ChatGPT when both ChatGPT tokens and an API key are present.
@@ -2896,6 +2915,7 @@ model_verbosity = "high"
                 experimental_client_tools: None,
                 model_providers: fixture.model_provider_map.clone(),
                 project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
+                project_doc_fallback_filenames: Vec::new(),
                 codex_home: fixture.codex_home(),
                 history: History::default(),
                 file_opener: UriBasedFileOpener::VsCode,
@@ -2969,6 +2989,7 @@ model_verbosity = "high"
             experimental_client_tools: None,
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
+            project_doc_fallback_filenames: Vec::new(),
             codex_home: fixture.codex_home(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
@@ -3057,6 +3078,7 @@ model_verbosity = "high"
             experimental_client_tools: None,
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
+            project_doc_fallback_filenames: Vec::new(),
             codex_home: fixture.codex_home(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,
@@ -3130,6 +3152,7 @@ model_verbosity = "high"
             experimental_client_tools: None,
             model_providers: fixture.model_provider_map.clone(),
             project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
+            project_doc_fallback_filenames: Vec::new(),
             codex_home: fixture.codex_home(),
             history: History::default(),
             file_opener: UriBasedFileOpener::VsCode,

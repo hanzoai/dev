@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::AuthManager;
 use bytes::Bytes;
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use codex_protocol::models::ResponseItem;
 use eventsource_stream::Eventsource;
 use futures::prelude::*;
@@ -39,6 +39,8 @@ use crate::debug_logger::DebugLogger;
 use crate::default_client::create_client;
 use crate::error::CodexErr;
 use crate::error::Result;
+use crate::error::RetryLimitReachedError;
+use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_family::ModelFamily;
@@ -509,7 +511,11 @@ impl ModelClient {
                             );
                             let _ = logger.end_request_log(&request_id);
                         }
-                        return Err(CodexErr::UnexpectedStatus(status, body_text));
+                        return Err(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+                            status,
+                            body: body_text,
+                            request_id: None,
+                        }));
                     }
 
                     if status == StatusCode::TOO_MANY_REQUESTS {
@@ -589,7 +595,10 @@ impl ModelClient {
                             return Err(CodexErr::ServerError(msg));
                         }
 
-                        return Err(CodexErr::RetryLimit(status));
+                        return Err(CodexErr::RetryLimit(RetryLimitReachedError {
+                            status,
+                            request_id: None,
+                        }));
                     }
 
                     let delay = retry_after_secs

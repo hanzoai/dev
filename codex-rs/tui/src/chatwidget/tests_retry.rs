@@ -2,7 +2,7 @@ use super::auto_coordinator::test_classify_model_error;
 use super::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions, RetryStatus};
 use anyhow::{anyhow, Error};
 use chrono::{Duration as ChronoDuration, Utc};
-use codex_core::error::{CodexErr, UsageLimitReachedError};
+use codex_core::error::{CodexErr, UnexpectedResponseError, UsageLimitReachedError};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reqwest::StatusCode;
 use serde_json::json;
@@ -128,10 +128,11 @@ async fn retry_respects_reset_seconds_rate_limit() {
         }
     })
     .to_string();
-    let rate_limit_err = anyhow!(CodexErr::UnexpectedStatus(
-        StatusCode::TOO_MANY_REQUESTS,
-        body
-    ));
+    let rate_limit_err = anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        body,
+        request_id: None,
+    }));
 
     let attempts = Arc::new(Mutex::new(VecDeque::from([
         Err(rate_limit_err),
@@ -194,10 +195,11 @@ async fn retry_respects_reset_at_rate_limit() {
         }
     })
     .to_string();
-    let rate_limit_err = anyhow!(CodexErr::UnexpectedStatus(
-        StatusCode::TOO_MANY_REQUESTS,
-        body
-    ));
+    let rate_limit_err = anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        body,
+        request_id: None,
+    }));
 
     let attempts = Arc::new(Mutex::new(VecDeque::from([
         Err(rate_limit_err),
@@ -251,10 +253,11 @@ async fn retry_rate_limit_without_reset_falls_back_to_backoff() {
     };
 
     let body = json!({ "error": { "message": "slow down" } }).to_string();
-    let rate_limit_err = anyhow!(CodexErr::UnexpectedStatus(
-        StatusCode::TOO_MANY_REQUESTS,
-        body
-    ));
+    let rate_limit_err = anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        body,
+        request_id: None,
+    }));
 
     let attempts = Arc::new(Mutex::new(VecDeque::from([
         Err(rate_limit_err),
@@ -346,4 +349,3 @@ async fn retry_cancellation_interrupts_sleep() {
     let result = task.await.unwrap();
     assert!(matches!(result, Err(RetryError::Aborted)));
 }
-
