@@ -35,13 +35,18 @@ fn parse_powershell_invocation(args: &[String]) -> Option<Vec<Vec<String>>> {
         let lower = arg.to_ascii_lowercase();
         match lower.as_str() {
             "-command" | "/command" | "-c" => {
-                let script = args.get(idx + 1)?;
-                if idx + 2 != args.len() {
-                    // Reject if there is more than one token representing the actual command.
-                    // Examples rejected here: "pwsh -Command foo bar" and "powershell -c ls extra".
+                let script_args = args.get(idx + 1..)?;
+                if script_args.is_empty() {
                     return None;
                 }
-                return parse_powershell_script(script);
+
+                if script_args.len() == 1 {
+                    if let Some(commands) = parse_powershell_script(&script_args[0]) {
+                        return Some(commands);
+                    }
+                }
+
+                return split_into_commands(script_args.to_vec());
             }
             _ if lower.starts_with("-command:") || lower.starts_with("/command:") => {
                 if idx + 1 != args.len() {
@@ -331,6 +336,14 @@ mod tests {
             "powershell.exe",
             "Get-Content",
             "Cargo.toml",
+        ])));
+
+        assert!(is_safe_command_windows(&vec_str(&[
+            "powershell.exe",
+            "-Command",
+            "Get-ChildItem",
+            "-Path",
+            ".",
         ])));
 
         // pwsh parity
