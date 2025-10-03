@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::fs::OpenOptions;

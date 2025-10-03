@@ -2,45 +2,78 @@ import { CodexOptions } from "./codexOptions";
 import { ThreadEvent } from "./events";
 import { CodexExec } from "./exec";
 import { ThreadItem } from "./items";
-import { TurnOptions } from "./turnOptions";
+import { ThreadOptions } from "./threadOptions";
 
-export type RunResult = {
+/** Completed turn. */
+export type Turn = {
   items: ThreadItem[];
   finalResponse: string;
 };
 
-export type RunStreamedResult = {
+/** Alias for `Turn` to describe the result of `run()`. */
+export type RunResult = Turn;
+
+/** The result of the `runStreamed` method. */
+export type StreamedTurn = {
   events: AsyncGenerator<ThreadEvent>;
 };
 
+/** Alias for `StreamedTurn` to describe the result of `runStreamed()`. */
+export type RunStreamedResult = StreamedTurn;
+
+/** An input to send to the agent. */
 export type Input = string;
 
+/** Respesent a thread of conversation with the agent. One thread can have multiple consecutive turns. */
 export class Thread {
-  private exec: CodexExec;
-  private options: CodexOptions;
-  public id: string | null;
+  private _exec: CodexExec;
+  private _options: CodexOptions;
+  private _id: string | null;
+  private _threadOptions: ThreadOptions;
 
-  constructor(exec: CodexExec, options: CodexOptions, id: string | null = null) {
-    this.exec = exec;
-    this.options = options;
-    this.id = id;
+  /** Returns the ID of the thread. Populated after the first turn starts. */
+  public get id(): string | null {
+    return this._id;
   }
 
-  async runStreamed(input: string, options?: TurnOptions): Promise<RunStreamedResult> {
+  /* @internal */
+  constructor(
+    exec: CodexExec,
+    options: CodexOptions,
+    threadOptions: ThreadOptions,
+    id: string | null = null,
+  ) {
+    this._exec = exec;
+    this._options = options;
+    this._id = id;
+    this._threadOptions = threadOptions;
+  }
+
+  /** Provides the input to the agent and streams events as they are produced during the turn. */
+  async runStreamed(input: string, options?: ThreadOptions): Promise<StreamedTurn> {
     return { events: this.runStreamedInternal(input, options) };
   }
 
   private async *runStreamedInternal(
     input: string,
-    options?: TurnOptions,
+    options?: ThreadOptions,
   ): AsyncGenerator<ThreadEvent> {
-    const generator = this.exec.run({
+    const mergedOptions = {
+      ...this._threadOptions,
+      ...options,
+    };
+    if (options) {
+      this._threadOptions = { ...mergedOptions };
+    }
+    const generator = this._exec.run({
       input,
-      baseUrl: this.options.baseUrl,
-      apiKey: this.options.apiKey,
-      threadId: this.id,
-      model: options?.model,
-      sandboxMode: options?.sandboxMode,
+      baseUrl: this._options.baseUrl,
+      apiKey: this._options.apiKey,
+      threadId: this._id,
+      model: mergedOptions?.model,
+      sandboxMode: mergedOptions?.sandboxMode,
+      workingDirectory: mergedOptions?.workingDirectory,
+      skipGitRepoCheck: mergedOptions?.skipGitRepoCheck,
     });
 
     for await (const item of generator) {
@@ -58,20 +91,21 @@ export class Thread {
 
       for (const event of threadEvents) {
         if (event.type === "thread.started") {
-          this.id = event.thread_id;
+          this._id = event.thread_id;
         }
         yield event;
       }
     }
   }
 
-  async run(input: string, options?: TurnOptions): Promise<RunResult> {
+  /** Provides the input to the agent and returns the completed turn. */
+  async run(input: string, options?: ThreadOptions): Promise<Turn> {
     const generator = this.runStreamedInternal(input, options);
     const items: ThreadItem[] = [];
     let finalResponse: string = "";
     for await (const event of generator) {
       if (event.type === "item.completed") {
-        if (event.item.item_type === "assistant_message") {
+        if (event.item.type === "agent_message") {
           finalResponse = event.item.text;
         }
         items.push(event.item);
@@ -117,7 +151,7 @@ function mapCliEventToThreadEvents(
       const text = typeof msg?.text === "string" ? (msg.text as string) : "";
       const reasoningItem: ThreadItem = {
         id: extractEventId(event),
-        item_type: "reasoning",
+        type: "reasoning",
         text,
       };
       return [
@@ -131,7 +165,7 @@ function mapCliEventToThreadEvents(
       const message = typeof msg?.message === "string" ? (msg.message as string) : "";
       const assistantItem: ThreadItem = {
         id: extractEventId(event),
-        item_type: "assistant_message",
+        type: "agent_message",
         text: message,
       };
       return [

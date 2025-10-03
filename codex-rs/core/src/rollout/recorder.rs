@@ -6,9 +6,10 @@ use std::io::Error as IoError;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::ConversationId;
+use codex_protocol::protocol::SessionSource;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde::{Serialize, Deserialize};
 use time::OffsetDateTime;
 use time::format_description::FormatItem;
 use time::macros::format_description;
@@ -20,13 +21,15 @@ use tracing::info;
 use tracing::warn;
 
 use super::SESSIONS_SUBDIR;
+use super::list::get_conversations;
 use super::list::ConversationsPage;
 use super::list::Cursor;
-use super::list::get_conversations;
 use super::policy::{should_persist_response_item, should_persist_rollout_item};
 use crate::config::Config;
 use crate::default_client::DEFAULT_ORIGINATOR;
 use crate::git_info::collect_git_info;
+use crate::history::HistorySnapshot;
+use crate::protocol::event_msg_from_protocol;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::ResumedHistory;
 use codex_protocol::protocol::RolloutItem;
@@ -44,7 +47,7 @@ pub struct SavedSession {
     #[serde(default)]
     pub items: Vec<RolloutItem>,
     #[serde(default)]
-    pub history_snapshot: Option<crate::history::HistorySnapshot>,
+    pub history_snapshot: Option<HistorySnapshot>,
     #[serde(default)]
     pub state: SessionStateSnapshot,
     pub session_id: uuid::Uuid,
@@ -70,6 +73,7 @@ pub enum RolloutRecorderParams {
     Create {
         conversation_id: ConversationId,
         instructions: Option<String>,
+        source: SessionSource,
     },
     Resume {
         path: PathBuf,
@@ -83,10 +87,15 @@ enum RolloutCmd {
 }
 
 impl RolloutRecorderParams {
-    pub fn new(conversation_id: ConversationId, instructions: Option<String>) -> Self {
+    pub fn new(
+        conversation_id: ConversationId,
+        instructions: Option<String>,
+        source: SessionSource,
+    ) -> Self {
         Self::Create {
             conversation_id,
             instructions,
+            source,
         }
     }
 
@@ -95,13 +104,13 @@ impl RolloutRecorderParams {
 
 impl RolloutRecorder {
     /// List conversations (rollout files) under the provided Codex home directory.
-    #[allow(dead_code)]
     pub async fn list_conversations(
         codex_home: &Path,
         page_size: usize,
         cursor: Option<&Cursor>,
+        allowed_sources: &[SessionSource],
     ) -> std::io::Result<ConversationsPage> {
-        get_conversations(codex_home, page_size, cursor).await
+        get_conversations(codex_home, page_size, cursor, allowed_sources).await
     }
 
     /// Attempt to create a new [`RolloutRecorder`]. If the sessions directory
@@ -112,6 +121,7 @@ impl RolloutRecorder {
             RolloutRecorderParams::Create {
                 conversation_id,
                 instructions,
+                source,
             } => {
                 let LogFileInfo {
                     file,
@@ -138,6 +148,7 @@ impl RolloutRecorder {
                         originator: DEFAULT_ORIGINATOR.to_string(),
                         cli_version: env!("CARGO_PKG_VERSION").to_string(),
                         instructions,
+                        source,
                     }),
                 )
             }
@@ -210,11 +221,17 @@ impl RolloutRecorder {
         if events.is_empty() {
             return Ok(());
         }
-        let filtered = events
-            .iter()
-            .cloned()
-            .map(RolloutItem::Event)
-            .collect::<Vec<_>>();
+        let mut filtered = Vec::new();
+        for event in events {
+            if event_msg_from_protocol(&event.msg)
+                .is_some_and(|msg| crate::rollout::policy::should_persist_event_msg(&msg))
+            {
+                filtered.push(RolloutItem::Event(event.clone()));
+            }
+        }
+        if filtered.is_empty() {
+            return Ok(());
+        }
         self.tx
             .send(RolloutCmd::AddItems(filtered))
             .await

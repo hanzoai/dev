@@ -274,11 +274,11 @@ fn build_observer_prompt(trigger: &ObserverTrigger, model_slug: &str) -> Prompt 
 fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         if let Some(codex_err) = cause.downcast_ref::<CodexErr>() {
-            if let CodexErr::UnexpectedStatus(status, body) = codex_err {
-                if !status.is_client_error() {
+            if let CodexErr::UnexpectedStatus(err) = codex_err {
+                if !err.status.is_client_error() {
                     return false;
                 }
-                let body_lower = body.to_lowercase();
+                let body_lower = err.body.to_lowercase();
                 return body_lower.contains("invalid model")
                     || body_lower.contains("unknown model")
                     || body_lower.contains("model_not_found")

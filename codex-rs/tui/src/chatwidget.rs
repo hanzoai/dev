@@ -44,6 +44,7 @@ use codex_core::auth_accounts::{self, StoredAccount};
 use codex_login::AuthManager;
 use codex_login::AuthMode;
 use codex_protocol::mcp_protocol::AuthMode as McpAuthMode;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::num_format::format_with_separators;
 
 
@@ -1601,7 +1602,10 @@ impl ChatWidget<'_> {
 
         tokio::spawn(async move {
             let mut codex_op_rx = codex_op_rx;
-            let conversation_manager = ConversationManager::new(auth_manager.clone());
+            let conversation_manager = ConversationManager::new(
+                auth_manager.clone(),
+                SessionSource::Cli,
+            );
             let resume_path = config.experimental_resume.clone();
             let new_conversation = match resume_path {
                 Some(path) => conversation_manager
@@ -18863,15 +18867,38 @@ impl ChatWidget<'_> {
 
         match status.as_str() {
             "no_issue" => {
-                if rationale.trim().is_empty() {
-                    self.auto_resolve_notice("Auto-resolve: agent reported no remaining issues. Done.");
+                let rationale_text = rationale.trim();
+                let attempt_limit_reached = self
+                    .auto_resolve_state
+                    .as_ref()
+                    .is_some_and(|state| state.attempt >= state.max_attempts);
+
+                if attempt_limit_reached {
+                    if rationale_text.is_empty() {
+                        self.auto_resolve_notice(
+                            "Auto-resolve: agent reported no remaining issues but hit the review attempt limit. Please inspect manually.".to_string(),
+                        );
+                    } else {
+                        self.auto_resolve_notice(format!(
+                            "Auto-resolve: no remaining issues. {rationale_text} Attempt limit reached; handing control back to you."
+                        ));
+                    }
+                    self.auto_resolve_clear();
                 } else {
-                    let rationale_text = rationale.trim();
-                    self.auto_resolve_notice(format!(
-                        "Auto-resolve: no remaining issues. {rationale_text}"
-                    ));
+                    if rationale_text.is_empty() {
+                        self.auto_resolve_notice(
+                            "Auto-resolve: agent reported no remaining issues. Running follow-up /review to confirm.".to_string(),
+                        );
+                    } else {
+                        self.auto_resolve_notice(format!(
+                            "Auto-resolve: no remaining issues. {rationale_text} Running follow-up /review to confirm."
+                        ));
+                    }
+                    if let Some(state) = self.auto_resolve_state.as_mut() {
+                        state.phase = AutoResolvePhase::WaitingForReview;
+                    }
+                    self.restart_auto_resolve_review();
                 }
-                self.auto_resolve_clear();
             }
             "continue_fix" => {
                 if let Some(state) = self.auto_resolve_state.as_mut() {
