@@ -111,6 +111,7 @@ pub(crate) use diff::{
 };
 pub(crate) use explore::{
     explore_lines_from_record,
+    explore_lines_from_record_with_force,
     explore_record_push_from_parsed,
     explore_record_update_status,
     ExploreAggregationCell,
