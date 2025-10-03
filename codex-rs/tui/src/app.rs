@@ -25,6 +25,7 @@ use codex_core::ConversationManager;
 use codex_login::{AuthManager, AuthMode, ServerOptions};
 use codex_cloud_tasks_client::TaskId;
 use codex_cloud_tasks_client::CloudTaskError;
+use codex_protocol::protocol::SessionSource;
 use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -208,11 +209,15 @@ impl App<'_> {
         startup_footer_notice: Option<String>,
         latest_upgrade_version: Option<String>,
     ) -> Self {
-        let conversation_manager = Arc::new(ConversationManager::new(AuthManager::shared_with_mode_and_originator(
+        let auth_manager = AuthManager::shared_with_mode_and_originator(
             config.codex_home.clone(),
             AuthMode::ApiKey,
             config.responses_originator_header.clone(),
-        )));
+        );
+        let conversation_manager = Arc::new(ConversationManager::new(
+            auth_manager.clone(),
+            SessionSource::Cli,
+        ));
 
         // Split queues so interactive input never waits behind bulk updates.
         let (high_tx, app_event_rx_high) = channel();

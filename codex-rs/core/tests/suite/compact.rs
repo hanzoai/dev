@@ -44,7 +44,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use chrono::Utc;
-use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::ConversationId;
 // --- Test helpers -----------------------------------------------------------
 
 pub(super) const FIRST_REPLY: &str = "FIRST_REPLY";
