@@ -8266,7 +8266,7 @@ async fn handle_container_exec_with_params(
         apply_patch: None,
     };
 
-    let display_label = exec_command_context.command_for_display.join(" ");
+    let display_label = crate::util::strip_bash_lc_and_escape(&exec_command_context.command_for_display);
     let params = maybe_run_with_user_profile(params, sess);
 
     // Prepare tail buffer and background registry entry
@@ -8396,7 +8396,7 @@ async fn handle_container_exec_with_params(
                 let message = if label.is_empty() {
                     format!("Background shell '{}' completed.", call_id_for_events)
                 } else {
-                    format!("{} completed in background", display_label_task.clone())
+                    format!("{label} completed in background")
                 };
                 let bg_event = EventMsg::BackgroundEvent(BackgroundEventEvent { message });
                 let ev = Event { id: sub_id_for_events.clone(), event_seq: 0, msg: bg_event, order: None };
