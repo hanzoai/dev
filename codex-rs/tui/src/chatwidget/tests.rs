@@ -24,7 +24,7 @@ use crate::history::state::{
     ToolStatus,
 };
 use crate::slash_command::SlashCommand;
-use super::auto_coordinator::AutoCoordinatorHandle;
+use super::auto_coordinator::{AutoCoordinatorCommand, AutoCoordinatorHandle, TurnConfig};
 use super::auto_observer::build_observer_conversation;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
@@ -64,6 +64,8 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::StreamErrorEvent;
 use codex_core::protocol::TaskCompleteEvent;
+use codex_core::protocol::ReviewOutputEvent;
+use codex_core::protocol::ReviewRequest;
 use codex_protocol::models::{ContentItem, ResponseItem};
 use mcp_types::CallToolResult;
 use crossterm::event::KeyCode;
@@ -77,7 +79,7 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, TryRecvError};
 use std::time::Duration;
 use tokio::sync::mpsc::unbounded_channel;
 use strip_ansi_escapes::strip as strip_ansi_bytes;
@@ -1894,6 +1896,63 @@ fn agents_terminal_toggle_via_shortcuts() {
 }
 
 #[test]
+fn spinner_clears_after_cancelled_agent() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Simulate a new turn so the footer switches into running mode.
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    assert!(
+        chat.bottom_pane.is_task_running(),
+        "sanity: task spinner should be active after TaskStarted",
+    );
+
+    // Agent batch reports a single cancelled agent (no completions).
+    let cancelled_update = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "code".into(),
+            status: "cancelled".into(),
+            batch_id: Some("batch-123".into()),
+            model: Some("code".into()),
+            last_progress: Some("12:15:41: cancelled".into()),
+            result: None,
+            error: Some("user cancelled".into()),
+        }],
+        context: Some("Cancelled turn".into()),
+        task: Some("investigate spinner".into()),
+    };
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentStatusUpdate(cancelled_update),
+    });
+
+    // Backend reports the turn as complete even though the agent was cancelled.
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    // Drain any queued UI work to keep the test aligned with runtime behavior.
+    let _ = pump_app_events(&mut chat, &rx);
+
+    assert!(
+        !chat.bottom_pane.is_task_running(),
+        "spinner should clear when the only agent finished in a cancelled state",
+    );
+    assert!(
+        chat.bottom_pane.composer.status_message().is_none(),
+        "status label should be empty once the footer stops running",
+    );
+}
+
+#[test]
 fn agents_terminal_focus_and_scroll_controls() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
     chat.prepare_agents();
@@ -2208,6 +2267,83 @@ fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(_) => out,
     }
+}
+
+#[test]
+fn auto_waits_for_review_before_continuing() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.goal = Some("demo goal".to_string());
+
+    let (tx, auto_rx) = channel();
+    chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
+    chat.pending_auto_turn_config = Some(TurnConfig {
+        read_only: false,
+        complexity: None,
+    });
+
+    chat.auto_on_assistant_final();
+
+    assert!(chat.auto_state.waiting_for_review, "auto drive should pause for review");
+    assert!(
+        !chat.auto_state.waiting_for_response,
+        "auto drive should stop waiting on coordinator"
+    );
+    assert!(matches!(auto_rx.try_recv(), Err(TryRecvError::Empty)));
+
+    chat.handle_codex_event(Event {
+        id: "auto-turn".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    chat.handle_codex_event(Event {
+        id: "auto-review".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::EnteredReviewMode(ReviewRequest {
+            prompt: "workspace prompt".to_string(),
+            user_facing_hint: "workspace".to_string(),
+            metadata: None,
+        }),
+    });
+
+    assert!(
+        chat.auto_state.waiting_for_review,
+        "auto drive should stay paused while review runs"
+    );
+
+    chat.handle_codex_event(Event {
+        id: "auto-review".into(),
+        event_seq: 1,
+        order: None,
+        msg: EventMsg::ExitedReviewMode(Some(ReviewOutputEvent::default())),
+    });
+
+    let command = auto_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("auto drive should resume after review finishes");
+    match command {
+        AutoCoordinatorCommand::UpdateConversation(_) => {}
+        other => panic!("unexpected auto coordinator command: {:?}", other),
+    }
+
+    assert!(
+        chat.auto_state.waiting_for_response,
+        "auto drive should wait for coordinator after resuming"
+    );
+    assert!(
+        !chat.auto_state.waiting_for_review,
+        "auto drive should clear review wait flag after resuming"
+    );
 }
 
 fn open_fixture(name: &str) -> std::fs::File {
@@ -3135,6 +3271,35 @@ fn status_widget_active_snapshot() {
         .draw(|f| f.render_widget_ref(&chat, f.area()))
         .expect("draw status widget");
     assert_snapshot!("status_widget_active", terminal.backend());
+}
+
+#[test]
+fn fallback_lines_skip_custom_render_patch_cells() {
+    let (chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "one\ntwo\nthree".to_string(),
+        },
+    );
+
+    let record = PatchRecord {
+        id: HistoryId::ZERO,
+        patch_type: HistoryPatchEventType::ApplySuccess,
+        changes,
+        failure: None,
+    };
+
+    let cell: Box<dyn HistoryCell> =
+        Box::new(history_cell::PatchSummaryCell::from_record(record.clone()));
+    assert!(
+        chat
+            .fallback_lines_for_record(cell.as_ref(), &HistoryRecord::Patch(record))
+            .is_none(),
+        "expected custom-render patch cell to skip fallback lines",
+    );
 }
 
 #[test]
