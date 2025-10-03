@@ -295,6 +295,15 @@ async fn process_request(
     }
 }
 
+/// tiny_http filters `Connection` headers out of `Response` objects, so using
+/// `req.respond` never informs the client (or the library) that a keep-alive
+/// socket should be closed. That leaves the per-connection worker parked in a
+/// loop waiting for more requests, which in turn causes the next login attempt
+/// to hang on the old connection. This helper bypasses tiny_http’s response
+/// machinery: it extracts the raw writer, prints the HTTP response manually,
+/// and always appends `Connection: close`, ensuring the socket is closed from
+/// the server side. Ideally, tiny_http would provide an API to control
+/// server-side connection persistence, but it does not.
 fn build_authorize_url(
     issuer: &str,
     client_id: &str,

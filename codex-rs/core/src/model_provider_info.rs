@@ -7,7 +7,7 @@
 //!      key. These override or extend the defaults at runtime.
 
 use crate::CodexAuth;
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;

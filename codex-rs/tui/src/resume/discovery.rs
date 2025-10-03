@@ -3,6 +3,7 @@ use codex_protocol::models::{ContentItem, ResponseItem};
 use codex_protocol::protocol::{RolloutItem, RolloutLine};
 use codex_core::Cursor;
 use codex_core::RolloutRecorder;
+use codex_core::INTERACTIVE_SESSION_SOURCES;
 use serde::Deserialize;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -142,7 +143,13 @@ fn fallback_scan_sessions_for_cwd(cwd: &Path, codex_home: &Path) -> Vec<ResumeCa
         let mut collected: Vec<ResumeCandidate> = Vec::new();
         let mut cursor: Option<Cursor> = None;
         while collected.len() < MAX_RESULTS {
-            let page = match RolloutRecorder::list_conversations(codex_home.as_path(), 256, cursor.as_ref()).await {
+            let page = match RolloutRecorder::list_conversations(
+                codex_home.as_path(),
+                256,
+                cursor.as_ref(),
+                INTERACTIVE_SESSION_SOURCES,
+            )
+            .await {
                 Ok(page) => page,
                 Err(err) => {
                     tracing::warn!("failed to list conversations for resume fallback: {err}");

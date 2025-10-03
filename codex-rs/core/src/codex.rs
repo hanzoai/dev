@@ -55,7 +55,7 @@ use crate::agent_tool::AgentStatusUpdatePayload;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use crate::account_usage;
 use crate::auth_accounts;
 use codex_protocol::models::WebSearchAction;
@@ -614,6 +614,7 @@ use crate::shell;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::user_notification::UserNotification;
 use crate::util::backoff;
+use codex_protocol::protocol::SessionSource;
 use crate::rollout::recorder::SessionStateSnapshot;
 use serde_json::Value;
 use crate::exec_command::ExecSessionManager;
@@ -3040,8 +3041,9 @@ async fn submission_loop(
                         match RolloutRecorder::new(
                             &config,
                             crate::rollout::recorder::RolloutRecorderParams::new(
-                                codex_protocol::mcp_protocol::ConversationId::from(session_id),
+                                codex_protocol::ConversationId::from(session_id),
                                 effective_user_instructions.clone(),
+                                SessionSource::Cli,
                             ),
                         )
                             .await
@@ -3067,7 +3069,7 @@ async fn submission_loop(
                     }
                 };
 
-                let conversation_id = codex_protocol::mcp_protocol::ConversationId::from(session_id);
+                let conversation_id = codex_protocol::ConversationId::from(session_id);
                 let auth_snapshot = auth_manager.as_ref().and_then(|mgr| mgr.auth());
                 let otel_event_manager = {
                     let manager = OtelEventManager::new(

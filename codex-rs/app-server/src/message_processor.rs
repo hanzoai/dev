@@ -7,6 +7,7 @@ use codex_protocol::mcp_protocol::AuthMode;
 use codex_protocol::mcp_protocol::ClientInfo;
 use codex_protocol::mcp_protocol::ClientRequest;
 use codex_protocol::mcp_protocol::InitializeResponse;
+use codex_protocol::protocol::SessionSource;
 
 use codex_core::AuthManager;
 use codex_core::ConversationManager;
@@ -41,7 +42,10 @@ impl MessageProcessor {
             AuthMode::ApiKey,
             config.responses_originator_header.clone(),
         );
-        let conversation_manager = Arc::new(ConversationManager::new(auth_manager.clone()));
+        let conversation_manager = Arc::new(ConversationManager::new(
+            auth_manager.clone(),
+            SessionSource::Mcp,
+        ));
         let config_for_processor = config.clone();
         let codex_message_processor = CodexMessageProcessor::new(
             auth_manager,

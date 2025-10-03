@@ -73,8 +73,8 @@ pub enum CodexErr {
     Interrupted,
 
     /// Unexpected HTTP status code.
-    #[error("unexpected status {0}: {1}")]
-    UnexpectedStatus(StatusCode, String),
+    #[error("{0}")]
+    UnexpectedStatus(UnexpectedResponseError),
 
     #[error("{0}")]
     UsageLimitReached(UsageLimitReachedError),
@@ -93,8 +93,8 @@ pub enum CodexErr {
     ServerError(String),
 
     /// Retry limit exceeded.
-    #[error("exceeded retry limit, last status: {0}")]
-    RetryLimit(StatusCode),
+    #[error("{0}")]
+    RetryLimit(RetryLimitReachedError),
 
     /// Agent loop died unexpectedly
     #[error("internal error; agent loop died unexpectedly")]
@@ -135,6 +135,49 @@ pub enum CodexErr {
 
     #[error("{0}")]
     EnvVar(EnvVarError),
+}
+
+#[derive(Debug)]
+pub struct UnexpectedResponseError {
+    pub status: StatusCode,
+    pub body: String,
+    pub request_id: Option<String>,
+}
+
+impl std::fmt::Display for UnexpectedResponseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "unexpected status {}: {}{}",
+            self.status,
+            self.body,
+            self.request_id
+                .as_ref()
+                .map(|id| format!(", request id: {id}"))
+                .unwrap_or_default()
+        )
+    }
+}
+
+impl std::error::Error for UnexpectedResponseError {}
+#[derive(Debug)]
+pub struct RetryLimitReachedError {
+    pub status: StatusCode,
+    pub request_id: Option<String>,
+}
+
+impl std::fmt::Display for RetryLimitReachedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "exceeded retry limit, last status: {}{}",
+            self.status,
+            self.request_id
+                .as_ref()
+                .map(|id| format!(", request id: {id}"))
+                .unwrap_or_default()
+        )
+    }
 }
 
 #[derive(Debug)]
