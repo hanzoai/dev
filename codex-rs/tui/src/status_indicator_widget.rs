@@ -141,6 +141,7 @@ impl WidgetRef for StatusIndicatorWidget {
         // Build header spans using theme colors (no terminal-default cyan/dim)
         let mut spans = vec![
             ratatui::text::Span::raw(" "),
+            ratatui::text::Span::raw("• ").style(Style::default().fg(text_dim)),
             ratatui::text::Span::styled(
                 self.header.clone(),
                 Style::default()
