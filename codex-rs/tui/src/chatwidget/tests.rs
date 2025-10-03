@@ -1896,6 +1896,63 @@ fn agents_terminal_toggle_via_shortcuts() {
 }
 
 #[test]
+fn spinner_clears_after_cancelled_agent() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Simulate a new turn so the footer switches into running mode.
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    assert!(
+        chat.bottom_pane.is_task_running(),
+        "sanity: task spinner should be active after TaskStarted",
+    );
+
+    // Agent batch reports a single cancelled agent (no completions).
+    let cancelled_update = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "code".into(),
+            status: "cancelled".into(),
+            batch_id: Some("batch-123".into()),
+            model: Some("code".into()),
+            last_progress: Some("12:15:41: cancelled".into()),
+            result: None,
+            error: Some("user cancelled".into()),
+        }],
+        context: Some("Cancelled turn".into()),
+        task: Some("investigate spinner".into()),
+    };
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentStatusUpdate(cancelled_update),
+    });
+
+    // Backend reports the turn as complete even though the agent was cancelled.
+    chat.handle_codex_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    // Drain any queued UI work to keep the test aligned with runtime behavior.
+    let _ = pump_app_events(&mut chat, &rx);
+
+    assert!(
+        !chat.bottom_pane.is_task_running(),
+        "spinner should clear when the only agent finished in a cancelled state",
+    );
+    assert!(
+        chat.bottom_pane.composer.status_message().is_none(),
+        "status label should be empty once the footer stops running",
+    );
+}
+
+#[test]
 fn agents_terminal_focus_and_scroll_controls() {
     let (mut chat, rx, _op_rx) = make_chatwidget_manual();
     chat.prepare_agents();
