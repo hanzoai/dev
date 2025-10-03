@@ -109,6 +109,8 @@ struct CoordinatorDecision {
     #[serde(default)]
     progress_current: Option<String>,
     #[serde(default)]
+    cli_context: Option<String>,
+    #[serde(default)]
     cli_prompt: Option<String>,
     #[serde(default)]
     turn_config: Option<TurnConfig>,
@@ -118,6 +120,7 @@ struct ParsedCoordinatorDecision {
     status: AutoCoordinatorStatus,
     progress_past: Option<String>,
     progress_current: Option<String>,
+    cli_context: Option<String>,
     cli_prompt: Option<String>,
     response_items: Vec<ResponseItem>,
     turn_config: Option<TurnConfig>,
@@ -284,6 +287,7 @@ fn run_auto_loop(
                     status,
                     progress_past,
                     progress_current,
+                    cli_context,
                     cli_prompt,
                     response_items,
                     turn_config,
@@ -313,6 +317,7 @@ fn run_auto_loop(
                             status,
                             progress_past,
                             progress_current,
+                            cli_context: cli_context.clone(),
                             cli_prompt,
                             transcript: response_items,
                             turn_config: turn_config.clone(),
@@ -373,6 +378,7 @@ fn run_auto_loop(
                         status,
                         progress_past,
                         progress_current,
+                        cli_context,
                         cli_prompt,
                         transcript: response_items,
                         turn_config: turn_config.clone(),
@@ -390,6 +396,7 @@ fn run_auto_loop(
                         status: AutoCoordinatorStatus::Failed,
                         progress_past: None,
                         progress_current: Some(format!("Coordinator error: {err}")),
+                        cli_context: None,
                         cli_prompt: None,
                         transcript: Vec::new(),
                         turn_config: None,
@@ -546,6 +553,11 @@ fn build_schema() -> Value {
                 "maxLength": 100,
                 "description": "A few words describing what is happening when the CLI performs the cli_prompt. Use current tense e.g. `Now updating documentation.`"
             },
+            "cli_context": {
+                "type": ["string", "null"],
+                "minLength": 1,
+                "description": "This context is background information given to the CLI which it doesn't already know. Generally only should be used at the start of a session if the auto session was started with a lot of background information. Ignored unless finish_status is 'continue'"
+            },
             "cli_prompt": {
                 "type": ["string", "null"],
                 "minLength": 1,
@@ -557,10 +569,18 @@ fn build_schema() -> Value {
                     "read_only": { "type": "boolean", "description": "If true, this turn should not modify files." },
                     "complexity": { "type": "string", "enum": ["low","medium","high"], "description": "Complexity estimate for this turn." }
                 },
+                "required": ["read_only", "complexity"],
                 "additionalProperties": false
             }
         },
-        "required": ["finish_status", "progress_past", "progress_current", "cli_prompt"],
+        "required": [
+            "finish_status",
+            "progress_past",
+            "progress_current",
+            "cli_context",
+            "cli_prompt",
+            "turn_config"
+        ],
         "additionalProperties": false
     })
 }
@@ -618,6 +638,14 @@ fn request_coordinator_decision(
     let progress_past = clean_field(decision.progress_past);
     let progress_current = clean_field(decision.progress_current);
 
+    let cli_context = match status {
+        AutoCoordinatorStatus::Continue => clean_field(decision.cli_context).map(|value| {
+            let cleaned = strip_role_prefix(&value);
+            cleaned.trim().to_string()
+        }),
+        _ => None,
+    };
+
     let cli_prompt = match status {
         AutoCoordinatorStatus::Continue => {
             let prompt_text = decision
@@ -636,6 +664,7 @@ fn request_coordinator_decision(
         status,
         progress_past,
         progress_current,
+        cli_context,
         cli_prompt,
         response_items,
         turn_config: decision.turn_config,

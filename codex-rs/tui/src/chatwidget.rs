@@ -508,6 +508,7 @@ struct AutoCoordinatorUiState {
     current_progress_past: Option<String>,
     current_progress_current: Option<String>,
     current_cli_prompt: Option<String>,
+    current_cli_context: Option<String>,
     current_display_line: Option<String>,
     current_display_is_summary: bool,
     current_reasoning_title: Option<String>,
@@ -11399,6 +11400,7 @@ impl ChatWidget<'_> {
                 self.auto_state.current_progress_past = None;
                 self.auto_state.current_progress_current = None;
                 self.auto_state.current_cli_prompt = None;
+                self.auto_state.current_cli_context = None;
                 self.auto_state.current_display_line = None;
                 self.auto_state.current_display_is_summary = false;
                 self.auto_state.current_reasoning_title = None;
@@ -11443,6 +11445,7 @@ impl ChatWidget<'_> {
             self.auto_state.current_progress_past = None;
             self.auto_state.current_progress_current = None;
             self.auto_state.current_cli_prompt = None;
+            self.auto_state.current_cli_context = None;
             self.auto_state.last_broadcast_summary = None;
             self.auto_state.current_summary_index = None;
             self.auto_state.current_display_line = None;
@@ -11462,6 +11465,7 @@ impl ChatWidget<'_> {
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
+        cli_context: Option<String>,
         cli_prompt: Option<String>,
         transcript: Vec<codex_protocol::models::ResponseItem>,
         turn_config: Option<TurnConfig>,
@@ -11481,6 +11485,7 @@ impl ChatWidget<'_> {
         self.auto_state.current_progress_current = progress_current.clone();
         self.auto_state.last_decision_progress_past = progress_past.clone();
         self.auto_state.last_decision_progress_current = progress_current.clone();
+        self.auto_state.current_cli_context = cli_context.clone();
 
         let summary_text = Self::compose_progress_summary(&progress_current, &progress_past);
         self.auto_state.last_decision_summary = Some(summary_text.clone());
@@ -11659,6 +11664,8 @@ impl ChatWidget<'_> {
             return;
         }
 
+        let full_prompt = self.auto_build_cli_message(&prompt);
+
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = true;
         self.auto_state.coordinator_waiting = false;
@@ -11695,12 +11702,31 @@ impl ChatWidget<'_> {
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
         if preface.trim().is_empty() {
-            self.submit_text_message(prompt);
+            self.submit_text_message(full_prompt);
         } else {
-            self.submit_text_message_with_preface(prompt, preface);
+            self.submit_text_message_with_preface(full_prompt, preface);
         }
         self.auto_rebuild_live_ring();
         self.request_redraw();
+    }
+
+    fn auto_build_cli_message(&self, prompt: &str) -> String {
+        let context = self
+            .auto_state
+            .current_cli_context
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+
+        if let Some(ctx) = context {
+            if ctx.ends_with('\n') {
+                format!("{ctx}{prompt}")
+            } else {
+                format!("{ctx}\n\n{prompt}")
+            }
+        } else {
+            prompt.to_string()
+        }
     }
 
     fn auto_pause_for_manual_edit(&mut self) {
@@ -11711,12 +11737,14 @@ impl ChatWidget<'_> {
             return;
         };
 
+        let full_prompt = self.auto_build_cli_message(&prompt);
+
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
         self.clear_composer();
-        self.insert_str(&prompt);
+        self.insert_str(&full_prompt);
         self.bottom_pane.ensure_input_focus();
         self.bottom_pane.set_task_running(true);
         self.bottom_pane
