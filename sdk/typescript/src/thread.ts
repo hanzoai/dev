@@ -50,21 +50,30 @@ export class Thread {
   }
 
   /** Provides the input to the agent and streams events as they are produced during the turn. */
-  async runStreamed(input: string): Promise<StreamedTurn> {
-    return { events: this.runStreamedInternal(input) };
+  async runStreamed(input: string, options?: ThreadOptions): Promise<StreamedTurn> {
+    return { events: this.runStreamedInternal(input, options) };
   }
 
-  private async *runStreamedInternal(input: string): AsyncGenerator<ThreadEvent> {
-    const options = this._threadOptions;
+  private async *runStreamedInternal(
+    input: string,
+    options?: ThreadOptions,
+  ): AsyncGenerator<ThreadEvent> {
+    const mergedOptions = {
+      ...this._threadOptions,
+      ...options,
+    };
+    if (options) {
+      this._threadOptions = { ...mergedOptions };
+    }
     const generator = this._exec.run({
       input,
       baseUrl: this._options.baseUrl,
       apiKey: this._options.apiKey,
       threadId: this._id,
-      model: options?.model,
-      sandboxMode: options?.sandboxMode,
-      workingDirectory: options?.workingDirectory,
-      skipGitRepoCheck: options?.skipGitRepoCheck,
+      model: mergedOptions?.model,
+      sandboxMode: mergedOptions?.sandboxMode,
+      workingDirectory: mergedOptions?.workingDirectory,
+      skipGitRepoCheck: mergedOptions?.skipGitRepoCheck,
     });
 
     for await (const item of generator) {
@@ -90,8 +99,8 @@ export class Thread {
   }
 
   /** Provides the input to the agent and returns the completed turn. */
-  async run(input: string): Promise<Turn> {
-    const generator = this.runStreamedInternal(input);
+  async run(input: string, options?: ThreadOptions): Promise<Turn> {
+    const generator = this.runStreamedInternal(input, options);
     const items: ThreadItem[] = [];
     let finalResponse: string = "";
     for await (const event of generator) {
