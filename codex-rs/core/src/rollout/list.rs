@@ -341,7 +341,7 @@ async fn read_head_and_tail(
         let parsed: Result<RolloutLine, _> = serde_json::from_str(trimmed);
         let Ok(rollout_line) = parsed else { continue };
 
-        match rollout_line.item {
+        match &rollout_line.item {
             RolloutItem::SessionMeta(session_meta_line) => {
                 summary.source = Some(session_meta_line.meta.source);
                 summary.created_at = summary
@@ -362,7 +362,9 @@ async fn read_head_and_tail(
             RolloutItem::ResponseItem(_) | RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => {}
         }
 
-        summary.head.push(serde_json::from_str(trimmed).unwrap_or_default());
+        summary
+            .head
+            .push(serde_json::to_value(&rollout_line.item).unwrap_or_default());
     }
 
     // Collect tail by reading entire file (bounded by TAIL_RECORD_LIMIT).
