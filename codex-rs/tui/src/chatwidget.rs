@@ -1187,6 +1187,7 @@ enum AgentStatus {
     Running,
     Completed,
     Failed,
+    Cancelled,
 }
 
 fn agent_status_from_str(status: &str) -> AgentStatus {
@@ -1195,6 +1196,7 @@ fn agent_status_from_str(status: &str) -> AgentStatus {
         "running" => AgentStatus::Running,
         "completed" => AgentStatus::Completed,
         "failed" => AgentStatus::Failed,
+        "cancelled" => AgentStatus::Cancelled,
         _ => AgentStatus::Pending,
     }
 }
@@ -1205,6 +1207,7 @@ fn agent_status_label(status: AgentStatus) -> &'static str {
         AgentStatus::Running => "Running",
         AgentStatus::Completed => "Completed",
         AgentStatus::Failed => "Failed",
+        AgentStatus::Cancelled => "Cancelled",
     }
 }
 
@@ -1214,6 +1217,7 @@ fn agent_status_color(status: AgentStatus) -> ratatui::style::Color {
         AgentStatus::Running => crate::colors::info(),
         AgentStatus::Completed => crate::colors::success(),
         AgentStatus::Failed => crate::colors::error(),
+        AgentStatus::Cancelled => crate::colors::warning(),
     }
 }
 
@@ -9651,7 +9655,7 @@ impl ChatWidget<'_> {
                                 entry.started_at = Some(now);
                             }
                         }
-                        AgentStatus::Completed | AgentStatus::Failed => {
+                        AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled => {
                             if entry.completed_at.is_none() {
                                 entry.completed_at = entry.completed_at.or(Some(now));
                             }
@@ -9722,6 +9726,12 @@ impl ChatWidget<'_> {
                     .any(|a| matches!(a.status, AgentStatus::Failed))
                 {
                     "failed".to_string()
+                } else if self
+                    .active_agents
+                    .iter()
+                    .any(|a| matches!(a.status, AgentStatus::Cancelled))
+                {
+                    "cancelled".to_string()
                 } else {
                     "planning".to_string()
                 };
@@ -9733,6 +9743,7 @@ impl ChatWidget<'_> {
                     "running" => format!("agents: running ({})", count),
                     "complete" => format!("agents: complete ({} ok)", count),
                     "failed" => "agents: failed".to_string(),
+                    "cancelled" => "agents: cancelled".to_string(),
                     _ => "agents: planning".to_string(),
                 };
                 self.bottom_pane.update_status_text(msg);
@@ -10555,6 +10566,7 @@ impl ChatWidget<'_> {
                     AgentStatus::Running => "running",
                     AgentStatus::Completed => "completed",
                     AgentStatus::Failed => "failed",
+                    AgentStatus::Cancelled => "cancelled",
                 };
                 lines.push(Line::from(format!("  • {} — {}", a.name, status)));
             }
@@ -21965,6 +21977,7 @@ impl ChatWidget<'_> {
                     }
                     AgentStatus::Completed => "done".to_string(),
                     AgentStatus::Failed => "failed".to_string(),
+                    AgentStatus::Cancelled => "cancelled".to_string(),
                 };
                 let mut label = format!("{} ({})", a.name, state);
                 if matches!(a.status, AgentStatus::Running) {
@@ -22504,6 +22517,7 @@ impl ChatWidget<'_> {
                     AgentStatus::Running => "running",
                     AgentStatus::Completed => "done",
                     AgentStatus::Failed => "failed",
+                    AgentStatus::Cancelled => "cancelled",
                 };
                 parts.push(format!("{} ({})", a.name, s));
             }
@@ -22610,6 +22624,7 @@ impl ChatWidget<'_> {
             "consolidating" => crate::colors::warning(),
             "complete" => crate::colors::success(),
             "failed" => crate::colors::error(),
+            "cancelled" => crate::colors::warning(),
             _ => crate::colors::text_dim(),
         };
 
@@ -22655,6 +22670,7 @@ impl ChatWidget<'_> {
                     AgentStatus::Running => crate::colors::info(),
                     AgentStatus::Completed => crate::colors::success(),
                     AgentStatus::Failed => crate::colors::error(),
+                    AgentStatus::Cancelled => crate::colors::warning(),
                 };
 
                 // Build status + timing suffix where available
@@ -22673,20 +22689,22 @@ impl ChatWidget<'_> {
                             "running".to_string()
                         }
                     }
-                    AgentStatus::Completed | AgentStatus::Failed => {
+                    AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled => {
                         if let Some(rt) = self.agent_runtime.get(&agent.id) {
                             if let (Some(start), Some(done)) = (rt.started_at, rt.completed_at) {
                                 let dur = done.saturating_duration_since(start);
-                                let base = if matches!(agent.status, AgentStatus::Completed) {
-                                    "completed"
-                                } else {
-                                    "failed"
+                                let base = match agent.status {
+                                    AgentStatus::Completed => "completed",
+                                    AgentStatus::Failed => "failed",
+                                    AgentStatus::Cancelled => "cancelled",
+                                    _ => unreachable!(),
                                 };
                                 format!("{} {}", base, self.fmt_short_duration(dur))
                             } else {
                                 match agent.status {
                                     AgentStatus::Completed => "completed".to_string(),
                                     AgentStatus::Failed => "failed".to_string(),
+                                    AgentStatus::Cancelled => "cancelled".to_string(),
                                     _ => unreachable!(),
                                 }
                             }
@@ -22694,6 +22712,7 @@ impl ChatWidget<'_> {
                             match agent.status {
                                 AgentStatus::Completed => "completed".to_string(),
                                 AgentStatus::Failed => "failed".to_string(),
+                                AgentStatus::Cancelled => "cancelled".to_string(),
                                 _ => unreachable!(),
                             }
                         }
@@ -22762,6 +22781,19 @@ impl ChatWidget<'_> {
                                     err,
                                     Style::default()
                                         .fg(crate::colors::error())
+                                        .add_modifier(Modifier::ITALIC),
+                                ),
+                            ]));
+                        }
+                    }
+                    AgentStatus::Cancelled => {
+                        if let Some(ref err) = agent.error {
+                            text_content.push(RLine::from(vec![
+                                Span::from("   "),
+                                Span::styled(
+                                    err,
+                                    Style::default()
+                                        .fg(crate::colors::warning())
                                         .add_modifier(Modifier::ITALIC),
                                 ),
                             ]));
