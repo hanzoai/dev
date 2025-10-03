@@ -547,6 +547,22 @@ impl AutoCoordinatorUiState {
 const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
 const AUTO_RESOLVE_REVIEW_FOLLOWUP: &str = "This issue has been resolved. Please continue your search and return all remaining issues you find.";
 
+#[derive(Default, Clone)]
+struct AutoTurnReviewState {
+    base_commit: Option<GhostCommit>,
+}
+
+struct AutoReviewCommitScope {
+    commit: String,
+    file_count: usize,
+}
+
+enum AutoReviewOutcome {
+    Skip,
+    Workspace,
+    Commit(AutoReviewCommitScope),
+}
+
 #[derive(Clone)]
 struct AutoResolveState {
     prompt: String,
@@ -749,6 +765,7 @@ pub(crate) struct ChatWidget<'a> {
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
     auto_history: AutoDriveHistory,
+    auto_turn_review_state: Option<AutoTurnReviewState>,
     cloud_tasks_selected_env: Option<CloudEnvironment>,
     cloud_tasks_environments: Vec<CloudEnvironment>,
     cloud_tasks_last_tasks: Vec<TaskSummary>,
@@ -3400,6 +3417,7 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
             cloud_tasks_last_tasks: Vec::new(),
@@ -3679,6 +3697,7 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
             cloud_tasks_last_tasks: Vec::new(),
@@ -8589,8 +8608,8 @@ impl ChatWidget<'_> {
                 // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
                 if self.auto_state.active {
                     if let Some(cfg) = self.pending_auto_turn_config.take() {
-                        if !cfg.read_only && !self.is_review_flow_active() {
-                            self.auto_start_post_turn_review();
+                        if !self.is_review_flow_active() {
+                            self.auto_handle_post_turn_review(cfg);
                         }
                     }
                 }
@@ -11678,6 +11697,124 @@ impl ChatWidget<'_> {
         self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
+    fn auto_handle_post_turn_review(&mut self, cfg: TurnConfig) {
+        if cfg.read_only {
+            self.auto_turn_review_state = None;
+            return;
+        }
+
+        match self.auto_prepare_commit_scope() {
+            AutoReviewOutcome::Skip => {
+                self.auto_turn_review_state = None;
+            }
+            AutoReviewOutcome::Workspace => {
+                self.auto_turn_review_state = None;
+                self.auto_start_post_turn_review(None);
+            }
+            AutoReviewOutcome::Commit(scope) => {
+                self.auto_turn_review_state = None;
+                self.auto_start_post_turn_review(Some(scope));
+            }
+        }
+    }
+
+    fn auto_prepare_commit_scope(&mut self) -> AutoReviewOutcome {
+        let Some(state) = self.auto_turn_review_state.take() else {
+            return AutoReviewOutcome::Workspace;
+        };
+
+        let Some(base_commit) = state.base_commit else {
+            return AutoReviewOutcome::Workspace;
+        };
+
+        let final_commit = match self.capture_auto_turn_commit("auto turn change snapshot", Some(&base_commit)) {
+            Ok(commit) => commit,
+            Err(err) => {
+                tracing::warn!("failed to capture auto turn change snapshot: {err}");
+                return AutoReviewOutcome::Workspace;
+            }
+        };
+
+        let diff_paths = match self.git_diff_name_only_between(base_commit.id(), final_commit.id()) {
+            Ok(paths) => paths,
+            Err(err) => {
+                tracing::warn!("failed to diff auto turn snapshots: {err}");
+                return AutoReviewOutcome::Workspace;
+            }
+        };
+
+        if diff_paths.is_empty() {
+            self.push_background_tail("Auto review skipped: no file changes detected this turn.".to_string());
+            return AutoReviewOutcome::Skip;
+        }
+
+        AutoReviewOutcome::Commit(AutoReviewCommitScope {
+            commit: final_commit.id().to_string(),
+            file_count: diff_paths.len(),
+        })
+    }
+
+    fn prepare_auto_turn_review_state(&mut self) {
+        if !self.auto_state.active {
+            self.auto_turn_review_state = None;
+            return;
+        }
+
+        let read_only = self
+            .pending_auto_turn_config
+            .as_ref()
+            .map(|cfg| cfg.read_only)
+            .unwrap_or(false);
+
+        if read_only {
+            self.auto_turn_review_state = None;
+            return;
+        }
+
+        match self.capture_auto_turn_commit("auto turn base snapshot", None) {
+            Ok(commit) => {
+                self.auto_turn_review_state = Some(AutoTurnReviewState {
+                    base_commit: Some(commit),
+                });
+            }
+            Err(err) => {
+                tracing::warn!("failed to capture auto turn base snapshot: {err}");
+                self.auto_turn_review_state = None;
+            }
+        }
+    }
+
+    fn capture_auto_turn_commit(
+        &self,
+        message: &'static str,
+        parent: Option<&GhostCommit>,
+    ) -> Result<GhostCommit, GitToolingError> {
+        let mut options = CreateGhostCommitOptions::new(self.config.cwd.as_path()).message(message);
+        if let Some(parent_commit) = parent {
+            options = options.parent(parent_commit.id());
+        }
+        create_ghost_commit(&options)
+    }
+
+    fn git_diff_name_only_between(
+        &self,
+        base_commit: &str,
+        head_commit: &str,
+    ) -> Result<Vec<String>, String> {
+        self.run_git_command(
+            ["diff", "--name-only", base_commit, head_commit],
+            |stdout| {
+                let changes = stdout
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(|line| line.to_string())
+                    .collect();
+                Ok(changes)
+            },
+        )
+    }
+
     fn auto_submit_prompt(&mut self) {
         if !self.auto_state.active {
             return;
@@ -11726,6 +11863,7 @@ impl ChatWidget<'_> {
         // Build hidden preface with explicit agent_run guidance
         let preface = self.build_auto_turn_preface(&prompt);
 
+        self.prepare_auto_turn_review_state();
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
         if preface.trim().is_empty() {
@@ -11852,6 +11990,7 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_state.reset();
         self.auto_history.clear();
+        self.auto_turn_review_state = None;
         self.bottom_pane.clear_auto_coordinator_view();
         self.bottom_pane.clear_live_ring();
         let any_exec_running = !self.exec.running_commands.is_empty();
@@ -11913,19 +12052,52 @@ impl ChatWidget<'_> {
         self.auto_send_conversation();
     }
 
-    fn auto_start_post_turn_review(&mut self) {
-        // Initialize auto-resolve state for this ad-hoc review cycle
-        let prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
-        let hint = "current workspace changes".to_string();
-        self.auto_resolve_state = Some(AutoResolveState::new(prompt.clone(), hint.clone(), Some(ReviewContextMetadata {
-            scope: Some("workspace".to_string()),
-            ..Default::default()
-        })));
-        // Begin the review request immediately
-        self.begin_review(prompt, hint, Some("Preparing code review request...".to_string()), Some(ReviewContextMetadata {
-            scope: Some("workspace".to_string()),
-            ..Default::default()
-        }));
+    fn auto_start_post_turn_review(&mut self, scope: Option<AutoReviewCommitScope>) {
+        let (prompt, hint, auto_metadata, review_metadata, preparation) = match scope {
+            Some(scope) => {
+                let commit_id = scope.commit;
+                let commit_for_prompt = commit_id.clone();
+                let short_sha: String = commit_for_prompt.chars().take(8).collect();
+                let file_label = if scope.file_count == 1 {
+                    "1 file".to_string()
+                } else {
+                    format!("{} files", scope.file_count)
+                };
+                let prompt = format!(
+                    "Review commit {} generated during the latest Auto Drive turn. Highlight bugs, regressions, risky patterns, and missing tests before merge.",
+                    commit_for_prompt
+                );
+                let hint = format!("auto turn changes — {} ({})", short_sha, file_label);
+                let preparation = format!("Preparing code review for commit {}", short_sha);
+                let review_metadata = Some(ReviewContextMetadata {
+                    scope: Some("commit".to_string()),
+                    commit: Some(commit_id),
+                    ..Default::default()
+                });
+                let auto_metadata = Some(ReviewContextMetadata {
+                    scope: Some("workspace".to_string()),
+                    ..Default::default()
+                });
+                (prompt, hint, auto_metadata, review_metadata, preparation)
+            }
+            None => {
+                let prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
+                let hint = "current workspace changes".to_string();
+                let review_metadata = Some(ReviewContextMetadata {
+                    scope: Some("workspace".to_string()),
+                    ..Default::default()
+                });
+                let preparation = "Preparing code review request...".to_string();
+                (prompt, hint, review_metadata.clone(), review_metadata, preparation)
+            }
+        };
+
+        self.auto_resolve_state = Some(AutoResolveState::new(
+            prompt.clone(),
+            hint.clone(),
+            auto_metadata.clone(),
+        ));
+        self.begin_review(prompt, hint, Some(preparation), review_metadata);
     }
 
     fn auto_rebuild_live_ring(&mut self) {
