@@ -23,6 +23,7 @@ pub struct CreateGhostCommitOptions<'a> {
     pub repo_path: &'a Path,
     pub message: Option<&'a str>,
     pub force_include: Vec<PathBuf>,
+    pub parent: Option<&'a str>,
 }
 
 impl<'a> CreateGhostCommitOptions<'a> {
@@ -32,12 +33,19 @@ impl<'a> CreateGhostCommitOptions<'a> {
             repo_path,
             message: None,
             force_include: Vec::new(),
+            parent: None,
         }
     }
 
     /// Sets a custom commit message for the ghost commit.
     pub fn message(mut self, message: &'a str) -> Self {
         self.message = Some(message);
+        self
+    }
+
+    /// Overrides the parent commit for the ghost snapshot when provided.
+    pub fn parent(mut self, parent: &'a str) -> Self {
+        self.parent = Some(parent);
         self
     }
 
@@ -68,7 +76,12 @@ pub fn create_ghost_commit(
 
     let repo_root = resolve_repository_root(options.repo_path)?;
     let repo_prefix = repo_subdir(repo_root.as_path(), options.repo_path);
-    let parent = resolve_head(repo_root.as_path())?;
+    let parent_override = options.parent.map(|value| value.to_string());
+    let resolved_parent = resolve_head(repo_root.as_path())?;
+    let parent_ref = parent_override
+        .as_deref()
+        .or(resolved_parent.as_deref())
+        .map(|value| value.to_string());
 
     let normalized_force = options
         .force_include
@@ -113,7 +126,7 @@ pub fn create_ghost_commit(
     let message = options.message.unwrap_or(DEFAULT_COMMIT_MESSAGE);
     let commit_args = {
         let mut result = vec![OsString::from("commit-tree"), OsString::from(&tree_id)];
-        if let Some(parent) = parent.as_deref() {
+        if let Some(parent) = parent_ref.as_deref() {
             result.extend([OsString::from("-p"), OsString::from(parent)]);
         }
         result.extend([OsString::from("-m"), OsString::from(message)]);
@@ -127,7 +140,7 @@ pub fn create_ghost_commit(
         Some(commit_env.as_slice()),
     )?;
 
-    Ok(GhostCommit::new(commit_id, parent))
+    Ok(GhostCommit::new(commit_id, parent_ref))
 }
 
 /// Restore the working tree to match the provided ghost commit.
