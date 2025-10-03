@@ -18747,7 +18747,9 @@ impl ChatWidget<'_> {
             self.request_redraw();
             return;
         }
+        self.auto_state.waiting_for_review = false;
         self.auto_send_conversation();
+        self.request_redraw();
     }
 
     fn auto_resolve_format_findings(review: &ReviewOutputEvent) -> String {
