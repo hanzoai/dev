@@ -12012,7 +12012,7 @@ impl ChatWidget<'_> {
     }
 
     fn auto_start_post_turn_review(&mut self, scope: Option<AutoReviewCommitScope>) {
-        let (prompt, hint, metadata, preparation) = match scope {
+        let (prompt, hint, auto_metadata, review_metadata, preparation) = match scope {
             Some(scope) => {
                 let commit_id = scope.commit;
                 let commit_for_prompt = commit_id.clone();
@@ -12028,31 +12028,35 @@ impl ChatWidget<'_> {
                 );
                 let hint = format!("auto turn changes — {} ({})", short_sha, file_label);
                 let preparation = format!("Preparing code review for commit {}", short_sha);
-                let metadata = Some(ReviewContextMetadata {
+                let review_metadata = Some(ReviewContextMetadata {
                     scope: Some("commit".to_string()),
                     commit: Some(commit_id),
                     ..Default::default()
                 });
-                (prompt, hint, metadata, preparation)
+                let auto_metadata = Some(ReviewContextMetadata {
+                    scope: Some("workspace".to_string()),
+                    ..Default::default()
+                });
+                (prompt, hint, auto_metadata, review_metadata, preparation)
             }
             None => {
                 let prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
                 let hint = "current workspace changes".to_string();
-                let metadata = Some(ReviewContextMetadata {
+                let review_metadata = Some(ReviewContextMetadata {
                     scope: Some("workspace".to_string()),
                     ..Default::default()
                 });
                 let preparation = "Preparing code review request...".to_string();
-                (prompt, hint, metadata, preparation)
+                (prompt, hint, review_metadata.clone(), review_metadata, preparation)
             }
         };
 
         self.auto_resolve_state = Some(AutoResolveState::new(
             prompt.clone(),
             hint.clone(),
-            metadata.clone(),
+            auto_metadata.clone(),
         ));
-        self.begin_review(prompt, hint, Some(preparation), metadata);
+        self.begin_review(prompt, hint, Some(preparation), review_metadata);
     }
 
     fn auto_rebuild_live_ring(&mut self) {
