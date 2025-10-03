@@ -992,22 +992,47 @@ async fn execute_cloud_built_in_streaming(
 }
 
 // Tool creation functions
-pub fn create_run_agent_tool() -> OpenAiTool {
+
+pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
     let mut properties = BTreeMap::new();
+
+    properties.insert(
+        "action".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Required: choose one of ['create','status','wait','result','cancel','list']".to_string(),
+            ),
+            allowed_values: Some(
+                ["create", "status", "wait", "result", "cancel", "list"]
+                    .into_iter()
+                    .map(|value| value.to_string())
+                    .collect(),
+            ),
+        },
+    );
 
     properties.insert(
         "task".to_string(),
         JsonSchema::String {
-            description: Some("The task prompt - what to perform (required)".to_string()),
+            description: Some("For action=create: task prompt to execute".to_string()),
+            allowed_values: None,
         },
     );
 
     properties.insert(
         "models".to_string(),
         JsonSchema::Array {
-            items: Box::new(JsonSchema::String { description: None }),
+            items: Box::new(JsonSchema::String {
+                description: None,
+                allowed_values: if allowed_models.is_empty() {
+                    None
+                } else {
+                    Some(allowed_models.iter().cloned().collect())
+                },
+            }),
             description: Some(
-                "Optional: Array of model names (e.g., ['claude','gemini','qwen','code','cloud'])".to_string(),
+                "For action=create: optional array of model names (e.g., ['claude','gemini','qwen','code','cloud'])"
+                    .to_string(),
             ),
         },
     );
@@ -1015,23 +1040,28 @@ pub fn create_run_agent_tool() -> OpenAiTool {
     properties.insert(
         "context".to_string(),
         JsonSchema::String {
-            description: Some("Optional: Background context for the agent".to_string()),
+            description: Some("For action=create: optional background context".to_string()),
+            allowed_values: None,
         },
     );
 
     properties.insert(
         "output".to_string(),
         JsonSchema::String {
-            description: Some("Optional: The desired output/success state".to_string()),
+            description: Some("For action=create: optional desired output description".to_string()),
+            allowed_values: None,
         },
     );
 
     properties.insert(
         "files".to_string(),
         JsonSchema::Array {
-            items: Box::new(JsonSchema::String { description: None }),
+            items: Box::new(JsonSchema::String {
+                description: None,
+                allowed_values: None,
+            }),
             description: Some(
-                "Optional: Array of file paths to include in the agent context".to_string(),
+                "For action=create: optional array of file paths to include in context".to_string(),
             ),
         },
     );
@@ -1040,76 +1070,18 @@ pub fn create_run_agent_tool() -> OpenAiTool {
         "read_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "Optional: When true, agent runs in read-only mode (default: false)".to_string(),
+                "For action=create: when true, run in read-only mode (default: false)".to_string(),
             ),
         },
     );
-
-    OpenAiTool::Function(ResponsesApiTool {
-        name: "agent_run".to_string(),
-        description: "Start a complex AI task asynchronously. Returns an agent ID immediately to check status and retrieve results. Once an agent is running, enables: agent_check, agent_result, agent_cancel, agent_wait, agent_list.".to_string(),
-        strict: false,
-        parameters: JsonSchema::Object {
-            properties,
-            required: Some(vec!["task".to_string()]),
-            additional_properties: Some(false.into()),
-        },
-    })
-}
-
-pub fn create_check_agent_status_tool() -> OpenAiTool {
-    let mut properties = BTreeMap::new();
-
-    properties.insert(
-        "agent_id".to_string(),
-        JsonSchema::String {
-            description: Some("The agent ID returned from run_agent".to_string()),
-        },
-    );
-
-    OpenAiTool::Function(ResponsesApiTool {
-        name: "agent_check".to_string(),
-        description: "Check the status of a running agent. Returns current status, progress, and partial results if available.".to_string(),
-        strict: false,
-        parameters: JsonSchema::Object {
-            properties,
-            required: Some(vec!["agent_id".to_string()]),
-            additional_properties: Some(false.into()),
-        },
-    })
-}
-
-pub fn create_get_agent_result_tool() -> OpenAiTool {
-    let mut properties = BTreeMap::new();
-
-    properties.insert(
-        "agent_id".to_string(),
-        JsonSchema::String {
-            description: Some("The agent ID returned from run_agent".to_string()),
-        },
-    );
-
-    OpenAiTool::Function(ResponsesApiTool {
-        name: "agent_result".to_string(),
-        description: "Get the final result of a completed agent. Returns a preview (first 500 lines) and a file path to the full output/error.".to_string(),
-        strict: false,
-        parameters: JsonSchema::Object {
-            properties,
-            required: Some(vec!["agent_id".to_string()]),
-            additional_properties: Some(false.into()),
-        },
-    })
-}
-
-pub fn create_cancel_agent_tool() -> OpenAiTool {
-    let mut properties = BTreeMap::new();
 
     properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
             description: Some(
-                "The agent ID to cancel (required if batch_id not provided)".to_string(),
+                "For actions=status/result/cancel/wait: specify the target agent ID".to_string(),
             ),
+            allowed_values: None,
         },
     );
 
@@ -1117,44 +1089,9 @@ pub fn create_cancel_agent_tool() -> OpenAiTool {
         "batch_id".to_string(),
         JsonSchema::String {
             description: Some(
-                "Cancel all agents with this batch ID (required if agent_id not provided)"
-                    .to_string(),
+                "For actions=cancel/wait/list: optional batch identifier".to_string(),
             ),
-        },
-    );
-
-    OpenAiTool::Function(ResponsesApiTool {
-        name: "agent_cancel".to_string(),
-        description: "Cancel a pending or running agent, or all agents in a batch.".to_string(),
-        strict: false,
-        parameters: JsonSchema::Object {
-            properties,
-            required: Some(vec![]),
-            additional_properties: Some(false.into()),
-        },
-    })
-}
-
-pub fn create_wait_for_agent_tool() -> OpenAiTool {
-    let mut properties = BTreeMap::new();
-
-    properties.insert(
-        "agent_id".to_string(),
-        JsonSchema::String {
-            description: Some(
-                "Wait for this specific agent to complete (required if batch_id not provided)"
-                    .to_string(),
-            ),
-        },
-    );
-
-    properties.insert(
-        "batch_id".to_string(),
-        JsonSchema::String {
-            description: Some(
-                "Wait for any agent in this batch to complete (required if agent_id not provided)"
-                    .to_string(),
-            ),
+            allowed_values: None,
         },
     );
 
@@ -1162,7 +1099,7 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
         "timeout_seconds".to_string(),
         JsonSchema::Number {
             description: Some(
-                "Maximum seconds to wait before timing out (default: 300, max: 600)".to_string(),
+                "For action=wait: optional timeout before giving up (default 300, max 600)".to_string(),
             ),
         },
     );
@@ -1170,36 +1107,20 @@ pub fn create_wait_for_agent_tool() -> OpenAiTool {
     properties.insert(
         "return_all".to_string(),
         JsonSchema::Boolean {
-            description: Some("For batch_id: return all completed agents instead of just the first one (default: false)".to_string()),
+            description: Some(
+                "For action=wait with batch_id: return all completed agents instead of the first".to_string(),
+            ),
         },
     );
-
-    OpenAiTool::Function(ResponsesApiTool {
-        name: "agent_wait".to_string(),
-        description: "Wait for an agent or any agent in a batch to complete, fail, or be cancelled. Returns status plus a preview (first 500 lines) and a file path to the full output/error. For batches, set return_all:true to receive per-agent summaries. Use agent_result with {\"agent_id\": \"...\"} to fetch after completion.".to_string(),
-        strict: false,
-        parameters: JsonSchema::Object {
-            properties,
-            required: Some(vec![]),
-            additional_properties: Some(false.into()),
-        },
-    })
-}
-
-pub fn create_list_agents_tool() -> OpenAiTool {
-    let mut properties = BTreeMap::new();
 
     properties.insert(
         "status_filter".to_string(),
         JsonSchema::String {
-            description: Some("Optional: Filter agents by status (pending, running, completed, failed, cancelled)".to_string()),
-        },
-    );
-
-    properties.insert(
-        "batch_id".to_string(),
-        JsonSchema::String {
-            description: Some("Optional: Filter agents by batch ID".to_string()),
+            description: Some(
+                "For action=list: optional status filter (pending, running, completed, failed, cancelled)"
+                    .to_string(),
+            ),
+            allowed_values: None,
         },
     );
 
@@ -1207,18 +1128,20 @@ pub fn create_list_agents_tool() -> OpenAiTool {
         "recent_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "Optional: Only show agents from the last 2 hours (default: false)".to_string(),
+                "For action=list: when true, only include agents from the last two hours".to_string(),
             ),
         },
     );
 
+    let required = Some(vec!["action".to_string()]);
+
     OpenAiTool::Function(ResponsesApiTool {
-        name: "agent_list".to_string(),
-        description: "List all agents with their current status.".to_string(),
+        name: "agent".to_string(),
+        description: "Unified agent manager for launching, monitoring, and collecting results from asynchronous agents.".to_string(),
         strict: false,
         parameters: JsonSchema::Object {
             properties,
-            required: Some(vec![]),
+            required,
             additional_properties: Some(false.into()),
         },
     })
@@ -1234,6 +1157,26 @@ pub struct RunAgentParams {
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
     pub read_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentToolRequest {
+    pub action: String,
+    #[serde(default)]
+    pub task: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_models_field")]
+    pub models: Vec<String>,
+    pub context: Option<String>,
+    pub output: Option<String>,
+    #[serde(default)]
+    pub files: Option<Vec<String>>,
+    pub read_only: Option<bool>,
+    pub agent_id: Option<String>,
+    pub batch_id: Option<String>,
+    pub timeout_seconds: Option<u64>,
+    pub return_all: Option<bool>,
+    pub status_filter: Option<String>,
+    pub recent_only: Option<bool>,
 }
 
 fn deserialize_models_field<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
