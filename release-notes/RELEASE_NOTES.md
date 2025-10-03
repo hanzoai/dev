@@ -1,11 +1,14 @@
-## @just-every/code v0.2.183
+## @just-every/code v0.2.184
 
-This release refines explore sessions so TUI context stays accurate.
+This update sharpens model selection and exec visibility while adding clearer server diagnostics.
 
 ### Changes
 
-- TUI/Explore: keep the Exploring header until the next non-reasoning entry to maintain exploration context.
-- TUI/Explore: sync reasoning visibility changes with explore cells to avoid stale header state.
+- Core: Record pid alongside port in server info to simplify local process debugging.
+- CLI: Support CODEX_API_KEY in `codex exec` so credentials can be set via environment.
+- TUI: Make the model switcher a two-stage flow to prevent accidental model swaps.
+- TUI: Surface live context window usage while tasks run to clarify token budgets.
+- TUI: Show a placeholder when commands produce no output to keep history legible.
 
 ### Install
 
@@ -14,4 +17,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.182...v0.2.183
+Compare: https://github.com/just-every/code/compare/v0.2.183...v0.2.184
