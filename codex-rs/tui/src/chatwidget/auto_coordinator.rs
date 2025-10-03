@@ -970,11 +970,11 @@ fn build_prompt_for_model(
 fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         if let Some(codex_err) = cause.downcast_ref::<CodexErr>() {
-            if let CodexErr::UnexpectedStatus(status, body) = codex_err {
-                if !status.is_client_error() {
+            if let CodexErr::UnexpectedStatus(err) = codex_err {
+                if !err.status.is_client_error() {
                     return false;
                 }
-                let body_lower = body.to_lowercase();
+                let body_lower = err.body.to_lowercase();
                 return body_lower.contains("invalid model")
                     || body_lower.contains("unknown model")
                     || body_lower.contains("model_not_found")
@@ -998,8 +998,10 @@ fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
                     reason: "model request timed out".to_string(),
                 };
             }
-            CodexErr::UnexpectedStatus(status, body) => {
-                if *status == StatusCode::REQUEST_TIMEOUT || status.as_u16() == 408 {
+            CodexErr::UnexpectedStatus(err) => {
+                let status = err.status;
+                let body = &err.body;
+                if status == StatusCode::REQUEST_TIMEOUT || status.as_u16() == 408 {
                     return RetryDecision::RetryAfterBackoff {
                         reason: format!("provider returned {status}"),
                     };
@@ -1009,7 +1011,7 @@ fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
                         reason: "client closed request (499)".to_string(),
                     };
                 }
-                if *status == StatusCode::TOO_MANY_REQUESTS {
+                if status == StatusCode::TOO_MANY_REQUESTS {
                     if let Some(wait_until) = parse_rate_limit_hint(body) {
                         return RetryDecision::RateLimited {
                             wait_until,
@@ -1203,7 +1205,7 @@ pub(crate) use classify_model_error as test_classify_model_error;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codex_core::error::UsageLimitReachedError;
+    use codex_core::error::{UnexpectedResponseError, UsageLimitReachedError};
 
     #[test]
     fn rate_limit_hint_uses_reset_seconds() {
@@ -1260,7 +1262,11 @@ mod tests {
 
     #[test]
     fn classify_fatal_on_bad_request() {
-        let err = anyhow!(CodexErr::UnexpectedStatus(StatusCode::BAD_REQUEST, "bad".to_string()));
+        let err = anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
+            status: StatusCode::BAD_REQUEST,
+            body: "bad".to_string(),
+            request_id: None,
+        }));
         match classify_model_error(&err) {
             RetryDecision::Fatal(_) => {}
             other => panic!("expected fatal, got {:?}", other),

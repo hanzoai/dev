@@ -11,7 +11,8 @@ use crate::protocol::Event;
 use crate::protocol::EventMsg;
 use crate::protocol::SessionConfiguredEvent;
 use crate::rollout::RolloutRecorder;
-use codex_protocol::mcp_protocol::ConversationId;
+use codex_protocol::ConversationId;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::RolloutItem;
@@ -33,20 +34,25 @@ pub struct NewConversation {
 pub struct ConversationManager {
     conversations: Arc<RwLock<HashMap<ConversationId, Arc<CodexConversation>>>>,
     auth_manager: Arc<AuthManager>,
+    session_source: SessionSource,
 }
 
 impl ConversationManager {
-    pub fn new(auth_manager: Arc<AuthManager>) -> Self {
+    pub fn new(auth_manager: Arc<AuthManager>, session_source: SessionSource) -> Self {
         Self {
             conversations: Arc::new(RwLock::new(HashMap::new())),
             auth_manager,
+            session_source,
         }
     }
 
     /// Construct with a dummy AuthManager containing the provided CodexAuth.
     /// Used for integration tests: should not be used by ordinary business logic.
     pub fn with_auth(auth: CodexAuth) -> Self {
-        Self::new(crate::AuthManager::from_auth_for_testing(auth))
+        Self::new(
+            crate::AuthManager::from_auth_for_testing(auth),
+            SessionSource::Exec,
+        )
     }
 
     pub async fn new_conversation(&self, config: Config) -> CodexResult<NewConversation> {
@@ -67,7 +73,7 @@ impl ConversationManager {
             init_id: _,
             session_id,
         } = Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
-        let conversation_id: codex_protocol::mcp_protocol::ConversationId = session_id.into();
+        let conversation_id: codex_protocol::ConversationId = session_id.into();
         self.finalize_spawn(codex, conversation_id).await
     }
 
@@ -128,7 +134,7 @@ impl ConversationManager {
             init_id: _,
             session_id,
         } = Codex::spawn_with_auth_manager(config, Some(auth_manager.clone())).await?;
-        let conversation_id: codex_protocol::mcp_protocol::ConversationId = session_id.into();
+        let conversation_id: codex_protocol::ConversationId = session_id.into();
         self.finalize_spawn(codex, conversation_id).await
     }
 
@@ -163,11 +169,15 @@ impl ConversationManager {
         }
 
         // Otherwise, create a temporary rollout with the truncated items and resume from it.
-        let convo_id = codex_protocol::mcp_protocol::ConversationId::new();
+        let convo_id = codex_protocol::ConversationId::new();
         let instructions = config.user_instructions.clone();
         let recorder = RolloutRecorder::new(
             &config,
-            crate::rollout::recorder::RolloutRecorderParams::new(convo_id, instructions),
+            crate::rollout::recorder::RolloutRecorderParams::new(
+                convo_id,
+                instructions,
+                self.session_source,
+            ),
         )
         .await
         .map_err(|e| CodexErr::Io(e))?;
@@ -190,7 +200,7 @@ impl ConversationManager {
             init_id: _,
             session_id,
         } = Codex::spawn_with_auth_manager(config, Some(self.auth_manager.clone())).await?;
-        let conversation_id: codex_protocol::mcp_protocol::ConversationId = session_id.into();
+        let conversation_id: codex_protocol::ConversationId = session_id.into();
         self.finalize_spawn(codex, conversation_id).await
     }
 }

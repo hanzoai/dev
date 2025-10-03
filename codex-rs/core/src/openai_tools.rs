@@ -1,16 +1,12 @@
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::{SerializeStruct, Serializer};
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use crate::agent_tool::create_cancel_agent_tool;
-use crate::agent_tool::create_check_agent_status_tool;
-use crate::agent_tool::create_get_agent_result_tool;
-use crate::agent_tool::create_list_agents_tool;
-use crate::agent_tool::create_run_agent_tool;
-use crate::agent_tool::create_wait_for_agent_tool;
+use crate::agent_tool::create_agent_tool;
 use crate::model_family::ModelFamily;
 use crate::plan_tool::PLAN_TOOL;
 use crate::protocol::AskForApproval;
@@ -91,6 +87,7 @@ pub(crate) struct ToolsConfig {
     #[allow(dead_code)]
     pub include_view_image_tool: bool,
     pub web_search_allowed_domains: Option<Vec<String>>,
+    pub agent_model_allowed_values: Vec<String>,
 }
 
 #[allow(dead_code)]
@@ -145,6 +142,7 @@ impl ToolsConfig {
             web_search_request: include_web_search_request,
             include_view_image_tool,
             web_search_allowed_domains: None,
+            agent_model_allowed_values: Vec::new(),
         }
     }
 
@@ -164,8 +162,38 @@ impl ToolsConfig {
     }
 }
 
-/// Generic JSON‑Schema subset needed for our tool definitions
+impl ToolsConfig {
+    pub fn set_agent_models(&mut self, models: Vec<String>) {
+        self.agent_model_allowed_values = models;
+    }
+
+    pub fn agent_models(&self) -> &[String] {
+        &self.agent_model_allowed_values
+    }
+}
+
+/// Whether additional properties are allowed, and if so, any required schema
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub(crate) enum AdditionalProperties {
+    Boolean(bool),
+    Schema(Box<JsonSchema>),
+}
+
+impl From<bool> for AdditionalProperties {
+    fn from(b: bool) -> Self {
+        Self::Boolean(b)
+    }
+}
+
+impl From<JsonSchema> for AdditionalProperties {
+    fn from(s: JsonSchema) -> Self {
+        Self::Schema(Box::new(s))
+    }
+}
+
+/// Generic JSON‑Schema subset needed for our tool definitions
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(crate) enum JsonSchema {
     Boolean {
@@ -175,6 +203,8 @@ pub(crate) enum JsonSchema {
     String {
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", rename = "enum")]
+        allowed_values: Option<Vec<String>>,
     },
     /// MCP schema allows "number" | "integer" for Number
     #[serde(alias = "integer")]
@@ -196,8 +226,92 @@ pub(crate) enum JsonSchema {
             rename = "additionalProperties",
             skip_serializing_if = "Option::is_none"
         )]
-        additional_properties: Option<bool>,
+        additional_properties: Option<AdditionalProperties>,
     },
+}
+
+impl Serialize for JsonSchema {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            JsonSchema::Boolean { description } => {
+                let mut state = serializer.serialize_struct("JsonSchema", if description.is_some() { 2 } else { 1 })?;
+                state.serialize_field("type", "boolean")?;
+                if let Some(desc) = description {
+                    state.serialize_field("description", desc)?;
+                }
+                state.end()
+            }
+            JsonSchema::String {
+                description,
+                allowed_values,
+            } => {
+                let mut fields = 1;
+                if description.is_some() {
+                    fields += 1;
+                }
+                if allowed_values.is_some() {
+                    fields += 1;
+                }
+                let mut state = serializer.serialize_struct("JsonSchema", fields)?;
+                state.serialize_field("type", "string")?;
+                if let Some(desc) = description {
+                    state.serialize_field("description", desc)?;
+                }
+                if let Some(values) = allowed_values {
+                    state.serialize_field("enum", values)?;
+                }
+                state.end()
+            }
+            JsonSchema::Number { description } => {
+                let mut state = serializer.serialize_struct("JsonSchema", if description.is_some() { 2 } else { 1 })?;
+                state.serialize_field("type", "number")?;
+                if let Some(desc) = description {
+                    state.serialize_field("description", desc)?;
+                }
+                state.end()
+            }
+            JsonSchema::Array { items, description } => {
+                let mut fields = 2; // type + items
+                if description.is_some() {
+                    fields += 1;
+                }
+                let mut state = serializer.serialize_struct("JsonSchema", fields)?;
+                state.serialize_field("type", "array")?;
+                state.serialize_field("items", items)?;
+                if let Some(desc) = description {
+                    state.serialize_field("description", desc)?;
+                }
+                state.end()
+            }
+            JsonSchema::Object {
+                properties,
+                required,
+                additional_properties,
+            } => {
+                let mut req = required.clone().unwrap_or_default();
+                for key in properties.keys() {
+                    if !req.iter().any(|existing| existing == key) {
+                        req.push(key.clone());
+                    }
+                }
+                let mut fields = 3; // type, properties, required
+                if additional_properties.is_some() {
+                    fields += 1;
+                }
+                let mut state = serializer.serialize_struct("JsonSchema", fields)?;
+                state.serialize_field("type", "object")?;
+                state.serialize_field("properties", properties)?;
+                state.serialize_field("required", &req)?;
+                if let Some(additional) = additional_properties {
+                    state.serialize_field("additionalProperties", additional)?;
+                }
+                state.end()
+            }
+        }
+    }
 }
 
 fn create_shell_tool() -> OpenAiTool {
@@ -205,7 +319,10 @@ fn create_shell_tool() -> OpenAiTool {
     properties.insert(
         "command".to_string(),
         JsonSchema::Array {
-            items: Box::new(JsonSchema::String { description: None }),
+            items: Box::new(JsonSchema::String {
+                description: None,
+                allowed_values: None,
+            }),
             description: Some("The command to execute".to_string()),
         },
     );
@@ -213,6 +330,7 @@ fn create_shell_tool() -> OpenAiTool {
         "workdir".to_string(),
         JsonSchema::String {
             description: Some("The working directory to execute the command in".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -229,7 +347,7 @@ fn create_shell_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["command".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -239,7 +357,10 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     properties.insert(
         "command".to_string(),
         JsonSchema::Array {
-            items: Box::new(JsonSchema::String { description: None }),
+            items: Box::new(JsonSchema::String {
+                description: None,
+                allowed_values: None,
+            }),
             description: Some("The command to execute".to_string()),
         },
     );
@@ -247,6 +368,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
         "workdir".to_string(),
         JsonSchema::String {
             description: Some("The working directory to execute the command in".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -258,17 +380,18 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
 
     if matches!(sandbox_policy, SandboxPolicy::WorkspaceWrite { .. }) {
         properties.insert(
-        "with_escalated_permissions".to_string(),
-        JsonSchema::Boolean {
-            description: Some("Whether to request escalated permissions. Set to true if command needs to be run without sandbox restrictions".to_string()),
-        },
-    );
+            "with_escalated_permissions".to_string(),
+            JsonSchema::Boolean {
+                description: Some("Whether to request escalated permissions. Set to true if command needs to be run without sandbox restrictions".to_string()),
+            },
+        );
         properties.insert(
-        "justification".to_string(),
-        JsonSchema::String {
-            description: Some("Only set if with_escalated_permissions is true. 1-sentence explanation of why we want to run this command.".to_string()),
-        },
-    );
+            "justification".to_string(),
+            JsonSchema::String {
+                description: Some("Only set if with_escalated_permissions is true. 1-sentence explanation of why we want to run this command.".to_string()),
+                allowed_values: None,
+            },
+        );
     }
 
     let description = match sandbox_policy {
@@ -326,7 +449,7 @@ Long-running commands may be backgrounded after an initial window. Use `wait` to
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["command".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -530,7 +653,7 @@ pub(crate) fn get_openai_tools(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
     browser_enabled: bool,
-    agents_active: bool,
+    _agents_active: bool,
 ) -> Vec<OpenAiTool> {
     let mut tools: Vec<OpenAiTool> = Vec::new();
 
@@ -580,15 +703,8 @@ pub(crate) fn get_openai_tools(
         tools.push(create_browser_status_tool());
     }
 
-    // Add agent management tools for calling external LLMs asynchronously
-    tools.push(create_run_agent_tool());
-    if agents_active {
-        tools.push(create_check_agent_status_tool());
-        tools.push(create_get_agent_result_tool());
-        tools.push(create_cancel_agent_tool());
-        tools.push(create_wait_for_agent_tool());
-        tools.push(create_list_agents_tool());
-    }
+    // Add agent management tool for launching and monitoring asynchronous agents
+    tools.push(create_agent_tool(config.agent_models()));
 
     // Add general wait tool for background completions
     tools.push(create_wait_tool());
@@ -638,6 +754,7 @@ pub fn create_wait_tool() -> OpenAiTool {
         "call_id".to_string(),
         JsonSchema::String {
             description: Some("Background call_id to wait for.".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -656,7 +773,7 @@ pub fn create_wait_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["call_id".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -667,6 +784,7 @@ pub fn create_kill_tool() -> OpenAiTool {
         "call_id".to_string(),
         JsonSchema::String {
             description: Some("Background call_id to terminate.".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -677,7 +795,7 @@ pub fn create_kill_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["call_id".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -690,6 +808,17 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    const TEST_AGENT_MODELS: &[&str] = &["claude", "gemini", "qwen", "code", "cloud"];
+
+    fn apply_default_agent_models(config: &mut ToolsConfig) {
+        config.set_agent_models(
+            TEST_AGENT_MODELS
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
+        );
+    }
 
     fn assert_eq_tool_names(tools: &[OpenAiTool], expected_names: &[&str]) {
         let tool_names = tools
@@ -719,7 +848,7 @@ mod tests {
     fn test_get_openai_tools() {
         let model_family = find_family_for_model("codex-mini-latest")
             .expect("codex-mini-latest should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -729,6 +858,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
         let tools = get_openai_tools(&config, Some(HashMap::new()), false, false);
 
         assert_eq_tool_names(
@@ -738,7 +868,7 @@ mod tests {
                 "update_plan",
                 "browser_open",
                 "browser_status",
-                "agent_run",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -751,7 +881,7 @@ mod tests {
     fn test_get_openai_tools_with_active_agents() {
         let model_family = find_family_for_model("codex-mini-latest")
             .expect("codex-mini-latest should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -761,6 +891,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
         let tools = get_openai_tools(&config, Some(HashMap::new()), false, true);
 
         assert_eq_tool_names(
@@ -770,12 +901,7 @@ mod tests {
                 "update_plan",
                 "browser_open",
                 "browser_status",
-                "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -787,7 +913,7 @@ mod tests {
     #[test]
     fn test_get_openai_tools_default_shell() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -797,6 +923,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
         let tools = get_openai_tools(&config, Some(HashMap::new()), false, false);
 
         assert_eq_tool_names(
@@ -806,7 +933,7 @@ mod tests {
                 "update_plan",
                 "browser_open",
                 "browser_status",
-                "agent_run",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -818,7 +945,7 @@ mod tests {
     #[test]
     fn test_get_openai_tools_mcp_tools() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -828,6 +955,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
         let tools = get_openai_tools(
             &config,
             Some(HashMap::from([(
@@ -874,12 +1002,7 @@ mod tests {
                 "shell",
                 "browser_open",
                 "browser_status",
-                "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -889,14 +1012,14 @@ mod tests {
         );
 
         assert_eq!(
-            tools[12],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "test_server/do_something_cool".to_string(),
                 parameters: JsonSchema::Object {
                     properties: BTreeMap::from([
                         (
                             "string_argument".to_string(),
-                            JsonSchema::String { description: None }
+                            JsonSchema::String { description: None, allowed_values: None }
                         ),
                         (
                             "number_argument".to_string(),
@@ -908,7 +1031,7 @@ mod tests {
                                 properties: BTreeMap::from([
                                     (
                                         "string_property".to_string(),
-                                        JsonSchema::String { description: None }
+                                        JsonSchema::String { description: None, allowed_values: None }
                                     ),
                                     (
                                         "number_property".to_string(),
@@ -919,7 +1042,139 @@ mod tests {
                                     "string_property".to_string(),
                                     "number_property".to_string(),
                                 ]),
-                                additional_properties: Some(false),
+                                additional_properties: Some(false.into()),
+                            },
+                        ),
+                    ]),
+                    required: None,
+                    additional_properties: None,
+                },
+                description: "Do something cool".to_string(),
+                strict: false,
+            })
+        );
+    }
+
+    #[test]
+    fn test_get_openai_tools_mcp_tools_with_additional_properties_schema() {
+        let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
+        let mut config = ToolsConfig::new_from_params(&ToolsConfigParams {
+            model_family: &model_family,
+            approval_policy: AskForApproval::Never,
+            sandbox_policy: SandboxPolicy::ReadOnly,
+            include_plan_tool: false,
+            include_apply_patch_tool: false,
+            include_web_search_request: true,
+            use_streamable_shell_tool: false,
+            include_view_image_tool: true,
+        });
+        apply_default_agent_models(&mut config);
+        let tools = get_openai_tools(
+            &config,
+            Some(HashMap::from([(
+                "test_server/do_something_cool".to_string(),
+                mcp_types::Tool {
+                    name: "do_something_cool".to_string(),
+                    input_schema: ToolInputSchema {
+                        properties: Some(serde_json::json!({
+                            "string_argument": {
+                                "type": "string",
+                            },
+                            "number_argument": {
+                                "type": "number",
+                            },
+                            "object_argument": {
+                                "type": "object",
+                                "properties": {
+                                    "string_property": { "type": "string" },
+                                    "number_property": { "type": "number" },
+                                },
+                                "required": [
+                                    "string_property",
+                                    "number_property",
+                                ],
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "properties": {
+                                        "addtl_prop": { "type": "string" },
+                                    },
+                                    "required": [
+                                        "addtl_prop",
+                                    ],
+                                    "additionalProperties": false,
+                                },
+                            },
+                        })),
+                        required: None,
+                        r#type: "object".to_string(),
+                    },
+                    output_schema: None,
+                    title: None,
+                    annotations: None,
+                    description: Some("Do something cool".to_string()),
+                },
+            )])),
+            false,
+            true,
+        );
+
+        assert_eq_tool_names(
+            &tools,
+            &[
+                "shell",
+                "browser_open",
+                "browser_status",
+                "agent",
+                "wait",
+                "kill",
+                "web_search",
+                "web_fetch",
+                "test_server/do_something_cool",
+            ],
+        );
+
+        assert_eq!(
+            tools[8],
+            OpenAiTool::Function(ResponsesApiTool {
+                name: "test_server/do_something_cool".to_string(),
+                parameters: JsonSchema::Object {
+                    properties: BTreeMap::from([
+                        (
+                            "string_argument".to_string(),
+                            JsonSchema::String { description: None, allowed_values: None }
+                        ),
+                        (
+                            "number_argument".to_string(),
+                            JsonSchema::Number { description: None }
+                        ),
+                        (
+                            "object_argument".to_string(),
+                            JsonSchema::Object {
+                                properties: BTreeMap::from([
+                                    (
+                                        "string_property".to_string(),
+                                        JsonSchema::String { description: None, allowed_values: None }
+                                    ),
+                                    (
+                                        "number_property".to_string(),
+                                        JsonSchema::Number { description: None }
+                                    ),
+                                ]),
+                                required: Some(vec![
+                                    "string_property".to_string(),
+                                    "number_property".to_string(),
+                                ]),
+                                additional_properties: Some(
+                                    JsonSchema::Object {
+                                        properties: BTreeMap::from([(
+                                            "addtl_prop".to_string(),
+                                            JsonSchema::String { description: None, allowed_values: None }
+                                        ),]),
+                                        required: Some(vec!["addtl_prop".to_string(),]),
+                                        additional_properties: Some(false.into()),
+                                    }
+                                    .into()
+                                ),
                             },
                         ),
                     ]),
@@ -950,7 +1205,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_property_missing_type_defaults_to_string() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new_from_params(&ToolsConfigParams {
+        let mut config = ToolsConfig::new_from_params(&ToolsConfigParams {
             model_family: &model_family,
             approval_policy: AskForApproval::Never,
             sandbox_policy: SandboxPolicy::ReadOnly,
@@ -960,6 +1215,7 @@ mod tests {
             use_streamable_shell_tool: false,
             include_view_image_tool: true,
         });
+        apply_default_agent_models(&mut config);
 
         let tools = get_openai_tools(
             &config,
@@ -992,12 +1248,7 @@ mod tests {
                 "shell",
                 "browser_open",
                 "browser_status",
-                "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -1007,14 +1258,15 @@ mod tests {
         );
 
         assert_eq!(
-            tools[12],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/search".to_string(),
                 parameters: JsonSchema::Object {
                     properties: BTreeMap::from([(
                         "query".to_string(),
                         JsonSchema::String {
-                            description: Some("search query".to_string())
+                            description: Some("search query".to_string()),
+                            allowed_values: None,
                         }
                     )]),
                     required: None,
@@ -1029,7 +1281,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_integer_normalized_to_number() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -1039,6 +1291,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
 
         let tools = get_openai_tools(
             &config,
@@ -1069,12 +1322,7 @@ mod tests {
                 "shell",
                 "browser_open",
                 "browser_status",
-                "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -1083,7 +1331,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[12],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
@@ -1103,7 +1351,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_array_without_items_gets_default_string_items() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -1113,6 +1361,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
 
         let tools = get_openai_tools(
             &config,
@@ -1143,12 +1392,7 @@ mod tests {
                 "shell",
                 "browser_open",
                 "browser_status",
-                "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -1157,14 +1401,14 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[12],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/tags".to_string(),
                 parameters: JsonSchema::Object {
                     properties: BTreeMap::from([(
                         "tags".to_string(),
                         JsonSchema::Array {
-                            items: Box::new(JsonSchema::String { description: None }),
+                            items: Box::new(JsonSchema::String { description: None, allowed_values: None }),
                             description: None
                         }
                     )]),
@@ -1180,7 +1424,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_anyof_defaults_to_string() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(
+        let mut config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -1190,6 +1434,7 @@ mod tests {
             /*use_experimental_streamable_shell_tool*/ false,
             false,
         );
+        apply_default_agent_models(&mut config);
 
         let tools = get_openai_tools(
             &config,
@@ -1220,12 +1465,7 @@ mod tests {
                 "shell",
                 "browser_open",
                 "browser_status",
-                "agent_run",
-                "agent_check",
-                "agent_result",
-                "agent_cancel",
-                "agent_wait",
-                "agent_list",
+                "agent",
                 "wait",
                 "kill",
                 "web_search",
@@ -1234,13 +1474,13 @@ mod tests {
             ],
         );
         assert_eq!(
-            tools[12],
+            tools[8],
             OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/value".to_string(),
                 parameters: JsonSchema::Object {
                     properties: BTreeMap::from([(
                         "value".to_string(),
-                        JsonSchema::String { description: None }
+                        JsonSchema::String { description: None, allowed_values: None }
                     )]),
                     required: None,
                     additional_properties: None,
@@ -1326,6 +1566,7 @@ fn create_browser_open_tool() -> OpenAiTool {
         "url".to_string(),
         JsonSchema::String {
             description: Some("The URL to navigate to (e.g., https://example.com)".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1336,7 +1577,7 @@ fn create_browser_open_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["url".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1351,7 +1592,7 @@ fn create_browser_close_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1366,7 +1607,7 @@ fn create_browser_status_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1377,6 +1618,7 @@ fn create_browser_click_tool() -> OpenAiTool {
         "type".to_string(),
         JsonSchema::String {
             description: Some("Optional type of mouse event: 'click' (default), 'mousedown', or 'mouseup'. Use mousedown, browser_move, mouseup sequence to drag.".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -1399,7 +1641,7 @@ fn create_browser_click_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1448,7 +1690,7 @@ fn create_browser_move_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1459,6 +1701,7 @@ fn create_browser_type_tool() -> OpenAiTool {
         "text".to_string(),
         JsonSchema::String {
             description: Some("The text to type into the currently focused element".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1469,7 +1712,7 @@ fn create_browser_type_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["text".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1480,6 +1723,7 @@ fn create_browser_key_tool() -> OpenAiTool {
         "key".to_string(),
         JsonSchema::String {
             description: Some("The key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete')".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1492,7 +1736,7 @@ fn create_browser_key_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["key".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1503,6 +1747,7 @@ fn create_browser_javascript_tool() -> OpenAiTool {
         "code".to_string(),
         JsonSchema::String {
             description: Some("The JavaScript code to execute in the browser context".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1513,7 +1758,7 @@ fn create_browser_javascript_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["code".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1540,7 +1785,7 @@ fn create_browser_scroll_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1551,6 +1796,7 @@ fn create_browser_history_tool() -> OpenAiTool {
         "direction".to_string(),
         JsonSchema::String {
             description: Some("History direction: 'back' or 'forward'".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1561,7 +1807,7 @@ fn create_browser_history_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["direction".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1584,6 +1830,7 @@ fn create_browser_inspect_tool() -> OpenAiTool {
         "id".to_string(),
         JsonSchema::String {
             description: Some("Optional element id attribute value. If provided, looks up '#id' and inspects that element.".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1594,7 +1841,7 @@ fn create_browser_inspect_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1615,7 +1862,7 @@ fn create_browser_console_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1628,7 +1875,7 @@ fn create_browser_cleanup_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties: BTreeMap::new(),
             required: Some(vec![]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1639,6 +1886,7 @@ fn create_browser_cdp_tool() -> OpenAiTool {
         "method".to_string(),
         JsonSchema::String {
             description: Some("CDP method name, e.g. 'Page.navigate' or 'Input.dispatchKeyEvent'".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -1646,13 +1894,14 @@ fn create_browser_cdp_tool() -> OpenAiTool {
         JsonSchema::Object {
             properties: BTreeMap::new(),
             required: None,
-            additional_properties: Some(true),
+            additional_properties: Some(true.into()),
         },
     );
     properties.insert(
         "target".to_string(),
         JsonSchema::String {
             description: Some("Target for the command: 'page' (default) or 'browser'".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1663,7 +1912,7 @@ fn create_browser_cdp_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["method".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }
@@ -1674,6 +1923,7 @@ fn create_web_fetch_tool() -> OpenAiTool {
         "url".to_string(),
         JsonSchema::String {
             description: Some("The URL to fetch (e.g., https://example.com)".to_string()),
+            allowed_values: None,
         },
     );
     properties.insert(
@@ -1688,6 +1938,7 @@ fn create_web_fetch_tool() -> OpenAiTool {
         "mode".to_string(),
         JsonSchema::String {
             description: Some("Optional: 'auto' (default) falls back to the internal browser on challenges; 'browser' forces CDP-based fetch; 'http' disables browser fallback.".to_string()),
+            allowed_values: None,
         },
     );
 
@@ -1698,7 +1949,7 @@ fn create_web_fetch_tool() -> OpenAiTool {
         parameters: JsonSchema::Object {
             properties,
             required: Some(vec!["url".to_string()]),
-            additional_properties: Some(false),
+            additional_properties: Some(false.into()),
         },
     })
 }

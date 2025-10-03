@@ -19,8 +19,9 @@ use crate::session_store::SessionMap;
 use agent_client_protocol as acp;
 use anyhow::anyhow;
 use anyhow::Context as _;
-use codex_protocol::mcp_protocol::ClientRequest;
-use codex_protocol::mcp_protocol::ConversationId;
+use codex_app_server_protocol::ClientRequest;
+use codex_protocol::ConversationId;
+use codex_protocol::protocol::SessionSource;
 
 use codex_common::model_presets::{builtin_model_presets, ModelPreset};
 use codex_core::AuthManager;
@@ -32,7 +33,7 @@ use codex_core::default_client::get_codex_user_agent_default;
 use codex_core::model_family::{derive_default_model_family, find_family_for_model};
 use codex_core::protocol::Submission;
 use codex_core::protocol::Op;
-use codex_protocol::mcp_protocol::AuthMode;
+use codex_app_server_protocol::AuthMode;
 use mcp_types::CallToolRequestParams;
 use mcp_types::CallToolResult;
 use mcp_types::ClientRequest as McpClientRequest;
@@ -78,7 +79,10 @@ impl MessageProcessor {
             AuthMode::ApiKey,
             config.responses_originator_header.clone(),
         );
-        let conversation_manager = Arc::new(ConversationManager::new(auth_manager.clone()));
+        let conversation_manager = Arc::new(ConversationManager::new(
+            auth_manager.clone(),
+            SessionSource::Mcp,
+        ));
         let config_for_processor = config.clone();
         let codex_message_processor = CodexMessageProcessor::new(
             auth_manager,

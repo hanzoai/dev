@@ -1,3 +1,4 @@
+use codex_app_server_protocol::AuthMode;
 use codex_common::CliConfigOverrides;
 use codex_core::CodexAuth;
 use codex_core::auth::CLIENT_ID;
@@ -9,7 +10,6 @@ use codex_core::config::ConfigOverrides;
 use codex_login::ServerOptions;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
-use codex_protocol::mcp_protocol::AuthMode;
 use std::env;
 use std::path::PathBuf;
 
