@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.183] - 2025-10-03
+
+- TUI/Explore: keep the Exploring header until the next non-reasoning entry to maintain exploration context. (7048793)
+- TUI/Explore: sync reasoning visibility changes with explore cells to avoid stale header state. (7048793)
+
 ## [0.2.182] - 2025-10-03
 
 - Agents: add first-class cloud agent flows with submit --wait support and richer previews. (6556ac9, 51e60cb, cdc833d)
