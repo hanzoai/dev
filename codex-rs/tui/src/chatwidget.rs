@@ -6536,6 +6536,9 @@ impl ChatWidget<'_> {
     fn refresh_explore_trailing_flags(&mut self) {}
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
+        if self.layout.scroll_offset > 0 {
+            layout_scroll::to_bottom(self);
+        }
         // Surface a local diagnostic note and anchor it to the NEXT turn,
         // placing it directly after the user prompt so ordering is stable.
         // (debug message removed)
