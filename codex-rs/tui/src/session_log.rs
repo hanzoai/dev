@@ -12,7 +12,6 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::app_event::AppEvent;
-use crate::history::state::HistorySnapshot;
 
 static LOGGER: LazyLock<SessionLogger> = LazyLock::new(SessionLogger::new);
 
@@ -129,40 +128,20 @@ pub(crate) fn log_inbound_app_event(event: &AppEvent) {
         AppEvent::CodexEvent(ev) => {
             write_record("to_tui", "codex_event", ev);
         }
-        AppEvent::KeyEvent(k) => {
+        AppEvent::NewSession => {
             let value = json!({
                 "ts": now_ts(),
                 "dir": "to_tui",
-                "kind": "key_event",
-                "event": format!("{:?}", k),
+                "kind": "new_session",
             });
             LOGGER.write_json_line(value);
         }
-        AppEvent::Paste(s) => {
+        AppEvent::InsertHistoryCell(cell) => {
             let value = json!({
                 "ts": now_ts(),
                 "dir": "to_tui",
-                "kind": "paste",
-                "text": s,
-            });
-            LOGGER.write_json_line(value);
-        }
-        AppEvent::DispatchCommand(cmd, _text) => {
-            let value = json!({
-                "ts": now_ts(),
-                "dir": "to_tui",
-                "kind": "slash_command",
-                "command": format!("{:?}", cmd),
-            });
-            LOGGER.write_json_line(value);
-        }
-        // Internal UI events; still log for fidelity, but avoid heavy payloads.
-        AppEvent::InsertHistory(lines) => {
-            let value = json!({
-                "ts": now_ts(),
-                "dir": "to_tui",
-                "kind": "insert_history",
-                "lines": lines.len(),
+                "kind": "insert_history_cell",
+                "lines": cell.transcript_lines().len(),
             });
             LOGGER.write_json_line(value);
         }
@@ -198,7 +177,6 @@ pub(crate) fn log_inbound_app_event(event: &AppEvent) {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn log_outbound_op(op: &Op) {
     if !LOGGER.is_enabled() {
         return;
@@ -229,56 +207,4 @@ where
         "payload": obj,
     });
     LOGGER.write_json_line(value);
-}
-
-fn make_history_snapshot_value(
-    commit_id: &str,
-    summary: Option<&str>,
-    history: &HistorySnapshot,
-) -> serde_json::Value {
-    let record_count = history.records.len();
-    let order_len = history.order.len();
-    let order_debug_len = history.order_debug.len();
-    json!({
-        "ts": now_ts(),
-        "dir": "meta",
-        "kind": "history_snapshot",
-        "commit": commit_id,
-        "summary": summary,
-        "record_count": record_count,
-        "order_len": order_len,
-        "order_debug_len": order_debug_len,
-        "history": history,
-    })
-}
-
-pub(crate) fn log_history_snapshot(
-    commit_id: &str,
-    summary: Option<&str>,
-    history: &HistorySnapshot,
-) {
-    if !LOGGER.is_enabled() {
-        return;
-    }
-    LOGGER.write_json_line(make_history_snapshot_value(commit_id, summary, history));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::history::state::HistoryState;
-
-    #[test]
-    fn history_snapshot_value_includes_snapshot_payload() {
-        let state = HistoryState::new();
-        let snapshot = state.snapshot();
-        let value = make_history_snapshot_value("abc123", Some("summary"), &snapshot);
-        assert_eq!(value["kind"], "history_snapshot");
-        assert_eq!(value["commit"], "abc123");
-        assert_eq!(value["summary"], "summary");
-        assert_eq!(value["record_count"], 0);
-        assert_eq!(value["order_len"], 0);
-        assert_eq!(value["order_debug_len"], 0);
-        assert!(value["history"].is_object());
-    }
 }

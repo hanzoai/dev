@@ -16,7 +16,7 @@ import {
 } from "./responsesProxy";
 import type { ResponsesApiRequest } from "./responsesProxy";
 
-const codexExecPath = path.join(process.cwd(), "..", "..", "codex-rs", "target", "debug", "code");
+const codexExecPath = path.join(process.cwd(), "..", "..", "code-rs", "target", "debug", "code");
 
 describe("Codex", () => {
   it("returns thread events", async () => {

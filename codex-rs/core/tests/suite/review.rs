@@ -22,7 +22,7 @@ use codex_core::protocol::RolloutItem;
 use codex_core::protocol::RolloutLine;
 use core_test_support::load_default_config_for_test;
 use core_test_support::load_sse_fixture_with_id_from_str;
-use core_test_support::non_sandbox_test;
+use core_test_support::skip_if_no_network;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use std::path::PathBuf;
@@ -42,7 +42,7 @@ use wiremock::matchers::path;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_op_emits_lifecycle_and_review_output() {
     // Skip under Codex sandbox network restrictions.
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     // Start mock Responses API server. Return a single assistant message whose
     // text is a JSON-encoded ReviewOutputEvent.
@@ -83,7 +83,6 @@ async fn review_op_emits_lifecycle_and_review_output() {
             review_request: ReviewRequest {
                 prompt: "Please review my changes".to_string(),
                 user_facing_hint: "my changes".to_string(),
-                metadata: None,
             },
         })
         .await
@@ -168,7 +167,7 @@ async fn review_op_emits_lifecycle_and_review_output() {
 #[cfg_attr(windows, tokio::test(flavor = "multi_thread", worker_threads = 4))]
 #[cfg_attr(not(windows), tokio::test(flavor = "multi_thread", worker_threads = 2))]
 async fn review_op_with_plain_text_emits_review_fallback() {
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     let sse_raw = r#"[
         {"type":"response.output_item.done", "item":{
@@ -186,7 +185,6 @@ async fn review_op_with_plain_text_emits_review_fallback() {
             review_request: ReviewRequest {
                 prompt: "Plain text review".to_string(),
                 user_facing_hint: "plain text review".to_string(),
-                metadata: None,
             },
         })
         .await
@@ -218,7 +216,7 @@ async fn review_op_with_plain_text_emits_review_fallback() {
 #[cfg_attr(windows, tokio::test(flavor = "multi_thread", worker_threads = 4))]
 #[cfg_attr(not(windows), tokio::test(flavor = "multi_thread", worker_threads = 2))]
 async fn review_does_not_emit_agent_message_on_structured_output() {
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     let review_json = serde_json::json!({
         "findings": [
@@ -256,7 +254,6 @@ async fn review_does_not_emit_agent_message_on_structured_output() {
             review_request: ReviewRequest {
                 prompt: "check structured".to_string(),
                 user_facing_hint: "check structured".to_string(),
-                metadata: None,
             },
         })
         .await
@@ -291,7 +288,7 @@ async fn review_does_not_emit_agent_message_on_structured_output() {
 /// request uses that model (and not the main chat model).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_uses_custom_review_model_from_config() {
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     // Minimal stream: just a completed event
     let sse_raw = r#"[
@@ -311,7 +308,6 @@ async fn review_uses_custom_review_model_from_config() {
             review_request: ReviewRequest {
                 prompt: "use custom model".to_string(),
                 user_facing_hint: "use custom model".to_string(),
-                metadata: None,
             },
         })
         .await
@@ -345,7 +341,7 @@ async fn review_uses_custom_review_model_from_config() {
 #[cfg_attr(windows, tokio::test(flavor = "multi_thread", worker_threads = 4))]
 #[cfg_attr(not(windows), tokio::test(flavor = "multi_thread", worker_threads = 2))]
 async fn review_input_isolated_from_parent_history() {
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     // Mock server for the single review request
     let sse_raw = r#"[
@@ -428,7 +424,6 @@ async fn review_input_isolated_from_parent_history() {
             review_request: ReviewRequest {
                 prompt: review_prompt.clone(),
                 user_facing_hint: review_prompt.clone(),
-                metadata: None,
             },
         })
         .await
@@ -522,7 +517,7 @@ async fn review_input_isolated_from_parent_history() {
 /// messages in its request `input`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_history_does_not_leak_into_parent_session() {
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     // Respond to both the review request and the subsequent parent request.
     let sse_raw = r#"[
@@ -542,7 +537,6 @@ async fn review_history_does_not_leak_into_parent_session() {
             review_request: ReviewRequest {
                 prompt: "Start a review".to_string(),
                 user_facing_hint: "Start a review".to_string(),
-                metadata: None,
             },
         })
         .await

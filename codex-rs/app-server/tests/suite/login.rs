@@ -1,15 +1,17 @@
 use std::path::Path;
 use std::time::Duration;
 
-use codex_core::auth::login_with_api_key;
+use app_test_support::McpProcess;
+use app_test_support::to_response;
 use codex_app_server_protocol::CancelLoginChatGptParams;
 use codex_app_server_protocol::CancelLoginChatGptResponse;
 use codex_app_server_protocol::GetAuthStatusParams;
 use codex_app_server_protocol::GetAuthStatusResponse;
+use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::LoginChatGptResponse;
 use codex_app_server_protocol::LogoutChatGptResponse;
-use mcp_types::JSONRPCResponse;
-use mcp_types::RequestId;
+use codex_app_server_protocol::RequestId;
+use codex_login::login_with_api_key;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
@@ -93,7 +95,7 @@ async fn logout_chatgpt_removes_auth() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn login_and_cancel_chatgpt() {
     let codex_home = TempDir::new().unwrap_or_else(|e| panic!("create tempdir: {e}"));
-    create_config_toml(codex_home.path()).expect("write config.toml");
+    create_config_toml(codex_home.path()).unwrap_or_else(|err| panic!("write config.toml: {err}"));
 
     let mut mcp = McpProcess::new(codex_home.path())
         .await

@@ -4,7 +4,7 @@ name = "codex-cli"
 version = { workspace = true }
 
 [[bin]]
-name = "code"
+name = "codex"
 path = "src/main.rs"
 
 [lib]
@@ -32,21 +32,11 @@ codex-app-server-protocol = { workspace = true }
 codex-protocol-ts = { workspace = true }
 codex-responses-api-proxy = { workspace = true }
 codex-tui = { workspace = true }
-codex-version = { path = "../codex-version" }
-codex-cloud-tasks = { workspace = true }
+codex-rmcp-client = { workspace = true }
+codex-cloud-tasks = { path = "../cloud-tasks" }
 ctor = { workspace = true }
-futures = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }
-regex = "1"
-tar = "0.4"
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
-tempfile = { workspace = true }
-uuid = { version = "1", features = ["v4"] }
-which = { workspace = true }
 owo-colors = { workspace = true }
 serde_json = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 supports-color = { workspace = true }
 tokio = { workspace = true, features = [
     "io-std",
@@ -55,10 +45,9 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
     "signal",
 ] }
-tracing = { workspace = true, features = ["log"] }
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

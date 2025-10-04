@@ -1,6 +1,12 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
+use codex_app_server_protocol::ClientNotification;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::export_client_responses;
+use codex_app_server_protocol::export_server_responses;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
@@ -15,41 +21,17 @@ const HEADER: &str = "// GENERATED CODE! DO NOT MODIFY BY HAND!\n\n";
 pub fn generate_ts(out_dir: &Path, prettier: Option<&Path>) -> Result<()> {
     ensure_dir(out_dir)?;
 
-    // Generate TS bindings
-    mcp_types::InitializeResult::export_all_to(out_dir)?;
-    codex_app_server_protocol::ConversationId::export_all_to(out_dir)?;
-    codex_app_server_protocol::InputItem::export_all_to(out_dir)?;
-    codex_app_server_protocol::ClientRequest::export_all_to(out_dir)?;
-    codex_app_server_protocol::ServerRequest::export_all_to(out_dir)?;
-    codex_app_server_protocol::NewConversationParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::NewConversationResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::AddConversationListenerParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::AddConversationSubscriptionResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::RemoveConversationListenerParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::RemoveConversationSubscriptionResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::SendUserMessageParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::SendUserMessageResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::SendUserTurnParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::SendUserTurnResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::InterruptConversationParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::InterruptConversationResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::GitDiffToRemoteParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::GitDiffToRemoteResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::LoginChatGptResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::LoginChatGptCompleteNotification::export_all_to(out_dir)?;
-    codex_app_server_protocol::CancelLoginChatGptParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::CancelLoginChatGptResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::LogoutChatGptParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::LogoutChatGptResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::GetAuthStatusParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::GetAuthStatusResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::ApplyPatchApprovalParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::ApplyPatchApprovalResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::ExecCommandApprovalParams::export_all_to(out_dir)?;
-    codex_app_server_protocol::ExecCommandApprovalResponse::export_all_to(out_dir)?;
-    codex_app_server_protocol::ServerNotification::export_all_to(out_dir)?;
-    codex_app_server_protocol::ClientNotification::export_all_to(out_dir)?;
+    // Generate the TS bindings client -> server messages.
+    ClientRequest::export_all_to(out_dir)?;
+    export_client_responses(out_dir)?;
+    ClientNotification::export_all_to(out_dir)?;
 
+    // Generate the TS bindings server -> client messages.
+    ServerRequest::export_all_to(out_dir)?;
+    export_server_responses(out_dir)?;
+    ServerNotification::export_all_to(out_dir)?;
+
+    // Generate index.ts that re-exports all types.
     generate_index_ts(out_dir)?;
 
     // Prepend header to each generated .ts file
@@ -59,16 +41,16 @@ pub fn generate_ts(out_dir: &Path, prettier: Option<&Path>) -> Result<()> {
     }
 
     // Format with Prettier by passing individual files (no shell globbing)
-    if let Some(prettier_bin) = prettier {
-        if !ts_files.is_empty() {
-            let status = Command::new(prettier_bin)
-                .arg("--write")
-                .args(ts_files.iter().map(|p| p.as_os_str()))
-                .status()
-                .with_context(|| format!("Failed to invoke Prettier at {}", prettier_bin.display()))?;
-            if !status.success() {
-                return Err(anyhow!("Prettier failed with status {status}"));
-            }
+    if let Some(prettier_bin) = prettier
+        && !ts_files.is_empty()
+    {
+        let status = Command::new(prettier_bin)
+            .arg("--write")
+            .args(ts_files.iter().map(|p| p.as_os_str()))
+            .status()
+            .with_context(|| format!("Failed to invoke Prettier at {}", prettier_bin.display()))?;
+        if !status.success() {
+            return Err(anyhow!("Prettier failed with status {status}"));
         }
     }
 

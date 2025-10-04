@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::path::PathBuf;
 use tempfile::Builder;
 
@@ -5,7 +6,6 @@ use tempfile::Builder;
 pub enum PasteImageError {
     ClipboardUnavailable(String),
     NoImage(String),
-    DecodeFailed(String),
     EncodeFailed(String),
     IoError(String),
 }
@@ -15,7 +15,6 @@ impl std::fmt::Display for PasteImageError {
         match self {
             PasteImageError::ClipboardUnavailable(msg) => write!(f, "clipboard unavailable: {msg}"),
             PasteImageError::NoImage(msg) => write!(f, "no image on clipboard: {msg}"),
-            PasteImageError::DecodeFailed(msg) => write!(f, "could not decode image: {msg}"),
             PasteImageError::EncodeFailed(msg) => write!(f, "could not encode image: {msg}"),
             PasteImageError::IoError(msg) => write!(f, "io error: {msg}"),
         }
@@ -26,51 +25,99 @@ impl std::error::Error for PasteImageError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodedImageFormat {
     Png,
+    Jpeg,
+    Other,
+}
+
+impl EncodedImageFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            EncodedImageFormat::Png => "PNG",
+            EncodedImageFormat::Jpeg => "JPEG",
+            EncodedImageFormat::Other => "IMG",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct PastedImageInfo {
     pub width: u32,
     pub height: u32,
-    #[allow(dead_code)]
     pub encoded_format: EncodedImageFormat, // Always PNG for now.
 }
 
 /// Capture image from system clipboard, encode to PNG, and return bytes + info.
+#[cfg(not(target_os = "android"))]
 pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
+    let _span = tracing::debug_span!("paste_image_as_png").entered();
     tracing::debug!("attempting clipboard image read");
     let mut cb = arboard::Clipboard::new()
         .map_err(|e| PasteImageError::ClipboardUnavailable(e.to_string()))?;
-    let img = cb
-        .get_image()
-        .map_err(|e| PasteImageError::NoImage(e.to_string()))?;
-    let w = img.width as u32;
-    let h = img.height as u32;
+    // Sometimes images on the clipboard come as files (e.g. when copy/pasting from
+    // Finder), sometimes they come as image data (e.g. when pasting from Chrome).
+    // Accept both, and prefer files if both are present.
+    let files = cb
+        .get()
+        .file_list()
+        .map_err(|e| PasteImageError::ClipboardUnavailable(e.to_string()));
+    let dyn_img = if let Some(img) = files
+        .unwrap_or_default()
+        .into_iter()
+        .find_map(|f| image::open(f).ok())
+    {
+        tracing::debug!(
+            "clipboard image opened from file: {}x{}",
+            img.width(),
+            img.height()
+        );
+        img
+    } else {
+        let _span = tracing::debug_span!("get_image").entered();
+        let img = cb
+            .get_image()
+            .map_err(|e| PasteImageError::NoImage(e.to_string()))?;
+        let w = img.width as u32;
+        let h = img.height as u32;
+        tracing::debug!("clipboard image opened from image: {}x{}", w, h);
+
+        let Some(rgba_img) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
+            return Err(PasteImageError::EncodeFailed("invalid RGBA buffer".into()));
+        };
+
+        image::DynamicImage::ImageRgba8(rgba_img)
+    };
 
     let mut png: Vec<u8> = Vec::new();
-    let Some(rgba_img) = image::RgbaImage::from_raw(w, h, img.bytes.into_owned()) else {
-        return Err(PasteImageError::EncodeFailed("invalid RGBA buffer".into()));
-    };
-    let dyn_img = image::DynamicImage::ImageRgba8(rgba_img);
-    tracing::debug!("clipboard image decoded RGBA {w}x{h}");
     {
+        let span =
+            tracing::debug_span!("encode_image", byte_length = tracing::field::Empty).entered();
         let mut cursor = std::io::Cursor::new(&mut png);
         dyn_img
             .write_to(&mut cursor, image::ImageFormat::Png)
             .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
+        span.record("byte_length", png.len());
     }
 
-    tracing::debug!(
-        "clipboard image encoded to PNG ({len} bytes)",
-        len = png.len()
-    );
     Ok((
         png,
-        PastedImageInfo { width: w, height: h, encoded_format: EncodedImageFormat::Png },
+        PastedImageInfo {
+            width: dyn_img.width(),
+            height: dyn_img.height(),
+            encoded_format: EncodedImageFormat::Png,
+        },
+    ))
+}
+
+/// Android/Termux does not support arboard; return a clear error.
+#[cfg(target_os = "android")]
+pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
+    Err(PasteImageError::ClipboardUnavailable(
+        "clipboard image paste is unsupported on Android".into(),
     ))
 }
 
 /// Convenience: write to a temp file and return its path + info.
+#[cfg(not(target_os = "android"))]
 pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
     let (png, info) = paste_image_as_png()?;
     // Create a unique temporary file with a .png suffix to avoid collisions.
@@ -87,76 +134,12 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
     Ok((path, info))
 }
 
-// Clipboard image helpers removed from default build to keep dependencies and warnings minimal.
-// If clipboard image pasting is needed, reintroduce using arboard + image crates.
-
-/// Try to interpret pasted text as an image (data URL or raw base64),
-/// decode it, convert to PNG, and write to a temp file.
-///
-/// Supports common forms:
-/// - data:image/png;base64,AAAA...
-/// - data:image/jpeg;base64,/9j/...
-/// - Raw base64 for PNG (starts with iVBORw0K...) or JPEG (/9j/), GIF (R0lGODlh / R0lGODdh)
-pub fn try_decode_base64_image_to_temp_png(pasted: &str) -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
-    let s = pasted.trim();
-    if s.is_empty() { return Err(PasteImageError::DecodeFailed("empty".into())); }
-
-    // Extract base64 payload and remember mime if present
-    let (maybe_mime, b64) = if let Some(rest) = s.strip_prefix("data:") {
-        // data:[mime];base64,....  We only handle base64-encoded payloads
-        if let Some(idx) = rest.find(",") {
-            let (head, tail) = rest.split_at(idx);
-            let b64 = &tail[1..];
-            if !head.contains(";base64") {
-                return Err(PasteImageError::DecodeFailed("data URL without base64".into()));
-            }
-            let mime = head.split(';').next().unwrap_or("").to_string();
-            (Some(mime), b64)
-        } else {
-            return Err(PasteImageError::DecodeFailed("malformed data URL".into()));
-        }
-    } else {
-        // Raw base64 – heuristically accept if it looks like an image
-        let looks_imagey = s.starts_with("iVBORw0K") // PNG
-            || s.starts_with("/9j/")               // JPEG
-            || s.starts_with("R0lGODlh")           // GIF87a
-            || s.starts_with("R0lGODdh");          // GIF89a
-        if !looks_imagey { return Err(PasteImageError::DecodeFailed("not image-like base64".into())); }
-        (None, s)
-    };
-
-    // Remove whitespace that might be wrapped by terminals
-    let compact: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
-    use base64::Engine as _;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(compact)
-        .map_err(|e| PasteImageError::DecodeFailed(e.to_string()))?;
-
-    // Load via `image` crate to get dimensions and normalize to PNG
-    let dyn_img = image::load_from_memory(&bytes)
-        .map_err(|e| PasteImageError::DecodeFailed(e.to_string()))?;
-    let (w, h) = (dyn_img.width(), dyn_img.height());
-
-    let mut png: Vec<u8> = Vec::new();
-    {
-        let mut cursor = std::io::Cursor::new(&mut png);
-        dyn_img
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|e| PasteImageError::EncodeFailed(e.to_string()))?;
-    }
-
-    // Persist to temp file
-    let tmp = Builder::new()
-        .prefix("codex-clipboard-")
-        .suffix(".png")
-        .tempfile()
-        .map_err(|e| PasteImageError::IoError(e.to_string()))?;
-    std::fs::write(tmp.path(), &png).map_err(|e| PasteImageError::IoError(e.to_string()))?;
-    let (_file, path) = tmp.keep().map_err(|e| PasteImageError::IoError(e.error.to_string()))?;
-
-    let _mime_dbg = maybe_mime.unwrap_or_else(|| "image/*".to_string());
-    tracing::debug!("decoded pasted base64 image to {w}x{h} PNG at {}", path.to_string_lossy());
-    Ok((path, PastedImageInfo { width: w, height: h, encoded_format: EncodedImageFormat::Png }))
+#[cfg(target_os = "android")]
+pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
+    // Keep error consistent with paste_image_as_png.
+    Err(PasteImageError::ClipboardUnavailable(
+        "clipboard image paste is unsupported on Android".into(),
+    ))
 }
 
 /// Normalize pasted text that may represent a filesystem path.
@@ -169,10 +152,10 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     let pasted = pasted.trim();
 
     // file:// URL → filesystem path
-    if let Ok(url) = url::Url::parse(pasted) {
-        if url.scheme() == "file" {
-            return url.to_file_path().ok();
-        }
+    if let Ok(url) = url::Url::parse(pasted)
+        && url.scheme() == "file"
+    {
+        return url.to_file_path().ok();
     }
 
     // TODO: We'll improve the implementation/unit tests over time, as appropriate.
@@ -210,9 +193,21 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     None
 }
 
-// Image format inference removed alongside clipboard image helpers.
+/// Infer an image format for the provided path based on its extension.
+pub fn pasted_image_format(path: &Path) -> EncodedImageFormat {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => EncodedImageFormat::Png,
+        Some("jpg") | Some("jpeg") => EncodedImageFormat::Jpeg,
+        _ => EncodedImageFormat::Other,
+    }
+}
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod pasted_paths_tests {
     use super::*;
 
