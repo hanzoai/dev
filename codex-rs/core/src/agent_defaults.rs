@@ -45,7 +45,7 @@ pub fn default_params_for(name: &str, read_only: bool) -> Vec<String> {
             } else {
                 vec![
                     "-s".into(), "workspace-write".into(),
-                    "-a".into(), "never".into(),
+                    "--dangerously-bypass-approvals-and-sandbox".into(),
                     "exec".into(), "--skip-git-repo-check".into(),
                 ]
             }
