@@ -61,9 +61,11 @@ pub(crate) enum CancellationEvent {
 pub(crate) use chat_composer::ChatComposer;
 pub(crate) use chat_composer::InputResult;
 pub(crate) use auto_coordinator_view::{
+    AutoActiveViewModel,
     AutoCoordinatorButton,
     AutoCoordinatorView,
     AutoCoordinatorViewModel,
+    AutoSetupViewModel,
     CountdownState,
 };
 pub(crate) use login_accounts_view::{
