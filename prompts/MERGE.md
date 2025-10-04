@@ -5,6 +5,7 @@ Goal
 
 Constraints
 ◦ Keep our TUI architecture (themes/colors, browser, multi-agent) intact.
+◦ Do not import upstream GitHub workflow or CI changes; keep only our existing `issue-*`, `preview-build`, and `upstream-merge` workflows.
 
 Essential Steps
 ◦ Prep:
