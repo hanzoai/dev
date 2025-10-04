@@ -12333,10 +12333,11 @@ fi\n\
         self.auto_state.thinking_prefix_stripped = false;
 
         let review_pending = self.is_review_flow_active()
-            || self
-                .pending_auto_turn_config
-                .as_ref()
-                .is_some_and(|cfg| !cfg.read_only);
+            || (self.auto_state.review_enabled
+                && self
+                    .pending_auto_turn_config
+                    .as_ref()
+                    .is_some_and(|cfg| !cfg.read_only));
 
         self.auto_state.waiting_for_review = review_pending;
 
