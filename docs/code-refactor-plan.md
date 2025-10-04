@@ -52,19 +52,23 @@ We already tried copying modules into `code-*` while leaving the originals in `c
 ## Execution Checklist
 
 1. Snapshot current state (branch + optional tag) so we can recover if the
-   reset uncovers regressions.
-2. `git mv codex-rs code-rs/codex-rs-fork` and ensure workspace tools still
-   locate the crates.
-3. Run the `codex-` → `code-` rename script over the moved tree; update
-   workspace members and dependencies accordingly.
+   reset uncovers regressions. *(Owner: pending — take snapshot before
+   upstream restore work begins.)*
+2. **DONE (2025-10-04):** Duplicate `codex-rs/` into `code-rs/` so history
+   follows the fork. Bulk-renamed all crates/binaries from `codex-*` to
+   `code-*`, fixed module/file names, updated manifests, and confirmed
+   `./build-fast.sh --workspace code` passes.
+3. **DONE (2025-10-04):** Update shared tooling (`build-fast.sh`) to target
+   both workspaces and keep existing `codex` builds green (`./build-fast.sh`).
 4. Fix build/scripts/tests that reference `codex-rs/…` paths (e.g.
-   `build-fast.sh`, CI workflows, developer docs).
-5. Verify `./build-fast.sh` succeeds using only the renamed fork crates.
-6. Replace `codex-rs/` with the upstream checkout and re-run
-   `./build-fast.sh`.
-7. Begin removing duplicated code area by area, leaning on upstream and
+   `build-fast.sh`, CI workflows, developer docs). *(Owner: in progress —
+   audit remaining references outside `build-fast.sh`.)*
+5. Replace `codex-rs/` with the upstream checkout and re-run
+   `./build-fast.sh`. *(Owner: pending — execute after snapshot & tooling
+   audit.)*
+6. Begin removing duplicated code area by area, leaning on upstream and
    exposing wrapper shims only where the fork behavior diverges.
-8. When wrapper surfaces stabilize, drop any stale fork-only modules from
+7. When wrapper surfaces stabilize, drop any stale fork-only modules from
    `code-rs/` and ensure all downstream crates import `code-*` exclusively.
 
 ## Tracking
