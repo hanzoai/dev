@@ -1192,7 +1192,7 @@ fn observer_report_replaces_prompt_and_resets_countdown() {
 
     chat.auto_state.active = true;
     chat.auto_state.awaiting_submission = true;
-    chat.auto_state.current_prompt = Some("old prompt".to_string());
+    chat.auto_state.current_cli_prompt = Some("old prompt".to_string());
     chat.auto_state.countdown_id = 7;
     chat.auto_state.seconds_remaining = 3;
 
@@ -1209,7 +1209,7 @@ fn observer_report_replaces_prompt_and_resets_countdown() {
         Some("double-check the failing command".to_string()),
     );
 
-    assert_eq!(chat.auto_state.current_prompt.as_deref(), Some("new prompt"));
+    assert_eq!(chat.auto_state.current_cli_prompt.as_deref(), Some("new prompt"));
     assert_eq!(chat.auto_state.observer_status, AutoObserverStatus::Failing);
     assert_eq!(
         chat
@@ -1221,7 +1221,8 @@ fn observer_report_replaces_prompt_and_resets_countdown() {
         telemetry.trigger_count
     );
     assert_eq!(chat.auto_state.countdown_id, 8);
-    assert_eq!(chat.auto_state.seconds_remaining, AUTO_COUNTDOWN_SECONDS);
+    let default_seconds = chat.auto_state.countdown_seconds().unwrap_or(0);
+    assert_eq!(chat.auto_state.seconds_remaining, default_seconds);
 
     let texts = cell_texts(&chat);
     assert!(texts.iter().any(|line| line.contains("Observer guidance")));
@@ -2247,10 +2248,11 @@ fn pump_app_events(
 fn prepare_auto_drive_for_manual_pause(chat: &mut ChatWidget<'_>) {
     chat.auto_state.reset();
     chat.auto_state.active = true;
+    chat.auto_state.review_enabled = true;
     chat.auto_state.awaiting_submission = true;
     chat.auto_state.current_cli_prompt = Some("echo hi".to_string());
     chat.auto_state.goal = Some("demo goal".to_string());
-    chat.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+    chat.auto_state.seconds_remaining = chat.auto_state.countdown_seconds().unwrap_or(0);
 }
 
 fn esc_key() -> KeyEvent {
@@ -2282,6 +2284,7 @@ fn auto_waits_for_review_before_continuing() {
     chat.auto_state.waiting_for_response = true;
     chat.auto_state.coordinator_waiting = true;
     chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.review_enabled = true;
 
     let (tx, auto_rx) = channel();
     chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
@@ -2383,6 +2386,7 @@ fn auto_resume_clears_review_flag_even_when_waiting_for_response() {
     chat.auto_state.waiting_for_response = true;
     chat.auto_state.coordinator_waiting = true;
     chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.review_enabled = true;
 
     chat.auto_resolve_state = Some(AutoResolveState::new(
         "Review workspace".to_string(),
@@ -2409,6 +2413,7 @@ fn auto_blocks_until_auto_resolve_completes() {
     chat.auto_state.waiting_for_response = true;
     chat.auto_state.coordinator_waiting = true;
     chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.review_enabled = true;
     chat.config.tui.review_auto_resolve = true;
 
     let (tx, auto_rx) = channel();

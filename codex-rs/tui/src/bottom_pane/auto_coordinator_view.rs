@@ -1,9 +1,10 @@
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::colors;
 use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::spinner;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use super::{
     bottom_pane_view::{BottomPaneView, ConditionalUpdate},
     chat_composer::ChatComposer,
+    BottomPane,
 };
 
 #[derive(Clone, Debug)]
@@ -29,7 +31,7 @@ pub(crate) struct AutoCoordinatorButton {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AutoCoordinatorViewModel {
+pub(crate) struct AutoActiveViewModel {
     #[allow(dead_code)]
     pub goal: Option<String>,
     pub status_lines: Vec<String>,
@@ -41,6 +43,20 @@ pub(crate) struct AutoCoordinatorViewModel {
     pub manual_hint: Option<String>,
     pub ctrl_switch_hint: String,
     pub cli_running: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AutoSetupViewModel {
+    pub goal: String,
+    pub auto_review_enabled: bool,
+    pub subagents_enabled: bool,
+    pub continue_mode: AutoContinueMode,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum AutoCoordinatorViewModel {
+    Setup(AutoSetupViewModel),
+    Active(AutoActiveViewModel),
 }
 
 struct ButtonContext {
@@ -88,19 +104,15 @@ impl AutoCoordinatorView {
         self.model = model;
     }
 
-    fn build_context(&self) -> VariantContext {
-        let button = self
-            .model
-            .button
-            .as_ref()
-            .map(|btn| ButtonContext {
-                label: btn.label.clone(),
-                enabled: btn.enabled,
-            });
+    fn build_context(model: &AutoActiveViewModel) -> VariantContext {
+        let button = model.button.as_ref().map(|btn| ButtonContext {
+            label: btn.label.clone(),
+            enabled: btn.enabled,
+        });
         VariantContext {
             button,
-            ctrl_hint: self.model.ctrl_switch_hint.clone(),
-            manual_hint: self.model.manual_hint.clone(),
+            ctrl_hint: model.ctrl_switch_hint.clone(),
+            manual_hint: model.manual_hint.clone(),
         }
     }
 
@@ -134,8 +146,8 @@ impl AutoCoordinatorView {
         }
     }
 
-    fn spinner_should_run(&self) -> bool {
-        self.model.cli_running
+    fn spinner_should_run(model: &AutoActiveViewModel) -> bool {
+        model.cli_running
     }
 
     fn overlay_text(&self, spinner_symbol: &str) -> Option<String> {
@@ -265,11 +277,11 @@ impl AutoCoordinatorView {
         }
     }
 
-    fn derived_status_entries(&self) -> Vec<(String, Style)> {
+    fn derived_status_entries(&self, model: &AutoActiveViewModel) -> Vec<(String, Style)> {
         let mut entries: Vec<(String, Style)> = Vec::new();
 
-        if self.model.awaiting_submission {
-            let text = if let Some(countdown) = &self.model.countdown {
+        if model.awaiting_submission {
+            let text = if let Some(countdown) = &model.countdown {
                 format!("Auto continue in {}s", countdown.remaining)
             } else {
                 "Awaiting confirmation".to_string()
@@ -277,7 +289,7 @@ impl AutoCoordinatorView {
             entries.push((text, Style::default().fg(colors::text_dim())));
         }
 
-        for status in &self.model.status_lines {
+        for status in &model.status_lines {
             let trimmed = status.trim();
             if trimmed.is_empty() {
                 continue;
@@ -313,8 +325,8 @@ impl AutoCoordinatorView {
         lines
     }
 
-    fn cli_prompt_lines(&self, style: Style) -> Option<Vec<Line<'static>>> {
-        self.model.cli_prompt.as_ref().map(|prompt| {
+    fn cli_prompt_lines(&self, model: &AutoActiveViewModel, style: Style) -> Option<Vec<Line<'static>>> {
+        model.cli_prompt.as_ref().map(|prompt| {
             prompt
                 .lines()
                 .map(|line| Line::from(Span::styled(line.trim_end().to_string(), style)))
@@ -436,7 +448,12 @@ impl AutoCoordinatorView {
             .sum()
     }
 
-    fn estimated_height(&self, width: u16, ctx: &VariantContext) -> u16 {
+    fn estimated_height_active(
+        &self,
+        width: u16,
+        ctx: &VariantContext,
+        model: &AutoActiveViewModel,
+    ) -> u16 {
         let inner_width = self.inner_width(width);
         let button_height = if ctx.button.is_some() { 3 } else { 0 };
         let hint_height = ctx
@@ -453,12 +470,10 @@ impl AutoCoordinatorView {
             Self::wrap_count(ctrl_hint, inner_width)
         };
 
-        let awaiting = self.model.awaiting_submission;
-
         let mut total = 0;
 
-        if awaiting {
-            if let Some(prompt) = &self.model.cli_prompt {
+        if model.awaiting_submission {
+            if let Some(prompt) = &model.cli_prompt {
                 total += Self::wrap_count(prompt, inner_width).max(1);
             }
             if ctx.button.is_some() {
@@ -469,7 +484,7 @@ impl AutoCoordinatorView {
                 total += ctrl_height.max(1);
             }
         } else {
-            let status_entries = self.derived_status_entries();
+            let status_entries = self.derived_status_entries(model);
             for (_, (text, _)) in status_entries.iter().enumerate() {
                 total += Self::wrap_count(text, inner_width);
             }
@@ -490,16 +505,16 @@ impl AutoCoordinatorView {
             .min(u16::MAX as usize) as u16
     }
 
-    fn render_internal(&self, area: Rect, buf: &mut Buffer, ctx: &VariantContext) {
-        self.render_classic(area, buf, ctx);
-    }
-
-    fn render_classic(&self, area: Rect, buf: &mut Buffer, ctx: &VariantContext) {
+    fn render_active(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        model: &AutoActiveViewModel,
+    ) {
         let now = Instant::now();
-        let waiting = self.model.waiting_for_response;
         let mut frame_needed = false;
 
-        let should_enable_border = waiting && !self.model.cli_running;
+        let should_enable_border = model.waiting_for_response && !model.cli_running;
         let mut border_enabled = self.header_border.is_enabled();
         if should_enable_border && !border_enabled {
             self.header_border.set_enabled(true, now);
@@ -513,7 +528,7 @@ impl AutoCoordinatorView {
             frame_needed = true;
         }
 
-        let spinner_active = self.spinner_should_run();
+        let spinner_active = Self::spinner_should_run(model);
         let spinner_def = spinner::current_spinner();
         let spinner_symbol = if spinner_active {
             let now_ms = SystemTime::now()
@@ -536,38 +551,40 @@ impl AutoCoordinatorView {
             return;
         }
 
-        let status_entries = self.derived_status_entries();
+        let status_entries = self.derived_status_entries(model);
         let mut content_lines: Vec<Line<'static>> = Vec::new();
         let mut footer_lines: Vec<Line<'static>> = Vec::new();
         let mut has_button_block = false;
 
-        if self.model.awaiting_submission {
-        if let Some(prompt_lines) =
-            self.cli_prompt_lines(Style::default().fg(colors::text_dim()))
-        {
-            content_lines.extend(prompt_lines);
-        }
+        let ctx = Self::build_context(model);
 
-            if let Some(button_block) = self.button_block_lines(ctx) {
+        if model.awaiting_submission {
+            if let Some(prompt_lines) =
+                self.cli_prompt_lines(model, Style::default().fg(colors::text_dim()))
+            {
+                content_lines.extend(prompt_lines);
+            }
+
+            if let Some(button_block) = self.button_block_lines(&ctx) {
                 has_button_block = true;
                 footer_lines.extend(button_block);
-            } else if let Some(ctrl_hint_line) = self.ctrl_hint_line(ctx) {
+            } else if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
                 footer_lines.push(ctrl_hint_line);
             }
         } else {
             let status_lines = self.status_lines_with_entries(&status_entries);
             content_lines.extend(status_lines);
 
-            if let Some(button_block) = self.button_block_lines(ctx) {
+            if let Some(button_block) = self.button_block_lines(&ctx) {
                 has_button_block = true;
                 footer_lines.extend(button_block);
             }
 
-            if let Some(hint_line) = self.manual_hint_line(ctx) {
+            if let Some(hint_line) = self.manual_hint_line(&ctx) {
                 footer_lines.push(hint_line);
             }
 
-            if let Some(ctrl_hint_line) = self.ctrl_hint_line(ctx) {
+            if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
                 footer_lines.push(Line::default());
                 footer_lines.push(ctrl_hint_line);
             }
@@ -640,6 +657,155 @@ impl AutoCoordinatorView {
         }
     }
 
+    fn estimated_height_setup(&self, width: u16, model: &AutoSetupViewModel) -> u16 {
+        let inner_width = self.inner_width(width);
+        if inner_width == 0 {
+            return 2;
+        }
+
+        let lines = Self::setup_text_lines(model);
+        let mut total = 0usize;
+        for line in lines {
+            if line.is_empty() {
+                total += 1;
+            } else {
+                total += Self::wrap_count(&line, inner_width).max(1);
+            }
+        }
+
+        total
+            .saturating_add(2)
+            .min(u16::MAX as usize) as u16
+    }
+
+    fn render_setup(&self, area: Rect, buf: &mut Buffer, model: &AutoSetupViewModel) {
+        let now = Instant::now();
+        if self.header_wave.is_enabled() {
+            self.header_wave.set_enabled(false, now);
+        }
+        if self.header_border.is_enabled() {
+            self.header_border.set_enabled(false, now);
+        }
+
+        let Some(inner) = self.render_frame(area, buf, now, None) else {
+            return;
+        };
+        let inner = self.apply_left_padding(inner, buf);
+        if inner.height == 0 {
+            return;
+        }
+
+        let lines = Self::setup_render_lines(model);
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .render(inner, buf);
+    }
+
+    fn setup_text_lines(model: &AutoSetupViewModel) -> Vec<String> {
+        let goal_text = model.goal.trim();
+        let goal_display = if goal_text.is_empty() {
+            "Goal: (none)".to_string()
+        } else {
+            format!("Goal: {goal_text}")
+        };
+
+        vec![
+            goal_display,
+            String::new(),
+            Self::setup_toggle_text("Automatic review", "R", model.auto_review_enabled),
+            Self::setup_toggle_text("Sub agents", "S", model.subagents_enabled),
+            Self::setup_countdown_text(model),
+            String::new(),
+            "Enter to launch Auto Drive | Esc to cancel".to_string(),
+        ]
+    }
+
+    fn setup_toggle_text(label: &str, key_hint: &str, enabled: bool) -> String {
+        let checkbox = if enabled { "[x]" } else { "[ ]" };
+        format!("{checkbox} {label} ({key_hint} to toggle)")
+    }
+
+    fn setup_countdown_text(model: &AutoSetupViewModel) -> String {
+        format!(
+            "Auto-continue: {} (C cycle | 0=now | 1=10s | 6=60s | M=manual)",
+            model.continue_mode.label()
+        )
+    }
+
+    fn setup_render_lines(model: &AutoSetupViewModel) -> Vec<Line<'static>> {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let goal_text = model.goal.trim();
+        let goal_display = if goal_text.is_empty() {
+            "(none)"
+        } else {
+            goal_text
+        };
+        lines.push(Line::from(vec![
+            Span::styled("Goal: ", Style::default().fg(colors::text())),
+            Span::styled(
+                goal_display.to_string(),
+                Style::default().fg(colors::text()).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::default());
+        lines.push(Self::setup_toggle_line(
+            "Automatic review",
+            "R",
+            model.auto_review_enabled,
+        ));
+        lines.push(Self::setup_toggle_line("Sub agents", "S", model.subagents_enabled));
+        lines.push(Self::setup_countdown_line(model));
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            "Enter to launch Auto Drive | Esc to cancel".to_string(),
+            Style::default()
+                .fg(colors::text_dim())
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines
+    }
+
+    fn setup_toggle_line(label: &str, key_hint: &str, enabled: bool) -> Line<'static> {
+        let checkbox = if enabled { "[x]" } else { "[ ]" };
+        let state_style = if enabled {
+            Style::default()
+                .fg(colors::success())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(colors::text_dim())
+        };
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::styled(checkbox.to_string(), state_style));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(label.to_string(), Style::default().fg(colors::text())));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("({key_hint} to toggle)"),
+            Style::default().fg(colors::text_dim()),
+        ));
+        Line::from(spans)
+    }
+
+    fn setup_countdown_line(model: &AutoSetupViewModel) -> Line<'static> {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::styled(
+            "Auto-continue: ".to_string(),
+            Style::default().fg(colors::text()),
+        ));
+        spans.push(Span::styled(
+            model.continue_mode.label().to_string(),
+            Style::default()
+                .fg(colors::primary())
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "C cycle | 0=now | 1=10s | 6=60s | M=manual".to_string(),
+            Style::default().fg(colors::text_dim()),
+        ));
+        Line::from(spans)
+    }
+
     fn apply_left_padding(&self, area: Rect, buf: &mut Buffer) -> Rect {
         if area.width <= 1 {
             return area;
@@ -662,18 +828,95 @@ impl AutoCoordinatorView {
 }
 
 impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        let AutoCoordinatorViewModel::Setup(model) = &self.model else {
+            return;
+        };
+
+        let has_ctrl_like = key_event.modifiers.contains(KeyModifiers::CONTROL)
+            || key_event.modifiers.contains(KeyModifiers::ALT)
+            || key_event.modifiers.contains(KeyModifiers::SUPER);
+        if has_ctrl_like {
+            return;
+        }
+
+        match key_event.code {
+            KeyCode::Enter => {
+                self.app_event_tx.send(AppEvent::AutoSetupConfirm);
+            }
+            KeyCode::Esc => {
+                self.app_event_tx.send(AppEvent::AutoSetupCancel);
+            }
+            KeyCode::Left => {
+                self
+                    .app_event_tx
+                    .send(AppEvent::AutoSetupSelectCountdown(model.continue_mode.cycle_backward()));
+            }
+            KeyCode::Right => {
+                self
+                    .app_event_tx
+                    .send(AppEvent::AutoSetupSelectCountdown(model.continue_mode.cycle_forward()));
+            }
+            KeyCode::Char(ch) => {
+                let lowered = ch.to_ascii_lowercase();
+                match lowered {
+                    'r' => {
+                        self.app_event_tx.send(AppEvent::AutoSetupToggleReview);
+                    }
+                    's' => {
+                        self.app_event_tx.send(AppEvent::AutoSetupToggleSubagents);
+                    }
+                    'c' => {
+                        self
+                            .app_event_tx
+                            .send(AppEvent::AutoSetupSelectCountdown(model.continue_mode.cycle_forward()));
+                    }
+                    '0' => {
+                        self
+                            .app_event_tx
+                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::Immediate));
+                    }
+                    '1' => {
+                        self
+                            .app_event_tx
+                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::TenSeconds));
+                    }
+                    '6' => {
+                        self
+                            .app_event_tx
+                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::SixtySeconds));
+                    }
+                    'm' => {
+                        self
+                            .app_event_tx
+                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::Manual));
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn desired_height(&self, width: u16) -> u16 {
-        let ctx = self.build_context();
-        self.estimated_height(width, &ctx)
+        match &self.model {
+            AutoCoordinatorViewModel::Active(model) => {
+                let ctx = Self::build_context(model);
+                self.estimated_height_active(width, &ctx, model)
+            }
+            AutoCoordinatorViewModel::Setup(model) => self.estimated_height_setup(width, model),
+        }
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let ctx = self.build_context();
         if area.height == 0 {
             return;
         }
 
-        self.render_internal(area, buf, &ctx);
+        match &self.model {
+            AutoCoordinatorViewModel::Active(model) => self.render_active(area, buf, model),
+            AutoCoordinatorViewModel::Setup(model) => self.render_setup(area, buf, model),
+        }
     }
 
     fn update_status_text(&mut self, text: String) -> ConditionalUpdate {
