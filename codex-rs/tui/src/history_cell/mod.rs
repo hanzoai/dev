@@ -1414,7 +1414,7 @@ fn exec_render_parts_parsed_with_meta(
     meta: &ParsedExecMetadata,
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
-    start_time: Option<Instant>,
+    elapsed_since_start: Option<Duration>,
     status_label: &str,
 ) -> (
     Vec<Line<'static>>,
@@ -1446,8 +1446,7 @@ fn exec_render_parts_parsed_with_meta(
                         Some(p) => format!("{}... in {p}", status_label),
                         None => format!("{}...", status_label),
                     };
-                    if let Some(start) = start_time {
-                        let elapsed = start.elapsed();
+                    if let Some(elapsed) = elapsed_since_start {
                         message = format!("{message} ({})", format_duration(elapsed));
                     }
                     running_status = Some(running_status_line(message));
@@ -1840,7 +1839,7 @@ fn exec_render_parts_parsed(
     parsed_commands: &[ParsedCommand],
     output: Option<&CommandOutput>,
     stream_preview: Option<&CommandOutput>,
-    start_time: Option<Instant>,
+    elapsed_since_start: Option<Duration>,
     status_label: &str,
 ) -> (
     Vec<Line<'static>>,
@@ -1853,7 +1852,7 @@ fn exec_render_parts_parsed(
         &meta,
         output,
         stream_preview,
-        start_time,
+        elapsed_since_start,
         status_label,
     )
 }
