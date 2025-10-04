@@ -128,8 +128,10 @@ use codex_core::protocol::TaskCompleteEvent;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol::TurnDiffEvent;
 use crate::bottom_pane::{
+    AutoActiveViewModel,
     AutoCoordinatorButton,
     AutoCoordinatorViewModel,
+    AutoSetupViewModel,
     CountdownState,
 };
 use crate::exec_command::strip_bash_lc_and_escape;
@@ -191,7 +193,6 @@ const STATUS_TOKENS_PREFIX: &str = "             ";
 const RESUME_PLACEHOLDER_MESSAGE: &str = "Resuming previous session...";
 const RESUME_NO_HISTORY_NOTICE: &str =
     "No saved messages for this session. Start typing to continue.";
-const AUTO_COUNTDOWN_SECONDS: u8 = 10;
 const ENABLE_WARP_STRIPES: bool = false;
 
 fn status_field_prefix(label: &str) -> String {
@@ -226,6 +227,7 @@ use crate::app_event::{
     AutoCoordinatorStatus,
     AutoObserverStatus,
     AutoObserverTelemetry,
+    AutoContinueMode,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -501,7 +503,6 @@ pub(crate) struct GhostState {
     queued_user_messages: VecDeque<UserMessage>,
 }
 
-#[derive(Default)]
 struct AutoCoordinatorUiState {
     active: bool,
     goal: Option<String>,
@@ -533,6 +534,10 @@ struct AutoCoordinatorUiState {
     observer_telemetry: Option<AutoObserverTelemetry>,
     observer_status: AutoObserverStatus,
     coordinator_waiting: bool,
+    review_enabled: bool,
+    subagents_enabled: bool,
+    continue_mode: AutoContinueMode,
+    setup: Option<AutoSetupState>,
 }
 
 impl AutoCoordinatorUiState {
@@ -541,8 +546,72 @@ impl AutoCoordinatorUiState {
     }
 
     fn countdown_active(&self) -> bool {
-        self.awaiting_submission && !self.paused_for_manual_edit
+        self.awaiting_submission
+            && !self.paused_for_manual_edit
+            && self
+                .countdown_seconds()
+                .map(|seconds| seconds > 0)
+                .unwrap_or(false)
     }
+
+    fn countdown_seconds(&self) -> Option<u8> {
+        self.continue_mode.seconds()
+    }
+
+    fn reset_countdown(&mut self) {
+        self.seconds_remaining = self.countdown_seconds().unwrap_or(0);
+    }
+}
+
+impl Default for AutoCoordinatorUiState {
+    fn default() -> Self {
+        let continue_mode = AutoContinueMode::default();
+        let seconds = continue_mode.seconds().unwrap_or(0);
+        Self {
+            active: false,
+            goal: None,
+            current_summary: None,
+            current_progress_past: None,
+            current_progress_current: None,
+            current_cli_prompt: None,
+            current_cli_context: None,
+            current_display_line: None,
+            current_display_is_summary: false,
+            current_reasoning_title: None,
+            placeholder_phrase: None,
+            thinking_prefix_stripped: false,
+            current_summary_index: None,
+            awaiting_submission: false,
+            waiting_for_response: false,
+            paused_for_manual_edit: false,
+            resume_after_manual_submit: false,
+            waiting_for_review: false,
+            countdown_id: 0,
+            seconds_remaining: seconds,
+            awaiting_goal_input: false,
+            last_broadcast_summary: None,
+            last_decision_summary: None,
+            last_decision_progress_past: None,
+            last_decision_progress_current: None,
+            last_decision_display: None,
+            last_decision_display_is_summary: false,
+            observer_telemetry: None,
+            observer_status: AutoObserverStatus::default(),
+            coordinator_waiting: false,
+            review_enabled: false,
+            subagents_enabled: false,
+            continue_mode,
+            setup: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AutoSetupState {
+    goal: String,
+    auto_review_enabled: bool,
+    subagents_enabled: bool,
+    continue_mode: AutoContinueMode,
 }
 
 const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
@@ -8628,11 +8697,12 @@ impl ChatWidget<'_> {
                     self.auto_resolve_on_task_complete(last_agent_message.clone());
                 }
                 // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
-                if self.auto_state.active {
-                    if let Some(cfg) = self.pending_auto_turn_config.take() {
-                        if !self.is_review_flow_active() {
-                            self.auto_handle_post_turn_review(cfg);
-                        }
+                if let Some(cfg) = self.pending_auto_turn_config.take() {
+                    if self.auto_state.active
+                        && self.auto_state.review_enabled
+                        && !self.is_review_flow_active()
+                    {
+                        self.auto_handle_post_turn_review(cfg);
                     }
                 }
                 // Defensive: clear transient agents-preparing state
@@ -11472,6 +11542,100 @@ fi\n\
         }
     }
 
+    fn auto_present_setup(&mut self) {
+        let Some(setup) = self.auto_state.setup.as_ref() else {
+            return;
+        };
+        let goal = setup.goal.clone();
+        let auto_review_enabled = setup.auto_review_enabled;
+        let subagents_enabled = setup.subagents_enabled;
+        let continue_mode = setup.continue_mode;
+        self.auto_state.review_enabled = auto_review_enabled;
+        self.auto_state.subagents_enabled = subagents_enabled;
+        self.auto_state.continue_mode = continue_mode;
+        self.auto_state.reset_countdown();
+        let model = AutoCoordinatorViewModel::Setup(AutoSetupViewModel {
+            goal,
+            auto_review_enabled,
+            subagents_enabled,
+            continue_mode,
+        });
+        self.bottom_pane.show_auto_coordinator_view(model);
+        self.bottom_pane.set_task_running(false);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane
+            .update_status_text("Auto Drive Setup".to_string());
+        self.bottom_pane
+            .set_standard_terminal_hint(Some("Enter to launch | Esc to cancel".to_string()));
+        self.bottom_pane.ensure_input_focus();
+        self.update_header_border_activation();
+        self.request_redraw();
+    }
+
+    fn auto_launch_with_setup(&mut self, setup: AutoSetupState) {
+        let AutoSetupState {
+            goal,
+            auto_review_enabled,
+            subagents_enabled,
+            continue_mode,
+        } = setup;
+
+        let conversation = self.rebuild_auto_history();
+        match start_auto_coordinator(
+            self.app_event_tx.clone(),
+            goal.clone(),
+            conversation,
+            self.config.clone(),
+            self.config.debug,
+            self.config.auto_drive_observer_cadence,
+        ) {
+            Ok(handle) => {
+                self.auto_handle = Some(handle);
+                self.auto_state.reset();
+                self.auto_state.setup = None;
+                self.auto_state.review_enabled = auto_review_enabled;
+                self.auto_state.subagents_enabled = subagents_enabled;
+                self.auto_state.continue_mode = continue_mode;
+                self.auto_state.reset_countdown();
+                self.auto_state.active = true;
+                self.auto_state.goal = Some(goal.clone());
+                self.auto_state.current_summary = None;
+                self.auto_state.current_progress_past = None;
+                self.auto_state.current_progress_current = None;
+                self.auto_state.current_cli_prompt = None;
+                self.auto_state.current_cli_context = None;
+                self.auto_state.current_display_line = None;
+                self.auto_state.current_display_is_summary = false;
+                self.auto_state.current_reasoning_title = None;
+                self.auto_state.current_summary_index = None;
+                self.auto_state.placeholder_phrase =
+                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_state.thinking_prefix_stripped = false;
+                self.auto_state.last_broadcast_summary = None;
+                self.auto_state.last_decision_progress_past = None;
+                self.auto_state.last_decision_progress_current = None;
+                self.auto_state.waiting_for_response = true;
+                self.auto_state.coordinator_waiting = true;
+                self.bottom_pane
+                    .set_standard_terminal_hint(Some("Esc to stop Auto Drive".to_string()));
+                self.update_header_border_activation();
+                self.auto_rebuild_live_ring();
+                self.push_background_tail(format!("Auto Drive started: {goal}"));
+                self.request_redraw();
+            }
+            Err(err) => {
+                self.push_background_tail(format!("Coordinator failed to start: {err}"));
+                self.auto_state.setup = Some(AutoSetupState {
+                    goal,
+                    auto_review_enabled,
+                    subagents_enabled,
+                    continue_mode,
+                });
+                self.auto_present_setup();
+            }
+        }
+    }
+
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
@@ -11514,47 +11678,70 @@ fi\n\
             self.auto_stop(None);
         }
 
-        let conversation = self.rebuild_auto_history();
-        match start_auto_coordinator(
-            self.app_event_tx.clone(),
-            goal_text.clone(),
-            conversation,
-            self.config.clone(),
-            self.config.debug,
-            self.config.auto_drive_observer_cadence,
-        ) {
-            Ok(handle) => {
-                self.auto_handle = Some(handle);
-                self.auto_state.reset();
-                self.auto_state.active = true;
-                self.auto_state.goal = Some(goal_text.clone());
-                self.auto_state.current_summary = None;
-                self.auto_state.current_progress_past = None;
-                self.auto_state.current_progress_current = None;
-                self.auto_state.current_cli_prompt = None;
-                self.auto_state.current_cli_context = None;
-                self.auto_state.current_display_line = None;
-                self.auto_state.current_display_is_summary = false;
-                self.auto_state.current_reasoning_title = None;
-                self.auto_state.current_summary_index = None;
-                self.auto_state.placeholder_phrase =
-                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
-                self.auto_state.thinking_prefix_stripped = false;
-                self.auto_state.last_broadcast_summary = None;
-                self.auto_state.last_decision_progress_past = None;
-                self.auto_state.last_decision_progress_current = None;
-                self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
-                self.auto_state.waiting_for_response = true;
-                self.auto_state.coordinator_waiting = true;
-                self.update_header_border_activation();
-                self.auto_rebuild_live_ring();
-                self.push_background_tail(format!("Auto Drive started: {goal_text}"));
-                self.request_redraw();
-            }
-            Err(err) => {
-                self.push_background_tail(format!("Coordinator failed to start: {err}"));
+        self.auto_state.reset();
+        self.auto_state.setup = Some(AutoSetupState {
+            goal: goal_text.clone(),
+            auto_review_enabled: false,
+            subagents_enabled: false,
+            continue_mode: AutoContinueMode::default(),
+        });
+        self.auto_state.review_enabled = false;
+        self.auto_state.subagents_enabled = false;
+        self.auto_state.continue_mode = AutoContinueMode::default();
+        self.auto_state.reset_countdown();
+
+        self.push_background_tail(format!(
+            "Auto Drive setup ready. Review defaults before launching goal: {goal_text}"
+        ));
+        self.auto_present_setup();
+    }
+
+    pub(crate) fn auto_setup_toggle_review(&mut self) {
+        if let Some(setup) = self.auto_state.setup.as_mut() {
+            setup.auto_review_enabled = !setup.auto_review_enabled;
+            self.auto_state.review_enabled = setup.auto_review_enabled;
+            self.auto_present_setup();
+        }
+    }
+
+    pub(crate) fn auto_setup_toggle_subagents(&mut self) {
+        if let Some(setup) = self.auto_state.setup.as_mut() {
+            setup.subagents_enabled = !setup.subagents_enabled;
+            self.auto_state.subagents_enabled = setup.subagents_enabled;
+            self.auto_present_setup();
+        }
+    }
+
+    pub(crate) fn auto_setup_select_countdown(&mut self, mode: AutoContinueMode) {
+        if let Some(setup) = self.auto_state.setup.as_mut() {
+            if setup.continue_mode != mode {
+                setup.continue_mode = mode;
+                self.auto_state.continue_mode = mode;
+                self.auto_state.reset_countdown();
+                self.auto_present_setup();
             }
         }
+    }
+
+    pub(crate) fn auto_setup_confirm(&mut self) {
+        if let Some(setup) = self.auto_state.setup.clone() {
+            self.auto_launch_with_setup(setup);
+        }
+    }
+
+    pub(crate) fn auto_setup_cancel(&mut self) {
+        if self.auto_state.setup.is_none() {
+            return;
+        }
+        self.auto_state.reset();
+        self.bottom_pane.clear_auto_coordinator_view();
+        self.bottom_pane.set_standard_terminal_hint(None);
+        self.bottom_pane.update_status_text(String::new());
+        self.bottom_pane.set_task_running(false);
+        self.bottom_pane.ensure_input_focus();
+        self.update_header_border_activation();
+        self.request_redraw();
+        self.push_background_tail("Auto Drive setup canceled.".to_string());
     }
 
     fn auto_send_conversation(&mut self) {
@@ -11644,12 +11831,13 @@ fi\n\
                 };
                 self.auto_state.current_cli_prompt = Some(prompt_text.clone());
                 self.auto_state.awaiting_submission = true;
-                self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+                self.auto_state.reset_countdown();
                 self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
                 let countdown_id = self.auto_state.countdown_id;
+                let countdown_seconds = self.auto_state.countdown_seconds();
                 self.auto_rebuild_live_ring();
                 self.request_redraw();
-                self.auto_start_countdown(countdown_id);
+                self.auto_start_countdown(countdown_id, countdown_seconds);
             }
             AutoCoordinatorStatus::Success => {
                 let normalized = summary_text.trim();
@@ -11684,29 +11872,34 @@ fi\n\
         }
     }
 
-    fn auto_start_countdown(&self, countdown_id: u64) {
-        if AUTO_COUNTDOWN_SECONDS == 0 {
-            let _ = self.app_event_tx.send(AppEvent::AutoCoordinatorCountdown {
-                countdown_id,
-                seconds_left: 0,
-            });
-            return;
-        }
-
-        let tx = self.app_event_tx.clone();
-        std::thread::spawn(move || {
-            let mut remaining = AUTO_COUNTDOWN_SECONDS;
-            while remaining > 0 {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                remaining -= 1;
-                if !tx.send_with_result(AppEvent::AutoCoordinatorCountdown {
+    fn auto_start_countdown(&self, countdown_id: u64, countdown_seconds: Option<u8>) {
+        match countdown_seconds {
+            Some(0) => {
+                let _ = self.app_event_tx.send(AppEvent::AutoCoordinatorCountdown {
                     countdown_id,
-                    seconds_left: remaining,
-                }) {
-                    break;
-                }
+                    seconds_left: 0,
+                });
             }
-        });
+            Some(seconds) => {
+                let tx = self.app_event_tx.clone();
+                std::thread::spawn(move || {
+                    let mut remaining = seconds;
+                    while remaining > 0 {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        remaining -= 1;
+                        if !tx.send_with_result(AppEvent::AutoCoordinatorCountdown {
+                            countdown_id,
+                            seconds_left: remaining,
+                        }) {
+                            break;
+                        }
+                    }
+                });
+            }
+            None => {
+                // Manual approval mode: do not start countdown automatically.
+            }
+        }
     }
 
     pub(crate) fn auto_handle_countdown(&mut self, countdown_id: u64, seconds_left: u8) {
@@ -11759,8 +11952,9 @@ fi\n\
                 self.auto_state.current_cli_prompt = Some(message.to_string());
                 if self.auto_state.awaiting_submission {
                     self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-                    self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
-                    self.auto_start_countdown(self.auto_state.countdown_id);
+                    self.auto_state.reset_countdown();
+                    let countdown_seconds = self.auto_state.countdown_seconds();
+                    self.auto_start_countdown(self.auto_state.countdown_id, countdown_seconds);
                 }
                 let summary = Self::truncate_with_ellipsis(message, 160);
                 self.push_background_tail(format!("Observer replaced prompt with: {summary}"));
@@ -11785,6 +11979,10 @@ fi\n\
     }
 
     fn auto_handle_post_turn_review(&mut self, cfg: TurnConfig) {
+        if !self.auto_state.review_enabled {
+            self.auto_turn_review_state = None;
+            return;
+        }
         if cfg.read_only {
             self.auto_turn_review_state = None;
             return;
@@ -11842,7 +12040,7 @@ fi\n\
     }
 
     fn prepare_auto_turn_review_state(&mut self) {
-        if !self.auto_state.active {
+        if !self.auto_state.active || !self.auto_state.review_enabled {
             self.auto_turn_review_state = None;
             return;
         }
@@ -11938,11 +12136,12 @@ fi\n\
         self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
         // If coordinator hinted medium/high complexity, prime the Agents HUD
-        let should_prepare_agents = self
-            .pending_auto_turn_config
-            .as_ref()
-            .and_then(|cfg| cfg.complexity)
-            .is_some_and(|c| matches!(c, TurnComplexity::Medium | TurnComplexity::High));
+        let should_prepare_agents = self.auto_state.subagents_enabled
+            && self
+                .pending_auto_turn_config
+                .as_ref()
+                .and_then(|cfg| cfg.complexity)
+                .is_some_and(|c| matches!(c, TurnComplexity::Medium | TurnComplexity::High));
         if should_prepare_agents {
             self.prepare_agents();
         }
@@ -11950,7 +12149,11 @@ fi\n\
         // Build hidden preface with explicit agent_run guidance
         let preface = self.build_auto_turn_preface(&prompt);
 
-        self.prepare_auto_turn_review_state();
+        if self.auto_state.review_enabled {
+            self.prepare_auto_turn_review_state();
+        } else {
+            self.auto_turn_review_state = None;
+        }
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
         if preface.trim().is_empty() {
@@ -11994,7 +12197,7 @@ fi\n\
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-        self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+        self.auto_state.reset_countdown();
         self.clear_composer();
         self.insert_str(&full_prompt);
         self.bottom_pane.ensure_input_focus();
@@ -12042,20 +12245,30 @@ fi\n\
                 parts.push("This turn is likely low complexity, so you should focus on addressing it directly without using agents.".to_string());
             }
             TurnComplexity::Medium => {
-                parts.push(format!(
-                    "This turn is likely medium complexity, so you should use at least 2 agents using `agent_run` and read_only: {}.",
-                    ro_str
-                ));
+                if self.auto_state.subagents_enabled {
+                    parts.push(format!(
+                        "This turn is likely medium complexity, so you should use at least 2 agents using `agent_run` and read_only: {}.",
+                        ro_str
+                    ));
+                } else {
+                    parts.push("This turn is likely medium complexity; break the work into clear steps and handle them directly without launching sub agents.".to_string());
+                }
             }
             TurnComplexity::High => {
-                parts.push(format!(
-                    "This turn is likely high complexity, you should use `agent_run` with all models [\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"] and read_only: {}.",
-                    ro_str
-                ));
+                if self.auto_state.subagents_enabled {
+                    parts.push(format!(
+                        "This turn is likely high complexity, you should use `agent_run` with all models [\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"] and read_only: {}.",
+                        ro_str
+                    ));
+                } else {
+                    parts.push("This turn is likely high complexity; plan carefully and execute step by step without invoking sub agents.".to_string());
+                }
             }
         }
 
-        if matches!(complexity, TurnComplexity::Medium | TurnComplexity::High) {
+        if self.auto_state.subagents_enabled
+            && matches!(complexity, TurnComplexity::Medium | TurnComplexity::High)
+        {
             if cfg.read_only {
                 parts.push("Use `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete automatically. Once they complete you should collate their output into your final output.".to_string());
             } else {
@@ -12111,7 +12324,7 @@ fi\n\
         self.auto_state.awaiting_submission = false;
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
-        self.auto_state.seconds_remaining = AUTO_COUNTDOWN_SECONDS;
+        self.auto_state.reset_countdown();
         self.auto_state.current_summary = Some(String::new());
         self.auto_state.current_progress_past = None;
         self.auto_state.current_progress_current = None;
@@ -12140,6 +12353,9 @@ fi\n\
     }
 
     fn auto_start_post_turn_review(&mut self, scope: Option<AutoReviewCommitScope>) {
+        if !self.auto_state.review_enabled {
+            return;
+        }
         let (prompt, hint, auto_metadata, review_metadata, preparation) = match scope {
             Some(scope) => {
                 let commit_id = scope.commit;
@@ -12289,13 +12505,14 @@ fi\n\
             .clone()
             .filter(|p| !p.trim().is_empty());
 
-        let countdown = if self.auto_state.awaiting_submission && AUTO_COUNTDOWN_SECONDS > 0 {
-            Some(CountdownState {
-                remaining: self
-                    .auto_state
-                    .seconds_remaining
-                    .min(AUTO_COUNTDOWN_SECONDS),
-            })
+        let countdown_limit = self.auto_state.countdown_seconds();
+        let countdown = if self.auto_state.awaiting_submission {
+            match countdown_limit {
+                Some(limit) if limit > 0 => Some(CountdownState {
+                    remaining: self.auto_state.seconds_remaining.min(limit),
+                }),
+                _ => None,
+            }
         } else {
             None
         };
@@ -12304,7 +12521,11 @@ fi\n\
             let label = if self.auto_state.countdown_active() {
                 format!("Continue ({}s)", self.auto_state.seconds_remaining)
             } else {
-                "Continue now".to_string()
+                match countdown_limit {
+                    Some(0) => "Continue now".to_string(),
+                    Some(_) => "Continue now".to_string(),
+                    None => "Continue".to_string(),
+                }
             };
             Some(AutoCoordinatorButton {
                 label,
@@ -12326,7 +12547,7 @@ fi\n\
             String::new()
         };
 
-        let model = AutoCoordinatorViewModel {
+        let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
             goal: self.auto_state.goal.clone(),
             status_lines,
             cli_prompt,
@@ -12337,7 +12558,7 @@ fi\n\
             manual_hint,
             ctrl_switch_hint,
             cli_running,
-        };
+        });
 
         self
             .bottom_pane
