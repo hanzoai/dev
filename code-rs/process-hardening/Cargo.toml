@@ -1,0 +1,15 @@
+[package]
+edition = "2021"
+name = "code-process-hardening"
+version = { workspace = true }
+
+[lib]
+name = "code_process_hardening"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
