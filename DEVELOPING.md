@@ -12,7 +12,7 @@ the TUI with the `dev-faults` feature and set the appropriate environment
 variables before launching:
 
 ```bash
-cd codex-rs
+cd code-rs
 cargo run --bin code-tui --features dev-faults
 ```
 

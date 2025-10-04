@@ -732,7 +732,7 @@ build-fast.sh\t\tflake.lock\t\tpnpm-lock.yaml\r\n\
 CHANGELOG.md\t\tflake.nix\t\tpnpm-workspace.yaml\r\n\
 cliff.toml\t\tFormula\t\t\tREADME.md\r\n\
 codex-cli\t\thomebrew-tap\t\trelease-notes\r\n\
-codex-rs\t\tLICENSE\t\t\tscripts\r\n\
+code-rs\t\tLICENSE\t\t\tscripts\r\n\
 config.toml.example\tNOTICE\r\n";
 
         let lines = build_preview_lines(sample, false);
@@ -962,11 +962,11 @@ config.toml.example\tNOTICE\r\n";
 
     #[test]
     fn strip_redundant_pipes_when_annotated() {
-        let cmd = "git show upstream/main:codex-rs/core/src/codex.rs | sed -n '2160,2640p'";
+        let cmd = "git show upstream/main:code-rs/core/src/codex.rs | sed -n '2160,2640p'";
         let (ann, _) = parse_read_line_annotation_with_range(cmd);
         assert!(ann.is_some());
         let cleaned = strip_redundant_line_filter_pipes(cmd);
-        assert!(cleaned.starts_with("git show upstream/main:codex-rs/core/src/codex.rs"));
+        assert!(cleaned.starts_with("git show upstream/main:code-rs/core/src/codex.rs"));
         assert!(!cleaned.contains("| sed -n"));
 
         let cmd2 = "nl -ba core/src/parse_command.rs | sed -n '1200,1720p'";

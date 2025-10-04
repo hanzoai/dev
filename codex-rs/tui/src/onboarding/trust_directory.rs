@@ -1,33 +1,24 @@
 use std::path::PathBuf;
 
 use codex_core::config::set_project_trusted;
-use codex_core::config::set_project_access_mode;
-use codex_protocol::config_types::SandboxMode as SandboxModeCfg;
-use codex_core::protocol::AskForApproval;
-use codex_core::protocol::SandboxPolicy;
+use codex_core::git_info::resolve_root_git_project_for_trust;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
+use ratatui::style::Color;
 use ratatui::style::Modifier;
-use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
-
-use crate::colors::light_blue;
 
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 
 use super::onboarding_screen::StepState;
-use crate::app::ChatWidgetArgs;
-use std::sync::Arc;
-use std::sync::Mutex;
 
 pub(crate) struct TrustDirectoryWidget {
     pub codex_home: PathBuf,
@@ -36,11 +27,10 @@ pub(crate) struct TrustDirectoryWidget {
     pub selection: Option<TrustDirectorySelection>,
     pub highlighted: TrustDirectorySelection,
     pub error: Option<String>,
-    pub chat_widget_args: Arc<Mutex<ChatWidgetArgs>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TrustDirectorySelection {
+pub enum TrustDirectorySelection {
     Trust,
     DontTrust,
 }
@@ -49,44 +39,31 @@ impl WidgetRef for &TrustDirectoryWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
-                Span::raw("> "),
-                Span::styled(
-                    "You are running Code in ",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(self.cwd.to_string_lossy().to_string()),
+                "> ".into(),
+                "You are running Codex in ".bold(),
+                self.cwd.to_string_lossy().to_string().into(),
             ]),
-            Line::from(""),
+            "".into(),
         ];
 
         if self.is_git_repo {
-            lines.push(Line::from(
-                "  Since this folder is version controlled, you may wish to allow Code",
-            ));
-            lines.push(Line::from(
-                "  to work in this folder without asking for approval.",
-            ));
+            lines.push(
+                "  Since this folder is version controlled, you may wish to allow Codex".into(),
+            );
+            lines.push("  to work in this folder without asking for approval.".into());
         } else {
-            lines.push(Line::from(
-                "  Since this folder is not version controlled, we recommend requiring",
-            ));
-            lines.push(Line::from("  approval of all edits and commands."));
+            lines.push(
+                "  Since this folder is not version controlled, we recommend requiring".into(),
+            );
+            lines.push("  approval of all edits and commands.".into());
         }
-        lines.push(Line::from(""));
+        lines.push("".into());
 
         let create_option =
             |idx: usize, option: TrustDirectorySelection, text: &str| -> Line<'static> {
                 let is_selected = self.highlighted == option;
                 if is_selected {
-                    Line::from(vec![
-                        Span::styled(
-                            format!("> {}. ", idx + 1),
-                            Style::default()
-                                .fg(light_blue())
-                                .add_modifier(Modifier::DIM),
-                        ),
-                        Span::styled(text.to_owned(), Style::default().fg(light_blue())),
-                    ])
+                    Line::from(format!("> {}. {text}", idx + 1)).cyan()
                 } else {
                     Line::from(format!("  {}. {}", idx + 1, text))
                 }
@@ -96,7 +73,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Yes, allow Code to work in this folder without asking for approval",
+                "Yes, allow Codex to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -107,7 +84,7 @@ impl WidgetRef for &TrustDirectoryWidget {
             lines.push(create_option(
                 0,
                 TrustDirectorySelection::Trust,
-                "Allow Code to work in this folder without asking for approval",
+                "Allow Codex to work in this folder without asking for approval",
             ));
             lines.push(create_option(
                 1,
@@ -115,10 +92,10 @@ impl WidgetRef for &TrustDirectoryWidget {
                 "Require approval of edits and commands",
             ));
         }
-        lines.push(Line::from(""));
+        lines.push("".into());
         if let Some(error) = &self.error {
-            lines.push(Line::from(format!("  {error}")).fg(crate::colors::error()));
-            lines.push(Line::from(""));
+            lines.push(Line::from(format!("  {error}")).fg(Color::Red));
+            lines.push("".into());
         }
         // AE: Following styles.md, this should probably be Cyan because it's a user input tip.
         //     But leaving this for a future cleanup.
@@ -161,28 +138,11 @@ impl StepStateProvider for TrustDirectoryWidget {
 
 impl TrustDirectoryWidget {
     fn handle_trust(&mut self) {
-        if let Err(e) = set_project_trusted(&self.codex_home, &self.cwd) {
+        let target =
+            resolve_root_git_project_for_trust(&self.cwd).unwrap_or_else(|| self.cwd.clone());
+        if let Err(e) = set_project_trusted(&self.codex_home, &target) {
             tracing::error!("Failed to set project trusted: {e:?}");
-            self.error = Some(e.to_string());
-            // self.error = Some("Failed to set project trusted".to_string());
-        }
-
-        // Update the in-memory chat config for this session to a more permissive
-        // policy suitable for a trusted workspace (Full Access).
-        if let Ok(mut args) = self.chat_widget_args.lock() {
-            args.config.approval_policy = AskForApproval::Never;
-            args.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
-        }
-
-        // Persist the access mode explicitly so subsequent runs don't rely solely on
-        // the trust fallback logic and so the UI reflects the chosen mode immediately.
-        if let Err(e) = set_project_access_mode(
-            &self.codex_home,
-            &self.cwd,
-            AskForApproval::Never,
-            SandboxModeCfg::DangerFullAccess,
-        ) {
-            tracing::warn!("Failed to persist project access mode: {e:?}");
+            self.error = Some(format!("Failed to set trust for {}: {e}", target.display()));
         }
 
         self.selection = Some(TrustDirectorySelection::Trust);

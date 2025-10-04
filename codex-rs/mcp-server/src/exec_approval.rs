@@ -74,7 +74,7 @@ pub(crate) async fn handle_exec_approval_request(
         codex_elicitation: "exec-approval".to_string(),
         codex_mcp_tool_call_id: tool_call_id.clone(),
         codex_event_id: event_id.clone(),
-        codex_call_id: call_id.clone(),
+        codex_call_id: call_id,
         codex_command: command,
         codex_cwd: cwd,
     };
@@ -106,16 +106,15 @@ pub(crate) async fn handle_exec_approval_request(
     // Listen for the response on a separate task so we don't block the main agent loop.
     {
         let codex = codex.clone();
-        // Correlate by call_id for core pending approvals
-        let approval_id = call_id.clone();
+        let event_id = event_id.clone();
         tokio::spawn(async move {
-            on_exec_approval_response(approval_id, on_response, codex).await;
+            on_exec_approval_response(event_id, on_response, codex).await;
         });
     }
 }
 
 async fn on_exec_approval_response(
-    approval_id: String,
+    event_id: String,
     receiver: tokio::sync::oneshot::Receiver<mcp_types::Result>,
     codex: Arc<CodexConversation>,
 ) {
@@ -140,7 +139,7 @@ async fn on_exec_approval_response(
 
     if let Err(err) = codex
         .submit(Op::ExecApproval {
-            id: approval_id,
+            id: event_id,
             decision: response.decision,
         })
         .await

@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use dirs::home_dir;
 use shlex::try_join;
 
 pub(crate) fn escape_command(command: &[String]) -> String {
@@ -9,38 +10,9 @@ pub(crate) fn escape_command(command: &[String]) -> String {
 
 pub(crate) fn strip_bash_lc_and_escape(command: &[String]) -> String {
     match command {
-        // exactly three items
-        [first, second, third]
-            // first two must be "bash", "-lc"
-            if is_bash_like(first) && second == "-lc" =>
-        {
-            third.clone()        // borrow `third`
-        }
+        [first, second, third] if first == "bash" && second == "-lc" => third.clone(),
         _ => escape_command(command),
     }
-}
-
-fn is_bash_like(cmd: &str) -> bool {
-    let trimmed = cmd.trim_matches('"').trim_matches('\'');
-    let lowered = Path::new(trimmed)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(trimmed)
-        .to_ascii_lowercase();
-    matches!(
-        lowered.as_str(),
-        "bash"
-            | "bash.exe"
-            | "sh"
-            | "sh.exe"
-            | "dash"
-            | "dash.exe"
-            | "zsh"
-            | "zsh.exe"
-            | "ksh"
-            | "ksh.exe"
-            | "busybox"
-    )
 }
 
 /// If `path` is absolute and inside $HOME, return the part *after* the home
@@ -56,16 +28,12 @@ where
         return None;
     }
 
-    if let Some(home_dir) = std::env::var_os("HOME").map(PathBuf::from) {
-        if let Ok(rel) = path.strip_prefix(&home_dir) {
-            return Some(rel.to_path_buf());
-        }
-    }
-
-    None
+    let home_dir = home_dir()?;
+    let rel = path.strip_prefix(&home_dir).ok()?;
+    Some(rel.to_path_buf())
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

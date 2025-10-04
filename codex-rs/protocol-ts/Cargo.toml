@@ -18,6 +18,4 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-app-server-protocol = { workspace = true }
-codex-protocol = { workspace = true }
 ts-rs = { workspace = true }
-mcp-types = { workspace = true }

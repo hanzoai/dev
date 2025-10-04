@@ -1,49 +1,65 @@
 //! A live status indicator that shows the *latest* log line emitted by the
 //! application while the agent is processing a long‑running task.
 
-use std::cell::Cell;
 use std::time::Duration;
 use std::time::Instant;
 
 use codex_core::protocol::Op;
+use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Stylize};
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
-use textwrap::Options as TwOptions;
-use textwrap::WordSplitter;
+use crate::key_hint;
+use crate::shimmer::shimmer_spans;
+use crate::tui::FrameRequester;
 
-#[allow(dead_code)]
 pub(crate) struct StatusIndicatorWidget {
     /// Animated header text (defaults to "Working").
     header: String,
     /// Queued user messages to display under the status line.
     queued_messages: Vec<String>,
 
-    start_time: Instant,
-    /// Last time we scheduled a follow-up frame; used to throttle redraws.
-    last_schedule: Cell<Instant>,
-    last_rendered_second: Cell<u64>,
+    elapsed_running: Duration,
+    last_resume_at: Instant,
+    is_paused: bool,
     app_event_tx: AppEventSender,
-    // We schedule frames via AppEventSender; no direct frame requester.
+    frame_requester: FrameRequester,
 }
 
-#[allow(dead_code)]
+// Format elapsed seconds into a compact human-friendly form used by the status line.
+// Examples: 0s, 59s, 1m 00s, 59m 59s, 1h 00m 00s, 2h 03m 09s
+pub fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
+    if elapsed_secs < 60 {
+        return format!("{elapsed_secs}s");
+    }
+    if elapsed_secs < 3600 {
+        let minutes = elapsed_secs / 60;
+        let seconds = elapsed_secs % 60;
+        return format!("{minutes}m {seconds:02}s");
+    }
+    let hours = elapsed_secs / 3600;
+    let minutes = (elapsed_secs % 3600) / 60;
+    let seconds = elapsed_secs % 60;
+    format!("{hours}h {minutes:02}m {seconds:02}s")
+}
+
 impl StatusIndicatorWidget {
-    pub(crate) fn new(app_event_tx: AppEventSender) -> Self {
+    pub(crate) fn new(app_event_tx: AppEventSender, frame_requester: FrameRequester) -> Self {
         Self {
             header: String::from("Working"),
             queued_messages: Vec::new(),
-            start_time: Instant::now(),
-            last_schedule: Cell::new(Instant::now()),
-            last_rendered_second: Cell::new(u64::MAX),
+            elapsed_running: Duration::ZERO,
+            last_resume_at: Instant::now(),
+            is_paused: false,
 
             app_event_tx,
+            frame_requester,
         }
     }
 
@@ -57,11 +73,8 @@ impl StatusIndicatorWidget {
         }
         let text_width = inner_width.saturating_sub(3); // account for " ↳ " prefix
         if text_width > 0 {
-            let opts = TwOptions::new(text_width)
-                .break_words(false)
-                .word_splitter(WordSplitter::NoHyphenation);
             for q in &self.queued_messages {
-                let wrapped = textwrap::wrap(q, &opts);
+                let wrapped = textwrap::wrap(q, text_width);
                 let lines = wrapped.len().min(3) as u16;
                 total = total.saturating_add(lines);
                 if wrapped.len() > 3 {
@@ -93,8 +106,44 @@ impl StatusIndicatorWidget {
     pub(crate) fn set_queued_messages(&mut self, queued: Vec<String>) {
         self.queued_messages = queued;
         // Ensure a redraw so changes are visible.
-        // Use the app's debounced redraw path; no need to arm a fast timer here.
-        self.app_event_tx.send(AppEvent::RequestRedraw);
+        self.frame_requester.schedule_frame();
+    }
+
+    pub(crate) fn pause_timer(&mut self) {
+        self.pause_timer_at(Instant::now());
+    }
+
+    pub(crate) fn resume_timer(&mut self) {
+        self.resume_timer_at(Instant::now());
+    }
+
+    pub(crate) fn pause_timer_at(&mut self, now: Instant) {
+        if self.is_paused {
+            return;
+        }
+        self.elapsed_running += now.saturating_duration_since(self.last_resume_at);
+        self.is_paused = true;
+    }
+
+    pub(crate) fn resume_timer_at(&mut self, now: Instant) {
+        if !self.is_paused {
+            return;
+        }
+        self.last_resume_at = now;
+        self.is_paused = false;
+        self.frame_requester.schedule_frame();
+    }
+
+    fn elapsed_seconds_at(&self, now: Instant) -> u64 {
+        let mut elapsed = self.elapsed_running;
+        if !self.is_paused {
+            elapsed += now.saturating_duration_since(self.last_resume_at);
+        }
+        elapsed.as_secs()
+    }
+
+    pub fn elapsed_seconds(&self) -> u64 {
+        self.elapsed_seconds_at(Instant::now())
     }
 }
 
@@ -104,58 +153,20 @@ impl WidgetRef for StatusIndicatorWidget {
             return;
         }
 
-        let viewport = buf.area();
-        let area_right = area.x.saturating_add(area.width);
-        let area_bottom = area.y.saturating_add(area.height);
-        let view_right = viewport.x.saturating_add(viewport.width);
-        let view_bottom = viewport.y.saturating_add(viewport.height);
-        let intersects = area.x < view_right
-            && viewport.x < area_right
-            && area.y < view_bottom
-            && viewport.y < area_bottom;
-        if !intersects {
-            return;
-        }
-
-        // Schedule periodic refreshes so the elapsed timer stays up to date without
-        // forcing a high-FPS redraw of the entire UI.
-        let now = Instant::now();
-        let elapsed_since_start = self.start_time.elapsed();
-        let elapsed = elapsed_since_start.as_secs();
-        if elapsed != self.last_rendered_second.get()
-            || now.duration_since(self.last_schedule.get()) >= Duration::from_secs(1)
-        {
-            self.last_schedule.set(now);
-            self.last_rendered_second.set(elapsed);
-            self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
-        }
+        // Schedule next animation frame.
+        self.frame_requester
+            .schedule_frame_in(Duration::from_millis(32));
+        let elapsed = self.elapsed_seconds();
+        let pretty_elapsed = fmt_elapsed_compact(elapsed);
 
         // Plain rendering: no borders or padding so the live cell is visually indistinguishable from terminal scrollback.
-        // Theme-aware base styles
-        let bg = crate::colors::background();
-        let text = crate::colors::text();
-        let text_dim = crate::colors::text_dim();
-        let accent = crate::colors::info();
-
-        // Build header spans using theme colors (no terminal-default cyan/dim)
-        let mut spans = vec![
-            ratatui::text::Span::raw(" "),
-            ratatui::text::Span::raw("• ").style(Style::default().fg(text_dim)),
-            ratatui::text::Span::styled(
-                self.header.clone(),
-                Style::default()
-                    .fg(accent)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            ),
-            ratatui::text::Span::raw(" "),
-        ];
+        let mut spans = vec!["• ".dim()];
+        spans.extend(shimmer_spans(&self.header));
         spans.extend(vec![
-            ratatui::text::Span::raw(" "),
-            // (12s • Esc to interrupt)
-            ratatui::text::Span::raw(format!("({elapsed}s • ")).style(Style::default().fg(text_dim)),
-            ratatui::text::Span::raw("Esc").style(Style::default().fg(accent).add_modifier(ratatui::style::Modifier::BOLD)),
-            ratatui::text::Span::raw(")").style(Style::default().fg(text_dim)),
+            " ".into(),
+            format!("({pretty_elapsed} • ").dim(),
+            key_hint::plain(KeyCode::Esc).into(),
+            " to interrupt)".dim(),
         ]);
 
         // Build lines: status, then queued messages, then spacer.
@@ -166,82 +177,93 @@ impl WidgetRef for StatusIndicatorWidget {
         }
         // Wrap queued messages using textwrap and show up to the first 3 lines per message.
         let text_width = area.width.saturating_sub(3); // " ↳ " prefix
-        let opts = TwOptions::new(text_width as usize)
-            .break_words(false)
-            .word_splitter(WordSplitter::NoHyphenation);
         for q in &self.queued_messages {
-            let wrapped = textwrap::wrap(q, &opts);
+            let wrapped = textwrap::wrap(q, text_width as usize);
             for (i, piece) in wrapped.iter().take(3).enumerate() {
                 let prefix = if i == 0 { " ↳ " } else { "   " };
                 let content = format!("{prefix}{piece}");
-                lines.push(Line::from(content).style(Style::default().fg(text_dim).italic()));
+                lines.push(Line::from(content.dim().italic()));
             }
             if wrapped.len() > 3 {
-                lines.push(Line::from("   …").style(Style::default().fg(text_dim).italic()));
+                lines.push(Line::from("   …".dim().italic()));
             }
         }
         if !self.queued_messages.is_empty() {
             lines.push(
                 Line::from(vec![
-                    ratatui::text::Span::raw("   "),
-                    // Key hint in accent, label in dim text
-                    ratatui::text::Span::raw("Alt+↑").style(Style::default().fg(accent)),
-                    ratatui::text::Span::raw(" edit").style(Style::default().fg(text_dim)),
+                    "   ".into(),
+                    key_hint::alt(KeyCode::Up).into(),
+                    " edit".into(),
                 ])
-                .style(Style::default()),
+                .dim(),
             );
         }
 
-        // Ensure background/foreground reflect theme
-        let paragraph = Paragraph::new(lines).style(Style::default().bg(bg).fg(text));
+        let paragraph = Paragraph::new(lines);
         paragraph.render_ref(area, buf);
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_event::AppEvent;
     use crate::app_event_sender::AppEventSender;
-    use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::time::Duration;
+    use std::time::Instant;
     use tokio::sync::mpsc::unbounded_channel;
 
-    // no extra tests added from upstream for elapsed formatting; our widget uses simple seconds
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn fmt_elapsed_compact_formats_seconds_minutes_hours() {
+        assert_eq!(fmt_elapsed_compact(0), "0s");
+        assert_eq!(fmt_elapsed_compact(1), "1s");
+        assert_eq!(fmt_elapsed_compact(59), "59s");
+        assert_eq!(fmt_elapsed_compact(60), "1m 00s");
+        assert_eq!(fmt_elapsed_compact(61), "1m 01s");
+        assert_eq!(fmt_elapsed_compact(3 * 60 + 5), "3m 05s");
+        assert_eq!(fmt_elapsed_compact(59 * 60 + 59), "59m 59s");
+        assert_eq!(fmt_elapsed_compact(3600), "1h 00m 00s");
+        assert_eq!(fmt_elapsed_compact(3600 + 60 + 1), "1h 01m 01s");
+        assert_eq!(fmt_elapsed_compact(25 * 3600 + 2 * 60 + 3), "25h 02m 03s");
+    }
+
     #[test]
     fn renders_with_working_header() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let w = StatusIndicatorWidget::new(tx);
+        let w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
 
         // Render into a fixed-size test terminal and snapshot the backend.
         let mut terminal = Terminal::new(TestBackend::new(80, 2)).expect("terminal");
         terminal
             .draw(|f| w.render_ref(f.area(), f.buffer_mut()))
             .expect("draw");
-        assert_snapshot!(terminal.backend());
+        insta::assert_snapshot!(terminal.backend());
     }
 
     #[test]
     fn renders_truncated() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let w = StatusIndicatorWidget::new(tx);
+        let w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
 
         // Render into a fixed-size test terminal and snapshot the backend.
         let mut terminal = Terminal::new(TestBackend::new(20, 2)).expect("terminal");
         terminal
             .draw(|f| w.render_ref(f.area(), f.buffer_mut()))
             .expect("draw");
-        assert_snapshot!(terminal.backend());
+        insta::assert_snapshot!(terminal.backend());
     }
 
     #[test]
     fn renders_with_queued_messages() {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut w = StatusIndicatorWidget::new(tx);
+        let mut w = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
         w.set_queued_messages(vec!["first".to_string(), "second".to_string()]);
 
         // Render into a fixed-size test terminal and snapshot the backend.
@@ -249,6 +271,27 @@ mod tests {
         terminal
             .draw(|f| w.render_ref(f.area(), f.buffer_mut()))
             .expect("draw");
-        assert_snapshot!(terminal.backend());
+        insta::assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn timer_pauses_when_requested() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut widget = StatusIndicatorWidget::new(tx, crate::tui::FrameRequester::test_dummy());
+
+        let baseline = Instant::now();
+        widget.last_resume_at = baseline;
+
+        let before_pause = widget.elapsed_seconds_at(baseline + Duration::from_secs(5));
+        assert_eq!(before_pause, 5);
+
+        widget.pause_timer_at(baseline + Duration::from_secs(5));
+        let paused_elapsed = widget.elapsed_seconds_at(baseline + Duration::from_secs(10));
+        assert_eq!(paused_elapsed, before_pause);
+
+        widget.resume_timer_at(baseline + Duration::from_secs(10));
+        let after_resume = widget.elapsed_seconds_at(baseline + Duration::from_secs(13));
+        assert_eq!(after_resume, before_pause + 3);
     }
 }

@@ -269,13 +269,13 @@ mod tests {
 
     #[test]
     fn supports_rg_with_path_and_glob_filter() {
-        let inner = "rg \"codex-run-as-apply-patch\" -n codex-rs -g\"*.rs\"";
+        let inner = "rg \"codex-run-as-apply-patch\" -n code-rs -g\"*.rs\"";
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
             vec![ParsedCommand::Search {
-                cmd: "rg codex-run-as-apply-patch -n codex-rs '-g*.rs'".to_string(),
+                cmd: "rg codex-run-as-apply-patch -n code-rs '-g*.rs'".to_string(),
                 query: Some("codex-run-as-apply-patch".to_string()),
-                path: Some("codex-rs".to_string()),
+                path: Some("code-rs".to_string()),
             }],
         );
     }
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn supports_cd_and_rg_files() {
         assert_parsed(
-            &shlex_split_safe("cd codex-rs && rg --files"),
+            &shlex_split_safe("cd code-rs && rg --files"),
             vec![ParsedCommand::Search {
                 cmd: "rg --files".to_string(),
                 query: None,

@@ -67,24 +67,20 @@ We already tried copying modules into `code-*` while leaving the originals in `c
    `./build-fast.sh --workspace code` passes.
 3. **DONE (2025-10-04):** Update shared tooling (`build-fast.sh`) to target
    both workspaces and keep existing `codex` builds green (`./build-fast.sh`).
-4. Fix build/scripts/tests that reference `codex-rs/…` paths (e.g.
-   `build-fast.sh`, CI workflows, developer docs). *(Owner: in progress —
-   audit remaining references outside `build-fast.sh`.)*
-5. Replace `codex-rs/` with the upstream checkout and re-run
-   `./build-fast.sh`. *(Owner: pending — execute after snapshot & tooling
-   audit.)*
-6. Review each major subsystem to pinpoint the largest chunks we can
-   realistically source from upstream, implementing extension hooks or local
-   overrides only where forked behavior is essential.
-7. Schedule regular dead-code sweeps in `code-rs/` to prune legacy modules
-   we inherited from upstream but no longer reference; document each removal
-   so future merges stay clean.
-8. As upstream-backed sections land, retire redundant fork modules and,
-   when a `code-*` crate is effectively identical (exact replica or only an
-   ancestor without new commits) to its upstream counterpart, delete the
-   duplicate crate in favor of the `codex-rs/` version before cutting a
-   release. Ensure downstream crates import the appropriate `code-*` or
-   upstream paths based on the documented decision.
+4. **DONE (2025-10-04):** Audited all scripts, docs, and SDK samples to swap
+   `codex-rs/…` references over to `code-rs/…` (see commits touching
+   `build-fast.sh`, `scripts/ci-tests.sh`, TypeScript SDK, installation docs).
+5. **DONE (2025-10-04):** Checked out upstream `codex-rs/` at
+   `openai/codex@d7acd146` and re-ran `./build-fast.sh --workspace codex`
+   plus `./build-fast.sh --workspace code` to confirm both workspaces build.
+6. **DONE (2025-10-04):** Captured subsystem decisions in
+   `docs/subsystem-migration-status.md`, highlighting where we will reuse
+   upstream code versus keep fork-specialised wrappers.
+7. **DONE (2025-10-04):** Scheduled recurring `code-rs/` dead-code sweeps and
+   documented the cadence in `docs/code-dead-code-sweeps.md`.
+8. **DONE (2025-10-04):** Opened `docs/code-crate-parity-tracker.md` to record
+   when forked crates reach parity with upstream so we can delete duplicates
+   ahead of releases.
 
 ## Tracking
 

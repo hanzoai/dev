@@ -1,7 +1,7 @@
 use std::io::Cursor;
-use std::io::{self};
 use std::io::Read;
 use std::io::Write;
+use std::io::{self};
 use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::path::Path;
@@ -16,6 +16,7 @@ use base64::Engine;
 use chrono::Utc;
 use codex_core::auth::AuthDotJson;
 use codex_core::auth::get_auth_file;
+use codex_core::default_client::originator;
 use codex_core::token_data::TokenData;
 use codex_core::token_data::parse_id_token;
 use rand::RngCore;
@@ -24,6 +25,7 @@ use tiny_http::Header;
 use tiny_http::Request;
 use tiny_http::Response;
 use tiny_http::Server;
+use tiny_http::StatusCode;
 
 const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const DEFAULT_PORT: u16 = 1455;
@@ -36,11 +38,10 @@ pub struct ServerOptions {
     pub port: u16,
     pub open_browser: bool,
     pub force_state: Option<String>,
-    pub originator: String,
 }
 
 impl ServerOptions {
-    pub fn new(codex_home: PathBuf, client_id: String, originator: String) -> Self {
+    pub fn new(codex_home: PathBuf, client_id: String) -> Self {
         Self {
             codex_home,
             client_id,
@@ -48,7 +49,6 @@ impl ServerOptions {
             port: DEFAULT_PORT,
             open_browser: true,
             force_state: None,
-            originator,
         }
     }
 }
@@ -104,14 +104,7 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
     let server = Arc::new(server);
 
     let redirect_uri = format!("http://localhost:{actual_port}/auth/callback");
-    let auth_url = build_authorize_url(
-        &opts.issuer,
-        &opts.client_id,
-        &redirect_uri,
-        &pkce,
-        &state,
-        &opts.originator,
-    );
+    let auth_url = build_authorize_url(&opts.issuer, &opts.client_id, &redirect_uri, &pkce, &state);
 
     if opts.open_browser {
         let _ = webbrowser::open(&auth_url);
@@ -156,8 +149,15 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
                                 let _ = tokio::task::spawn_blocking(move || req.respond(response)).await;
                                 None
                             }
-                            HandledRequest::ResponseAndExit { response, result } => {
-                                let _ = tokio::task::spawn_blocking(move || req.respond(response)).await;
+                            HandledRequest::ResponseAndExit {
+                                headers,
+                                body,
+                                result,
+                            } => {
+                                let _ = tokio::task::spawn_blocking(move || {
+                                    send_response_with_disconnect(req, headers, body)
+                                })
+                                .await;
                                 Some(result)
                             }
                             HandledRequest::RedirectWithHeader(header) => {
@@ -167,7 +167,9 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
                             }
                         };
 
-                        if let Some(result) = exit_result { break result; }
+                        if let Some(result) = exit_result {
+                            break result;
+                        }
                     }
                 }
             };
@@ -190,7 +192,11 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
 enum HandledRequest {
     Response(Response<Cursor<Vec<u8>>>),
     RedirectWithHeader(Header),
-    ResponseAndExit { response: Response<Cursor<Vec<u8>>>, result: io::Result<()> },
+    ResponseAndExit {
+        headers: Vec<Header>,
+        body: Vec<u8>,
+        result: io::Result<()>,
+    },
 }
 
 async fn process_request(
@@ -278,18 +284,25 @@ async fn process_request(
         }
         "/success" => {
             let body = include_str!("assets/success.html");
-            let mut resp = Response::from_data(body.as_bytes());
-            if let Ok(h) = tiny_http::Header::from_bytes(
-                &b"Content-Type"[..],
-                &b"text/html; charset=utf-8"[..],
-            ) {
-                resp.add_header(h);
+            HandledRequest::ResponseAndExit {
+                headers: match Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"text/html; charset=utf-8"[..],
+                ) {
+                    Ok(header) => vec![header],
+                    Err(_) => Vec::new(),
+                },
+                body: body.as_bytes().to_vec(),
+                result: Ok(()),
             }
-            HandledRequest::ResponseAndExit { response: resp, result: Ok(()) }
         }
         "/cancel" => HandledRequest::ResponseAndExit {
-            response: Response::from_string("Login cancelled"),
-            result: Err(io::Error::new(io::ErrorKind::Interrupted, "Login cancelled")),
+            headers: Vec::new(),
+            body: b"Login cancelled".to_vec(),
+            result: Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Login cancelled",
+            )),
         },
         _ => HandledRequest::Response(Response::from_string("Not Found").with_status_code(404)),
     }
@@ -304,13 +317,47 @@ async fn process_request(
 /// and always appends `Connection: close`, ensuring the socket is closed from
 /// the server side. Ideally, tiny_http would provide an API to control
 /// server-side connection persistence, but it does not.
+fn send_response_with_disconnect(
+    req: Request,
+    mut headers: Vec<Header>,
+    body: Vec<u8>,
+) -> io::Result<()> {
+    let status = StatusCode(200);
+    let mut writer = req.into_writer();
+    let reason = status.default_reason_phrase();
+    write!(writer, "HTTP/1.1 {} {}\r\n", status.0, reason)?;
+    headers.retain(|h| !h.field.equiv("Connection"));
+    if let Ok(close_header) = Header::from_bytes(&b"Connection"[..], &b"close"[..]) {
+        headers.push(close_header);
+    }
+
+    let content_length_value = format!("{}", body.len());
+    if let Ok(content_length_header) =
+        Header::from_bytes(&b"Content-Length"[..], content_length_value.as_bytes())
+    {
+        headers.push(content_length_header);
+    }
+
+    for header in headers {
+        write!(
+            writer,
+            "{}: {}\r\n",
+            header.field.as_str(),
+            header.value.as_str()
+        )?;
+    }
+
+    writer.write_all(b"\r\n")?;
+    writer.write_all(&body)?;
+    writer.flush()
+}
+
 fn build_authorize_url(
     issuer: &str,
     client_id: &str,
     redirect_uri: &str,
     pkce: &PkceCodes,
     state: &str,
-    originator: &str,
 ) -> String {
     let query = vec![
         ("response_type", "code"),
@@ -322,7 +369,7 @@ fn build_authorize_url(
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
         ("state", state),
-        ("originator", originator),
+        ("originator", originator().value.as_str()),
     ];
     let qs = query
         .into_iter()
@@ -420,7 +467,7 @@ pub(crate) async fn exchange_code_for_tokens(
         refresh_token: String,
     }
 
-    let client = codex_core::http_client::build_http_client();
+    let client = reqwest::Client::new();
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -461,10 +508,10 @@ pub(crate) async fn persist_tokens_async(
     let codex_home = codex_home.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let auth_file = get_auth_file(&codex_home);
-        if let Some(parent) = auth_file.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(io::Error::other)?;
-            }
+        if let Some(parent) = auth_file.parent()
+            && !parent.exists()
+        {
+            std::fs::create_dir_all(parent).map_err(io::Error::other)?;
         }
 
         let mut tokens = TokenData {
@@ -479,23 +526,12 @@ pub(crate) async fn persist_tokens_async(
         {
             tokens.account_id = Some(acc.to_string());
         }
-        let tokens_for_store = tokens.clone();
-        let last_refresh = Utc::now();
         let auth = AuthDotJson {
             openai_api_key: api_key,
             tokens: Some(tokens),
-            last_refresh: Some(last_refresh),
+            last_refresh: Some(Utc::now()),
         };
-        codex_core::auth::write_auth_json(&auth_file, &auth)?;
-        let email_for_store = tokens_for_store.id_token.email.clone();
-        let _ = codex_core::auth_accounts::upsert_chatgpt_account(
-            &codex_home,
-            tokens_for_store,
-            last_refresh,
-            email_for_store,
-            true,
-        )?;
-        Ok(())
+        codex_core::auth::write_auth_json(&auth_file, &auth)
     })
     .await
     .map_err(|e| io::Error::other(format!("persist task failed: {e}")))?
@@ -590,7 +626,7 @@ pub(crate) async fn obtain_api_key(
     struct ExchangeResp {
         access_token: String,
     }
-    let client = codex_core::http_client::build_http_client();
+    let client = reqwest::Client::new();
     let resp = client
         .post(format!("{issuer}/oauth/token"))
         .header("Content-Type", "application/x-www-form-urlencoded")

@@ -1,4 +1,4 @@
-// based on item types from codex-rs/exec/src/exec_events.rs
+// based on item types from code-rs/exec/src/exec_events.rs
 
 /** The status of a command execution. */
 export type CommandExecutionStatus = "in_progress" | "completed" | "failed";

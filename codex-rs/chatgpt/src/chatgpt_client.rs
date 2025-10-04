@@ -1,4 +1,5 @@
 use codex_core::config::Config;
+use codex_core::default_client::create_client;
 
 use crate::chatgpt_token::get_chatgpt_token_data;
 use crate::chatgpt_token::init_chatgpt_token_from_auth;
@@ -12,17 +13,17 @@ pub(crate) async fn chatgpt_get_request<T: DeserializeOwned>(
     path: String,
 ) -> anyhow::Result<T> {
     let chatgpt_base_url = &config.chatgpt_base_url;
-    init_chatgpt_token_from_auth(&config.codex_home, &config.responses_originator_header).await?;
+    init_chatgpt_token_from_auth(&config.codex_home).await?;
 
     // Make direct HTTP request to ChatGPT backend API with the token
-    let client = codex_core::http_client::build_http_client();
+    let client = create_client();
     let url = format!("{chatgpt_base_url}{path}");
 
     let token =
         get_chatgpt_token_data().ok_or_else(|| anyhow::anyhow!("ChatGPT token not available"))?;
 
     let account_id = token.account_id.ok_or_else(|| {
-        anyhow::anyhow!("ChatGPT account ID not available, please re-run `code login`")
+        anyhow::anyhow!("ChatGPT account ID not available, please re-run `codex login`")
     });
 
     let response = client

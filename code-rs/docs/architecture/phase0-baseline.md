@@ -1,6 +1,6 @@
 # Phase 0 Baseline – Architecture Survey (September 20, 2025)
 
-This note captures the current layout of the `codex-rs` workspace before any
+This note captures the current layout of the `code-rs` workspace before any
 phase-one refactors. It should help us reason about the execution pipeline and
 identify the modules that will be split up in later phases.
 

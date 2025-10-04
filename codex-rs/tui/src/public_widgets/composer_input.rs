@@ -8,7 +8,6 @@ use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
-use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use crate::app_event::AppEvent;
@@ -28,17 +27,17 @@ pub enum ComposerAction {
 /// reusable text input field with submit semantics.
 pub struct ComposerInput {
     inner: ChatComposer,
-    _tx: Sender<AppEvent>,
-    rx: Receiver<AppEvent>,
+    _tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 }
 
 impl ComposerInput {
     /// Create a new composer input with a neutral placeholder.
     pub fn new() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let sender = AppEventSender::new(tx.clone());
         // `enhanced_keys_supported=true` enables Shift+Enter newline hint/behavior.
-        let inner = ChatComposer::new(true, sender, true, false);
+        let inner = ChatComposer::new(true, sender, true, "Compose new task".to_string(), false);
         Self { inner, _tx: tx, rx }
     }
 
