@@ -1,0 +1,4634 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, unnameable_test_items)]
+
+use super::*;
+use super::OrderKey;
+use crate::app_event::{
+    AppEvent,
+    AutoCoordinatorStatus,
+    AutoObserverStatus,
+    AutoObserverTelemetry,
+    BackgroundPlacement,
+};
+use crate::app_event_sender::AppEventSender;
+use crate::history::state::{
+    ArgumentValue,
+    ExecStatus,
+    ExploreEntryStatus,
+    HistoryDomainRecord,
+    HistoryId,
+    HistoryRecord,
+    HistoryState,
+    ToolArgument,
+    ToolCallState,
+    ToolResultPreview,
+    ToolStatus,
+};
+use crate::slash_command::SlashCommand;
+use super::auto_coordinator::{AutoCoordinatorCommand, AutoCoordinatorHandle, TurnConfig};
+use super::auto_observer::build_observer_conversation;
+use code_core::config::Config;
+use code_core::config::ConfigOverrides;
+use code_core::config::ConfigToml;
+use code_core::config_types::ReasoningEffort;
+use code_core::plan_tool::PlanItemArg;
+use code_core::plan_tool::StepStatus;
+use code_core::plan_tool::UpdatePlanArgs;
+use code_core::parse_command::ParsedCommand;
+use code_core::protocol::AgentMessageDeltaEvent;
+use code_core::protocol::AgentMessageEvent;
+use code_core::protocol::AgentStatusUpdateEvent;
+use code_core::protocol::AgentInfo as ProtocolAgentInfo;
+use code_core::protocol::AgentReasoningDeltaEvent;
+use code_core::protocol::AgentReasoningEvent;
+use code_core::protocol::ApplyPatchApprovalRequestEvent;
+use code_core::protocol::Event;
+use code_core::protocol::EventMsg;
+use code_core::protocol::CustomToolCallBeginEvent;
+use code_core::protocol::CustomToolCallEndEvent;
+use code_core::protocol::McpInvocation;
+use code_core::protocol::McpToolCallBeginEvent;
+use code_core::protocol::McpToolCallEndEvent;
+use code_core::protocol::WebSearchBeginEvent;
+use code_core::protocol::WebSearchCompleteEvent;
+use code_core::protocol::ExecApprovalRequestEvent;
+use code_core::protocol::ExecCommandBeginEvent;
+use code_core::protocol::ExecCommandEndEvent;
+use code_core::protocol::ExecCommandOutputDeltaEvent;
+use code_core::protocol::ExecOutputStream;
+use code_core::protocol::FileChange;
+use code_core::protocol::RateLimitSnapshotEvent;
+use code_core::protocol::PatchApplyBeginEvent;
+use code_core::protocol::PatchApplyEndEvent;
+use code_core::protocol::OrderMeta;
+use code_core::protocol::InputItem;
+use code_core::protocol::Op;
+use code_core::protocol::StreamErrorEvent;
+use code_core::protocol::TaskCompleteEvent;
+use code_core::protocol::ReviewCodeLocation;
+use code_core::protocol::ReviewFinding;
+use code_core::protocol::ReviewLineRange;
+use code_core::protocol::ReviewOutputEvent;
+use code_core::protocol::ReviewRequest;
+use code_protocol::models::{ContentItem, ResponseItem};
+use mcp_types::CallToolResult;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
+use chrono::{Duration as ChronoDuration, Local, Utc};
+use insta::assert_snapshot;
+use pretty_assertions::assert_eq;
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::path::PathBuf;
+use std::sync::mpsc::{channel, TryRecvError};
+use std::time::Duration;
+use tokio::sync::mpsc::unbounded_channel;
+use strip_ansi_escapes::strip as strip_ansi_bytes;
+use serde_json::json;
+
+fn test_config() -> Config {
+    // Use base defaults to avoid depending on host state.
+    code_core::config::Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        std::env::temp_dir(),
+    )
+    .expect("config")
+}
+
+#[test]
+fn final_answer_without_newline_is_flushed_immediately() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Set up a VT100 test terminal to capture ANSI visual output
+    let width: u16 = 80;
+    let height: u16 = 2000;
+    let viewport = ratatui::layout::Rect::new(0, height - 1, width, 1);
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = crate::custom_terminal::Terminal::with_options(backend)
+        .expect("failed to construct terminal");
+    terminal.set_viewport_area(viewport);
+
+    // Simulate a streaming answer without any newline characters.
+    chat.handle_code_event(Event {
+        id: "sub-a".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Hi! How can I help with code-rs or anything else today?".into(),
+        }),
+    });
+
+    // Now simulate the final AgentMessage which should flush the pending line immediately.
+    chat.handle_code_event(Event {
+        id: "sub-a".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hi! How can I help with code-rs or anything else today?".into(),
+        }),
+    });
+
+    // Drain history insertions and verify the final line is present.
+    // We no longer emit a visible "codex" header during streaming.
+    let cells = drain_insert_history(&rx);
+    let found_final = cells.iter().any(|lines| {
+        let s = lines
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|sp| sp.content.clone())
+            .collect::<String>();
+        s.contains("Hi! How can I help with code-rs or anything else today?")
+    });
+    assert!(
+        found_final,
+        "expected final answer text to be flushed to history"
+    );
+}
+
+#[test]
+fn auto_resolve_decision_parses_inline_json() {
+    let decision = ChatWidget::auto_resolve_parse_decision(
+        "{\"status\":\"no_issue\",\"rationale\":\"all set\"}"
+    )
+    .expect("decision");
+    assert_eq!(decision.status, "no_issue");
+    assert_eq!(decision.rationale.as_deref(), Some("all set"));
+}
+
+#[test]
+fn auto_resolve_decision_parses_json_fence() {
+    let payload = "```json\n{\"status\":\"continue_fix\"}\n```";
+    let decision = ChatWidget::auto_resolve_parse_decision(payload).expect("decision");
+    assert_eq!(decision.status, "continue_fix");
+    assert!(decision.rationale.is_none());
+}
+
+#[test]
+fn assistant_history_state_tracks_stream_and_final() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.handle_code_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Hello world\n".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let stream_records: Vec<_> = chat
+        .history_state()
+        .records
+        .iter()
+        .filter_map(|rec| match rec {
+            HistoryRecord::AssistantStream(state) => Some(state.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stream_records.len(), 1, "expected single assistant stream state");
+    let stream_state = &stream_records[0];
+    assert_eq!(stream_state.stream_id, "turn-1");
+    assert!(stream_state.in_progress);
+    assert_eq!(stream_state.deltas.len(), 1);
+    assert_eq!(stream_state.deltas[0].delta, "Hello world\n");
+
+    chat.handle_code_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello world\n".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let mut has_stream = false;
+    let mut has_final = false;
+    for record in &chat.history_state().records {
+        match record {
+            HistoryRecord::AssistantStream(state) if state.stream_id == "turn-1" => {
+                has_stream = true;
+            }
+            HistoryRecord::AssistantMessage(state)
+                if state.stream_id.as_deref() == Some("turn-1")
+                    && state.markdown.contains("Hello world") =>
+            {
+                has_final = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(has_final, "expected finalized assistant message state");
+    assert!(!has_stream, "stream state should be removed after finalization");
+}
+
+#[test]
+fn replayed_assistant_message_with_id_dedupes_final_event() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let replay_item = ResponseItem::Message {
+        id: Some("answer-1".to_string()),
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: "Hello from resume".to_string(),
+        }],
+    };
+
+    chat.render_replay_item(replay_item);
+
+    let initial_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        initial_assistant_cells, 1,
+        "resume replay should seed exactly one assistant cell"
+    );
+
+    chat.handle_code_event(Event {
+        id: "answer-1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Hello from resume".into(),
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let final_assistant_cells = chat
+        .history_cells
+        .iter()
+        .filter(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::AssistantMarkdownCell>()
+                .is_some()
+        })
+        .count();
+    assert_eq!(
+        final_assistant_cells, 1,
+        "AgentMessage replay should not duplicate assistant output"
+    );
+}
+
+#[test]
+fn history_snapshot_restore_rehydrates_state() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push_plain_state(history_cell::new_user_prompt("First turn".to_string()));
+    chat.push_background_tail("note: background");
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    let original_len = snapshot.records.len();
+    assert!(original_len >= 2, "expected at least two records in snapshot");
+
+    chat.push_background_tail("extra entry");
+    assert!(
+        chat.history_state().records.len() > original_len,
+        "setup should have more records before restore"
+    );
+
+    chat.restore_history_snapshot(&snapshot);
+
+    assert_eq!(
+        chat.history_state().records.len(),
+        original_len,
+        "history_state should match restored snapshot length"
+    );
+    assert_eq!(
+        chat.history_cell_ids.len(),
+        original_len,
+        "history_cell_ids should align with restored records"
+    );
+    assert_eq!(
+        chat.cell_order_seq.len(),
+        original_len,
+        "order keys should be restored for each record"
+    );
+
+    let restored_cells = cell_texts(&chat);
+    assert!(
+        restored_cells.first().map(|s| s.contains("user")).unwrap_or(false),
+        "expected first restored cell to include user header"
+    );
+}
+
+#[test]
+fn history_snapshot_restore_rehydrates_running_tools() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let custom_call_id = "tool-call-123";
+    chat.handle_code_event(Event {
+        id: "req-custom".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: custom_call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let search_call_id = "search-call-abc";
+    let search_query = "find repo docs";
+    chat.handle_code_event(Event {
+        id: "req-search".into(),
+        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: search_call_id.to_string(),
+            query: Some(search_query.to_string()),
+        }),
+    });
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    let custom_key = ToolCallId(custom_call_id.to_string());
+    let custom_entry = chat
+        .tools_state
+        .running_custom_tools
+        .get(&custom_key)
+        .copied()
+        .expect("custom tool entry should be rehydrated");
+
+    let (custom_idx, custom_history_id) = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == custom_call_id)
+                        .map(|_| {
+                            let hid = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+                            (idx, hid)
+                        })
+                })
+        })
+        .expect("expected running custom tool cell");
+
+    assert_eq!(custom_entry.fallback_index, custom_idx);
+    assert_eq!(custom_entry.history_id, custom_history_id);
+    let custom_key_order = chat.cell_order_seq[custom_idx];
+    assert_eq!(custom_entry.order_key.req, custom_key_order.req);
+    assert_eq!(custom_entry.order_key.out, custom_key_order.out);
+    assert_eq!(custom_entry.order_key.seq, custom_key_order.seq);
+
+    let search_key = ToolCallId(search_call_id.to_string());
+    let (search_idx_recorded, search_query_recorded) = chat
+        .tools_state
+        .running_web_search
+        .get(&search_key)
+        .cloned()
+        .expect("web search entry should be rehydrated");
+
+    let search_idx = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == search_call_id)
+                        .map(|_| idx)
+                })
+        })
+        .expect("expected running web search cell");
+
+    assert_eq!(search_idx_recorded, search_idx);
+    assert_eq!(search_query_recorded.as_deref(), Some(search_query));
+}
+
+#[test]
+fn finalize_running_tool_handles_stale_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "tool-stale";
+    chat.handle_code_event(Event {
+        id: "req-stale".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let key = ToolCallId(call_id.to_string());
+    let idx = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(i, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| i)
+                })
+        })
+        .expect("running tool cell should exist");
+
+    chat.cell_order_seq[idx].seq = chat.cell_order_seq[idx].seq.saturating_add(7);
+    if let Some(entry) = chat.tools_state.running_custom_tools.get_mut(&key) {
+        entry.history_id = None;
+        entry.fallback_index = chat.history_cells.len().saturating_add(10);
+    }
+
+    chat.finalize_all_running_due_to_answer();
+
+    let has_running = chat.history_cells.iter().any(|cell| {
+        cell.as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some()
+    });
+    assert!(!has_running, "running tool cell should be replaced");
+
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "exactly one completed tool cell expected");
+    assert!(
+        chat.tools_state.running_custom_tools.is_empty(),
+        "custom tool map should be cleared when finalize succeeds"
+    );
+}
+
+#[test]
+fn finalize_running_tool_retains_unresolved_entry_when_cell_missing() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "tool-missing";
+    chat.handle_code_event(Event {
+        id: "req-missing".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let key = ToolCallId(call_id.to_string());
+    let idx = chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(i, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| i)
+                })
+        })
+        .expect("running tool cell should exist");
+
+    if let Some(entry) = chat.tools_state.running_custom_tools.get_mut(&key) {
+        entry.history_id = None;
+        entry.fallback_index = chat.history_cells.len().saturating_add(10);
+    }
+
+    if let Some(cell) = chat.history_cells.get_mut(idx) {
+        if let Some(running) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::RunningToolCallCell>()
+        {
+            running.state_mut().call_id = None;
+        }
+    }
+
+    chat.finalize_all_running_due_to_answer();
+
+    assert!(
+        chat.tools_state.running_custom_tools.contains_key(&key),
+        "entry should remain unresolved when no matching cell is found"
+    );
+
+    let running_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(running_count, 1, "running cell should remain untouched");
+}
+
+#[test]
+fn custom_tool_end_recovers_missing_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "custom-end-missing-entry";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+    chat.tools_state.running_custom_tools.clear();
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(10),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert!(
+        !chat.history_cells.iter().any(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .is_some()
+        }),
+        "running custom tool spinner should be gone"
+    );
+
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "expected single completed custom tool cell");
+    assert!(
+        chat.tools_state.running_custom_tools.is_empty(),
+        "running map should stay empty after fallback"
+    );
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_end_removes_orphaned_spinner() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "custom-end-orphan";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    if let Some((idx, cell)) = chat.history_cells.iter_mut().enumerate().find(|(_, cell)| {
+        cell.as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some()
+    }) {
+        if let Some(running) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::RunningToolCallCell>()
+        {
+            running.state_mut().call_id = None;
+        }
+        if let Some(entry) = chat.tools_state.running_custom_tools.get_mut(&ToolCallId(call_id.to_string())) {
+            entry.history_id = None;
+            entry.fallback_index = idx.saturating_add(20);
+        }
+    }
+
+    chat.tools_state.running_custom_tools.clear();
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(10),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    let running_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(running_count, 0, "no running spinner should remain after fallback");
+
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "completion should appear exactly once");
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn mcp_tool_end_recovers_missing_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "mcp-end-missing-entry";
+    let invocation = McpInvocation {
+        server: "demo".into(),
+        tool: "info".into(),
+        arguments: None,
+    };
+    let result = CallToolResult {
+        content: Vec::new(),
+        is_error: Some(false),
+        structured_content: None,
+    };
+    chat.handle_code_event(Event {
+        id: "turn-mcp".into(),
+        msg: EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            invocation: invocation.clone(),
+        }),
+    });
+
+    chat.tools_state.running_custom_tools.clear();
+
+    chat.handle_code_event(Event {
+        id: "turn-mcp".into(),
+        msg: EventMsg::McpToolCallEnd(McpToolCallEndEvent {
+            call_id: call_id.to_string(),
+            invocation,
+            duration: Duration::from_millis(5),
+            result: Ok(result),
+        }),
+    });
+
+    assert!(
+        !chat.history_cells.iter().any(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .is_some()
+        }),
+        "MCP running cell should be finalized"
+    );
+    assert!(chat.tools_state.running_custom_tools.is_empty());
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn web_search_complete_recovers_missing_entry() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "web-search-missing-entry";
+    chat.handle_code_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    chat.tools_state.running_web_search.clear();
+
+    chat.handle_code_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    assert!(
+        !chat.history_cells.iter().any(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .is_some_and(|rt| rt.has_title("Web Search..."))
+        }),
+        "web search spinner should be finalized"
+    );
+    assert!(chat.tools_state.running_web_search.is_empty());
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn web_search_complete_handles_missing_cell() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let call_id = "web-search-missing-cell";
+    chat.handle_code_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    if let Some(cell) = chat.history_cells.iter_mut().find(|cell| {
+        cell.as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some()
+    }) {
+        if let Some(running) = cell
+            .as_any_mut()
+            .downcast_mut::<history_cell::RunningToolCallCell>()
+        {
+            running.state_mut().call_id = None;
+        }
+    }
+
+    chat.tools_state.running_web_search.clear();
+
+    chat.handle_code_event(Event {
+        id: "turn-web".into(),
+        msg: EventMsg::WebSearchComplete(WebSearchCompleteEvent {
+            call_id: call_id.to_string(),
+            query: Some("docs".into()),
+        }),
+    });
+
+    let running_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::RunningToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(running_count, 0, "no running web search cell should remain");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_sequence_begin_restore_taskcomplete_end() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "custom-seq-a";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+    assert_history_consistent(&chat);
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    });
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(4),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_background_group(&chat, "Creating worktree", "Created worktree.");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_sequence_begin_restore_end_taskcomplete() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "custom-seq-b";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(5),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_background_group(&chat, "Creating worktree", "Created worktree.");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_sequence_begin_taskcomplete_restore_end() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "custom-seq-c";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message: None }),
+    });
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(6),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_background_group(&chat, "Creating worktree", "Created worktree.");
+    assert_history_consistent(&chat);
+}
+
+#[test]
+fn custom_tool_duplicate_end_idempotent() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    let call_id = "custom-dup";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(4),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    let snapshot = cell_texts(&chat);
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+
+    chat.handle_code_event(Event {
+        id: "turn-custom".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(4),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+    assert_eq!(snapshot, cell_texts(&chat), "duplicate end should not change UI");
+    assert_history_consistent(&chat);
+}
+
+
+#[test]
+fn background_banners_survive_tool_finalize_after_restore() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let call_id = "tool-order-restore";
+    chat.handle_code_event(Event {
+        id: "turn-order".into(),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.handle_code_event(Event {
+        id: "turn-order".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(3),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    let creating_idx = find_background_index(&chat, "Creating worktree").expect("creating banner index");
+    let created_idx = find_background_index(&chat, "Created worktree").expect("created banner index");
+    assert_eq!(created_idx, creating_idx + 1, "banners should remain adjacent");
+    assert!(!is_running_tool_present(&chat));
+    assert!(chat.tools_state.running_custom_tools.is_empty());
+    assert!(chat.system_cell_by_id.is_empty());
+}
+
+#[test]
+fn background_notice_after_restore_appends_after_group() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    chat.push_background_tail("Created worktree.".to_string());
+
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    chat.push_background_tail("Final status.".to_string());
+
+    let creating_idx = find_background_index(&chat, "Creating worktree").expect("creating banner index");
+    let created_idx = find_background_index(&chat, "Created worktree").expect("created banner index");
+    let final_idx = find_background_index(&chat, "Final status").expect("final banner index");
+    assert_eq!(created_idx, creating_idx + 1, "original banners stay adjacent");
+    assert!(final_idx > created_idx, "new banner should append after originals");
+    let indices = background_indices(&chat);
+    assert_eq!(indices.last().copied(), Some(final_idx));
+}
+
+#[test]
+fn history_trace_flag_collects_events() {
+    std::env::set_var("CODEX_TRACE_HISTORY", "1");
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    let call_id = "trace-tool";
+    let original_key = begin_custom_tool(&mut chat, call_id);
+    chat.handle_code_event(Event {
+        id: "turn-trace".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(2),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert_custom_tool_finalized(&chat, call_id, original_key);
+
+    let events = chat.history_debug_events();
+    assert!(events.iter().any(|e| e.contains("restore_history_snapshot.start")), "missing restore start trace");
+    assert!(events.iter().any(|e| e.contains("restore_history_snapshot.done")), "missing restore done trace");
+    assert!(events.iter().any(|e| e.contains("custom_tool_end")), "missing custom tool trace");
+
+    std::env::remove_var("CODEX_TRACE_HISTORY");
+}
+
+#[test]
+fn history_trace_flag_disabled_no_events() {
+    std::env::remove_var("CODEX_TRACE_HISTORY");
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.push_background_tail("Creating worktree...".to_string());
+    let snapshot = chat.history_snapshot_for_persistence();
+    chat.restore_history_snapshot(&snapshot);
+
+    let call_id = "trace-off";
+    let _ = begin_custom_tool(&mut chat, call_id);
+    chat.handle_code_event(Event {
+        id: "turn-trace-off".into(),
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+            duration: Duration::from_millis(2),
+            result: Ok("done".to_string()),
+        }),
+    });
+
+    assert!(chat.history_debug_events().is_empty(), "no trace events expected when flag disabled");
+}
+
+fn cell_texts(chat: &ChatWidget<'_>) -> Vec<String> {
+    chat
+        .history_cells
+        .iter()
+        .map(|cell| {
+            let mut out = Vec::new();
+            for line in cell.display_lines() {
+                let mut buf = String::new();
+                for span in line.spans {
+                    buf.push_str(span.content.as_ref());
+                }
+                out.push(buf);
+            }
+            out.join("\n")
+        })
+        .collect()
+}
+
+fn find_background_index(chat: &ChatWidget<'_>, needle: &str) -> Option<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            if cell.kind() != crate::history_cell::HistoryCellType::BackgroundEvent {
+                return None;
+            }
+            let matches = cell.display_lines().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.as_ref().contains(needle))
+            });
+            matches.then_some(idx)
+        })
+}
+
+fn background_indices(chat: &ChatWidget<'_>) -> Vec<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, cell)| {
+            if cell.kind() == crate::history_cell::HistoryCellType::BackgroundEvent {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn is_running_tool_present(chat: &ChatWidget<'_>) -> bool {
+    chat.history_cells.iter().any(|cell| {
+        cell.as_any()
+            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
+            .is_some()
+    })
+}
+
+fn begin_custom_tool(chat: &mut ChatWidget<'_>, call_id: &str) -> OrderKey {
+    chat.handle_code_event(Event {
+        id: format!("turn-{call_id}"),
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: call_id.to_string(),
+            tool_name: "custom_tool".into(),
+            parameters: None,
+        }),
+    });
+    let idx = running_tool_index(chat, call_id).expect("running custom tool cell");
+    chat.cell_order_seq[idx]
+}
+
+fn running_tool_index(chat: &ChatWidget<'_>, call_id: &str) -> Option<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::RunningToolCallCell>()
+                .and_then(|running| {
+                    running
+                        .state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| idx)
+                })
+        })
+}
+
+fn completed_custom_tool_index(chat: &ChatWidget<'_>, call_id: &str) -> Option<usize> {
+    chat
+        .history_cells
+        .iter()
+        .enumerate()
+        .find_map(|(idx, cell)| {
+            cell.as_any()
+                .downcast_ref::<history_cell::ToolCallCell>()
+                .and_then(|tool| {
+                    tool.state()
+                        .call_id
+                        .as_deref()
+                        .filter(|cid| *cid == call_id)
+                        .map(|_| idx)
+                })
+        })
+}
+
+fn assert_custom_tool_finalized(chat: &ChatWidget<'_>, call_id: &str, expected_key: OrderKey) {
+    assert!(
+        !is_running_tool_present(chat),
+        "running spinner should be cleared for {call_id}"
+    );
+    let idx = completed_custom_tool_index(chat, call_id)
+        .expect("completed custom tool cell should exist");
+    assert_eq!(chat.cell_order_seq[idx], expected_key, "order key should be preserved");
+    let completed_count = chat
+        .history_cells
+        .iter()
+        .filter(|cell| cell
+            .as_any()
+            .downcast_ref::<history_cell::ToolCallCell>()
+            .is_some())
+        .count();
+    assert_eq!(completed_count, 1, "expected single completed custom tool cell");
+}
+
+fn assert_background_group(chat: &ChatWidget<'_>, first: &str, second: &str) {
+    let first_idx = find_background_index(chat, first).expect("first banner idx");
+    let second_idx = find_background_index(chat, second).expect("second banner idx");
+    assert_eq!(second_idx, first_idx + 1, "banners should remain adjacent");
+}
+
+fn assert_history_consistent(chat: &ChatWidget<'_>) {
+    assert_eq!(chat.history_cells.len(), chat.cell_order_seq.len(), "order seq length mismatch");
+    assert_eq!(chat.history_cells.len(), chat.history_cell_ids.len(), "id slot length mismatch");
+    for &idx in chat.system_cell_by_id.values() {
+        assert!(idx < chat.history_cells.len(), "system cell id out of bounds");
+    }
+}
+
+#[test]
+fn background_events_append_in_arrival_order() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.insert_background_event_with_placement(
+        "first background".to_string(),
+        BackgroundPlacement::Tail,
+        None,
+    );
+    chat.insert_background_event_with_placement(
+        "second background".to_string(),
+        BackgroundPlacement::Tail,
+        None,
+    );
+
+    let texts = cell_texts(&chat);
+    assert_eq!(texts, vec!["first background".to_string(), "second background".to_string()]);
+}
+
+#[test]
+fn observer_report_replaces_prompt_and_resets_countdown() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.auto_state.active = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_cli_prompt = Some("old prompt".to_string());
+    chat.auto_state.countdown_id = 7;
+    chat.auto_state.seconds_remaining = 3;
+
+    let telemetry = AutoObserverTelemetry {
+        trigger_count: 5,
+        last_status: AutoObserverStatus::Failing,
+        last_intervention: Some("replaced".to_string()),
+    };
+
+    chat.auto_handle_observer_report(
+        AutoObserverStatus::Failing,
+        telemetry.clone(),
+        Some("new prompt".to_string()),
+        Some("double-check the failing command".to_string()),
+    );
+
+    assert_eq!(chat.auto_state.current_cli_prompt.as_deref(), Some("new prompt"));
+    assert_eq!(chat.auto_state.observer_status, AutoObserverStatus::Failing);
+    assert_eq!(
+        chat
+            .auto_state
+            .observer_telemetry
+            .as_ref()
+            .unwrap()
+            .trigger_count,
+        telemetry.trigger_count
+    );
+    assert_eq!(chat.auto_state.countdown_id, 8);
+    let default_seconds = chat.auto_state.countdown_seconds().unwrap_or(0);
+    assert_eq!(chat.auto_state.seconds_remaining, default_seconds);
+
+    let texts = cell_texts(&chat);
+    assert!(texts.iter().any(|line| line.contains("Observer guidance")));
+    assert!(texts.iter().any(|line| line.contains("Observer replaced prompt")));
+}
+
+#[test]
+fn background_event_before_next_output_precedes_later_cells() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let tail_ticket = chat.make_background_tail_ticket();
+    chat.insert_background_event_with_placement(
+        "initial".to_string(),
+        BackgroundPlacement::Tail,
+        Some(tail_ticket.next_order()),
+    );
+    let before_ticket = chat.make_background_before_next_output_ticket();
+    chat.insert_background_event_with_placement(
+        "guard".to_string(),
+        BackgroundPlacement::BeforeNextOutput,
+        Some(before_ticket.next_order()),
+    );
+    chat.push_background_tail("tail".to_string());
+
+    let texts = cell_texts(&chat);
+    assert_eq!(texts, vec![
+        "initial".to_string(),
+        "guard".to_string(),
+        "tail".to_string(),
+    ]);
+}
+
+#[test]
+fn wait_tool_updates_exec_record_via_history_state() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let cwd = chat.config.cwd.clone();
+    chat.handle_code_event(Event {
+        id: "req-1".into(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-1".into(),
+            command: vec!["sleep".into(), "1".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(order_meta(0)),
+    });
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let wait_params = json!({
+        "call_id": "call-1",
+        "for": "sleep 1",
+    });
+
+    chat.handle_code_event(Event {
+        id: "req-1".into(),
+        event_seq: 2,
+        msg: EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "wait-1".into(),
+            tool_name: "wait".into(),
+            parameters: Some(wait_params.clone()),
+        }),
+        order: Some(order_meta(1)),
+    });
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    chat.handle_code_event(Event {
+        id: "req-1".into(),
+        event_seq: 3,
+        msg: EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "wait-1".into(),
+            tool_name: "wait".into(),
+            parameters: Some(wait_params),
+            duration: Duration::from_secs(2),
+            result: Ok("Scaling services".to_string()),
+        }),
+        order: Some(order_meta(2)),
+    });
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Exec(record) => Some(record.clone()),
+            _ => None,
+        })
+        .expect("exec record present");
+    assert_eq!(exec_record.wait_total, Some(Duration::from_secs(2)));
+    assert!(!exec_record.wait_active);
+    assert!(exec_record
+        .wait_notes
+        .iter()
+        .any(|note| note.message.contains("Scaling services")));
+
+    let exec_cell = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| cell.as_any().downcast_ref::<history_cell::ExecCell>())
+        .expect("exec cell present");
+    assert_eq!(exec_cell.record.wait_total, exec_record.wait_total);
+    assert_eq!(exec_cell.record.wait_notes.len(), exec_record.wait_notes.len());
+}
+
+#[test]
+fn explore_updates_history_state_via_domain_events() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let cwd = chat.config.cwd.clone();
+    let search_cmd = vec!["rg".into(), "foo".into()];
+    let parsed = vec![ParsedCommand::Search {
+        cmd: "rg foo".to_string(),
+        query: Some("foo".to_string()),
+        path: None,
+    }];
+
+    chat.handle_code_event(Event {
+        id: "req-1".into(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-1".into(),
+            command: search_cmd.clone(),
+            cwd: cwd.clone(),
+            parsed_cmd: parsed.clone(),
+        }),
+        order: Some(order_meta(0)),
+    });
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let explore_id = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Explore(record) => Some(record.id),
+            _ => None,
+        })
+        .expect("explore record inserted");
+    assert_ne!(explore_id, HistoryId::ZERO);
+
+    let explore_state = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Explore(record) if record.id == explore_id => Some(record.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(explore_state.entries.len(), 1);
+    assert!(matches!(explore_state.entries[0].status, ExploreEntryStatus::Running));
+
+    chat.handle_code_event(Event {
+        id: "req-1".into(),
+        event_seq: 2,
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: "call-1".into(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration: Duration::from_millis(250),
+        }),
+        order: Some(order_meta(1)),
+    });
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let explore_state = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Explore(record) if record.id == explore_id => Some(record.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(explore_state.entries[0].status, ExploreEntryStatus::Success));
+
+    let explore_cell = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| cell.as_any().downcast_ref::<history_cell::ExploreAggregationCell>())
+        .expect("explore cell present");
+    assert_eq!(explore_cell.record().id, explore_id);
+}
+
+#[test]
+fn diff_inserts_history_record_through_domain_event() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push_diff(Some("README".to_string()), "@@ -0,0 +1 @@\n+hello world\n".to_string());
+
+    let diff_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|rec| match rec {
+            HistoryRecord::Diff(record) => Some(record.clone()),
+            _ => None,
+        })
+        .expect("diff record present");
+    assert_ne!(diff_record.id, HistoryId::ZERO);
+
+    let diff_cell = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| cell.as_any().downcast_ref::<history_cell::DiffCell>())
+        .expect("diff cell present");
+    assert_eq!(diff_cell.record().id, diff_record.id);
+}
+
+#[test]
+fn limits_overlay_loading_when_snapshot_missing() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.rate_limit_snapshot = None;
+    chat.rate_limit_fetch_inflight = true;
+    chat.rate_limit_last_fetch_at = Some(Utc::now());
+
+    chat.add_limits_output();
+
+    let overlay = chat.limits.overlay.as_ref().expect("overlay present");
+    let lines = overlay.lines_for_width(60);
+    let text: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
+
+    assert!(
+        text.iter()
+            .any(|line| line.contains("Loading...")),
+        "expected loading message in overlay: {text:?}"
+    );
+    assert!(text.iter().all(|line| !line.contains("/limits")));
+    assert!(chat.rate_limit_fetch_inflight);
+}
+
+#[test]
+fn limits_overlay_renders_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.rate_limit_snapshot = Some(RateLimitSnapshotEvent {
+        primary_used_percent: 30.0,
+        secondary_used_percent: 60.0,
+        primary_to_secondary_ratio_percent: 0.0,
+        primary_window_minutes: 300,
+        secondary_window_minutes: 10_080,
+        primary_reset_after_seconds: Some(600),
+        secondary_reset_after_seconds: Some(3_600),
+    });
+    chat.update_rate_limit_resets(chat.rate_limit_snapshot.as_ref().unwrap());
+    chat.rate_limit_last_fetch_at = Some(Utc::now());
+
+    chat.add_limits_output();
+
+    let overlay = chat.limits.overlay.as_ref().expect("overlay present");
+    let lines = overlay.lines_for_width(80);
+    let strings: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect();
+
+    let joined = strings.join("\n");
+    assert!(joined.contains("Hourly Limit"), "overlay text: {joined}");
+    assert!(joined.contains("Weekly Limit"), "overlay text: {joined}");
+    assert!(joined.contains(" Type: "));
+    assert!(joined.contains(" Plan: "));
+    assert!(joined.contains("Resets"), "overlay text: {joined}");
+    assert!(
+        !joined.contains("awaiting reset timing"),
+        "expected reset timings to render: {joined}"
+    );
+    assert!(joined.contains(" Total: "));
+    assert!(joined.contains("Chart"));
+    assert!(joined.contains("7 Day History"));
+    assert!(joined.contains("6 Month History"));
+    assert!(!joined.contains("/limits"));
+    assert!(!joined.contains("Within current limits"));
+
+    let tokens_line = strings
+        .iter()
+        .find(|line| line.contains("cached"))
+        .expect("expected cached tokens line");
+    assert!(
+        tokens_line.starts_with("             "),
+        "expected tokens line to begin with 13 spaces: {tokens_line}"
+    );
+
+    let chart_row = strings
+        .iter()
+        .find(|line| line.contains("▇▇") && line.contains("▓▓"))
+        .expect("expected chart grid row");
+    assert!(
+        chart_row.starts_with("    "),
+        "expected chart grid row to start with four spaces: {chart_row}"
+    );
+
+    let legend_line = strings
+        .iter()
+        .find(|line| line.contains("weekly usage"))
+        .expect("expected legend line");
+    assert!(
+        legend_line.starts_with("    "),
+        "expected legend line to start with four spaces: {legend_line}"
+    );
+
+    let header_idx = strings
+        .iter()
+        .position(|line| line.contains("7 Day History"))
+        .expect("expected usage header");
+    assert!(
+        strings
+            .get(header_idx.saturating_sub(1))
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false),
+        "expected blank spacer before 7 Day History"
+    );
+    let latest_label = Local::now().format("%b %d").to_string();
+    let yesterday_label = (Local::now().date_naive() - ChronoDuration::days(1))
+        .format("%b %d")
+        .to_string();
+    let latest_line = strings
+        .get(header_idx + 1)
+        .expect("expected latest usage line");
+    let second_line = strings
+        .get(header_idx + 2)
+        .expect("expected second usage line");
+    assert!(
+        latest_line.starts_with("    "),
+        "expected daily usage line to start with four spaces: {latest_line}"
+    );
+    assert!(latest_line.contains(&latest_label));
+    assert!(second_line.contains(&yesterday_label));
+
+    let month_header_idx = strings
+        .iter()
+        .position(|line| line.contains("6 Month History"))
+        .expect("expected monthly usage header");
+    assert!(
+        strings
+            .get(month_header_idx.saturating_sub(1))
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false),
+        "expected blank spacer before 6 Month History"
+    );
+    let current_month_label = Local::now().format("%b %Y").to_string();
+    let month_line = strings
+        .get(month_header_idx + 1)
+        .expect("expected latest monthly usage line");
+    assert!(
+        month_line.starts_with("    "),
+        "expected monthly usage line to start with four spaces: {month_line}"
+    );
+    assert!(
+        month_line.contains(&current_month_label),
+        "expected month label to contain {current_month_label}, got {month_line}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn helpers_are_available_and_do_not_panic() {
+    let (tx_raw, _rx) = channel::<AppEvent>();
+    let tx = AppEventSender::new(tx_raw);
+    let cfg = test_config();
+    let term = crate::tui::TerminalInfo {
+        picker: None,
+        font_size: (8, 16),
+    };
+    let mut w = ChatWidget::new(
+        cfg,
+        tx,
+        None,
+        Vec::new(),
+        false,
+        term,
+        false,
+        None,
+    );
+    // Basic construction sanity.
+    let _ = &mut w;
+}
+
+// --- Helpers for tests that need direct construction and event draining ---
+fn make_chatwidget_manual() -> (
+    ChatWidget<'static>,
+    std::sync::mpsc::Receiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    let (tx_raw, rx) = channel::<AppEvent>();
+    let app_event_tx = AppEventSender::new(tx_raw);
+    let (op_tx, op_rx) = unbounded_channel::<Op>();
+    let cfg = test_config();
+    let bottom = BottomPane::new(BottomPaneParams {
+        app_event_tx: app_event_tx.clone(),
+        has_input_focus: true,
+        enhanced_keys_supported: false,
+        using_chatgpt_auth: false,
+    });
+    let widget = ChatWidget {
+        app_event_tx,
+        code_op_tx: op_tx,
+        bottom_pane: bottom,
+        history_state: HistoryState::new(),
+        active_exec_cell: None,
+        config: cfg.clone(),
+        latest_upgrade_version: None,
+        initial_user_message: None,
+        total_token_usage: TokenUsage::default(),
+        last_token_usage: TokenUsage::default(),
+        rate_limit_snapshot: None,
+        rate_limit_warnings: Default::default(),
+        rate_limit_fetch_inflight: false,
+        rate_limit_fetch_placeholder: None,
+        rate_limit_fetch_ack_pending: false,
+        #[cfg(not(feature = "legacy_tests"))]
+        ghost_snapshots: Vec::new(),
+        #[cfg(not(feature = "legacy_tests"))]
+        ghost_snapshots_disabled: false,
+        #[cfg(not(feature = "legacy_tests"))]
+        ghost_snapshots_disabled_reason: None,
+        stream: StreamController::new(cfg),
+        last_stream_kind: None,
+        running_commands: HashMap::new(),
+        pending_exec_completions: Vec::new(),
+        task_complete_pending: false,
+        interrupts: InterruptManager::new(),
+        needs_redraw: false,
+        ui_background_seq_counters: HashMap::new(),
+        agents_terminal: AgentsTerminalState::new(),
+    };
+    (widget, rx, op_rx)
+}
+
+pub(crate) fn make_chatwidget_manual_with_sender() -> (
+    ChatWidget,
+    AppEventSender,
+    tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+    tokio::sync::mpsc::UnboundedReceiver<Op>,
+) {
+    let (widget, rx, op_rx) = make_chatwidget_manual();
+    let app_event_tx = widget.app_event_tx.clone();
+    (widget, app_event_tx, rx, op_rx)
+}
+
+struct EnvGuard {
+    key: String,
+    prev: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(key: &str, value: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        Self {
+            key: key.to_string(),
+            prev,
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            std::env::set_var(&self.key, prev);
+        } else {
+            std::env::remove_var(&self.key);
+        }
+    }
+}
+
+fn drain_insert_history(
+    rx: &std::sync::mpsc::Receiver<AppEvent>,
+) -> Vec<Vec<ratatui::text::Line<'static>>> {
+    let mut out = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let AppEvent::InsertHistory(lines) = ev {
+            out.push(lines);
+        }
+    }
+    out
+}
+
+fn order_meta(seq: u64) -> OrderMeta {
+    OrderMeta {
+        request_ordinal: 1,
+        output_index: Some(0),
+        sequence_number: Some(seq),
+    }
+}
+
+fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
+    let mut s = String::new();
+    for line in lines {
+        for span in &line.spans {
+            s.push_str(&span.content);
+        }
+        s.push('\n');
+    }
+    s
+}
+
+fn flush_stream_events(chat: &mut ChatWidget<'_>, rx: &std::sync::mpsc::Receiver<AppEvent>) {
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::InsertHistory(lines) => chat.insert_history_lines(lines),
+            AppEvent::InsertHistoryWithKind { id, kind, lines } => {
+                chat.insert_history_lines_with_kind(kind, id, lines);
+            }
+            AppEvent::InsertFinalAnswer { id, lines, source } => {
+                chat.insert_final_answer_with_id(id, lines, source);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ScriptStep {
+    Key(KeyCode, KeyModifiers),
+}
+
+impl ScriptStep {
+    fn key_char(c: char) -> Self {
+        ScriptStep::Key(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn enter() -> Self {
+        ScriptStep::Key(KeyCode::Enter, KeyModifiers::NONE)
+    }
+}
+
+fn run_script(
+    chat: &mut ChatWidget<'_>,
+    steps: &[ScriptStep],
+    rx: &std::sync::mpsc::Receiver<AppEvent>,
+) -> Vec<AppEvent> {
+    let mut captured = Vec::new();
+    for step in steps {
+        if let ScriptStep::Key(code, modifiers) = step {
+            chat.handle_key_event(KeyEvent::new(*code, *modifiers));
+            captured.extend(pump_app_events(chat, rx));
+        }
+    }
+    captured.extend(pump_app_events(chat, rx));
+    captured
+}
+
+#[test]
+fn agents_terminal_tracks_logs() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let mut event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            batch_id: None,
+            model: Some("gemini-pro".into()),
+            last_progress: Some("12:00:01: creating worktree".into()),
+            result: None,
+            error: None,
+        }],
+        context: Some("monorepo".into()),
+        task: Some("upgrade agents UI".into()),
+    };
+
+    chat.handle_code_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event.clone()),
+    });
+
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .expect("expected agent entry");
+    assert_eq!(entry.logs.len(), 2, "expect status + initial progress logged");
+
+    // Duplicate update should not add new logs
+    chat.handle_code_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event.clone()),
+    });
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .unwrap();
+    assert_eq!(entry.logs.len(), 2, "duplicate progress should be deduped");
+
+    // Completed update should append status + result
+    event.agents[0].status = "completed".into();
+    event.agents[0].last_progress = Some("12:04:12: finalizing".into());
+    event.agents[0].result = Some("Plan delivered".into());
+
+    chat.handle_code_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    let entry = chat
+        .agents_terminal
+        .entries
+        .get("agent-1")
+        .unwrap();
+    assert!(
+        entry
+            .logs
+            .iter()
+            .any(|log| matches!(log.kind, AgentLogKind::Result) && log.message.contains("Plan delivered")),
+        "result log expected"
+    );
+    assert!(
+        entry
+            .logs
+            .iter()
+            .any(|log| matches!(log.kind, AgentLogKind::Status) && log.message.contains("Completed")),
+        "status transition expected"
+    );
+
+    drop(rx);
+}
+
+#[test]
+fn agents_terminal_toggle_via_shortcuts() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            batch_id: None,
+            model: Some("gemini-pro".into()),
+            last_progress: Some("progress".into()),
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_code_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    assert!(chat.agents_terminal.order.contains(&"agent-1".to_string()));
+    assert!(!chat.agents_terminal.active);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "Ctrl+A should open terminal");
+
+    // Esc should exit the terminal view
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Esc should exit terminal");
+}
+
+#[test]
+fn spinner_clears_after_cancelled_agent() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Simulate a new turn so the footer switches into running mode.
+    chat.handle_code_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    assert!(
+        chat.bottom_pane.is_task_running(),
+        "sanity: task spinner should be active after TaskStarted",
+    );
+
+    // Agent batch reports a single cancelled agent (no completions).
+    let cancelled_update = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "code".into(),
+            status: "cancelled".into(),
+            batch_id: Some("batch-123".into()),
+            model: Some("code".into()),
+            last_progress: Some("12:15:41: cancelled".into()),
+            result: None,
+            error: Some("user cancelled".into()),
+        }],
+        context: Some("Cancelled turn".into()),
+        task: Some("investigate spinner".into()),
+    };
+    chat.handle_code_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::AgentStatusUpdate(cancelled_update),
+    });
+
+    // Backend reports the turn as complete even though the agent was cancelled.
+    chat.handle_code_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    // Drain any queued UI work to keep the test aligned with runtime behavior.
+    let _ = pump_app_events(&mut chat, &rx);
+
+    assert!(
+        !chat.bottom_pane.is_task_running(),
+        "spinner should clear when the only agent finished in a cancelled state",
+    );
+    assert!(
+        chat.bottom_pane.composer.status_message().is_none(),
+        "status label should be empty once the footer stops running",
+    );
+}
+
+#[test]
+fn agents_terminal_focus_and_scroll_controls() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            batch_id: None,
+            model: Some("gemini-pro".into()),
+            last_progress: Some("progress".into()),
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_code_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
+
+    chat.layout.last_history_viewport_height.set(5);
+    chat.layout.last_max_scroll.set(5);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Detail);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert_eq!(chat.layout.scroll_offset, 1, "Up should scroll output when focused");
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "Overlay should remain open after first Esc");
+    assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Second Esc should close overlay");
+}
+
+#[test]
+fn agents_terminal_esc_closes_from_sidebar() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    chat.prepare_agents();
+
+    let event = AgentStatusUpdateEvent {
+        agents: vec![ProtocolAgentInfo {
+            id: "agent-1".into(),
+            name: "Gemini".into(),
+            status: "running".into(),
+            batch_id: None,
+            model: Some("gemini-pro".into()),
+            last_progress: None,
+            result: None,
+            error: None,
+        }],
+        context: None,
+        task: None,
+    };
+
+    chat.handle_code_event(Event {
+        id: "agents".into(),
+        msg: EventMsg::AgentStatusUpdate(event),
+    });
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(chat.agents_terminal.active, "overlay should open");
+    assert_eq!(chat.agents_terminal.focus(), AgentsTerminalFocus::Sidebar);
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(!chat.agents_terminal.active, "Esc should close from sidebar focus");
+}
+
+#[test]
+fn auto_thinking_keeps_previous_display_until_decision() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.current_display_line = Some("Prev summary".to_string());
+    chat.auto_state.current_summary = Some("Prev summary".to_string());
+
+    chat.auto_handle_thinking("**Next:** run lint".to_string(), Some(3));
+    assert_eq!(chat.auto_state.current_summary_index, Some(3));
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Prev summary")
+    );
+
+    chat.auto_handle_thinking("extra detail".to_string(), None);
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Prev summary")
+    );
+}
+
+#[test]
+fn auto_decision_persists_summary_through_cli_cycle() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+
+    chat.auto_handle_decision(
+        AutoCoordinatorStatus::Continue,
+        Some("Reviewed failing integration tests.".to_string()),
+        Some("Running tests now.".to_string()),
+        None,
+        Some("run tests".to_string()),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
+    assert!(!chat.auto_state.coordinator_waiting, "spinner should stop");
+    assert!(!chat.auto_state.waiting_for_response, "coordinator finished");
+    assert_eq!(
+        chat.auto_state.last_decision_summary.as_deref(),
+        Some("Running tests now.\nReviewed failing integration tests.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_progress_current.as_deref(),
+        Some("Running tests now.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_progress_past.as_deref(),
+        Some("Reviewed failing integration tests.")
+    );
+
+    chat.auto_submit_prompt();
+    assert!(chat.auto_state.waiting_for_response, "waiting on CLI");
+    assert!(!chat.auto_state.coordinator_waiting, "spinner stays off during CLI");
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
+    assert_eq!(
+        chat.auto_state.last_decision_summary.as_deref(),
+        Some("Running tests now.\nReviewed failing integration tests.")
+    );
+
+    chat.auto_state.placeholder_phrase = None;
+    let (tx, _rx_handle) = channel();
+    chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
+    chat.auto_on_assistant_final();
+
+    assert!(chat.auto_state.waiting_for_response, "next JSON in flight");
+    assert!(chat.auto_state.coordinator_waiting, "spinner resumes for JSON");
+    assert_eq!(
+        chat.auto_state.current_display_line.as_deref(),
+        Some("Running tests now.")
+    );
+}
+
+#[test]
+fn auto_double_escape_stops_after_manual_pause() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    prepare_auto_drive_for_manual_pause(&mut chat);
+
+    chat.handle_key_event(esc_key());
+    let _ = pump_app_events(&mut chat, &rx);
+    assert!(chat.auto_state.paused_for_manual_edit, "first Esc should pause for manual edit");
+    assert!(chat.auto_state.resume_after_manual_submit);
+    assert!(chat.is_task_running(), "manual edit keeps task running hint active");
+    assert!(chat.auto_should_handle_global_esc(), "second Esc should route back to Auto Drive handler");
+
+    let (mut legacy, legacy_rx, _legacy_op_rx) = make_chatwidget_manual();
+    prepare_auto_drive_for_manual_pause(&mut legacy);
+    legacy.handle_key_event(esc_key());
+    let _ = pump_app_events(&mut legacy, &legacy_rx);
+    assert!(legacy.auto_state.paused_for_manual_edit);
+    assert!(legacy.is_task_running());
+    let _ = legacy.on_ctrl_c();
+    assert!(legacy.auto_state.active, "Ctrl-C interrupt alone should not reset Auto Drive");
+
+    if chat.auto_should_handle_global_esc() {
+        chat.handle_key_event(esc_key());
+        let _ = pump_app_events(&mut chat, &rx);
+    } else if chat.is_task_running() {
+        let _ = chat.on_ctrl_c();
+    } else if !chat.composer_is_empty() {
+        chat.clear_composer();
+    } else {
+        chat.show_esc_undo_hint();
+    }
+
+    assert!(!chat.auto_state.active, "Auto Drive must fully stop after the second Esc");
+    assert!(!chat.auto_state.paused_for_manual_edit);
+    assert!(!chat.auto_state.resume_after_manual_submit);
+    assert!(!chat.is_task_running());
+}
+
+#[test]
+fn auto_history_captures_raw_transcript() {
+    use code_protocol::models::{ContentItem, ResponseItem};
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+
+    let transcript = vec![ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText {
+            text: "{\n  \"finish_status\": \"continue\"\n}".to_string(),
+        }],
+    }];
+
+    chat.auto_handle_decision(
+        AutoCoordinatorStatus::Continue,
+        None,
+        Some("Next".to_string()),
+        None,
+        Some("do thing".to_string()),
+        transcript.clone(),
+    );
+
+    assert_eq!(chat.auto_history.raw_items(), transcript.as_slice());
+}
+
+#[test]
+fn auto_cli_context_is_prefixed_before_prompt() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.auto_state.active = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_cli_prompt = Some("Run diagnostics".to_string());
+    chat.auto_state.current_cli_context = Some("Project background: mock services are offline.".to_string());
+
+    assert!(chat.pending_dispatched_user_messages.is_empty());
+
+    chat.auto_submit_prompt();
+
+    let sent = chat
+        .pending_dispatched_user_messages
+        .back()
+        .cloned();
+
+    assert_eq!(
+        sent.as_deref(),
+        Some("Project background: mock services are offline.\n\nRun diagnostics")
+    );
+}
+
+fn pump_app_events(
+    chat: &mut ChatWidget<'_>,
+    rx: &std::sync::mpsc::Receiver<AppEvent>,
+) -> Vec<AppEvent> {
+    let mut captured = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            AppEvent::PrepareAgents => chat.prepare_agents(),
+            AppEvent::DispatchCommand(SlashCommand::Agents, args) => {
+                chat.handle_agents_command(args);
+            }
+            AppEvent::DispatchCommand(SlashCommand::Undo, _command_text) => {
+                chat.handle_undo_command();
+            }
+            AppEvent::DispatchCommand(SlashCommand::Update, command_text) => {
+                chat.handle_update_command(&command_text);
+            }
+            AppEvent::PerformUndoRestore { commit, restore_files, restore_conversation } => {
+                chat.perform_undo_restore(commit.as_deref(), restore_files, restore_conversation);
+            }
+            AppEvent::ShowAgentsOverview => chat.show_agents_overview_ui(),
+            AppEvent::RequestRedraw | AppEvent::Redraw | AppEvent::ScheduleFrameIn(_) => {}
+            AppEvent::OpenTerminal(_) => {
+                captured.push(event);
+            }
+            _ => {}
+        }
+    }
+    captured
+}
+
+fn prepare_auto_drive_for_manual_pause(chat: &mut ChatWidget<'_>) {
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.review_enabled = true;
+    chat.auto_state.awaiting_submission = true;
+    chat.auto_state.current_cli_prompt = Some("echo hi".to_string());
+    chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.seconds_remaining = chat.auto_state.countdown_seconds().unwrap_or(0);
+}
+
+fn esc_key() -> KeyEvent {
+    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+}
+
+fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
+    let area = buffer.area();
+    let mut out = String::with_capacity((area.width as usize + 1) * area.height as usize);
+    for y in 0..area.height {
+        for x in 0..area.width {
+            out.push_str(buffer.get(x, y).symbol());
+        }
+        out.push('\n');
+    }
+    match strip_ansi_bytes(out.as_bytes()) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(_) => out,
+    }
+}
+
+#[test]
+fn auto_waits_for_review_before_continuing() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.review_enabled = true;
+
+    let (tx, auto_rx) = channel();
+    chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
+    chat.pending_auto_turn_config = Some(TurnConfig {
+        read_only: false,
+        complexity: None,
+    });
+
+    chat.auto_on_assistant_final();
+
+    assert!(chat.auto_state.waiting_for_review, "auto drive should pause for review");
+    assert!(
+        !chat.auto_state.waiting_for_response,
+        "auto drive should stop waiting on coordinator"
+    );
+    assert!(matches!(auto_rx.try_recv(), Err(TryRecvError::Empty)));
+
+    chat.handle_code_event(Event {
+        id: "auto-turn".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    chat.handle_code_event(Event {
+        id: "auto-review".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::EnteredReviewMode(ReviewRequest {
+            prompt: "workspace prompt".to_string(),
+            user_facing_hint: "workspace".to_string(),
+            metadata: None,
+        }),
+    });
+
+    assert!(
+        chat.auto_state.waiting_for_review,
+        "auto drive should stay paused while review runs"
+    );
+
+    chat.handle_code_event(Event {
+        id: "auto-review".into(),
+        event_seq: 1,
+        order: None,
+        msg: EventMsg::ExitedReviewMode(Some(ReviewOutputEvent::default())),
+    });
+
+    let command = auto_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("auto drive should resume after review finishes");
+    match command {
+        AutoCoordinatorCommand::UpdateConversation(_) => {}
+        other => panic!("unexpected auto coordinator command: {:?}", other),
+    }
+
+    assert!(
+        chat.auto_state.waiting_for_response,
+        "auto drive should wait for coordinator after resuming"
+    );
+    assert!(
+        !chat.auto_state.waiting_for_review,
+        "auto drive should clear review wait flag after resuming"
+    );
+}
+
+#[test]
+fn auto_start_post_turn_review_respects_auto_resolve_toggle() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+
+    chat.config.tui.review_auto_resolve = true;
+    chat.auto_start_post_turn_review(None);
+    assert!(
+        chat.auto_resolve_state.is_some(),
+        "auto drive should seed auto resolve state when toggle is enabled"
+    );
+
+    chat.config.tui.review_auto_resolve = false;
+    chat.auto_start_post_turn_review(None);
+    assert!(
+        chat.auto_resolve_state.is_none(),
+        "auto drive should clear auto resolve state when toggle is disabled"
+    );
+}
+
+#[test]
+fn auto_resume_clears_review_flag_even_when_waiting_for_response() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_review = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.review_enabled = true;
+
+    chat.auto_resolve_state = Some(AutoResolveState::new(
+        "Review workspace".to_string(),
+        "workspace".to_string(),
+        None,
+    ));
+
+    chat.auto_resolve_clear();
+
+    assert!(chat.auto_state.waiting_for_response);
+    assert!(
+        !chat.auto_state.waiting_for_review,
+        "auto drive should clear review wait flag even when still waiting for coordinator"
+    );
+}
+
+#[test]
+fn auto_blocks_until_auto_resolve_completes() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    drop(rx);
+
+    chat.auto_state.reset();
+    chat.auto_state.active = true;
+    chat.auto_state.waiting_for_response = true;
+    chat.auto_state.coordinator_waiting = true;
+    chat.auto_state.goal = Some("demo goal".to_string());
+    chat.auto_state.review_enabled = true;
+    chat.config.tui.review_auto_resolve = true;
+
+    let (tx, auto_rx) = channel();
+    chat.auto_handle = Some(AutoCoordinatorHandle::for_tests(tx));
+    chat.pending_auto_turn_config = Some(TurnConfig {
+        read_only: false,
+        complexity: None,
+    });
+
+    chat.auto_on_assistant_final();
+
+    chat.handle_code_event(Event {
+        id: "auto-turn".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    chat.handle_code_event(Event {
+        id: "auto-review".into(),
+        event_seq: 0,
+        order: None,
+        msg: EventMsg::EnteredReviewMode(ReviewRequest {
+            prompt: "workspace prompt".to_string(),
+            user_facing_hint: "workspace".to_string(),
+            metadata: None,
+        }),
+    });
+
+    let review_output = ReviewOutputEvent {
+        findings: vec![ReviewFinding {
+            title: "issue".to_string(),
+            body: "found bug".to_string(),
+            confidence_score: 0.6,
+            priority: 1,
+            code_location: ReviewCodeLocation {
+                absolute_file_path: PathBuf::from("src/lib.rs"),
+                line_range: ReviewLineRange { start: 1, end: 1 },
+            },
+        }],
+        overall_correctness: String::new(),
+        overall_explanation: String::new(),
+        overall_confidence_score: 0.0,
+    };
+
+    chat.handle_code_event(Event {
+        id: "auto-review".into(),
+        event_seq: 1,
+        order: None,
+        msg: EventMsg::ExitedReviewMode(Some(review_output)),
+    });
+
+    assert!(
+        chat.auto_state.waiting_for_review,
+        "auto drive should remain paused while auto resolve follow-ups run"
+    );
+    assert!(chat
+        .auto_resolve_state
+        .as_ref()
+        .is_some_and(|state| matches!(state.phase, AutoResolvePhase::PendingFix { .. })),
+        "auto resolve should enter pending fix phase"
+    );
+    assert!(matches!(auto_rx.try_recv(), Err(TryRecvError::Empty)));
+
+    chat.auto_resolve_clear();
+
+    let command = auto_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("auto drive should resume after auto resolve clears");
+    match command {
+        AutoCoordinatorCommand::UpdateConversation(_) => {}
+        other => panic!("unexpected auto coordinator command: {:?}", other),
+    }
+
+    assert!(
+        chat.auto_state.waiting_for_response,
+        "auto drive should wait for coordinator after resuming"
+    );
+    assert!(
+        !chat.auto_state.waiting_for_review,
+        "auto drive should clear review wait flag after auto resolve clears"
+    );
+}
+
+fn open_fixture(name: &str) -> std::fs::File {
+    // 1) Prefer fixtures within this crate
+    {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("tests");
+        p.push("fixtures");
+        p.push(name);
+        if let Ok(f) = File::open(&p) {
+            return f;
+        }
+    }
+    // 2) Fallback to parent (workspace root)
+    {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("..");
+        p.push(name);
+        if let Ok(f) = File::open(&p) {
+            return f;
+        }
+    }
+    // 3) Last resort: CWD
+    File::open(name).expect("open fixture file")
+}
+
+#[test]
+fn slash_agents_opens_overview() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('a'),
+        ScriptStep::key_char('g'),
+        ScriptStep::key_char('e'),
+        ScriptStep::key_char('n'),
+        ScriptStep::key_char('t'),
+        ScriptStep::key_char('s'),
+        ScriptStep::enter(),
+    ];
+    let _ = run_script(&mut chat, &script, &rx);
+
+    let width: u16 = 120;
+    let height = chat.desired_height(width).max(40);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw agents overview");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(lower.contains("agents"), "expected Agents heading\n{plain}");
+    assert!(lower.contains("commands"), "expected Commands section\n{plain}");
+    assert!(
+        lower.contains("add new"),
+        "expected Add new row in overview\n{plain}"
+    );
+}
+
+#[test]
+fn slash_upgrade_opens_guided_terminal() {
+    crate::updates::reset_force_upgrade_preview_for_tests();
+    let _npm_guard = EnvGuard::set("CODEX_MANAGED_BY_NPM", "1");
+    let _upgrade_guard = EnvGuard::set("SHOW_UPGRADE", "1");
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+    chat.latest_upgrade_version = Some("9.9.9".to_string());
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('u'),
+        ScriptStep::key_char('p'),
+        ScriptStep::key_char('g'),
+        ScriptStep::key_char('r'),
+        ScriptStep::key_char('a'),
+        ScriptStep::key_char('d'),
+        ScriptStep::key_char('e'),
+        ScriptStep::enter(),
+    ];
+    let mut events = run_script(&mut chat, &script, &rx);
+    events.extend(rx.try_iter());
+
+    let mut saw_open_terminal = false;
+    for event in events {
+        if let AppEvent::OpenTerminal(launch) = event {
+            saw_open_terminal = true;
+            assert_eq!(launch.title, "Upgrade Code");
+            assert!(
+                launch.command_display.contains("Guided"),
+                "expected guided terminal display, got {}",
+                launch.command_display
+            );
+        }
+    }
+
+    assert!(saw_open_terminal, "expected guided upgrade terminal to open");
+    crate::updates::reset_force_upgrade_preview_for_tests();
+}
+
+#[test]
+fn slash_undo_shows_no_snapshot_state() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let script = [
+        ScriptStep::key_char('/'),
+        ScriptStep::key_char('u'),
+        ScriptStep::key_char('n'),
+        ScriptStep::key_char('d'),
+        ScriptStep::key_char('o'),
+        ScriptStep::enter(),
+    ];
+    let _ = run_script(&mut chat, &script, &rx);
+
+    assert!(
+        chat.bottom_pane.has_active_modal_view(),
+        "expected undo modal to be active"
+    );
+
+    let width: u16 = 120;
+    let height = chat.desired_height(width).max(40);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw undo status");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(
+        lower.contains("no snapshots yet"),
+        "expected undo status title\n{plain}"
+    );
+    assert!(
+        lower.contains("no snapshot is available to restore"),
+        "expected undo status detail\n{plain}"
+    );
+    assert!(
+        lower.contains("chat history stays unchanged"),
+        "expected scope hint to mention chat history\n{plain}"
+    );
+}
+
+#[test]
+fn slash_command_prefix_processes_followup_message() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = runtime.enter();
+    let (mut chat, rx, mut op_rx) = make_chatwidget_manual();
+
+    let text = "/reasoning high\nContinue with the next step.";
+    let message = crate::chatwidget::message::UserMessage {
+        display_text: text.to_string(),
+        ordered_items: vec![InputItem::Text {
+            text: text.to_string(),
+        }],
+    };
+
+    chat.submit_user_message(message);
+
+    assert_eq!(
+        chat.config.model_reasoning_effort,
+        ReasoningEffort::High,
+        "slash command should update reasoning effort"
+    );
+
+    let op = op_rx
+        .try_recv()
+        .expect("follow-up message sent to agent");
+    match op {
+        Op::UserInput { items } => {
+            assert_eq!(
+                items,
+                vec![InputItem::Text {
+                    text: "Continue with the next step.".to_string()
+                }],
+                "expected follow-up text to be forwarded without the slash command"
+            );
+        }
+        other => panic!("expected user input op, got {other:?}"),
+    }
+
+    let history_cells = drain_insert_history(&rx);
+    let mut saw_follow_up = false;
+    for lines in &history_cells {
+        let combined = lines_to_single_string(lines);
+        if combined.contains("Continue with the next step.") {
+            saw_follow_up = true;
+            break;
+        }
+    }
+    assert!(
+        saw_follow_up,
+        "expected follow-up text to appear in the queued history entry"
+    );
+}
+
+#[test]
+fn undo_options_view_shows_toggles() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push_plain_state(history_cell::new_user_prompt("latest change".to_string()));
+
+    let commit = code_git_tooling::GhostCommit::new("abcdef1234567890".to_string(), None);
+    chat.ghost_snapshots.push(GhostSnapshot::new(
+        commit,
+        Some("Initial checkpoint".to_string()),
+        ConversationSnapshot::new(0, 0),
+    ));
+
+    chat.show_undo_restore_options(0);
+
+    let width: u16 = 100;
+    let height = chat.desired_height(width).max(24);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw undo options");
+
+    let plain = buffer_to_string(terminal.backend().buffer());
+    let lower = plain.to_ascii_lowercase();
+    assert!(lower.contains("restore workspace snapshot"), "expected overlay title\n{plain}");
+    assert!(lower.contains("conversation preview"), "expected conversation preview block\n{plain}");
+    assert!(
+        lower.contains("[x] files") || lower.contains("[ ] files"),
+        "expected files toggle\n{plain}"
+    );
+    assert!(
+        lower.contains("[x] conversation") || lower.contains("[ ] conversation"),
+        "expected conversation toggle\n{plain}"
+    );
+}
+
+#[test]
+fn alt_up_edits_most_recent_queued_message() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    // Simulate a running task so messages would normally be queued.
+    chat.bottom_pane.set_task_running(true);
+
+    // Seed two queued messages.
+    chat.queued_user_messages
+        .push_back(UserMessage::from("first queued".to_string()));
+    chat.queued_user_messages
+        .push_back(UserMessage::from("second queued".to_string()));
+    chat.refresh_queued_user_messages();
+
+    // Press Alt+Up to edit the most recent (last) queued message.
+    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+
+    // Composer should now contain the last queued message.
+    assert_eq!(
+        chat.bottom_pane.composer_text(),
+        "second queued".to_string()
+    );
+    // And the queue should now contain only the remaining (older) item.
+    assert_eq!(chat.queued_user_messages.len(), 1);
+    assert_eq!(
+        chat.queued_user_messages.front().unwrap().text,
+        "first queued"
+    );
+}
+
+#[test]
+fn exec_history_cell_shows_working_then_completed() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Begin command
+    chat.handle_code_event(Event {
+        id: "call-1".into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-1".into(),
+            command: vec!["bash".into(), "-lc".into(), "echo done".into()],
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: vec![code_core::parse_command::ParsedCommand::Unknown {
+                cmd: "echo done".into(),
+            }],
+        }),
+    });
+
+    // End command successfully
+    chat.handle_code_event(Event {
+        id: "call-1".into(),
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: "call-1".into(),
+            stdout: "done".into(),
+            stderr: String::new(),
+            aggregated_output: "done".into(),
+            exit_code: 0,
+            duration: std::time::Duration::from_millis(5),
+        }),
+    });
+
+    let cells = drain_insert_history(&rx);
+    assert_eq!(
+        cells.len(),
+        1,
+        "expected only the completed exec cell to be inserted into history"
+    );
+    let blob = lines_to_single_string(&cells[0]);
+    assert!(
+        blob.contains("Completed"),
+        "expected completed exec cell to show Completed header: {blob:?}"
+    );
+}
+
+#[test]
+fn exec_history_cell_shows_working_then_failed() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Begin command
+    chat.handle_code_event(Event {
+        id: "call-2".into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-2".into(),
+            command: vec!["bash".into(), "-lc".into(), "false".into()],
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: vec![code_core::parse_command::ParsedCommand::Unknown {
+                cmd: "false".into(),
+            }],
+        }),
+    });
+
+    // End command with failure
+    chat.handle_code_event(Event {
+        id: "call-2".into(),
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: "call-2".into(),
+            stdout: String::new(),
+            stderr: "error".into(),
+            aggregated_output: "error".into(),
+            exit_code: 2,
+            duration: std::time::Duration::from_millis(7),
+        }),
+    });
+
+    let cells = drain_insert_history(&rx);
+    assert_eq!(
+        cells.len(),
+        1,
+        "expected only the completed exec cell to be inserted into history"
+    );
+    let blob = lines_to_single_string(&cells[0]);
+    assert!(
+        blob.contains("Failed (exit 2)"),
+        "expected completed exec cell to show Failed header with exit code: {blob:?}"
+    );
+}
+
+#[test]
+fn exec_output_delta_updates_history_state() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    chat.handle_code_event(Event {
+        id: "call-stream".into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-stream".into(),
+            command: vec!["bash".into(), "-lc".into(), "echo streaming".into()],
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: vec![code_core::parse_command::ParsedCommand::Unknown {
+                cmd: "echo streaming".into(),
+            }],
+        }),
+    });
+
+    chat.handle_code_event(Event {
+        id: "call-stream".into(),
+        msg: EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+            call_id: "call-stream".into(),
+            stream: ExecOutputStream::Stdout,
+            chunk: b"hello".to_vec(),
+        }),
+    });
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) => Some(rec.clone()),
+            _ => None,
+        })
+        .expect("exec record present");
+
+    assert_eq!(exec_record.status, ExecStatus::Running);
+    assert_eq!(exec_record.stdout_chunks.len(), 1);
+    assert_eq!(exec_record.stdout_chunks[0].offset, 0);
+    assert_eq!(exec_record.stdout_chunks[0].content, "hello");
+    assert!(exec_record.stderr_chunks.is_empty());
+}
+
+#[test]
+fn exec_output_delta_tracks_history_id_after_reorder() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.handle_code_event(Event {
+        id: "call-reorder".into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: "call-reorder".into(),
+            command: vec!["bash".into(), "-lc".into(), "sleep 1".into()],
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: vec![ParsedCommand::Unknown {
+                cmd: "sleep 1".into(),
+            }],
+        }),
+        order: Some(order_meta(10)),
+    });
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let exec_id = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) if rec.call_id.as_deref() == Some("call-reorder") => {
+                Some(rec.id)
+            }
+            _ => None,
+        })
+        .expect("exec record present");
+
+    let early_meta = OrderMeta {
+        request_ordinal: 0,
+        output_index: Some(0),
+        sequence_number: Some(0),
+    };
+    let order_key = ChatWidget::order_key_from_order_meta(&early_meta);
+    let state = history_cell::plain_message_state_from_lines(
+        vec![ratatui::text::Line::from("reordered")],
+        history_cell::HistoryCellType::Plain,
+    );
+    let plain = history_cell::PlainHistoryCell::from_state(state.clone());
+    chat.history_insert_with_key_global_tagged(
+        Box::new(plain),
+        order_key,
+        "test",
+        Some(HistoryDomainRecord::Plain(state)),
+    );
+
+    let exec_cell_idx = chat
+        .history_cells
+        .iter()
+        .position(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::ExecCell>()
+                .is_some()
+        })
+        .expect("exec cell located after reordering");
+    assert!(exec_cell_idx > 0, "exec cell should shift after inserting earlier cell");
+
+    chat.handle_code_event(Event {
+        id: "call-reorder".into(),
+        msg: EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
+            call_id: "call-reorder".into(),
+            stream: ExecOutputStream::Stdout,
+            chunk: b"output".to_vec(),
+        }),
+        order: Some(order_meta(11)),
+    });
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) if rec.id == exec_id => Some(rec.clone()),
+            _ => None,
+        })
+        .expect("exec record still present");
+
+    assert_eq!(exec_record.stdout_chunks.len(), 1);
+    assert_eq!(exec_record.stdout_chunks[0].content, "output");
+    assert_eq!(
+        chat
+            .history_state()
+            .history_id_for_exec_call("call-reorder"),
+        Some(exec_id)
+    );
+}
+
+#[test]
+fn exec_end_before_begin_upgrades_history_record() {
+    use code_core::parse_command::ParsedCommand;
+
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    let call_id = "call-out-of-order";
+
+    chat.handle_code_event(Event {
+        id: call_id.into(),
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id.to_string(),
+            stdout: "done".into(),
+            stderr: String::new(),
+            aggregated_output: "done".into(),
+            exit_code: 0,
+            duration: std::time::Duration::from_millis(12),
+        }),
+        order: Some(order_meta(20)),
+    });
+
+    // Force the pending end to materialise the fallback record immediately.
+    chat.flush_pending_exec_ends();
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let command = vec!["bash".into(), "-lc".into(), "echo upgraded".into()];
+    let parsed = vec![ParsedCommand::Unknown {
+        cmd: "echo upgraded".into(),
+    }];
+
+    chat.handle_code_event(Event {
+        id: call_id.into(),
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.to_string(),
+            command: command.clone(),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            parsed_cmd: parsed.clone(),
+        }),
+        order: Some(order_meta(10)),
+    });
+
+    chat.flush_pending_exec_ends();
+    let _ = pump_app_events(&mut chat, &rx);
+    let _ = drain_insert_history(&rx);
+
+    let exec_record = chat
+        .history_state()
+        .records
+        .iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(rec) if rec.call_id.as_deref() == Some(call_id) => {
+                Some(rec.clone())
+            }
+            _ => None,
+        })
+        .expect("exec record tracked by history state");
+
+    assert_eq!(exec_record.command, command, "history_state kept fallback command");
+    assert_eq!(exec_record.parsed, parsed, "history_state kept fallback parsing");
+    assert_eq!(exec_record.status, ExecStatus::Success);
+    assert_eq!(exec_record.exit_code, Some(0));
+
+    let exec_id = exec_record.id;
+    assert_eq!(
+        chat.history_state().history_id_for_exec_call(call_id),
+        Some(exec_id),
+        "history_id mapping missing upgraded call_id",
+    );
+
+    let ui_exec_record = chat
+        .history_cells
+        .iter()
+        .find_map(|cell| history_cell::record_from_cell(cell.as_ref()))
+        .and_then(|record| match record {
+            HistoryRecord::Exec(rec) if rec.id == exec_id => Some(rec),
+            _ => None,
+        })
+        .expect("exec cell present in UI");
+
+    assert_eq!(ui_exec_record.command, exec_record.command);
+    assert_eq!(ui_exec_record.parsed, exec_record.parsed);
+    assert_eq!(ui_exec_record.status, ExecStatus::Success);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn binary_size_transcript_matches_ideal_fixture() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Set up a VT100 test terminal to capture ANSI visual output
+    let width: u16 = 80;
+    let height: u16 = 2000;
+    let viewport = ratatui::layout::Rect::new(0, height - 1, width, 1);
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = crate::custom_terminal::Terminal::with_options(backend)
+        .expect("failed to construct terminal");
+    terminal.set_viewport_area(viewport);
+
+    // Replay the recorded session into the widget and collect transcript
+    let file = open_fixture("binary-size-log.jsonl");
+    let reader = BufReader::new(file);
+    let mut transcript = String::new();
+    let mut ansi: Vec<u8> = Vec::new();
+
+    for line in reader.lines() {
+        let line = line.expect("read line");
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Ok(v): Result<serde_json::Value, _> = serde_json::from_str(&line) else {
+            continue;
+        };
+        let Some(dir) = v.get("dir").and_then(|d| d.as_str()) else {
+            continue;
+        };
+        if dir != "to_tui" {
+            continue;
+        }
+        let Some(kind) = v.get("kind").and_then(|k| k.as_str()) else {
+            continue;
+        };
+
+        match kind {
+            "code_event" => {
+                if let Some(payload) = v.get("payload") {
+                    let ev: Event = serde_json::from_value(payload.clone()).expect("parse");
+                    chat.handle_code_event(ev);
+                    while let Ok(app_ev) = rx.try_recv() {
+                        if let AppEvent::InsertHistory(lines) = app_ev {
+                            transcript.push_str(&lines_to_single_string(&lines));
+                            crate::insert_history::insert_history_lines_to_writer(
+                                &mut terminal,
+                                &mut ansi,
+                                lines,
+                            );
+                        }
+                    }
+                }
+            }
+            "app_event" => {
+                if let Some(variant) = v.get("variant").and_then(|s| s.as_str())
+                    && variant == "CommitTick"
+                {
+                    chat.on_commit_tick();
+                    while let Ok(app_ev) = rx.try_recv() {
+                        if let AppEvent::InsertHistory(lines) = app_ev {
+                            transcript.push_str(&lines_to_single_string(&lines));
+                            crate::insert_history::insert_history_lines_to_writer(
+                                &mut terminal,
+                                &mut ansi,
+                                lines,
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Read the ideal fixture as-is
+    let mut f = open_fixture("ideal-binary-response.txt");
+    let mut ideal = String::new();
+    f.read_to_string(&mut ideal)
+        .expect("read ideal-binary-response.txt");
+    // Normalize line endings for Windows vs. Unix checkouts
+    let ideal = ideal.replace("\r\n", "\n");
+
+    // Build the final VT100 visual by parsing the ANSI stream. Trim trailing spaces per line
+    // and drop trailing empty lines so the shape matches the ideal fixture exactly.
+    let mut parser = vt100::Parser::new(height, width, 0);
+    parser.process(&ansi);
+    let mut lines: Vec<String> = Vec::with_capacity(height as usize);
+    for row in 0..height {
+        let mut s = String::with_capacity(width as usize);
+        for col in 0..width {
+            if let Some(cell) = parser.screen().cell(row, col) {
+                if let Some(ch) = cell.contents().chars().next() {
+                    s.push(ch);
+                } else {
+                    s.push(' ');
+                }
+            } else {
+                s.push(' ');
+            }
+        }
+        // Trim trailing spaces to match plain text fixture
+        lines.push(s.trim_end().to_string());
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    // Compare only after the last session banner marker, and start at the next 'thinking' line.
+    const MARKER_PREFIX: &str = ">_ You are using OpenAI Code in ";
+    let last_marker_line_idx = lines
+        .iter()
+        .rposition(|l| l.starts_with(MARKER_PREFIX))
+        .expect("marker not found in visible output");
+    let thinking_line_idx = (last_marker_line_idx + 1..lines.len())
+        .find(|&idx| lines[idx].trim_start() == "thinking")
+        .expect("no 'thinking' line found after marker");
+
+    let mut compare_lines: Vec<String> = Vec::new();
+    // Ensure the first line is exactly 'thinking' without leading spaces to match the fixture
+    compare_lines.push(lines[thinking_line_idx].trim_start().to_string());
+    compare_lines.extend(lines[(thinking_line_idx + 1)..].iter().cloned());
+    let visible_after = compare_lines.join("\n");
+
+    // Optionally update the fixture when env var is set
+    if std::env::var("UPDATE_IDEAL").as_deref() == Ok("1") {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("tests");
+        p.push("fixtures");
+        p.push("ideal-binary-response.txt");
+        std::fs::write(&p, &visible_after).expect("write updated ideal fixture");
+        return;
+    }
+
+    // Exact equality with pretty diff on failure
+    assert_eq!(visible_after, ideal);
+}
+
+//
+// Snapshot test: command approval modal
+//
+// Synthesizes a Code ExecApprovalRequest event to trigger the approval modal
+// and snapshots the visual output using the ratatui TestBackend.
+#[test]
+fn approval_modal_exec_snapshot() {
+    // Build a chat widget with manual channels to avoid spawning the agent.
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    // Ensure policy allows surfacing approvals explicitly (not strictly required for direct event).
+    chat.config.approval_policy = code_core::protocol::AskForApproval::OnRequest;
+    // Inject an exec approval request to display the approval modal.
+    let ev = ExecApprovalRequestEvent {
+        call_id: "call-approve-cmd".into(),
+        command: vec!["bash".into(), "-lc".into(), "echo hello world".into()],
+        cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        reason: Some("Model wants to run a command".into()),
+    };
+    chat.handle_code_event(Event {
+        id: "sub-approve".into(),
+        msg: EventMsg::ExecApprovalRequest(ev),
+    });
+    // Render to a fixed-size test terminal and snapshot.
+    // Call desired_height first and use that exact height for rendering.
+    let height = chat.desired_height(80);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw approval modal");
+    assert_snapshot!("approval_modal_exec", terminal.backend());
+}
+
+// Snapshot test: patch approval modal
+#[test]
+fn approval_modal_patch_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    chat.config.approval_policy = code_core::protocol::AskForApproval::OnRequest;
+
+    // Build a small changeset and a reason/grant_root to exercise the prompt text.
+    let mut changes = std::collections::HashMap::new();
+    changes.insert(
+        PathBuf::from("README.md"),
+        FileChange::Add {
+            content: "hello\nworld\n".into(),
+        },
+    );
+    let ev = ApplyPatchApprovalRequestEvent {
+        call_id: "call-approve-patch".into(),
+        changes,
+        reason: Some("The model wants to apply changes".into()),
+        grant_root: Some(PathBuf::from("/tmp")),
+    };
+    chat.handle_code_event(Event {
+        id: "sub-approve-patch".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ev),
+    });
+
+    // Render at the widget's desired height and snapshot.
+    let height = chat.desired_height(80);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw patch approval modal");
+    assert_snapshot!("approval_modal_patch", terminal.backend());
+}
+
+#[test]
+fn interrupt_restores_queued_messages_into_composer() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual();
+
+    // Simulate a running task to enable queuing of user inputs.
+    chat.bottom_pane.set_task_running(true);
+
+    // Queue two user messages while the task is running.
+    chat.queued_user_messages
+        .push_back(UserMessage::from("first queued".to_string()));
+    chat.queued_user_messages
+        .push_back(UserMessage::from("second queued".to_string()));
+    chat.refresh_queued_user_messages();
+
+    // Deliver a TurnAborted event with Interrupted reason (as if Esc was pressed).
+    chat.handle_code_event(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TurnAborted(code_core::protocol::TurnAbortedEvent {
+            reason: code_core::protocol::TurnAbortReason::Interrupted,
+        }),
+    });
+
+    // Composer should now contain the queued messages joined by newlines, in order.
+    assert_eq!(
+        chat.bottom_pane.composer_text(),
+        "first queued\n\nsecond queued"
+    );
+
+    // Queue should be cleared and no new user input should have been auto-submitted.
+    assert!(chat.queued_user_messages.is_empty());
+    assert!(
+        op_rx.try_recv().is_err(),
+        "unexpected outbound op after interrupt"
+    );
+
+    // Drain rx to avoid unused warnings.
+    let _ = drain_insert_history(&mut rx);
+}
+
+// Snapshot test: ChatWidget at very small heights (idle)
+// Ensures overall layout behaves when terminal height is extremely constrained.
+#[test]
+fn ui_snapshots_small_heights_idle() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    let (chat, _rx, _op_rx) = make_chatwidget_manual();
+    for h in [1u16, 2, 3] {
+        let name = format!("chat_small_idle_h{h}");
+        let mut terminal = Terminal::new(TestBackend::new(40, h)).expect("create terminal");
+        terminal
+            .draw(|f| f.render_widget_ref(&chat, f.area()))
+            .expect("draw chat idle");
+        assert_snapshot!(name, terminal.backend());
+    }
+}
+
+// Snapshot test: ChatWidget at very small heights (task running)
+// Validates how status + composer are presented within tight space.
+#[test]
+fn ui_snapshots_small_heights_task_running() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    // Activate status line
+    chat.handle_code_event(Event {
+        id: "task-1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "task-1".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "**Thinking**".into(),
+        }),
+    });
+    for h in [1u16, 2, 3] {
+        let name = format!("chat_small_running_h{h}");
+        let mut terminal = Terminal::new(TestBackend::new(40, h)).expect("create terminal");
+        terminal
+            .draw(|f| f.render_widget_ref(&chat, f.area()))
+            .expect("draw chat running");
+        assert_snapshot!(name, terminal.backend());
+    }
+}
+
+// Snapshot test: status widget + approval modal active together
+// The modal takes precedence visually; this captures the layout with a running
+// task (status indicator active) while an approval request is shown.
+#[test]
+fn status_widget_and_approval_modal_snapshot() {
+    use code_core::protocol::ExecApprovalRequestEvent;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    // Begin a running task so the status indicator would be active.
+    chat.handle_code_event(Event {
+        id: "task-1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    // Provide a deterministic header for the status line.
+    chat.handle_code_event(Event {
+        id: "task-1".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "**Analyzing**".into(),
+        }),
+    });
+
+    // Now show an approval modal (e.g. exec approval).
+    let ev = ExecApprovalRequestEvent {
+        call_id: "call-approve-exec".into(),
+        command: vec!["echo".into(), "hello world".into()],
+        cwd: std::path::PathBuf::from("/tmp"),
+        reason: Some("Code wants to run a command".into()),
+    };
+    chat.handle_code_event(Event {
+        id: "sub-approve-exec".into(),
+        msg: EventMsg::ExecApprovalRequest(ev),
+    });
+
+    // Render at the widget's desired height and snapshot.
+    let height = chat.desired_height(80);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw status + approval modal");
+    assert_snapshot!("status_widget_and_approval_modal", terminal.backend());
+}
+
+// Snapshot test: status widget active (StatusIndicatorView)
+// Ensures the VT100 rendering of the status indicator is stable when active.
+#[test]
+fn status_widget_active_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    // Activate the status indicator by simulating a task start.
+    chat.handle_code_event(Event {
+        id: "task-1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    // Provide a deterministic header via a bold reasoning chunk.
+    chat.handle_code_event(Event {
+        id: "task-1".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "**Analyzing**".into(),
+        }),
+    });
+    // Render and snapshot.
+    let height = chat.desired_height(80);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, height))
+        .expect("create terminal");
+    terminal
+        .draw(|f| f.render_widget_ref(&chat, f.area()))
+        .expect("draw status widget");
+    assert_snapshot!("status_widget_active", terminal.backend());
+}
+
+#[test]
+fn fallback_lines_skip_custom_render_patch_cells() {
+    let (chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "one\ntwo\nthree".to_string(),
+        },
+    );
+
+    let record = PatchRecord {
+        id: HistoryId::ZERO,
+        patch_type: HistoryPatchEventType::ApplySuccess,
+        changes,
+        failure: None,
+    };
+
+    let cell: Box<dyn HistoryCell> =
+        Box::new(history_cell::PatchSummaryCell::from_record(record.clone()));
+    assert!(
+        chat
+            .fallback_lines_for_record(cell.as_ref(), &HistoryRecord::Patch(record))
+            .is_none(),
+        "expected custom-render patch cell to skip fallback lines",
+    );
+}
+
+#[test]
+fn apply_patch_events_emit_history_cells() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // 1) Approval request -> proposed patch summary cell
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    let ev = ApplyPatchApprovalRequestEvent {
+        call_id: "c1".into(),
+        changes,
+        reason: None,
+        grant_root: None,
+    };
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ev),
+    });
+    let cells = drain_insert_history(&rx);
+    assert!(!cells.is_empty(), "expected pending patch cell to be sent");
+    let blob = lines_to_single_string(cells.last().unwrap());
+    assert!(
+        blob.contains("proposed patch"),
+        "missing proposed patch header: {blob:?}"
+    );
+
+    // 2) Begin apply -> applying patch cell
+    let mut changes2 = HashMap::new();
+    changes2.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    let begin = PatchApplyBeginEvent {
+        call_id: "c1".into(),
+        auto_approved: true,
+        changes: changes2,
+    };
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::PatchApplyBegin(begin),
+    });
+    let cells = drain_insert_history(&rx);
+    assert!(!cells.is_empty(), "expected applying patch cell to be sent");
+    let blob = lines_to_single_string(cells.last().unwrap());
+    assert!(
+        blob.contains("Applying patch"),
+        "missing applying patch header: {blob:?}"
+    );
+
+    // 3) End apply success -> success cell
+    let end = PatchApplyEndEvent {
+        call_id: "c1".into(),
+        stdout: "ok\n".into(),
+        stderr: String::new(),
+        success: true,
+    };
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::PatchApplyEnd(end),
+    });
+    let cells = drain_insert_history(&rx);
+    assert!(!cells.is_empty(), "expected applied patch cell to be sent");
+    let blob = lines_to_single_string(cells.last().unwrap());
+    assert!(
+        blob.contains("Applied patch"),
+        "missing applied patch header: {blob:?}"
+    );
+}
+
+#[test]
+fn apply_patch_failure_records_metadata() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+            call_id: "c1".into(),
+            changes,
+            reason: None,
+            grant_root: None,
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let mut changes2 = HashMap::new();
+    changes2.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
+            call_id: "c1".into(),
+            auto_approved: false,
+            changes: changes2,
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::PatchApplyEnd(PatchApplyEndEvent {
+            call_id: "c1".into(),
+            stdout: "applied 0 hunks".into(),
+            stderr: "error: rejected hunk".into(),
+            success: false,
+        }),
+    });
+    flush_stream_events(&mut chat, &rx);
+
+    let idx = chat
+        .history_cells
+        .iter()
+        .rposition(|cell| matches!(cell.kind(), HistoryCellType::Patch { .. }))
+        .expect("patch cell present");
+    let patch_cell = chat.history_cells[idx]
+        .as_any()
+        .downcast_ref::<history_cell::PatchSummaryCell>()
+        .expect("patch summary cell");
+    assert!(matches!(
+        patch_cell.record().patch_type,
+        HistoryPatchEventType::ApplyFailure
+    ));
+    let failure = patch_cell
+        .record()
+        .failure
+        .as_ref()
+        .expect("failure metadata present");
+    assert!(failure.message.contains("error"));
+    assert!(failure
+        .stderr_excerpt
+        .as_ref()
+        .expect("stderr excerpt")
+        .contains("rejected"));
+}
+
+#[test]
+fn apply_patch_approval_sends_op_with_submission_id() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    // Simulate receiving an approval request with a distinct submission id and call id
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("file.rs"),
+        FileChange::Add {
+            content: "fn main(){}\n".into(),
+        },
+    );
+    let ev = ApplyPatchApprovalRequestEvent {
+        call_id: "call-999".into(),
+        changes,
+        reason: None,
+        grant_root: None,
+    };
+    chat.handle_code_event(Event {
+        id: "sub-123".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ev),
+    });
+
+    // Approve via key press 'y'
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+
+    // Expect a CodexOp with PatchApproval carrying the submission id, not call id
+    let mut found = false;
+    while let Ok(app_ev) = rx.try_recv() {
+        if let AppEvent::CodexOp(Op::PatchApproval { id, decision }) = app_ev {
+            assert_eq!(id, "sub-123");
+            assert!(matches!(
+                decision,
+                code_core::protocol::ReviewDecision::Approved
+            ));
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "expected PatchApproval op to be sent");
+}
+
+#[test]
+fn apply_patch_full_flow_integration_like() {
+    let (mut chat, rx, mut op_rx) = make_chatwidget_manual();
+
+    // 1) Backend requests approval
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("pkg.rs"),
+        FileChange::Add { content: "".into() },
+    );
+    chat.handle_code_event(Event {
+        id: "sub-xyz".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+            call_id: "call-1".into(),
+            changes,
+            reason: None,
+            grant_root: None,
+        }),
+    });
+
+    // 2) User approves via 'y' and App receives a CodexOp
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    let mut maybe_op: Option<Op> = None;
+    while let Ok(app_ev) = rx.try_recv() {
+        if let AppEvent::CodexOp(op) = app_ev {
+            maybe_op = Some(op);
+            break;
+        }
+    }
+    let op = maybe_op.expect("expected CodexOp after key press");
+
+    // 3) App forwards to widget.submit_op, which pushes onto code_op_tx
+    chat.submit_op(op);
+    let forwarded = op_rx
+        .try_recv()
+        .expect("expected op forwarded to codex channel");
+    match forwarded {
+        Op::PatchApproval { id, decision } => {
+            assert_eq!(id, "sub-xyz");
+            assert!(matches!(
+                decision,
+                code_core::protocol::ReviewDecision::Approved
+            ));
+        }
+        other => panic!("unexpected op forwarded: {other:?}"),
+    }
+
+    // 4) Simulate patch begin/end events from backend; ensure history cells are emitted
+    let mut changes2 = HashMap::new();
+    changes2.insert(
+        PathBuf::from("pkg.rs"),
+        FileChange::Add { content: "".into() },
+    );
+    chat.handle_code_event(Event {
+        id: "sub-xyz".into(),
+        msg: EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
+            call_id: "call-1".into(),
+            auto_approved: false,
+            changes: changes2,
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "sub-xyz".into(),
+        msg: EventMsg::PatchApplyEnd(PatchApplyEndEvent {
+            call_id: "call-1".into(),
+            stdout: String::from("ok"),
+            stderr: String::new(),
+            success: true,
+        }),
+    });
+}
+
+#[test]
+fn apply_patch_untrusted_shows_approval_modal() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+    // Ensure approval policy is untrusted (OnRequest)
+    chat.config.approval_policy = code_core::protocol::AskForApproval::OnRequest;
+
+    // Simulate a patch approval request from backend
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("a.rs"),
+        FileChange::Add { content: "".into() },
+    );
+    chat.handle_code_event(Event {
+        id: "sub-1".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+            call_id: "call-1".into(),
+            changes,
+            reason: None,
+            grant_root: None,
+        }),
+    });
+
+    // Render and ensure the approval modal title is present
+    let area = ratatui::layout::Rect::new(0, 0, 80, 12);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    (&chat).render_ref(area, &mut buf);
+
+    let mut contains_title = false;
+    for y in 0..area.height {
+        let mut row = String::new();
+        for x in 0..area.width {
+            row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
+        }
+        if row.contains("Apply changes?") {
+            contains_title = true;
+            break;
+        }
+    }
+    assert!(
+        contains_title,
+        "expected approval modal to be visible with title 'Apply changes?'"
+    );
+}
+
+#[test]
+fn apply_patch_request_shows_diff_summary() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Ensure we are in OnRequest so an approval is surfaced
+    chat.config.approval_policy = code_core::protocol::AskForApproval::OnRequest;
+
+    // Simulate backend asking to apply a patch adding two lines to README.md
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("README.md"),
+        FileChange::Add {
+            // Two lines (no trailing empty line counted)
+            content: "line one\nline two\n".into(),
+        },
+    );
+    chat.handle_code_event(Event {
+        id: "sub-apply".into(),
+        msg: EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
+            call_id: "call-apply".into(),
+            changes,
+            reason: None,
+            grant_root: None,
+        }),
+    });
+
+    // Drain history insertions and verify the diff summary is present
+    let cells = drain_insert_history(&rx);
+    assert!(
+        !cells.is_empty(),
+        "expected a history cell with the proposed patch summary"
+    );
+    let blob = lines_to_single_string(cells.last().unwrap());
+
+    // Header should summarize totals
+    assert!(
+        blob.contains("proposed patch to 1 file (+2 -0)"),
+        "missing or incorrect diff header: {blob:?}"
+    );
+
+    // Per-file summary line should include the file path and counts
+    assert!(
+        blob.contains("README.md"),
+        "missing per-file diff summary: {blob:?}"
+    );
+}
+
+#[test]
+fn plan_update_renders_history_cell() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+    let update = UpdatePlanArgs {
+        name: Some("Feature rollout plan".to_string()),
+        plan: vec![
+            PlanItemArg {
+                step: "Explore codebase".into(),
+                status: StepStatus::Completed,
+            },
+            PlanItemArg {
+                step: "Implement feature".into(),
+                status: StepStatus::InProgress,
+            },
+            PlanItemArg {
+                step: "Write tests".into(),
+                status: StepStatus::Pending,
+            },
+        ],
+    };
+    chat.handle_code_event(Event {
+        id: "sub-1".into(),
+        msg: EventMsg::PlanUpdate(update),
+    });
+    let cells = drain_insert_history(&rx);
+    assert!(!cells.is_empty(), "expected plan update cell to be sent");
+    let blob = lines_to_single_string(cells.last().unwrap());
+    assert!(
+        blob.contains("Feature rollout plan"),
+        "missing plan header: {blob:?}"
+    );
+    assert!(blob.contains("Explore codebase"));
+    assert!(blob.contains("Implement feature"));
+    assert!(blob.contains("Write tests"));
+}
+
+#[test]
+fn headers_emitted_on_stream_begin_for_answer_and_reasoning() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Answer: no header until a newline commit
+    chat.handle_code_event(Event {
+        id: "sub-a".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Hello".into(),
+        }),
+    });
+    let mut saw_code_pre = false;
+    while let Ok(ev) = rx.try_recv() {
+        if let AppEvent::InsertHistory(lines) = ev {
+            let s = lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|sp| sp.content.clone())
+                .collect::<Vec<_>>()
+                .join("");
+            if s.contains("codex") {
+                saw_code_pre = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        !saw_code_pre,
+        "answer header should not be emitted before first newline commit"
+    );
+
+    // Newline arrives; no visible header should be emitted for Answer
+    chat.handle_code_event(Event {
+        id: "sub-a".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "!\n".into(),
+        }),
+    });
+    chat.on_commit_tick();
+    let mut saw_code_post = false;
+    while let Ok(ev) = rx.try_recv() {
+        if let AppEvent::InsertHistory(lines) = ev {
+            let s = lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|sp| sp.content.clone())
+                .collect::<Vec<_>>()
+                .join("");
+            if s.contains("codex") {
+                saw_code_post = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        !saw_code_post,
+        "did not expect a visible 'codex' header to be emitted after first newline commit"
+    );
+
+    // Reasoning: header immediately
+    let (mut chat2, rx2, _op_rx2) = make_chatwidget_manual();
+    chat2.handle_code_event(Event {
+        id: "sub-b".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "Thinking".into(),
+        }),
+    });
+    let mut saw_thinking = false;
+    while let Ok(ev) = rx2.try_recv() {
+        if let AppEvent::InsertHistory(lines) = ev {
+            let s = lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|sp| sp.content.clone())
+                .collect::<Vec<_>>()
+                .join("");
+            if s.contains("thinking") {
+                saw_thinking = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        saw_thinking,
+        "expected 'thinking' header to be emitted at stream start"
+    );
+}
+
+#[test]
+fn multiple_agent_messages_in_single_turn_emit_multiple_headers() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Begin turn
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+
+    // First finalized assistant message
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "First message".into(),
+        }),
+    });
+
+    // Second finalized assistant message in the same turn
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Second message".into(),
+        }),
+    });
+
+    // End turn
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+
+    let cells = drain_insert_history(&rx);
+    let mut combined = String::new();
+    for lines in &cells {
+        for l in lines {
+            for sp in &l.spans {
+                let s = &sp.content;
+                combined.push_str(s);
+            }
+            combined.push('\n');
+        }
+    }
+    assert!(
+        combined.contains("First message"),
+        "missing first message: {combined}"
+    );
+    assert!(
+        combined.contains("Second message"),
+        "missing second message: {combined}"
+    );
+    let first_idx = combined.find("First message").unwrap();
+    let second_idx = combined.find("Second message").unwrap();
+    assert!(first_idx < second_idx, "messages out of order: {combined}");
+}
+
+#[test]
+fn two_final_answers_append_not_overwrite_when_no_deltas() {
+    // Directly exercise ChatWidget::insert_final_answer to validate we do not
+    // overwrite a prior finalized assistant message when a new final arrives
+    // without any streaming deltas (regression guard for overwrite bug).
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // First finalized assistant message (no streaming cell exists yet)
+    chat.insert_final_answer_with_id(None, Vec::new(), "First message".to_string());
+    // Second finalized assistant message (also without streaming)
+    chat.insert_final_answer_with_id(None, Vec::new(), "Second message".to_string());
+
+    // Drain any history insert side-effects (not strictly required here)
+    let _ = drain_insert_history(&rx);
+
+    // Verify via exported ResponseItems so we don't reach into private fields
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            code_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    code_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    code_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 2, "expected two assistant messages, got {}", assistants.len());
+    assert!(assistants.iter().any(|s| s.contains("First message")), "missing first message");
+    assert!(assistants.iter().any(|s| s.contains("Second message")), "missing second message");
+}
+
+fn message_text(item: &ResponseItem) -> Option<String> {
+    if let ResponseItem::Message { content, .. } = item {
+        let mut out = String::new();
+        for chunk in content {
+            match chunk {
+                ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                    out.push_str(text);
+                }
+                _ => {}
+            }
+        }
+        Some(out)
+    } else {
+        None
+    }
+}
+
+#[test]
+fn export_auto_drive_items_includes_cli_outputs() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push_plain_state(history_cell::new_user_prompt("Run integration tests".to_string()));
+
+    chat.insert_final_answer_with_id(None, Vec::new(), "{\"status\":\"ok\"}".to_string());
+    let _ = drain_insert_history(&rx);
+
+    let mut reasoning_cell = history_cell::CollapsibleReasoningCell::new_with_id(
+        vec![ratatui::text::Line::from("Considering optimal workflow")],
+        Some("reasoning-test".to_string()),
+    );
+    reasoning_cell.set_collapsed(false);
+    reasoning_cell.set_in_progress(false);
+    chat.history_push(reasoning_cell);
+
+    let plan_update = UpdatePlanArgs {
+        name: Some("Stabilize build".to_string()),
+        plan: vec![
+            PlanItemArg {
+                step: "Install dependencies".to_string(),
+                status: StepStatus::Completed,
+            },
+            PlanItemArg {
+                step: "Run integration tests".to_string(),
+                status: StepStatus::InProgress,
+            },
+        ],
+    };
+    chat.history_push(history_cell::new_plan_update(plan_update));
+
+    let diff = "diff --git a/foo.rs b/foo.rs\n--- a/foo.rs\n+++ b/foo.rs\n@@ -1 +1,2 @@\n-println!(\"old\");\n+println!(\"new\");\n+println!(\"extra\");\n";
+    chat.add_diff_output(diff.to_string());
+
+    let tool_state = ToolCallState {
+        id: HistoryId::ZERO,
+        call_id: Some("tool-1".to_string()),
+        status: ToolStatus::Success,
+        title: "Run formatter".to_string(),
+        duration: None,
+        arguments: vec![ToolArgument {
+            name: "command".to_string(),
+            value: ArgumentValue::Text("just fmt".to_string()),
+        }],
+        result_preview: Some(ToolResultPreview {
+            lines: vec!["Formatted 12 files".to_string()],
+            truncated: false,
+        }),
+        error_message: None,
+    };
+    chat.history_push(history_cell::ToolCallCell::new(tool_state));
+
+    let items = chat.export_auto_drive_items();
+
+    let coordinator = items
+        .iter()
+        .find(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
+        .and_then(message_text)
+        .expect("coordinator message present");
+    assert!(
+        coordinator.contains("Run integration tests"),
+        "coordinator text missing"
+    );
+
+    let cli = items
+        .iter()
+        .find(|item| {
+            matches!(
+                item,
+                ResponseItem::Message { role, content, .. }
+                    if role == "user"
+                        && content.iter().any(|c| matches!(
+                            c,
+                            ContentItem::InputText { text }
+                                if text.contains("\"status\":\"ok\"")
+                        ))
+            )
+        })
+        .expect("cli response included");
+    assert!(matches!(cli, ResponseItem::Message { .. }));
+
+    assert!(items.iter().any(|item| {
+        matches!(item, ResponseItem::Message { id, .. } if id.as_deref() == Some("auto-drive-reasoning"))
+    }), "reasoning message tagged");
+
+    assert!(items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Plan update") && text.contains("[in_progress]"))
+            .unwrap_or(false)
+    }), "plan update summary present");
+
+    assert!(items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Files changed") && text.contains("foo.rs"))
+            .unwrap_or(false)
+    }), "diff summary present");
+
+    assert!(items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Run formatter") && text.contains("Formatted 12 files"))
+            .unwrap_or(false)
+    }), "tool call output present");
+}
+
+#[test]
+fn observer_conversation_filters_reasoning_and_prefixes() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+
+    chat.history_push_plain_state(history_cell::new_user_prompt("Summarize recent commits".to_string()));
+    chat.insert_final_answer_with_id(None, Vec::new(), "CLI summary".to_string());
+    let _ = drain_insert_history(&rx);
+
+    let mut reasoning_cell = history_cell::CollapsibleReasoningCell::new_with_id(
+        vec![ratatui::text::Line::from("Inspecting commit history")],
+        Some("reasoning-test".to_string()),
+    );
+    reasoning_cell.set_collapsed(false);
+    reasoning_cell.set_in_progress(false);
+    chat.history_push(reasoning_cell);
+
+    let items = chat.export_auto_drive_items();
+    assert!(items.iter().any(|item| matches!(
+        item,
+        ResponseItem::Message { role, .. } if role == "assistant"
+    )));
+
+    let observer_items = build_observer_conversation(items, Some("Queue next review"));
+
+    assert!(observer_items.iter().all(|item| {
+        !matches!(item, ResponseItem::Message { role, .. } if role == "assistant")
+    }), "assistant roles converted to user");
+
+    assert!(observer_items.iter().all(|item| {
+        !matches!(item, ResponseItem::Message { id, .. } if id.as_deref() == Some("auto-drive-reasoning"))
+    }), "reasoning entries removed");
+
+    assert!(observer_items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Coordinator: Summarize recent commits"))
+            .unwrap_or(false)
+    }), "coordinator text prefixed");
+
+    assert!(observer_items.iter().any(|item| {
+        message_text(item)
+            .map(|text| text.contains("Coordinator: Queue next review"))
+            .unwrap_or(false)
+    }), "appended prompt prefixed");
+}
+
+#[test]
+fn export_preserves_user_role_and_content_type() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.submit_text_message("Run the integration tests".to_string());
+
+    // Drain any synthetic history updates generated during submission.
+    let _ = drain_insert_history(&rx);
+
+    let items = chat.export_response_items();
+    let mut user_items = items.iter().filter_map(|item| match item {
+        code_protocol::models::ResponseItem::Message { role, content, .. }
+            if role == "user" =>
+        {
+            Some(content)
+        }
+        _ => None,
+    });
+
+    let content = user_items
+        .next()
+        .expect("expected at least one exported user item");
+
+    assert!(matches!(
+        content.first(),
+        Some(code_protocol::models::ContentItem::InputText { .. })
+    ));
+}
+
+#[test]
+fn export_last_user_turn_detectable_after_assistant_reply() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    chat.submit_text_message("Please summarize the diff".to_string());
+    chat.insert_final_answer_with_id(None, Vec::new(), "Sure, here's the summary.".to_string());
+
+    let _ = drain_insert_history(&rx);
+
+    let items = chat.export_response_items();
+    let last_user_index = items
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, item)| matches!(
+            item,
+            code_protocol::models::ResponseItem::Message { role, content, .. }
+                if role == "user"
+                    && content.iter().any(|c| matches!(
+                        c,
+                        code_protocol::models::ContentItem::InputText { .. }
+                    ))
+        ))
+        .map(|(idx, _)| idx);
+
+    assert_eq!(last_user_index, Some(0), "expected latest user prompt index");
+}
+
+#[test]
+fn second_final_that_is_superset_replaces_first() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let base = "• Behavior\n  ◦ One\n\nNotes\n  ◦ Alpha\n".to_string();
+    let extended = format!("{}  ◦ Beta\n", base);
+
+    chat.insert_final_answer_with_id(None, Vec::new(), base);
+    chat.insert_final_answer_with_id(None, Vec::new(), extended.clone());
+
+    // Drain history events
+    let _ = drain_insert_history(&rx);
+
+    // Expect exactly one assistant message containing the extended text
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            code_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    code_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    code_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 1, "expected single assistant after superset replace");
+    assert!(assistants[0].contains("Beta"), "expected extended content present");
+}
+
+#[test]
+fn identical_content_with_unicode_bullets_dedupes() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    let a = "• Behavior\n  ◦ One\n\nNotes\n  ◦ Alpha".to_string();
+    let b = "- Behavior\n  - One\n\nNotes\n  - Alpha".to_string();
+
+    // Two finals that only differ in bullet glyphs should dedupe into one cell
+    chat.insert_final_answer_with_id(None, Vec::new(), a);
+    chat.insert_final_answer_with_id(None, Vec::new(), b);
+
+    // Drain history events
+    let _ = drain_insert_history(&rx);
+
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            code_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    code_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    code_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 1, "expected deduped single assistant cell");
+}
+
+#[test]
+fn final_reasoning_then_message_without_deltas_are_rendered() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // No deltas; only final reasoning followed by final message.
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentReasoning(AgentReasoningEvent {
+            text: "I will first analyze the request.".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Here is the result.".into(),
+        }),
+    });
+
+    // Drain history and snapshot the combined visible content.
+    let cells = drain_insert_history(&rx);
+    let combined = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert_snapshot!(combined);
+}
+
+#[test]
+fn deltas_then_same_final_message_are_rendered_snapshot() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Stream some reasoning deltas first.
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "I will ".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "first analyze the ".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "request.".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentReasoning(AgentReasoningEvent {
+            text: "request.".into(),
+        }),
+    });
+
+    // Then stream answer deltas, followed by the exact same final message.
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Here is the ".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "result.".into(),
+        }),
+    });
+
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "Here is the result.".into(),
+        }),
+    });
+
+    // Snapshot the combined visible content to ensure we render as expected
+    // when deltas are followed by the identical final message.
+    let cells = drain_insert_history(&rx);
+    let combined = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert_snapshot!(combined);
+}
+
+#[test]
+fn late_final_does_not_duplicate_when_stream_finalized_early() {
+    use code_core::protocol::*;
+
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Stream some answer deltas for id "s1"
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "What I Can Do\n".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "- Explore/Modify Code\n".into(),
+        }),
+    });
+
+    // Simulate a side event that forces finalization (e.g., tool start)
+    chat.finalize_active_stream();
+
+    // Now a late final AgentMessage arrives with the full text
+    let final_text = "What I Can Do\n- Explore/Modify Code\n".to_string();
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: final_text.clone(),
+        }),
+    });
+
+    // Drain any history insert side-effects (not strictly required here)
+    let _ = drain_insert_history(&rx);
+
+    // Export and assert that only a single assistant message exists
+    let items = chat.export_response_items();
+    let assistants: Vec<String> = items
+        .into_iter()
+        .filter_map(|it| match it {
+            code_protocol::models::ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                let text = content.into_iter().filter_map(|c| match c {
+                    code_protocol::models::ContentItem::OutputText { text } => Some(text),
+                    code_protocol::models::ContentItem::InputText { text } => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>().join("\n");
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(assistants.len(), 1, "late final should replace, not duplicate");
+    assert!(assistants[0].contains("Explore/Modify Code"));
+}
+
+#[test]
+fn streaming_answer_then_finalize_does_not_truncate() {
+    let (mut chat, rx, _op_rx) = make_chatwidget_manual();
+
+    // Stream an assistant message in chunks, without sending a final AgentMessage.
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "Files changed\n".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "- code-rs/tui/src/markdown.rs: Guard against list markers...\n".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "\nWhat to expect\n".into(),
+        }),
+    });
+    chat.handle_code_event(Event {
+        id: "s1".into(),
+        msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
+            delta: "- Third-level bullets render correctly now.\n".into(),
+        }),
+    });
+
+    // Simulate lifecycle location that finalizes active stream (e.g., new event)
+    chat.finalize_active_stream();
+
+    // Drain and combine visible content
+    let cells = drain_insert_history(&rx);
+    let combined = cells
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+
+    assert!(combined.contains("Files changed"), "missing header: {combined}");
+    assert!(combined.contains("What to expect"), "missing section header: {combined}");
+    assert!(combined.contains("Third-level bullets render correctly now"),
+        "missing tail content after finalize: {combined}");
+}
+
+// E2E vt100 snapshot for complex markdown with indented and nested fenced code blocks
+#[test]
+fn chatwidget_markdown_code_blocks_vt100_snapshot() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual();
+
+    // Simulate a final agent message via streaming deltas instead of a single message
+
+    chat.handle_code_event(Event {
+        id: "t1".into(),
+        msg: EventMsg::TaskStarted(TaskStartedEvent {
+            model_context_window: None,
+        }),
+    });
+    // Build a vt100 visual from the history insertions only (no UI overlay)
+    let width: u16 = 80;
+    let height: u16 = 50;
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+    // Place viewport at the last line so that history lines insert above it
+    term.set_viewport_area(Rect::new(0, height - 1, width, 1));
+
+    let mut ansi: Vec<u8> = Vec::new();
+
+    // Simulate streaming via AgentMessageDelta in 2-character chunks (no final AgentMessage).
+    let source: &str = r#"
+
+    -- Indented code block (4 spaces)
+    SELECT *
+    FROM "users"
+    WHERE "email" LIKE '%@example.com';
+
+````markdown
+```sh
+printf 'fenced within fenced\n'
+```
+````
+
+```jsonc
+{
+  // comment allowed in jsonc
+  "path": "C:\\Program Files\\App",
+  "regex": "^foo.*(bar)?$"
+}
+```
+"#;
+
+    let mut it = source.chars();
+    loop {
+        let mut delta = String::new();
+        match it.next() {
+            Some(c) => delta.push(c),
+            None => break,
+        }
+        if let Some(c2) = it.next() {
+            delta.push(c2);
+        }
+
+        chat.handle_code_event(Event {
+            id: "t1".into(),
+            msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }),
+        });
+        // Drive commit ticks and drain emitted history lines into the vt100 buffer.
+        loop {
+            chat.on_commit_tick();
+            let mut inserted_any = false;
+            while let Ok(app_ev) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = app_ev {
+                    let lines = cell.display_lines(width);
+                    crate::insert_history::insert_history_lines_to_writer(
+                        &mut term, &mut ansi, lines,
+                    );
+                    inserted_any = true;
+                }
+            }
+            if !inserted_any {
+                break;
+            }
+        }
+    }
+
+    // Finalize the stream without sending a final AgentMessage, to flush any tail.
+    chat.handle_code_event(Event {
+        id: "t1".into(),
+        msg: EventMsg::TaskComplete(TaskCompleteEvent {
+            last_agent_message: None,
+        }),
+    });
+    for lines in drain_insert_history(&mut rx) {
+        crate::insert_history::insert_history_lines_to_writer(&mut term, &mut ansi, lines);
+    }
+
+    let mut parser = vt100::Parser::new(height, width, 0);
+    parser.process(&ansi);
+
+    let mut vt_lines: Vec<String> = (0..height)
+        .map(|row| {
+            let mut s = String::with_capacity(width as usize);
+            for col in 0..width {
+                if let Some(cell) = parser.screen().cell(row, col) {
+                    if let Some(ch) = cell.contents().chars().next() {
+                        s.push(ch);
+                    } else {
+                        s.push(' ');
+                    }
+                } else {
+                    s.push(' ');
+                }
+            }
+            s.trim_end().to_string()
+        })
+        .collect();
+
+    // Compact trailing blank rows for a stable snapshot
+    while matches!(vt_lines.last(), Some(l) if l.trim().is_empty()) {
+        vt_lines.pop();
+    }
+    let visual = vt_lines.join("\n");
+    assert_snapshot!(visual);
+}

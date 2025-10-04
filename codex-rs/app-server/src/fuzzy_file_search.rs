@@ -5,19 +5,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use codex_app_server_protocol::FuzzyFileSearchResult;
 use codex_file_search as file_search;
-use codex_protocol::mcp_protocol::FuzzyFileSearchResult;
 use tokio::task::JoinSet;
 use tracing::warn;
 
-#[allow(dead_code)]
 const LIMIT_PER_ROOT: usize = 50;
-#[allow(dead_code)]
 const MAX_THREADS: usize = 12;
-#[allow(dead_code)]
 const COMPUTE_INDICES: bool = true;
 
-#[allow(dead_code)]
 pub(crate) async fn run_fuzzy_file_search(
     query: String,
     roots: Vec<String>,

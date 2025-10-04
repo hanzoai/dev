@@ -141,8 +141,7 @@ impl McpClient {
         // STDOUT and dispatches responses to the pending map.
         let reader_handle = {
             let pending = pending.clone();
-            // Use a larger buffer size (1MB) to handle large tool responses
-            let mut lines = BufReader::with_capacity(1024 * 1024, stdout).lines();
+            let mut lines = BufReader::new(stdout).lines();
 
             tokio::spawn(async move {
                 while let Ok(Some(line)) = lines.next_line().await {

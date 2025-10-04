@@ -1,7 +1,7 @@
 
 # TUI ChatWidget Refactor Plan
 
-This document tracks the refactor of `codex-rs/tui/src/chatwidget.rs` into smaller, maintainable modules and state bundles. It also captures what has been completed, and what remains so another engineer can continue seamlessly.
+This document tracks the refactor of `code-rs/tui/src/chatwidget.rs` into smaller, maintainable modules and state bundles. It also captures what has been completed, and what remains so another engineer can continue seamlessly.
 
 ## Goals
 

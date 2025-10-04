@@ -1,0 +1,57 @@
+[package]
+edition = "2024"
+name = "code-exec"
+version = { workspace = true }
+
+[[bin]]
+name = "code-exec"
+path = "src/main.rs"
+
+[lib]
+name = "code_exec"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+code-arg0 = { workspace = true }
+code-common = { workspace = true, features = [
+    "cli",
+    "elapsed",
+    "sandbox_summary",
+] }
+code-core = { workspace = true }
+code-ollama = { workspace = true }
+code-protocol = { workspace = true }
+code-app-server-protocol = { workspace = true }
+chrono = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
+owo-colors = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+shlex = { workspace = true }
+supports-color = { workspace = true }
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+core_test_support = { workspace = true }
+libc = { workspace = true }
+mcp-types = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }
+walkdir = { workspace = true }
+wiremock = { workspace = true }

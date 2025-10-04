@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use std::time::Duration;
 use std::time::Instant;
 
@@ -36,6 +35,12 @@ pub(crate) struct RetroGrab {
     pub grabbed: String,
 }
 
+pub(crate) enum FlushResult {
+    Paste(String),
+    Typed(char),
+    None,
+}
+
 impl PasteBurst {
     /// Recommended delay to wait between simulated keypresses (or before
     /// scheduling a UI tick) so that a pending fast keystroke is flushed
@@ -65,15 +70,15 @@ impl PasteBurst {
 
         // If we already held a first char and receive a second fast char,
         // start buffering without retro-grabbing (we never rendered the first).
-        if let Some((held, held_at)) = self.pending_first_char {
-            if now.duration_since(held_at) <= PASTE_BURST_CHAR_INTERVAL {
-                self.active = true;
-                // take() to clear pending; we already captured the held char above
-                let _ = self.pending_first_char.take();
-                self.buffer.push(held);
-                self.burst_window_until = Some(now + PASTE_ENTER_SUPPRESS_WINDOW);
-                return CharDecision::BeginBufferFromPending;
-            }
+        if let Some((held, held_at)) = self.pending_first_char
+            && now.duration_since(held_at) <= PASTE_BURST_CHAR_INTERVAL
+        {
+            self.active = true;
+            // take() to clear pending; we already captured the held char above
+            let _ = self.pending_first_char.take();
+            self.buffer.push(held);
+            self.burst_window_until = Some(now + PASTE_ENTER_SUPPRESS_WINDOW);
+            return CharDecision::BeginBufferFromPending;
         }
 
         if self.consecutive_plain_char_burst >= PASTE_BURST_MIN_CHARS {
@@ -96,24 +101,24 @@ impl PasteBurst {
     ///   now emit that char as normal typed input.
     ///
     /// Returns None if the timeout has not elapsed or there is nothing to flush.
-    pub fn flush_if_due(&mut self, now: Instant) -> Option<String> {
+    pub fn flush_if_due(&mut self, now: Instant) -> FlushResult {
         let timed_out = self
             .last_plain_char_time
             .is_some_and(|t| now.duration_since(t) > PASTE_BURST_CHAR_INTERVAL);
         if timed_out && self.is_active_internal() {
             self.active = false;
             let out = std::mem::take(&mut self.buffer);
-            Some(out)
+            FlushResult::Paste(out)
         } else if timed_out {
             // If we were saving a single fast char and no burst followed,
             // flush it as normal typed input.
             if let Some((ch, _at)) = self.pending_first_char.take() {
-                Some(ch.to_string())
+                FlushResult::Typed(ch)
             } else {
-                None
+                FlushResult::None
             }
         } else {
-            None
+            FlushResult::None
         }
     }
 

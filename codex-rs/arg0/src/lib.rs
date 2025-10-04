@@ -2,7 +2,6 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_core::config::resolve_codex_path_for_read;
 use codex_core::CODEX_APPLY_PATCH_ARG1;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -22,8 +21,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 /// `codex-linux-sandbox` we *directly* execute
 /// [`codex_linux_sandbox::run_main`] (which never returns). Otherwise we:
 ///
-/// 1.  Use [`dotenvy::from_path`] and [`dotenvy::dotenv`] to modify the
-///     environment before creating any threads.
+/// 1.  Load `.env` values from `~/.codex/.env` before creating any threads.
 /// 2.  Construct a Tokio multi-thread runtime.
 /// 3.  Derive the path to the current executable (so children can re-invoke the
 ///     sandbox) when running on Linux.
@@ -107,35 +105,15 @@ where
 
 const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
-/// Load env vars from ~/.code/.env (legacy ~/.codex/.env is still read) and `$(pwd)/.env`.
+/// Load env vars from ~/.codex/.env.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
 /// with names starting with `CODEX_`.
 fn load_dotenv() {
-    // 1) Load from global ~/.code/.env (or ~/.codex/.env) first.
-    if let Ok(codex_home) = codex_core::config::find_codex_home() {
-        let global_env_path = resolve_codex_path_for_read(&codex_home, Path::new(".env"));
-        if let Ok(iter) = dotenvy::from_path_iter(global_env_path) {
-            // Global env may legitimately contain provider keys for Code usage.
-            set_filtered(iter);
-        }
-    }
-
-    // 2) Load from the current project's .env, but with extra safety:
-    //    - Do NOT import provider API keys by default (e.g., OPENAI_API_KEY, AZURE_OPENAI_API_KEY).
-    //    - Users can opt back in via CODEX_ALLOW_PROJECT_OPENAI_KEYS=1 (either exported
-    //      in the shell or placed in ~/.code/.env).
-    if let Ok(iter) = dotenvy::dotenv_iter() {
-        // Filtered setter that always blocks provider keys from the project's .env.
-        for (key, value) in iter.into_iter().flatten() {
-            let upper = key.to_ascii_uppercase();
-            // Never allow CODEX_* to be set from .env files for safety.
-            if upper.starts_with(ILLEGAL_ENV_VAR_PREFIX) { continue; }
-            // Always ignore provider keys from project .env (must be set globally or in shell).
-            if upper == "OPENAI_API_KEY" || upper == "AZURE_OPENAI_API_KEY" { continue; }
-            // Safe: still single-threaded during startup.
-            unsafe { std::env::set_var(&key, &value) };
-        }
+    if let Ok(codex_home) = codex_core::config::find_codex_home()
+        && let Ok(iter) = dotenvy::from_path_iter(codex_home.join(".env"))
+    {
+        set_filtered(iter);
     }
 }
 

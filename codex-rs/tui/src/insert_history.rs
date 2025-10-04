@@ -2,7 +2,7 @@ use std::fmt;
 use std::io;
 use std::io::Write;
 
-use crate::tui;
+use crate::wrapping::word_wrap_lines_borrowed;
 use crossterm::Command;
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
@@ -13,43 +13,31 @@ use crossterm::style::SetAttribute;
 use crossterm::style::SetBackgroundColor;
 use crossterm::style::SetColors;
 use crossterm::style::SetForegroundColor;
-// No terminal clears in terminal-mode insertion; preserve user's theme.
+use crossterm::terminal::Clear;
+use crossterm::terminal::ClearType;
 use ratatui::layout::Size;
+use ratatui::prelude::Backend;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use textwrap::Options as TwOptions;
-use textwrap::WordSplitter;
 
-/// Insert `lines` above the viewport.
-#[allow(dead_code)]
-pub(crate) fn insert_history_lines(terminal: &mut tui::Tui, lines: Vec<Line>) {
-    let mut out = std::io::stdout();
-    insert_history_lines_to_writer(terminal, &mut out, lines);
-}
-
-/// Like `insert_history_lines`, but writes ANSI to the provided writer. This
-/// is intended for testing where a capture buffer is used instead of stdout.
-#[allow(dead_code)]
-pub fn insert_history_lines_to_writer<B, W>(
-    terminal: &mut ratatui::Terminal<B>,
-    writer: &mut W,
-    lines: Vec<Line>,
-) where
-    B: ratatui::backend::Backend,
-    W: Write,
+/// Insert `lines` above the viewport using the terminal's backend writer
+/// (avoids direct stdout references).
+pub fn insert_history_lines<B>(terminal: &mut crate::custom_terminal::Terminal<B>, lines: Vec<Line>)
+where
+    B: Backend + Write,
 {
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
-    let cursor_pos = terminal.get_cursor_position().ok();
 
-    let mut area = terminal.get_frame().area();
+    let mut area = terminal.viewport_area;
+    let mut should_update_area = false;
+    let last_cursor_pos = terminal.last_known_cursor_pos;
+    let writer = terminal.backend_mut();
 
     // Pre-wrap lines using word-aware wrapping so terminal scrollback sees the same
     // formatting as the TUI. This avoids character-level hard wrapping by the terminal.
-    // Wrap to the full content width of the viewport in standard mode.
-    let content_width = area.width.max(1);
-    let wrapped = word_wrap_lines(&lines, content_width);
+    let wrapped = word_wrap_lines_borrowed(&lines, area.width.max(1) as usize);
     let wrapped_lines = wrapped.len() as u16;
     let cursor_top = if area.bottom() < screen_size.height {
         // If the viewport is not at the bottom of the screen, scroll it down to make room.
@@ -66,15 +54,14 @@ pub fn insert_history_lines_to_writer<B, W>(
         queue!(writer, SetScrollRegion(top_1based..screen_size.height)).ok();
         queue!(writer, MoveTo(0, area.top())).ok();
         for _ in 0..scroll_amount {
-            // Reverse Index (RI)
-            queue!(writer, ReverseIndex).ok();
+            // Reverse Index (RI): ESC M
+            queue!(writer, Print("\x1bM")).ok();
         }
         queue!(writer, ResetScrollRegion).ok();
 
         let cursor_top = area.top().saturating_sub(1);
-        // Adjust our local notion of area to account for the pre-scroll,
-        // but avoid touching ratatui::Terminal internals (set_viewport_area is private).
         area.y += scroll_amount;
+        should_update_area = true;
         cursor_top
     } else {
         area.top().saturating_sub(1)
@@ -97,117 +84,49 @@ pub fn insert_history_lines_to_writer<B, W>(
     // └──────────────────────────────┘
     queue!(writer, SetScrollRegion(1..area.top())).ok();
 
-    // Do not force theme colors in terminal mode; let native terminal theme show.
-
     // NB: we are using MoveTo instead of set_cursor_position here to avoid messing with the
     // terminal's last_known_cursor_position, which hopefully will still be accurate after we
     // fetch/restore the cursor position. insert_history_lines should be cursor-position-neutral :)
     queue!(writer, MoveTo(0, cursor_top)).ok();
 
     for line in wrapped {
-        // Emit a real newline so terminals reliably scroll when at the bottom
-        // of the scroll region. Some terminals do not scroll on CSI E
-        // (MoveToNextLine); LF is the most portable.
         queue!(writer, Print("\r\n")).ok();
-        write_spans(writer, line.iter()).ok();
-        // Avoid Clear(EOL) painting solid backgrounds over terminal theme.
+        queue!(
+            writer,
+            SetColors(Colors::new(
+                line.style
+                    .fg
+                    .map(std::convert::Into::into)
+                    .unwrap_or(CColor::Reset),
+                line.style
+                    .bg
+                    .map(std::convert::Into::into)
+                    .unwrap_or(CColor::Reset)
+            ))
+        )
+        .ok();
+        queue!(writer, Clear(ClearType::UntilNewLine)).ok();
+        // Merge line-level style into each span so that ANSI colors reflect
+        // line styles (e.g., blockquotes with green fg).
+        let merged_spans: Vec<Span> = line
+            .spans
+            .iter()
+            .map(|s| Span {
+                style: s.style.patch(line.style),
+                content: s.content.clone(),
+            })
+            .collect();
+        write_spans(writer, merged_spans.iter()).ok();
     }
 
     queue!(writer, ResetScrollRegion).ok();
 
     // Restore the cursor position to where it was before we started.
-    if let Some(cursor_pos) = cursor_pos {
-        queue!(writer, MoveTo(cursor_pos.x, cursor_pos.y)).ok();
-    }
+    queue!(writer, MoveTo(last_cursor_pos.x, last_cursor_pos.y)).ok();
 
-    writer.flush().ok();
-}
-
-/// Variant of `insert_history_lines` that reserves `reserved_bottom_rows` at the
-/// bottom of the screen for a live UI (e.g., the input composer) and inserts
-/// history lines into the scrollback above that region.
-#[allow(dead_code)]
-pub(crate) fn insert_history_lines_above(terminal: &mut tui::Tui, reserved_bottom_rows: u16, lines: Vec<Line>) {
-    let mut out = std::io::stdout();
-    insert_history_lines_to_writer_above(terminal, &mut out, reserved_bottom_rows, lines);
-}
-
-#[allow(dead_code)]
-pub fn insert_history_lines_to_writer_above<B, W>(
-    terminal: &mut ratatui::Terminal<B>,
-    writer: &mut W,
-    reserved_bottom_rows: u16,
-    lines: Vec<Line>,
-) where
-    B: ratatui::backend::Backend,
-    W: Write,
-{
-    if lines.is_empty() { return; }
-    let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
-    let cursor_pos = terminal.get_cursor_position().ok();
-
-    // Compute the bottom of the reserved region; ensure at least 1 visible row remains
-    let screen_h = screen_size.height.max(1);
-    let reserved = reserved_bottom_rows.min(screen_h.saturating_sub(1));
-    let region_bottom = screen_h.saturating_sub(reserved).max(1);
-
-    // Pre-wrap to avoid terminal hard-wrap artifacts
-    let content_width = screen_size.width.max(1);
-    let wrapped = word_wrap_lines(&lines, content_width);
-
-    if region_bottom <= 1 {
-        // Degenerate case (startup or unknown size): fall back to simple
-        // line-by-line prints that let the terminal naturally scroll. This is
-        // safe before the first bottom-pane draw and avoids a 1-line scroll
-        // region that would overwrite the same line repeatedly.
-        for line in word_wrap_lines(&lines, screen_size.width.max(1)) {
-            write_spans(writer, line.iter()).ok();
-            queue!(writer, Print("\r\n")).ok();
-        }
-        writer.flush().ok();
-        return;
-    }
-
-    // Limit scroll region to rows [1 .. region_bottom] so the bottom reserved rows are untouched
-    queue!(writer, SetScrollRegion(1..region_bottom)).ok();
-    // Place cursor at the last line of the scroll region
-    queue!(writer, MoveTo(0, region_bottom.saturating_sub(1))).ok();
-
-    // Do not force theme colors in terminal mode; let native terminal theme show.
-
-    for line in wrapped {
-        // Ensure we're at the bottom row of the scroll region; printing a newline
-        // while at the bottom margin scrolls the region by one.
-        write_spans(writer, line.iter()).ok();
-        // Newline scrolls the region up by one when at the bottom margin.
-        queue!(writer, Print("\r\n")).ok();
-    }
-
-    queue!(writer, ResetScrollRegion).ok();
-    if let Some(cursor_pos) = cursor_pos {
-        queue!(writer, MoveTo(cursor_pos.x, cursor_pos.y)).ok();
-    }
-    writer.flush().ok();
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ReverseIndex;
-
-impl Command for ReverseIndex {
-    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // RI (Reverse Index): ESC M
-        write!(f, "\x1bM")
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> io::Result<()> {
-        // Use ANSI path through ConPTY; WinAPI equivalent isn't exposed.
-        Ok(())
-    }
-
-    #[cfg(windows)]
-    fn is_ansi_code_supported(&self) -> bool {
-        true
+    let _ = writer;
+    if should_update_area {
+        terminal.set_viewport_area(area);
     }
 }
 
@@ -216,14 +135,11 @@ pub struct SetScrollRegion(pub std::ops::Range<u16>);
 
 impl Command for SetScrollRegion {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // CSI Ps ; Ps r  (DECSTBM)
-        // Set Scrolling Region [top;bottom] (default = full size of window)
-        // 1-based line numbers
         write!(f, "\x1b[{};{}r", self.0.start, self.0.end)
     }
 
     #[cfg(windows)]
-    fn execute_winapi(&self) -> io::Result<()> {
+    fn execute_winapi(&self) -> std::io::Result<()> {
         panic!("tried to execute SetScrollRegion command using WinAPI, use ANSI instead");
     }
 
@@ -239,13 +155,11 @@ pub struct ResetScrollRegion;
 
 impl Command for ResetScrollRegion {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // CSI r  (DECSTBM)
-        // Reset Scrolling Region to full screen
         write!(f, "\x1b[r")
     }
 
     #[cfg(windows)]
-    fn execute_winapi(&self) -> io::Result<()> {
+    fn execute_winapi(&self) -> std::io::Result<()> {
         panic!("tried to execute ResetScrollRegion command using WinAPI, use ANSI instead");
     }
 
@@ -323,10 +237,9 @@ impl ModifierDiff {
     }
 }
 
-/// Write the spans to the writer with the correct styling
 fn write_spans<'a, I>(mut writer: &mut impl Write, content: I) -> io::Result<()>
 where
-    I: Iterator<Item = &'a Span<'a>>,
+    I: IntoIterator<Item = &'a Span<'a>>,
 {
     let mut fg = Color::Reset;
     let mut bg = Color::Reset;
@@ -365,191 +278,13 @@ where
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub struct SetUnderlineColor(pub CColor);
-
-impl Command for SetUnderlineColor {
-    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // Use the CSI 58 sequence for underline color
-        // CSI 58:5:n m for 256 colors or CSI 58:2::r:g:b m for RGB
-        match self.0 {
-            CColor::Black => write!(f, "\x1b[58:5:0m"),
-            CColor::DarkGrey => write!(f, "\x1b[58:5:8m"),
-            CColor::Red => write!(f, "\x1b[58:5:1m"),
-            CColor::DarkRed => write!(f, "\x1b[58:5:9m"),
-            CColor::Green => write!(f, "\x1b[58:5:2m"),
-            CColor::DarkGreen => write!(f, "\x1b[58:5:10m"),
-            CColor::Yellow => write!(f, "\x1b[58:5:3m"),
-            CColor::DarkYellow => write!(f, "\x1b[58:5:11m"),
-            CColor::Blue => write!(f, "\x1b[58:5:4m"),
-            CColor::DarkBlue => write!(f, "\x1b[58:5:12m"),
-            CColor::Magenta => write!(f, "\x1b[58:5:5m"),
-            CColor::DarkMagenta => write!(f, "\x1b[58:5:13m"),
-            CColor::Cyan => write!(f, "\x1b[58:5:6m"),
-            CColor::DarkCyan => write!(f, "\x1b[58:5:14m"),
-            CColor::White => write!(f, "\x1b[58:5:7m"),
-            CColor::Grey => write!(f, "\x1b[58:5:15m"),
-            CColor::Rgb { r, g, b } => write!(f, "\x1b[58:2::{}:{}:{}m", r, g, b),
-            CColor::AnsiValue(n) => write!(f, "\x1b[58:5:{}m", n),
-            CColor::Reset => write!(f, "\x1b[59m"), // Reset underline color
-        }
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> io::Result<()> {
-        // Windows doesn't support underline colors in the same way
-        Ok(())
-    }
-}
-
-/// Word-aware wrapping for a list of `Line`s preserving styles.
-pub(crate) fn word_wrap_lines(lines: &[Line], width: u16) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    let w = width.max(1) as usize;
-    for line in lines {
-        out.extend(word_wrap_line(line, w));
-    }
-    out
-}
-
-fn word_wrap_line(line: &Line, width: usize) -> Vec<Line<'static>> {
-    if width == 0 {
-        return vec![to_owned_line(line)];
-    }
-    // Horizontal rule detection: lines consisting of --- *** or ___ (3+)
-    let flat_trim: String = line
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect::<String>()
-        .trim()
-        .to_string();
-    if !flat_trim.is_empty() {
-        let chars: Vec<char> = flat_trim.chars().collect();
-        let only = |ch: char| chars.iter().all(|c| *c == ch || c.is_whitespace());
-        let count = |ch: char| chars.iter().filter(|c| **c == ch).count();
-        if (only('-') && count('-') >= 3)
-            || (only('*') && count('*') >= 3)
-            || (only('_') && count('_') >= 3)
-        {
-            let hr = Line::from(Span::styled(
-                std::iter::repeat('─').take(width).collect::<String>(),
-                ratatui::style::Style::default().fg(crate::colors::assistant_hr()),
-            ));
-            return vec![hr];
-        }
-    }
-
-    // Concatenate content and keep span boundaries for later re-slicing.
-    let mut flat = String::new();
-    let mut span_bounds = Vec::new(); // (start_byte, end_byte, style)
-    let mut cursor = 0usize;
-    for s in &line.spans {
-        let text = s.content.as_ref();
-        let start = cursor;
-        flat.push_str(text);
-        cursor += text.len();
-        span_bounds.push((start, cursor, s.style));
-    }
-
-    // Use textwrap for robust word-aware wrapping; no hyphenation, no breaking words.
-    let opts = TwOptions::new(width)
-        .break_words(false)
-        .word_splitter(WordSplitter::NoHyphenation);
-    let wrapped = textwrap::wrap(&flat, &opts);
-
-    if wrapped.len() <= 1 {
-        return vec![to_owned_line(line)];
-    }
-
-    // Map wrapped pieces back to byte ranges in `flat` sequentially.
-    let mut start_cursor = 0usize;
-    let mut out: Vec<Line<'static>> = Vec::with_capacity(wrapped.len());
-    for piece in wrapped {
-        let piece_str: &str = &piece;
-        if piece_str.is_empty() {
-            out.push(Line {
-                style: line.style,
-                alignment: line.alignment,
-                spans: Vec::new(),
-            });
-            continue;
-        }
-        // Find the next occurrence of piece_str at or after start_cursor.
-        // textwrap preserves order, so a linear scan is sufficient.
-        if let Some(rel) = flat[start_cursor..].find(piece_str) {
-            let s = start_cursor + rel;
-            let e = s + piece_str.len();
-            out.push(slice_line_spans(line, &span_bounds, s, e));
-            start_cursor = e;
-        } else {
-            // Fallback: slice by length from cursor.
-            let s = start_cursor;
-            let e = (start_cursor + piece_str.len()).min(flat.len());
-            out.push(slice_line_spans(line, &span_bounds, s, e));
-            start_cursor = e;
-        }
-    }
-
-    out
-}
-
-fn to_owned_line(l: &Line<'_>) -> Line<'static> {
-    Line {
-        style: l.style,
-        alignment: l.alignment,
-        spans: l
-            .spans
-            .iter()
-            .map(|s| Span {
-                style: s.style,
-                content: std::borrow::Cow::Owned(s.content.to_string()),
-            })
-            .collect(),
-    }
-}
-
-fn slice_line_spans(
-    original: &Line<'_>,
-    span_bounds: &[(usize, usize, ratatui::style::Style)],
-    start_byte: usize,
-    end_byte: usize,
-) -> Line<'static> {
-    let mut acc: Vec<Span<'static>> = Vec::new();
-    for (i, (s, e, style)) in span_bounds.iter().enumerate() {
-        if *e <= start_byte {
-            continue;
-        }
-        if *s >= end_byte {
-            break;
-        }
-        let seg_start = start_byte.max(*s);
-        let seg_end = end_byte.min(*e);
-        if seg_end > seg_start {
-            let local_start = seg_start - *s;
-            let local_end = seg_end - *s;
-            let content = original.spans[i].content.as_ref();
-            let slice = &content[local_start..local_end];
-            acc.push(Span {
-                style: *style,
-                content: std::borrow::Cow::Owned(slice.to_string()),
-            });
-        }
-        if *e >= end_byte {
-            break;
-        }
-    }
-    Line {
-        style: original.style,
-        alignment: original.alignment,
-        spans: acc,
-    }
-}
-
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown_render::render_markdown_text;
+    use crate::test_backend::VT100Backend;
+    use ratatui::layout::Rect;
+    use ratatui::style::Color;
 
     #[test]
     fn writes_bold_then_regular_spans() {
@@ -572,59 +307,217 @@ mod tests {
             SetAttribute(crossterm::style::Attribute::Reset),
         )
         .unwrap();
+
         assert_eq!(
-            actual,
-            expected,
-            "Actual: {}",
-            String::from_utf8_lossy(&actual)
+            String::from_utf8(actual).unwrap(),
+            String::from_utf8(expected).unwrap()
         );
     }
 
     #[test]
-    fn word_wrap_line_simple() {
-        let line = Line::from("hello world foo bar baz");
-        let wrapped = word_wrap_line(&line, 10);
-        assert_eq!(wrapped.len(), 3);
-        assert_eq!(wrapped[0].to_string(), "hello");
-        assert_eq!(wrapped[1].to_string(), "world foo");
-        assert_eq!(wrapped[2].to_string(), "bar baz");
+    fn vt100_blockquote_line_emits_green_fg() {
+        // Set up a small off-screen terminal
+        let width: u16 = 40;
+        let height: u16 = 10;
+        let backend = VT100Backend::new(width, height);
+        let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        // Place viewport on the last line so history inserts scroll upward
+        let viewport = Rect::new(0, height - 1, width, 1);
+        term.set_viewport_area(viewport);
+
+        // Build a blockquote-like line: apply line-level green style and prefix "> "
+        let mut line: Line<'static> = Line::from(vec!["> ".into(), "Hello world".into()]);
+        line = line.style(Color::Green);
+        insert_history_lines(&mut term, vec![line]);
+
+        let mut saw_colored = false;
+        'outer: for row in 0..height {
+            for col in 0..width {
+                if let Some(cell) = term.backend().vt100().screen().cell(row, col)
+                    && cell.has_contents()
+                    && cell.fgcolor() != vt100::Color::Default
+                {
+                    saw_colored = true;
+                    break 'outer;
+                }
+            }
+        }
+        assert!(
+            saw_colored,
+            "expected at least one colored cell in vt100 output"
+        );
     }
 
     #[test]
-    fn word_wrap_line_preserves_styles() {
-        use ratatui::style::Stylize;
-        let line = Line::from(vec!["hello ".into(), "world".bold(), " foo".into()]);
-        let wrapped = word_wrap_line(&line, 8);
-        assert_eq!(wrapped.len(), 2);
-        assert_eq!(wrapped[0].spans.len(), 2);
-        assert_eq!(wrapped[0].spans[0].content, "hello ");
+    fn vt100_blockquote_wrap_preserves_color_on_all_wrapped_lines() {
+        // Force wrapping by using a narrow viewport width and a long blockquote line.
+        let width: u16 = 20;
+        let height: u16 = 8;
+        let backend = VT100Backend::new(width, height);
+        let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        // Viewport is the last line so history goes directly above it.
+        let viewport = Rect::new(0, height - 1, width, 1);
+        term.set_viewport_area(viewport);
+
+        // Create a long blockquote with a distinct prefix and enough text to wrap.
+        let mut line: Line<'static> = Line::from(vec![
+            "> ".into(),
+            "This is a long quoted line that should wrap".into(),
+        ]);
+        line = line.style(Color::Green);
+
+        insert_history_lines(&mut term, vec![line]);
+
+        // Parse and inspect the final screen buffer.
+        let screen = term.backend().vt100().screen();
+
+        // Collect rows that are non-empty; these should correspond to our wrapped lines.
+        let mut non_empty_rows: Vec<u16> = Vec::new();
+        for row in 0..height {
+            let mut any = false;
+            for col in 0..width {
+                if let Some(cell) = screen.cell(row, col)
+                    && cell.has_contents()
+                    && cell.contents() != "\0"
+                    && cell.contents() != " "
+                {
+                    any = true;
+                    break;
+                }
+            }
+            if any {
+                non_empty_rows.push(row);
+            }
+        }
+
+        // Expect at least two rows due to wrapping.
         assert!(
-            !wrapped[0].spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::BOLD)
+            non_empty_rows.len() >= 2,
+            "expected wrapped output to span >=2 rows, got {non_empty_rows:?}",
         );
-        assert_eq!(wrapped[0].spans[1].content, "wo");
-        assert!(
-            wrapped[0].spans[1]
-                .style
-                .add_modifier
-                .contains(Modifier::BOLD)
-        );
-        assert_eq!(wrapped[1].spans.len(), 2);
-        assert_eq!(wrapped[1].spans[0].content, "rld");
-        assert!(
-            wrapped[1].spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::BOLD)
-        );
-        assert_eq!(wrapped[1].spans[1].content, " foo");
-        assert!(
-            !wrapped[1].spans[1]
-                .style
-                .add_modifier
-                .contains(Modifier::BOLD)
-        );
+
+        // For each non-empty row, ensure all non-space cells are using a non-default fg color.
+        for row in non_empty_rows {
+            for col in 0..width {
+                if let Some(cell) = screen.cell(row, col) {
+                    let contents = cell.contents();
+                    if !contents.is_empty() && contents != " " {
+                        assert!(
+                            cell.fgcolor() != vt100::Color::Default,
+                            "expected non-default fg on row {row} col {col}, got {:?}",
+                            cell.fgcolor()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vt100_colored_prefix_then_plain_text_resets_color() {
+        let width: u16 = 40;
+        let height: u16 = 6;
+        let backend = VT100Backend::new(width, height);
+        let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        let viewport = Rect::new(0, height - 1, width, 1);
+        term.set_viewport_area(viewport);
+
+        // First span colored, rest plain.
+        let line: Line<'static> = Line::from(vec![
+            Span::styled("1. ", ratatui::style::Style::default().fg(Color::LightBlue)),
+            Span::raw("Hello world"),
+        ]);
+
+        insert_history_lines(&mut term, vec![line]);
+
+        let screen = term.backend().vt100().screen();
+
+        // Find the first non-empty row; verify first three cells are colored, following cells default.
+        'rows: for row in 0..height {
+            let mut has_text = false;
+            for col in 0..width {
+                if let Some(cell) = screen.cell(row, col)
+                    && cell.has_contents()
+                    && cell.contents() != " "
+                {
+                    has_text = true;
+                    break;
+                }
+            }
+            if !has_text {
+                continue;
+            }
+
+            // Expect "1. Hello world" starting at col 0.
+            for col in 0..3 {
+                let cell = screen.cell(row, col).unwrap();
+                assert!(
+                    cell.fgcolor() != vt100::Color::Default,
+                    "expected colored prefix at col {col}, got {:?}",
+                    cell.fgcolor()
+                );
+            }
+            for col in 3..(3 + "Hello world".len() as u16) {
+                let cell = screen.cell(row, col).unwrap();
+                assert_eq!(
+                    cell.fgcolor(),
+                    vt100::Color::Default,
+                    "expected default color for plain text at col {col}, got {:?}",
+                    cell.fgcolor()
+                );
+            }
+            break 'rows;
+        }
+    }
+
+    #[test]
+    fn vt100_deep_nested_mixed_list_third_level_marker_is_colored() {
+        // Markdown with five levels (ordered → unordered → ordered → unordered → unordered).
+        let md = "1. First\n   - Second level\n     1. Third level (ordered)\n        - Fourth level (bullet)\n          - Fifth level to test indent consistency\n";
+        let text = render_markdown_text(md);
+        let lines: Vec<Line<'static>> = text.lines.clone();
+
+        let width: u16 = 60;
+        let height: u16 = 12;
+        let backend = VT100Backend::new(width, height);
+        let mut term = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        let viewport = ratatui::layout::Rect::new(0, height - 1, width, 1);
+        term.set_viewport_area(viewport);
+
+        insert_history_lines(&mut term, lines);
+
+        let screen = term.backend().vt100().screen();
+
+        // Reconstruct screen rows as strings to locate the 3rd level line.
+        let rows: Vec<String> = screen.rows(0, width).collect();
+
+        let needle = "1. Third level (ordered)";
+        let row_idx = rows
+            .iter()
+            .position(|r| r.contains(needle))
+            .unwrap_or_else(|| {
+                panic!("expected to find row containing {needle:?}, have rows: {rows:?}")
+            });
+        let col_start = rows[row_idx].find(needle).unwrap() as u16; // column where '1' starts
+
+        // Verify that the numeric marker ("1.") at the third level is colored
+        // (non-default fg) and the content after the following space resets to default.
+        for c in [col_start, col_start + 1] {
+            let cell = screen.cell(row_idx as u16, c).unwrap();
+            assert!(
+                cell.fgcolor() != vt100::Color::Default,
+                "expected colored 3rd-level marker at row {row_idx} col {c}, got {:?}",
+                cell.fgcolor()
+            );
+        }
+        let content_col = col_start + 3; // skip '1', '.', and the space
+        if let Some(cell) = screen.cell(row_idx as u16, content_col) {
+            assert_eq!(
+                cell.fgcolor(),
+                vt100::Color::Default,
+                "expected default color for 3rd-level content at row {row_idx} col {content_col}, got {:?}",
+                cell.fgcolor()
+            );
+        }
     }
 }

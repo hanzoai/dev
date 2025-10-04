@@ -1,152 +1,235 @@
-#![allow(dead_code)]
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use itertools::Itertools as _;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Constraint;
+use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
+use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::{Paragraph, Block, Borders, Clear};
-use ratatui::layout::Alignment;
+use ratatui::widgets::Block;
+use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
 use crate::app_event_sender::AppEventSender;
+use crate::key_hint::KeyBinding;
+use crate::render::Insets;
+use crate::render::RectExt as _;
+use crate::render::renderable::ColumnRenderable;
+use crate::render::renderable::Renderable;
+use crate::style::user_message_style;
+use crate::terminal_palette;
 
-use super::BottomPane;
 use super::CancellationEvent;
 use super::bottom_pane_view::BottomPaneView;
+use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
 use super::selection_popup_common::GenericDisplayRow;
+use super::selection_popup_common::measure_rows_height;
 use super::selection_popup_common::render_rows;
 
 /// One selectable item in the generic selection list.
 pub(crate) type SelectionAction = Box<dyn Fn(&AppEventSender) + Send + Sync>;
 
+#[derive(Default)]
 pub(crate) struct SelectionItem {
     pub name: String,
+    pub display_shortcut: Option<KeyBinding>,
     pub description: Option<String>,
     pub is_current: bool,
     pub actions: Vec<SelectionAction>,
+    pub dismiss_on_select: bool,
+    pub search_value: Option<String>,
+}
+
+pub(crate) struct SelectionViewParams {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub footer_hint: Option<Line<'static>>,
+    pub items: Vec<SelectionItem>,
+    pub is_searchable: bool,
+    pub search_placeholder: Option<String>,
+    pub header: Box<dyn Renderable>,
+}
+
+impl Default for SelectionViewParams {
+    fn default() -> Self {
+        Self {
+            title: None,
+            subtitle: None,
+            footer_hint: None,
+            items: Vec::new(),
+            is_searchable: false,
+            search_placeholder: None,
+            header: Box::new(()),
+        }
+    }
 }
 
 pub(crate) struct ListSelectionView {
-    title: String,
-    subtitle: Option<String>,
-    footer_hint: Option<String>,
+    footer_hint: Option<Line<'static>>,
     items: Vec<SelectionItem>,
     state: ScrollState,
     complete: bool,
     app_event_tx: AppEventSender,
-    max_rows: usize,
+    is_searchable: bool,
+    search_query: String,
+    search_placeholder: Option<String>,
+    filtered_indices: Vec<usize>,
+    last_selected_actual_idx: Option<usize>,
+    header: Box<dyn Renderable>,
 }
 
 impl ListSelectionView {
-    fn dim_prefix_span() -> Span<'static> {
-        Span::styled("▌ ", Style::default().add_modifier(Modifier::DIM))
-    }
-
-    fn render_dim_prefix_line(area: Rect, buf: &mut Buffer) {
-        // Render a simple blank spacer line (no glyphs like '▌')
-        let para = Paragraph::new(Line::from(""));
-        para.render(area, buf);
-    }
-    
-    fn wrapped_lines_for(text: &str, width: u16) -> u16 {
-        if text.is_empty() || width == 0 { return 0; }
-        let w = width as usize;
-        let mut lines: u16 = 0;
-        for part in text.split('\n') {
-            let len = part.chars().count();
-            if len == 0 { lines = lines.saturating_add(1); continue; }
-            let mut l = (len / w) as u16;
-            if len % w != 0 { l = l.saturating_add(1); }
-            if l == 0 { l = 1; }
-            lines = lines.saturating_add(l);
+    pub fn new(params: SelectionViewParams, app_event_tx: AppEventSender) -> Self {
+        let mut header = params.header;
+        if params.title.is_some() || params.subtitle.is_some() {
+            let title = params.title.map(|title| Line::from(title.bold()));
+            let subtitle = params.subtitle.map(|subtitle| Line::from(subtitle.dim()));
+            header = Box::new(ColumnRenderable::new([
+                header,
+                Box::new(title),
+                Box::new(subtitle),
+            ]));
         }
-        lines
-    }
-
-    // Compute a consistent layout for both height calculation and rendering.
-    // Returns (content_width, subtitle_rows, spacer_top_rows, bottom_spacer_rows, footer_rows, rows_visible, total_height)
-    fn compute_layout(&self, total_width: u16) -> (u16, u16, u16, u16, u16, u16, u16) {
-        // Borders consume 2 cols; we also left-pad content by 1 col inside inner.
-        let inner_width = total_width.saturating_sub(2);
-        let content_width = inner_width.saturating_sub(1);
-
-        // How many list rows we want to show
-        let target_rows = (self.items.len()).clamp(1, self.max_rows) as u16;
-
-        // Subtitle wraps on content width
-        let subtitle_rows = self
-            .subtitle
-            .as_ref()
-            .map(|s| Self::wrapped_lines_for(s, content_width))
-            .unwrap_or(0);
-
-        // Always include one spacer row between subtitle/title and the list
-        let spacer_top_rows: u16 = 1;
-
-        // Footer: single line of hints when present
-        let footer_rows: u16 = if self.footer_hint.is_some() { 1 } else { 0 };
-
-        // A visual spacer between the last list row and the footer
-        let bottom_spacer_rows: u16 = if footer_rows > 0 { 1 } else { 0 };
-
-        // Content rows budget equals the rows we want to show
-        let rows_visible = target_rows;
-
-        // Total height = borders (2) + subtitle + spacer + rows + bottom spacer + footer
-        let total_height = 2 + subtitle_rows + spacer_top_rows + rows_visible + bottom_spacer_rows + footer_rows;
-
-        (content_width, subtitle_rows, spacer_top_rows, bottom_spacer_rows, footer_rows, rows_visible, total_height)
-    }
-    pub fn new(
-        title: String,
-        subtitle: Option<String>,
-        footer_hint: Option<String>,
-        items: Vec<SelectionItem>,
-        app_event_tx: AppEventSender,
-        max_rows: usize,
-    ) -> Self {
         let mut s = Self {
-            title,
-            subtitle,
-            footer_hint,
-            items,
+            footer_hint: params.footer_hint,
+            items: params.items,
             state: ScrollState::new(),
             complete: false,
             app_event_tx,
-            max_rows,
+            is_searchable: params.is_searchable,
+            search_query: String::new(),
+            search_placeholder: if params.is_searchable {
+                params.search_placeholder
+            } else {
+                None
+            },
+            filtered_indices: Vec::new(),
+            last_selected_actual_idx: None,
+            header,
         };
-        let len = s.items.len();
-        if let Some(idx) = s.items.iter().position(|it| it.is_current) {
-            s.state.selected_idx = Some(idx);
-        }
-        s.state.clamp_selection(len);
-        s.state.ensure_visible(len, s.max_rows.min(len));
+        s.apply_filter();
         s
     }
 
+    fn visible_len(&self) -> usize {
+        self.filtered_indices.len()
+    }
+
+    fn max_visible_rows(len: usize) -> usize {
+        MAX_POPUP_ROWS.min(len.max(1))
+    }
+
+    fn apply_filter(&mut self) {
+        let previously_selected = self
+            .state
+            .selected_idx
+            .and_then(|visible_idx| self.filtered_indices.get(visible_idx).copied())
+            .or_else(|| {
+                (!self.is_searchable)
+                    .then(|| self.items.iter().position(|item| item.is_current))
+                    .flatten()
+            });
+
+        if self.is_searchable && !self.search_query.is_empty() {
+            let query_lower = self.search_query.to_lowercase();
+            self.filtered_indices = self
+                .items
+                .iter()
+                .positions(|item| {
+                    item.search_value
+                        .as_ref()
+                        .is_some_and(|v| v.to_lowercase().contains(&query_lower))
+                })
+                .collect();
+        } else {
+            self.filtered_indices = (0..self.items.len()).collect();
+        }
+
+        let len = self.filtered_indices.len();
+        self.state.selected_idx = self
+            .state
+            .selected_idx
+            .and_then(|visible_idx| {
+                self.filtered_indices
+                    .get(visible_idx)
+                    .and_then(|idx| self.filtered_indices.iter().position(|cur| cur == idx))
+            })
+            .or_else(|| {
+                previously_selected.and_then(|actual_idx| {
+                    self.filtered_indices
+                        .iter()
+                        .position(|idx| *idx == actual_idx)
+                })
+            })
+            .or_else(|| (len > 0).then_some(0));
+
+        let visible = Self::max_visible_rows(len);
+        self.state.clamp_selection(len);
+        self.state.ensure_visible(len, visible);
+    }
+
+    fn build_rows(&self) -> Vec<GenericDisplayRow> {
+        self.filtered_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(visible_idx, actual_idx)| {
+                self.items.get(*actual_idx).map(|item| {
+                    let is_selected = self.state.selected_idx == Some(visible_idx);
+                    let prefix = if is_selected { '›' } else { ' ' };
+                    let name = item.name.as_str();
+                    let name_with_marker = if item.is_current {
+                        format!("{name} (current)")
+                    } else {
+                        item.name.clone()
+                    };
+                    let n = visible_idx + 1;
+                    let display_name = if self.is_searchable {
+                        // The number keys don't work when search is enabled (since we let the
+                        // numbers be used for the search query).
+                        format!("{prefix} {name_with_marker}")
+                    } else {
+                        format!("{prefix} {n}. {name_with_marker}")
+                    };
+                    GenericDisplayRow {
+                        name: display_name,
+                        display_shortcut: item.display_shortcut,
+                        match_indices: None,
+                        is_current: item.is_current,
+                        description: item.description.clone(),
+                    }
+                })
+            })
+            .collect()
+    }
+
     fn move_up(&mut self) {
-        let len = self.items.len();
+        let len = self.visible_len();
         self.state.move_up_wrap(len);
-        self.state.ensure_visible(len, self.max_rows.min(len));
+        let visible = Self::max_visible_rows(len);
+        self.state.ensure_visible(len, visible);
     }
 
     fn move_down(&mut self) {
-        let len = self.items.len();
+        let len = self.visible_len();
         self.state.move_down_wrap(len);
-        self.state.ensure_visible(len, self.max_rows.min(len));
+        let visible = Self::max_visible_rows(len);
+        self.state.ensure_visible(len, visible);
     }
 
     fn accept(&mut self) {
-        if let Some(idx) = self.state.selected_idx {
-            if let Some(item) = self.items.get(idx) {
-                for act in &item.actions {
-                    act(&self.app_event_tx);
-                }
+        if let Some(idx) = self.state.selected_idx
+            && let Some(actual_idx) = self.filtered_indices.get(idx)
+            && let Some(item) = self.items.get(*actual_idx)
+        {
+            self.last_selected_actual_idx = Some(*actual_idx);
+            for act in &item.actions {
+                act(&self.app_event_tx);
+            }
+            if item.dismiss_on_select {
                 self.complete = true;
             }
         } else {
@@ -154,14 +237,19 @@ impl ListSelectionView {
         }
     }
 
-    fn cancel(&mut self) {
-        // Close the popup without performing any actions.
-        self.complete = true;
+    #[cfg(test)]
+    pub(crate) fn set_search_query(&mut self, query: String) {
+        self.search_query = query;
+        self.apply_filter();
+    }
+
+    pub(crate) fn take_last_selected_index(&mut self) -> Option<usize> {
+        self.last_selected_actual_idx.take()
     }
 }
 
-impl BottomPaneView<'_> for ListSelectionView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'_>, key_event: KeyEvent) {
+impl BottomPaneView for ListSelectionView {
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
                 code: KeyCode::Up, ..
@@ -171,8 +259,46 @@ impl BottomPaneView<'_> for ListSelectionView {
                 ..
             } => self.move_down(),
             KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            } if self.is_searchable => {
+                self.search_query.pop();
+                self.apply_filter();
+            }
+            KeyEvent {
                 code: KeyCode::Esc, ..
-            } => self.cancel(),
+            } => {
+                self.on_ctrl_c();
+            }
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                ..
+            } if self.is_searchable
+                && !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.search_query.push(c);
+                self.apply_filter();
+            }
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                ..
+            } if !self.is_searchable
+                && !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                if let Some(idx) = c
+                    .to_digit(10)
+                    .map(|d| d as usize)
+                    .and_then(|d| d.checked_sub(1))
+                    && idx < self.items.len()
+                {
+                    self.state.selected_idx = Some(idx);
+                    self.accept();
+                }
+            }
             KeyEvent {
                 code: KeyCode::Enter,
                 modifiers: KeyModifiers::NONE,
@@ -186,14 +312,30 @@ impl BottomPaneView<'_> for ListSelectionView {
         self.complete
     }
 
-    fn on_ctrl_c(&mut self, _pane: &mut BottomPane<'_>) -> CancellationEvent {
+    fn on_ctrl_c(&mut self) -> CancellationEvent {
         self.complete = true;
         CancellationEvent::Handled
     }
+}
 
+impl Renderable for ListSelectionView {
     fn desired_height(&self, width: u16) -> u16 {
-        let (_cw, _sub, _sp, _bsp, _foot, _rows, total) = self.compute_layout(width);
-        total
+        // Measure wrapped height for up to MAX_POPUP_ROWS items at the given width.
+        // Build the same display rows used by the renderer so wrapping math matches.
+        let rows = self.build_rows();
+
+        let rows_height = measure_rows_height(&rows, &self.state, MAX_POPUP_ROWS, width);
+
+        // Subtract 4 for the padding on the left and right of the header.
+        let mut height = self.header.desired_height(width.saturating_sub(4));
+        height = height.saturating_add(rows_height + 3);
+        if self.is_searchable {
+            height = height.saturating_add(1);
+        }
+        if self.footer_hint.is_some() {
+            height = height.saturating_add(1);
+        }
+        height
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -201,97 +343,192 @@ impl BottomPaneView<'_> for ListSelectionView {
             return;
         }
 
-        // Clear and draw a bordered block matching other slash popups
-        Clear.render(area, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .title(self.title.clone())
-            .title_alignment(Alignment::Center);
-        let inner = block.inner(area);
-        block.render(area, buf);
+        let [content_area, footer_area] = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(if self.footer_hint.is_some() { 1 } else { 0 }),
+        ])
+        .areas(area);
 
-        // Layout inside the block: optional subtitle header, spacer, rows, footer
-        let (content_width, subtitle_rows, spacer_top, bottom_spacer_rows, footer_rows, rows_visible, _total) =
-            self.compute_layout(area.width);
-        let mut next_y = inner.y;
-        if let Some(sub) = &self.subtitle {
-            let sub_h = subtitle_rows;
-            if sub_h > 0 {
-                let subtitle_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: content_width, height: sub_h };
-                Paragraph::new(sub.clone())
-                    .style(Style::default().fg(crate::colors::text_dim()))
-                    .render(subtitle_area, buf);
-                next_y = next_y.saturating_add(sub_h);
-            }
+        Block::default()
+            .style(user_message_style(terminal_palette::default_bg()))
+            .render(content_area, buf);
+
+        let header_height = self
+            .header
+            // Subtract 4 for the padding on the left and right of the header.
+            .desired_height(content_area.width.saturating_sub(4));
+        let rows = self.build_rows();
+        let rows_height =
+            measure_rows_height(&rows, &self.state, MAX_POPUP_ROWS, content_area.width);
+        let [header_area, _, search_area, list_area] = Layout::vertical([
+            Constraint::Max(header_height),
+            Constraint::Max(1),
+            Constraint::Length(if self.is_searchable { 1 } else { 0 }),
+            Constraint::Length(rows_height),
+        ])
+        .areas(content_area.inset(Insets::vh(1, 2)));
+
+        if header_area.height < header_height {
+            let [header_area, elision_area] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(header_area);
+            self.header.render(header_area, buf);
+            Paragraph::new(vec![
+                Line::from(format!("[… {header_height} lines] ctrl + a view all")).dim(),
+            ])
+            .render(elision_area, buf);
+        } else {
+            self.header.render(header_area, buf);
         }
-        if spacer_top > 0 && next_y < inner.y.saturating_add(inner.height) {
-            let spacer_area = Rect { x: inner.x.saturating_add(1), y: next_y, width: content_width, height: 1 };
-            Self::render_dim_prefix_line(spacer_area, buf);
-            next_y = next_y.saturating_add(1);
+
+        if self.is_searchable {
+            Line::from(self.search_query.clone()).render(search_area, buf);
+            let query_span: Span<'static> = if self.search_query.is_empty() {
+                self.search_placeholder
+                    .as_ref()
+                    .map(|placeholder| placeholder.clone().dim())
+                    .unwrap_or_else(|| "".into())
+            } else {
+                self.search_query.clone().into()
+            };
+            Line::from(query_span).render(search_area, buf);
         }
 
-        // Compute rows area height from inner
-        let reserved = bottom_spacer_rows.saturating_add(footer_rows); // exactly as measured
-        let rows_area = Rect {
-            // Left pad by one column
-            x: inner.x.saturating_add(1),
-            y: next_y,
-            width: content_width,
-            height: inner.height.saturating_sub(next_y.saturating_sub(inner.y)).saturating_sub(reserved),
-        };
+        if list_area.height > 0 {
+            let list_area = Rect {
+                x: list_area.x - 2,
+                y: list_area.y,
+                width: list_area.width + 2,
+                height: list_area.height,
+            };
+            render_rows(
+                list_area,
+                buf,
+                &rows,
+                &self.state,
+                list_area.height as usize,
+                "no matches",
+            );
+        }
 
-        let rows: Vec<GenericDisplayRow> = self
-            .items
-            .iter()
-            .enumerate()
-            .map(|(i, it)| {
-                let is_selected = self.state.selected_idx == Some(i);
-                // Use a nicer selector: '›' when selected, otherwise space
-                let prefix = if is_selected { '›' } else { ' ' };
-                let name_with_marker = if it.is_current {
-                    format!("{} (current)", it.name)
-                } else {
-                    it.name.clone()
-                };
-                let display_name = format!("{} {}. {}", prefix, i + 1, name_with_marker);
-                GenericDisplayRow {
-                    name: display_name,
-                    match_indices: None,
-                    is_current: it.is_current,
-                    description: if is_selected { it.description.clone() } else { None },
-                    name_color: None,
+        if let Some(hint) = &self.footer_hint {
+            let hint_area = Rect {
+                x: footer_area.x + 2,
+                y: footer_area.y,
+                width: footer_area.width.saturating_sub(2),
+                height: footer_area.height,
+            };
+            hint.clone().dim().render(hint_area, buf);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_event::AppEvent;
+    use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+    use insta::assert_snapshot;
+    use ratatui::layout::Rect;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    fn make_selection_view(subtitle: Option<&str>) -> ListSelectionView {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let items = vec![
+            SelectionItem {
+                name: "Read Only".to_string(),
+                description: Some("Codex can read files".to_string()),
+                is_current: true,
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+            SelectionItem {
+                name: "Full Access".to_string(),
+                description: Some("Codex can edit files".to_string()),
+                is_current: false,
+                dismiss_on_select: true,
+                ..Default::default()
+            },
+        ];
+        ListSelectionView::new(
+            SelectionViewParams {
+                title: Some("Select Approval Mode".to_string()),
+                subtitle: subtitle.map(str::to_string),
+                footer_hint: Some(standard_popup_hint_line()),
+                items,
+                ..Default::default()
+            },
+            tx,
+        )
+    }
+
+    fn render_lines(view: &ListSelectionView) -> String {
+        let width = 48;
+        let height = view.desired_height(width);
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+
+        let lines: Vec<String> = (0..area.height)
+            .map(|row| {
+                let mut line = String::new();
+                for col in 0..area.width {
+                    let symbol = buf[(area.x + col, area.y + row)].symbol();
+                    if symbol.is_empty() {
+                        line.push(' ');
+                    } else {
+                        line.push_str(symbol);
+                    }
                 }
+                line
             })
             .collect();
-        if rows_area.height > 0 {
-            let max_rows_to_render = rows_visible.min(rows_area.height);
-            render_rows(rows_area, buf, &rows, &self.state, max_rows_to_render as usize, true);
-        }
+        lines.join("\n")
+    }
 
-        if self.footer_hint.is_some() {
-            // Bottom spacer above footer, if reserved
-            if bottom_spacer_rows > 0 && rows_area.height > 0 {
-                let spacer_y = inner.y + inner.height - footer_rows - bottom_spacer_rows;
-                let spacer_area = Rect { x: inner.x.saturating_add(1), y: spacer_y, width: content_width, height: bottom_spacer_rows };
-                Paragraph::new(Line::from(""))
-                    .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-                    .render(spacer_area, buf);
-            }
-            // Render footer on the last inner line
-            let footer_area = Rect { x: inner.x.saturating_add(1), y: inner.y + inner.height - 1, width: content_width, height: 1 };
-            let line = Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-                Span::styled(" Navigate  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Enter", Style::default().fg(crate::colors::success())),
-                Span::styled(" Select  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Esc", Style::default().fg(crate::colors::error())),
-                Span::styled(" Cancel", Style::default().fg(crate::colors::text_dim())),
-            ]);
-            Paragraph::new(line)
-                .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-                .render(footer_area, buf);
-        }
+    #[test]
+    fn renders_blank_line_between_title_and_items_without_subtitle() {
+        let view = make_selection_view(None);
+        assert_snapshot!(
+            "list_selection_spacing_without_subtitle",
+            render_lines(&view)
+        );
+    }
+
+    #[test]
+    fn renders_blank_line_between_subtitle_and_items() {
+        let view = make_selection_view(Some("Switch between Codex approval presets"));
+        assert_snapshot!("list_selection_spacing_with_subtitle", render_lines(&view));
+    }
+
+    #[test]
+    fn renders_search_query_line_when_enabled() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let items = vec![SelectionItem {
+            name: "Read Only".to_string(),
+            description: Some("Codex can read files".to_string()),
+            is_current: false,
+            dismiss_on_select: true,
+            ..Default::default()
+        }];
+        let mut view = ListSelectionView::new(
+            SelectionViewParams {
+                title: Some("Select Approval Mode".to_string()),
+                footer_hint: Some(standard_popup_hint_line()),
+                items,
+                is_searchable: true,
+                search_placeholder: Some("Type to search branches".to_string()),
+                ..Default::default()
+            },
+            tx,
+        );
+        view.set_search_query("filters".to_string());
+
+        let lines = render_lines(&view);
+        assert!(
+            lines.contains("filters"),
+            "expected search query line to include rendered query, got {lines:?}"
+        );
     }
 }

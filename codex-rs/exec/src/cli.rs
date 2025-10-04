@@ -11,12 +11,7 @@ pub struct Cli {
     pub command: Option<Command>,
 
     /// Optional image(s) to attach to the initial prompt.
-    #[arg(
-        long = "image",
-        short = 'i',
-        value_name = "FILE",
-        value_delimiter = ','
-    )]
+    #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',', num_args = 1..)]
     pub images: Vec<PathBuf>,
 
     /// Model the agent should use.
@@ -53,10 +48,6 @@ pub struct Cli {
     #[clap(long = "cd", short = 'C', value_name = "DIR")]
     pub cwd: Option<PathBuf>,
 
-    /// Enable debug logging of all LLM requests and responses to files.
-    #[clap(long = "debug", short = 'd', default_value_t = false)]
-    pub debug: bool,
-
     /// Allow running Codex outside a Git repository.
     #[arg(long = "skip-git-repo-check", default_value_t = false)]
     pub skip_git_repo_check: bool,
@@ -73,7 +64,7 @@ pub struct Cli {
     pub color: Color,
 
     /// Print events to stdout as JSONL.
-    #[arg(long = "json", default_value_t = false)]
+    #[arg(long = "json", alias = "experimental-json", default_value_t = false)]
     pub json: bool,
 
     /// Whether to include the plan tool in the conversation.
@@ -81,7 +72,7 @@ pub struct Cli {
     pub include_plan_tool: bool,
 
     /// Specifies file where the last message from the agent should be written.
-    #[arg(long = "output-last-message")]
+    #[arg(long = "output-last-message", short = 'o', value_name = "FILE")]
     pub last_message_file: Option<PathBuf>,
 
     /// Initial instructions for the agent. If not provided as an argument (or

@@ -42,7 +42,7 @@ fn group_for(name: &str) -> String {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = "codex-rs/tui/assets/spinners.json";
+    let path = "code-rs/tui/assets/spinners.json";
     let text = fs::read_to_string(path)?;
     let src: BTreeMap<String, serde_json::Value> = serde_json::from_str(&text)?;
     let mut out: BTreeMap<String, Dest> = BTreeMap::new();
@@ -60,4 +60,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Upgraded spinners.json with labels/groups");
     Ok(())
 }
-
