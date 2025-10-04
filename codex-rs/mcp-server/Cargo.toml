@@ -16,14 +16,11 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-agent-client-protocol = { version = "0.4.3", features = ["unstable"] }
 codex-arg0 = { workspace = true }
 codex-common = { workspace = true, features = ["cli"] }
 codex-core = { workspace = true }
 codex-protocol = { workspace = true }
-codex-app-server-protocol = { workspace = true }
 codex-utils-json-to-toml = { workspace = true }
-codex-app-server = { workspace = true }
 mcp-types = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -38,7 +35,6 @@ tokio = { workspace = true, features = [
 ] }
 tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
-uuid = { workspace = true, features = ["serde", "v7"] }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

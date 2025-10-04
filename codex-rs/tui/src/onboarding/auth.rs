@@ -1,68 +1,82 @@
-use codex_login::CLIENT_ID;
+#![allow(clippy::unwrap_used)]
+
+use codex_core::AuthManager;
+use codex_core::auth::CLIENT_ID;
+use codex_core::auth::login_with_api_key;
+use codex_core::auth::read_openai_api_key_from_env;
 use codex_login::ServerOptions;
 use codex_login::ShutdownHandle;
 use codex_login::run_login_server;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Constraint;
+use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
+use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::BorderType;
+use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
-use codex_login::AuthMode;
-
-use codex_core::config::GPT_5_CODEX_MEDIUM_MODEL;
-use codex_core::model_family::{derive_default_model_family, find_family_for_model};
+use codex_app_server_protocol::AuthMode;
+use std::sync::RwLock;
 
 use crate::LoginStatus;
-use crate::app::ChatWidgetArgs;
-use crate::app_event::AppEvent;
-use crate::app_event_sender::AppEventSender;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
 use crate::shimmer::shimmer_spans;
+use crate::tui::FrameRequester;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use super::onboarding_screen::StepState;
-// no additional imports
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub(crate) enum SignInState {
     PickMode,
     ChatGptContinueInBrowser(ContinueInBrowserState),
     ChatGptSuccessMessage,
     ChatGptSuccess,
-    EnvVarMissing,
-    EnvVarFound,
+    ApiKeyEntry(ApiKeyInputState),
+    ApiKeyConfigured,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Default)]
+pub(crate) struct ApiKeyInputState {
+    value: String,
+    prepopulated_from_env: bool,
+}
+
+#[derive(Clone)]
 /// Used to manage the lifecycle of SpawnedLogin and ensure it gets cleaned up.
 pub(crate) struct ContinueInBrowserState {
     auth_url: String,
-    shutdown_handle: Option<ShutdownHandle>,
-    _login_wait_handle: Option<tokio::task::JoinHandle<()>>,
+    shutdown_flag: Option<ShutdownHandle>,
 }
 
 impl Drop for ContinueInBrowserState {
     fn drop(&mut self) {
-        if let Some(flag) = &self.shutdown_handle {
-            flag.shutdown();
+        if let Some(handle) = &self.shutdown_flag {
+            handle.shutdown();
         }
     }
 }
 
 impl KeyboardHandler for AuthModeWidget {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if self.handle_api_key_entry_key_event(&key_event) {
+            return;
+        }
+
         match key_event.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.highlighted_mode = AuthMode::ChatGPT;
@@ -73,80 +87,65 @@ impl KeyboardHandler for AuthModeWidget {
             KeyCode::Char('1') => {
                 self.start_chatgpt_login();
             }
-            KeyCode::Char('2') => self.verify_api_key(),
-            KeyCode::Enter => match self.sign_in_state {
-                SignInState::PickMode => match self.highlighted_mode {
-                    AuthMode::ChatGPT => self.start_chatgpt_login(),
-                    AuthMode::ApiKey => self.verify_api_key(),
-                },
-                SignInState::EnvVarMissing => self.sign_in_state = SignInState::PickMode,
-                SignInState::ChatGptSuccessMessage => {
-                    self.sign_in_state = SignInState::ChatGptSuccess
+            KeyCode::Char('2') => self.start_api_key_entry(),
+            KeyCode::Enter => {
+                let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
+                match sign_in_state {
+                    SignInState::PickMode => match self.highlighted_mode {
+                        AuthMode::ChatGPT => {
+                            self.start_chatgpt_login();
+                        }
+                        AuthMode::ApiKey => {
+                            self.start_api_key_entry();
+                        }
+                    },
+                    SignInState::ChatGptSuccessMessage => {
+                        *self.sign_in_state.write().unwrap() = SignInState::ChatGptSuccess;
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             KeyCode::Esc => {
-                if matches!(self.sign_in_state, SignInState::ChatGptContinueInBrowser(_)) {
-                    self.sign_in_state = SignInState::PickMode;
+                tracing::info!("Esc pressed");
+                let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
+                if matches!(sign_in_state, SignInState::ChatGptContinueInBrowser(_)) {
+                    *self.sign_in_state.write().unwrap() = SignInState::PickMode;
+                    self.request_frame.schedule_frame();
                 }
             }
             _ => {}
         }
     }
+
+    fn handle_paste(&mut self, pasted: String) {
+        let _ = self.handle_api_key_entry_paste(pasted);
+    }
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub(crate) struct AuthModeWidget {
-    pub event_tx: AppEventSender,
+    pub request_frame: FrameRequester,
     pub highlighted_mode: AuthMode,
     pub error: Option<String>,
-    pub sign_in_state: SignInState,
+    pub sign_in_state: Arc<RwLock<SignInState>>,
     pub codex_home: PathBuf,
     pub login_status: LoginStatus,
-    pub preferred_auth_method: AuthMode,
-    pub chat_widget_args: Arc<Mutex<ChatWidgetArgs>>,
+    pub auth_manager: Arc<AuthManager>,
 }
 
 impl AuthModeWidget {
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
-                Span::raw("> "),
-                Span::styled(
-                    "Sign in with ChatGPT to use your paid OpenAI plan",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
+                "  ".into(),
+                "Sign in with ChatGPT to use Codex as part of your paid plan".into(),
             ]),
             Line::from(vec![
-                Span::raw("  "),
-                Span::styled(
-                    "or connect an API key for usage-based billing",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
+                "  ".into(),
+                "or connect an API key for usage-based billing".into(),
             ]),
-            Line::from(""),
+            "".into(),
         ];
-
-        // If the user is already authenticated but the method differs from their
-        // preferred auth method, show a brief explanation.
-        if let LoginStatus::AuthMode(current) = self.login_status {
-            if current != self.preferred_auth_method {
-                let to_label = |mode: AuthMode| match mode {
-                    AuthMode::ApiKey => "API key",
-                    AuthMode::ChatGPT => "ChatGPT",
-                };
-                let msg = format!(
-                    "  You’re currently using {} while your preferred method is {}.",
-                    to_label(current),
-                    to_label(self.preferred_auth_method)
-                );
-                lines.push(
-                    Line::from(msg)
-                        .style(Style::default().fg(crate::colors::text_dim())),
-                );
-                lines.push(Line::from(""));
-            }
-        }
 
         let create_mode_item = |idx: usize,
                                 selected_mode: AuthMode,
@@ -158,65 +157,47 @@ impl AuthModeWidget {
 
             let line1 = if is_selected {
                 Line::from(vec![
-                    format!("{} {}. ", caret, idx + 1)
-                        .fg(crate::colors::info())
-                        .dim(),
-                    text.to_string().fg(crate::colors::info()),
+                    format!("{} {}. ", caret, idx + 1).cyan().dim(),
+                    text.to_string().cyan(),
                 ])
             } else {
-                Line::from(format!("  {}. {text}", idx + 1))
-                    .style(Style::default().fg(crate::colors::text()))
+                format!("  {}. {text}", idx + 1).into()
             };
 
             let line2 = if is_selected {
                 Line::from(format!("     {description}"))
-                    .fg(crate::colors::info())
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::DIM)
             } else {
                 Line::from(format!("     {description}"))
-                    .style(Style::default().fg(crate::colors::text_dim()))
+                    .style(Style::default().add_modifier(Modifier::DIM))
             };
 
             vec![line1, line2]
-        };
-        let chatgpt_label = if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ChatGPT))
-        {
-            "Continue using ChatGPT"
-        } else {
-            "Sign in with ChatGPT"
         };
 
         lines.extend(create_mode_item(
             0,
             AuthMode::ChatGPT,
-            chatgpt_label,
+            "Sign in with ChatGPT",
             "Usage included with Plus, Pro, and Team plans",
         ));
-        let api_key_label = if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ApiKey))
-        {
-            "Continue using API key"
-        } else {
-            "Provide your own API key"
-        };
+        lines.push("".into());
         lines.extend(create_mode_item(
             1,
             AuthMode::ApiKey,
-            api_key_label,
+            "Provide your own API key",
             "Pay for what you use",
         ));
-        lines.push(Line::from(""));
+        lines.push("".into());
         lines.push(
             // AE: Following styles.md, this should probably be Cyan because it's a user input tip.
             //     But leaving this for a future cleanup.
-            Line::from("  Press Enter to continue")
-                .style(Style::default().fg(crate::colors::text_dim())),
+            "  Press Enter to continue".dim().into(),
         );
         if let Some(err) = &self.error {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                err.as_str(),
-                Style::default().fg(crate::colors::error()),
-            )));
+            lines.push("".into());
+            lines.push(err.as_str().red().into());
         }
 
         Paragraph::new(lines)
@@ -225,31 +206,24 @@ impl AuthModeWidget {
     }
 
     fn render_continue_in_browser(&self, area: Rect, buf: &mut Buffer) {
-        let mut spans = vec![Span::from("> ")];
+        let mut spans = vec!["  ".into()];
         // Schedule a follow-up frame to keep the shimmer animation going.
-        self.event_tx
-            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
-                100,
-            )));
+        self.request_frame
+            .schedule_frame_in(std::time::Duration::from_millis(100));
         spans.extend(shimmer_spans("Finish signing in via your browser"));
-        let mut lines = vec![Line::from(spans), Line::from("")];
-        if let SignInState::ChatGptContinueInBrowser(state) = &self.sign_in_state {
-            if !state.auth_url.is_empty() {
-                lines.push(Line::from("  If the link doesn't open automatically, open the following link to authenticate:"));
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    state.auth_url
-                        .as_str()
-                        .fg(crate::colors::info())
-                        .underlined(),
-                ]));
-                lines.push(Line::from(""));
-            }
+        let mut lines = vec![spans.into(), "".into()];
+
+        let sign_in_state = self.sign_in_state.read().unwrap();
+        if let SignInState::ChatGptContinueInBrowser(state) = &*sign_in_state
+            && !state.auth_url.is_empty()
+        {
+            lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
+            lines.push("".into());
+            lines.push(Line::from(state.auth_url.as_str().cyan().underlined()));
+            lines.push("".into());
         }
 
-        lines.push(
-            Line::from("  Press Esc to cancel").style(Style::default().add_modifier(Modifier::DIM)),
-        );
+        lines.push("  Press Esc to cancel".dim().into());
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .render(area, buf);
@@ -257,36 +231,28 @@ impl AuthModeWidget {
 
     fn render_chatgpt_success_message(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
-            Line::from("✓ Signed in with your ChatGPT account")
-                .fg(crate::colors::success()),
-            Line::from(""),
-            Line::from("> Before you start:"),
-            Line::from(""),
-            Line::from("  Decide how much autonomy you want to grant Code"),
+            "✓ Signed in with your ChatGPT account".fg(Color::Green).into(),
+            "".into(),
+            "  Before you start:".into(),
+            "".into(),
+            "  Decide how much autonomy you want to grant Codex".into(),
             Line::from(vec![
-                Span::raw("  For more details see the "),
-                Span::styled(
-                    "\u{1b}]8;;https://github.com/just-every/code\u{7}Code docs\u{1b}]8;;\u{7}",
-                    Style::default().add_modifier(Modifier::UNDERLINED),
-                ),
+                "  For more details see the ".into(),
+                "\u{1b}]8;;https://github.com/openai/codex\u{7}Codex docs\u{1b}]8;;\u{7}".underlined(),
             ])
-            .style(Style::default().add_modifier(Modifier::DIM)),
-            Line::from(""),
-            Line::from("  Code can make mistakes"),
-            Line::from("  Review the code it writes and commands it runs")
-                .style(Style::default().add_modifier(Modifier::DIM)),
-            Line::from(""),
-            Line::from("  Powered by your ChatGPT account"),
+            .dim(),
+            "".into(),
+            "  Codex can make mistakes".into(),
+            "  Review the code it writes and commands it runs".dim().into(),
+            "".into(),
+            "  Powered by your ChatGPT account".into(),
             Line::from(vec![
-                Span::raw("  Uses your plan's rate limits and "),
-                Span::styled(
-                    "\u{1b}]8;;https://chatgpt.com/#settings\u{7}training data preferences\u{1b}]8;;\u{7}",
-                    Style::default().add_modifier(Modifier::UNDERLINED),
-                ),
+                "  Uses your plan's rate limits and ".into(),
+                "\u{1b}]8;;https://chatgpt.com/#settings\u{7}training data preferences\u{1b}]8;;\u{7}".underlined(),
             ])
-            .style(Style::default().add_modifier(Modifier::DIM)),
-            Line::from(""),
-            Line::from("  Press Enter to continue").fg(crate::colors::info()),
+            .dim(),
+            "".into(),
+            "  Press Enter to continue".fg(Color::Cyan).into(),
         ];
 
         Paragraph::new(lines)
@@ -295,30 +261,10 @@ impl AuthModeWidget {
     }
 
     fn render_chatgpt_success(&self, area: Rect, buf: &mut Buffer) {
-        let lines = vec![Line::from("✓ Signed in with your ChatGPT account").fg(crate::colors::success())];
-
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .render(area, buf);
-    }
-
-    fn render_env_var_found(&self, area: Rect, buf: &mut Buffer) {
-        let lines = vec![Line::from("✓ Using OPENAI_API_KEY").fg(crate::colors::success())];
-
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .render(area, buf);
-    }
-
-    fn render_env_var_missing(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
-            Line::from(
-                "  To use Code with the OpenAI API, set OPENAI_API_KEY in your environment",
-            )
-            .style(Style::default().fg(crate::colors::info())),
-            Line::from(""),
-            Line::from("  Press Enter to return")
-                .style(Style::default().add_modifier(Modifier::DIM)),
+            "✓ Signed in with your ChatGPT account"
+                .fg(Color::Green)
+                .into(),
         ];
 
         Paragraph::new(lines)
@@ -326,111 +272,284 @@ impl AuthModeWidget {
             .render(area, buf);
     }
 
+    fn render_api_key_configured(&self, area: Rect, buf: &mut Buffer) {
+        let lines = vec![
+            "✓ API key configured".fg(Color::Green).into(),
+            "".into(),
+            "  Codex will use usage-based billing with your API key.".into(),
+        ];
+
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_api_key_entry(&self, area: Rect, buf: &mut Buffer, state: &ApiKeyInputState) {
+        let [intro_area, input_area, footer_area] = Layout::vertical([
+            Constraint::Min(4),
+            Constraint::Length(3),
+            Constraint::Min(2),
+        ])
+        .areas(area);
+
+        let mut intro_lines: Vec<Line> = vec![
+            Line::from(vec![
+                "> ".into(),
+                "Use your own OpenAI API key for usage-based billing".bold(),
+            ]),
+            "".into(),
+            "  Paste or type your API key below. It will be stored locally in auth.json.".into(),
+            "".into(),
+        ];
+        if state.prepopulated_from_env {
+            intro_lines.push("  Detected OPENAI_API_KEY environment variable.".into());
+            intro_lines.push(
+                "  Paste a different key if you prefer to use another account."
+                    .dim()
+                    .into(),
+            );
+            intro_lines.push("".into());
+        }
+        Paragraph::new(intro_lines)
+            .wrap(Wrap { trim: false })
+            .render(intro_area, buf);
+
+        let content_line: Line = if state.value.is_empty() {
+            vec!["Paste or type your API key".dim()].into()
+        } else {
+            Line::from(state.value.clone())
+        };
+        Paragraph::new(content_line)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .title("API key")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .render(input_area, buf);
+
+        let mut footer_lines: Vec<Line> = vec![
+            "  Press Enter to save".dim().into(),
+            "  Press Esc to go back".dim().into(),
+        ];
+        if let Some(error) = &self.error {
+            footer_lines.push("".into());
+            footer_lines.push(error.as_str().red().into());
+        }
+        Paragraph::new(footer_lines)
+            .wrap(Wrap { trim: false })
+            .render(footer_area, buf);
+    }
+
+    fn handle_api_key_entry_key_event(&mut self, key_event: &KeyEvent) -> bool {
+        let mut should_save: Option<String> = None;
+        let mut should_request_frame = false;
+
+        {
+            let mut guard = self.sign_in_state.write().unwrap();
+            if let SignInState::ApiKeyEntry(state) = &mut *guard {
+                match key_event.code {
+                    KeyCode::Esc => {
+                        *guard = SignInState::PickMode;
+                        self.error = None;
+                        should_request_frame = true;
+                    }
+                    KeyCode::Enter => {
+                        let trimmed = state.value.trim().to_string();
+                        if trimmed.is_empty() {
+                            self.error = Some("API key cannot be empty".to_string());
+                            should_request_frame = true;
+                        } else {
+                            should_save = Some(trimmed);
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if state.prepopulated_from_env {
+                            state.value.clear();
+                            state.prepopulated_from_env = false;
+                        } else {
+                            state.value.pop();
+                        }
+                        self.error = None;
+                        should_request_frame = true;
+                    }
+                    KeyCode::Char(c)
+                        if !key_event.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key_event.modifiers.contains(KeyModifiers::ALT) =>
+                    {
+                        if state.prepopulated_from_env {
+                            state.value.clear();
+                            state.prepopulated_from_env = false;
+                        }
+                        state.value.push(c);
+                        self.error = None;
+                        should_request_frame = true;
+                    }
+                    _ => {}
+                }
+                // handled; let guard drop before potential save
+            } else {
+                return false;
+            }
+        }
+
+        if let Some(api_key) = should_save {
+            self.save_api_key(api_key);
+        } else if should_request_frame {
+            self.request_frame.schedule_frame();
+        }
+        true
+    }
+
+    fn handle_api_key_entry_paste(&mut self, pasted: String) -> bool {
+        let trimmed = pasted.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let mut guard = self.sign_in_state.write().unwrap();
+        if let SignInState::ApiKeyEntry(state) = &mut *guard {
+            if state.prepopulated_from_env {
+                state.value = trimmed.to_string();
+                state.prepopulated_from_env = false;
+            } else {
+                state.value.push_str(trimmed);
+            }
+            self.error = None;
+        } else {
+            return false;
+        }
+
+        drop(guard);
+        self.request_frame.schedule_frame();
+        true
+    }
+
+    fn start_api_key_entry(&mut self) {
+        self.error = None;
+        let prefill_from_env = read_openai_api_key_from_env();
+        let mut guard = self.sign_in_state.write().unwrap();
+        match &mut *guard {
+            SignInState::ApiKeyEntry(state) => {
+                if state.value.is_empty() {
+                    if let Some(prefill) = prefill_from_env {
+                        state.value = prefill;
+                        state.prepopulated_from_env = true;
+                    } else {
+                        state.prepopulated_from_env = false;
+                    }
+                }
+            }
+            _ => {
+                *guard = SignInState::ApiKeyEntry(ApiKeyInputState {
+                    value: prefill_from_env.clone().unwrap_or_default(),
+                    prepopulated_from_env: prefill_from_env.is_some(),
+                });
+            }
+        }
+        drop(guard);
+        self.request_frame.schedule_frame();
+    }
+
+    fn save_api_key(&mut self, api_key: String) {
+        match login_with_api_key(&self.codex_home, &api_key) {
+            Ok(()) => {
+                self.error = None;
+                self.login_status = LoginStatus::AuthMode(AuthMode::ApiKey);
+                self.auth_manager.reload();
+                *self.sign_in_state.write().unwrap() = SignInState::ApiKeyConfigured;
+            }
+            Err(err) => {
+                self.error = Some(format!("Failed to save API key: {err}"));
+                let mut guard = self.sign_in_state.write().unwrap();
+                if let SignInState::ApiKeyEntry(existing) = &mut *guard {
+                    if existing.value.is_empty() {
+                        existing.value.push_str(&api_key);
+                    }
+                    existing.prepopulated_from_env = false;
+                } else {
+                    *guard = SignInState::ApiKeyEntry(ApiKeyInputState {
+                        value: api_key,
+                        prepopulated_from_env: false,
+                    });
+                }
+            }
+        }
+
+        self.request_frame.schedule_frame();
+    }
+
     fn start_chatgpt_login(&mut self) {
         // If we're already authenticated with ChatGPT, don't start a new login –
         // just proceed to the success message flow.
         if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ChatGPT)) {
-            self.apply_chatgpt_login_side_effects();
-            self.sign_in_state = SignInState::ChatGptSuccess;
-            self.event_tx.send(AppEvent::RequestRedraw);
+            *self.sign_in_state.write().unwrap() = SignInState::ChatGptSuccess;
+            self.request_frame.schedule_frame();
             return;
         }
 
         self.error = None;
-        let opts = ServerOptions::new(
-            self.codex_home.clone(),
-            CLIENT_ID.to_string(),
-            codex_core::default_client::DEFAULT_ORIGINATOR.to_string(),
-        );
-        let server = run_login_server(opts);
-        match server {
+        let opts = ServerOptions::new(self.codex_home.clone(), CLIENT_ID.to_string());
+        match run_login_server(opts) {
             Ok(child) => {
-                let auth_url = child.auth_url.clone();
-                let shutdown_handle = child.cancel_handle();
+                let sign_in_state = self.sign_in_state.clone();
+                let request_frame = self.request_frame.clone();
+                let auth_manager = self.auth_manager.clone();
+                tokio::spawn(async move {
+                    let auth_url = child.auth_url.clone();
+                    {
+                        *sign_in_state.write().unwrap() =
+                            SignInState::ChatGptContinueInBrowser(ContinueInBrowserState {
+                                auth_url,
+                                shutdown_flag: Some(child.cancel_handle()),
+                            });
+                    }
+                    request_frame.schedule_frame();
+                    let r = child.block_until_done().await;
+                    match r {
+                        Ok(()) => {
+                            // Force the auth manager to reload the new auth information.
+                            auth_manager.reload();
 
-                let event_tx = self.event_tx.clone();
-                let join_handle = tokio::spawn(async move {
-                    spawn_completion_poller(child, event_tx).await;
+                            *sign_in_state.write().unwrap() = SignInState::ChatGptSuccessMessage;
+                            request_frame.schedule_frame();
+                        }
+                        _ => {
+                            *sign_in_state.write().unwrap() = SignInState::PickMode;
+                            // self.error = Some(e.to_string());
+                            request_frame.schedule_frame();
+                        }
+                    }
                 });
-                self.sign_in_state =
-                    SignInState::ChatGptContinueInBrowser(ContinueInBrowserState {
-                        auth_url,
-                        shutdown_handle: Some(shutdown_handle),
-                        _login_wait_handle: Some(join_handle),
-                    });
-                self.event_tx.send(AppEvent::RequestRedraw);
             }
             Err(e) => {
-                self.sign_in_state = SignInState::PickMode;
+                *self.sign_in_state.write().unwrap() = SignInState::PickMode;
                 self.error = Some(e.to_string());
-                self.event_tx.send(AppEvent::RequestRedraw);
+                self.request_frame.schedule_frame();
             }
         }
     }
-
-    /// TODO: Read/write from the correct hierarchy config overrides + auth json + OPENAI_API_KEY.
-    fn verify_api_key(&mut self) {
-        if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ApiKey)) {
-            // We already have an API key configured (e.g., from auth.json or env),
-            // so mark this step complete immediately.
-            self.sign_in_state = SignInState::EnvVarFound;
-        } else {
-            self.sign_in_state = SignInState::EnvVarMissing;
-        }
-
-        self.event_tx.send(AppEvent::RequestRedraw);
-    }
-
-    pub(crate) fn apply_chatgpt_login_side_effects(&mut self) {
-        self.login_status = LoginStatus::AuthMode(AuthMode::ChatGPT);
-        if let Ok(mut args) = self.chat_widget_args.lock() {
-            args.config.using_chatgpt_auth = true;
-            if args
-                .config
-                .model
-                .eq_ignore_ascii_case("gpt-5")
-            {
-                let new_model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
-                args.config.model = new_model.clone();
-
-                let family = find_family_for_model(&new_model)
-                    .unwrap_or_else(|| derive_default_model_family(&new_model));
-                args.config.model_family = family;
-            }
-        }
-    }
-}
-
-async fn spawn_completion_poller(
-    child: codex_login::LoginServer,
-    event_tx: AppEventSender,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        if let Ok(()) = child.block_until_done().await {
-            event_tx.send(AppEvent::OnboardingAuthComplete(Ok(())));
-        } else {
-            event_tx.send(AppEvent::OnboardingAuthComplete(Err(
-                "login failed".to_string()
-            )));
-        }
-    })
 }
 
 impl StepStateProvider for AuthModeWidget {
     fn get_step_state(&self) -> StepState {
-        match &self.sign_in_state {
+        let sign_in_state = self.sign_in_state.read().unwrap();
+        match &*sign_in_state {
             SignInState::PickMode
-            | SignInState::EnvVarMissing
+            | SignInState::ApiKeyEntry(_)
             | SignInState::ChatGptContinueInBrowser(_)
             | SignInState::ChatGptSuccessMessage => StepState::InProgress,
-            SignInState::ChatGptSuccess | SignInState::EnvVarFound => StepState::Complete,
+            SignInState::ChatGptSuccess | SignInState::ApiKeyConfigured => StepState::Complete,
         }
     }
 }
 
 impl WidgetRef for AuthModeWidget {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        match self.sign_in_state {
+        let sign_in_state = self.sign_in_state.read().unwrap();
+        match &*sign_in_state {
             SignInState::PickMode => {
                 self.render_pick_mode(area, buf);
             }
@@ -443,11 +562,11 @@ impl WidgetRef for AuthModeWidget {
             SignInState::ChatGptSuccess => {
                 self.render_chatgpt_success(area, buf);
             }
-            SignInState::EnvVarMissing => {
-                self.render_env_var_missing(area, buf);
+            SignInState::ApiKeyEntry(state) => {
+                self.render_api_key_entry(area, buf, state);
             }
-            SignInState::EnvVarFound => {
-                self.render_env_var_found(area, buf);
+            SignInState::ApiKeyConfigured => {
+                self.render_api_key_configured(area, buf);
             }
         }
     }

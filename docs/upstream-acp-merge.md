@@ -5,7 +5,7 @@
 Upstream PR [openai/codex#1707](https://github.com/openai/codex/pull/1707) introduces an
 experimental Agent Client Protocol (ACP) bridge so Zed can drive Codex via the
 `session/new` and `session/prompt` tool calls. The branch (fetched locally as
-`upstream-pr-1707`) rewrites large portions of `codex-rs/core`, the MCP server,
+`upstream-pr-1707`) rewrites large portions of `code-rs/core`, the MCP server,
 and the TypeScript CLI/TUI to accommodate the new workflow.
 
 ### Current Status (2025-09-22)
@@ -31,7 +31,7 @@ capabilities.
 
 ## What Upstream Added
 
-- **Core (`codex-rs/core`)**
+- **Core (`code-rs/core`)**
   - New `acp.rs` module with helpers for translating Codex exec/patch events
     into ACP `ToolCall` updates, including an ACP-backed `FileSystem` shim and a
     permission-request flow (`acp::request_permission`).
@@ -40,7 +40,7 @@ capabilities.
     etc.) and introducing new event wiring for ACP tool calls.
   - `protocol.rs` pared down to match the simplified upstream surface (fewer
     `Op` variants, different `AskForApproval` options, new MCP call events).
-- **MCP server (`codex-rs/mcp-server`)**
+- **MCP server (`code-rs/mcp-server`)**
   - New `acp_tool_runner.rs` that spawns Codex sessions on demand, relays MCP
     notifications, and surfaces ACP updates.
   - `message_processor.rs` extended to expose `session/new` and
@@ -53,11 +53,11 @@ capabilities.
 
 - **Protocol & Ops** – `QueueUserInput`, validation toggles, confirm guards,
   rich approval semantics (`ReviewDecision::ApprovedForSession`), and sandbox
-  policy options currently in `codex-rs/core/src/protocol.rs:1`.
+  policy options currently in `code-rs/core/src/protocol.rs:1`.
 - **Execution Safety & Logging** – Confirm-guard enforcement and the richer
-  `EventMsg` variants emitted from our `codex-rs/core/src/codex.rs:1`.
-- **TUI** – Entire Rust TUI stack (`codex-rs/tui/src/chatwidget.rs:1`,
-  `codex-rs/tui/src/history_cell.rs:1`, etc.) must remain functional and ignore
+  `EventMsg` variants emitted from our `code-rs/core/src/codex.rs:1`.
+- **TUI** – Entire Rust TUI stack (`code-rs/tui/src/chatwidget.rs:1`,
+  `code-rs/tui/src/history_cell.rs:1`, etc.) must remain functional and ignore
   unknown ACP events gracefully.
 - **CLI Footprint** – Our trimmed `codex-cli` structure and scripts differ from
   upstream’s wholesale replacement; we will not adopt the TypeScript overhaul.
@@ -67,17 +67,17 @@ capabilities.
 ## Integration Approach
 
 1. **Introduce ACP Helpers Without Regressions**
-   - Port `codex-rs/core/src/acp.rs:1` (and dependent structs) into Code, but
+   - Port `code-rs/core/src/acp.rs:1` (and dependent structs) into Code, but
      adapt it to reuse the current `FileChange` representations and respect
      confirm guard / approval flows.
-   - Extend `codex-rs/core/src/codex.rs:1` to emit ACP events while preserving
+   - Extend `code-rs/core/src/codex.rs:1` to emit ACP events while preserving
      the existing `Op` variants, queueing logic, and validation toggles.
-   - Update `codex-rs/core/src/util.rs:1`, `codex-rs/core/src/apply_patch.rs:1`,
+   - Update `code-rs/core/src/util.rs:1`, `code-rs/core/src/apply_patch.rs:1`,
      and related modules so ACP tool-call generators can derive the same
      metadata our TUI already consumes.
 
 2. **MCP Server Wiring**
-   - Add `codex-rs/mcp-server/src/acp_tool_runner.rs:1` and integrate it with
+   - Add `code-rs/mcp-server/src/acp_tool_runner.rs:1` and integrate it with
      `message_processor.rs:1`, ensuring we keep Code-specific auth/sandbox setup
      and error reporting.
    - Maintain existing MCP tools and ensure ACP tools are opt-in (guarded by
@@ -85,7 +85,7 @@ capabilities.
      unused.
 
 3. **Event & Frontend Compatibility**
-   - Extend our event enums (`codex-rs/core/src/protocol.rs:1`) with any new
+   - Extend our event enums (`code-rs/core/src/protocol.rs:1`) with any new
      variants required by ACP while keeping deprecated ones for backward
      compatibility.
    - Teach the Rust TUI to ignore or minimally display ACP-specific events so
@@ -93,17 +93,17 @@ capabilities.
 
 4. **Config & Build**
    - Add `agent-client-protocol` dependency where needed, updating
-     `codex-rs/core/Cargo.toml:1`, `codex-rs/mcp-server/Cargo.toml:1`, and
+     `code-rs/core/Cargo.toml:1`, `code-rs/mcp-server/Cargo.toml:1`, and
      `Cargo.lock`.
-   - Introduce configuration toggles (if any) in `codex-rs/core/src/config.rs:1`
-     and `codex-rs/core/src/config_types.rs:1` without breaking existing TOML
+   - Introduce configuration toggles (if any) in `code-rs/core/src/config.rs:1`
+     and `code-rs/core/src/config_types.rs:1` without breaking existing TOML
      files.
    - Update documentation (targeted sections in `docs/experimental.md:1` or a
      new page) to describe ACP/Zed support plus Code-specific caveats.
 
 5. **Testing & Validation**
    - Add focused tests covering ACP request flow (unit-level in core and MCP
-     server). Reuse existing harnesses (e.g., `codex-rs/mcp-server/tests`) to
+     server). Reuse existing harnesses (e.g., `code-rs/mcp-server/tests`) to
      simulate a session.
    - Validate end-to-end via `./build-fast.sh` only, honoring our policy against
      running additional formatters automatically.

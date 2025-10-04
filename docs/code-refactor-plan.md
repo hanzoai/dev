@@ -36,11 +36,16 @@ We already tried copying modules into `code-*` while leaving the originals in `c
    - Point binaries and downstream crates at the `code-*` versions first so
      the product keeps working.
    - For each fork feature area (TUI, app-server, CLI, core, browser, etc.)
-     replace the copy in `code-rs/` with thin wrappers that call into
-     upstream `codex-*` modules. When the wrapper is thin enough, delete the
-     duplicated implementation from `code-rs/` and rely on upstream.
-   - After each feature area is reconciled, re-run `./build-fast.sh` and
-     remove any leftover fork patches from the matching `codex-*` crate.
+     decide whether we can extend upstream `codex-*` code or must keep the
+     forked implementation. Favor reusing large upstream sections where the
+     integration cost is manageable; otherwise, maintain the fork logic and
+     document why it diverges.
+   - When we do integrate, prefer targeted extension points or light
+     wrappers instead of one-to-one rewrites, and retire duplicate modules
+     only after the shared path is verified.
+   - After each feature area decision, re-run `./build-fast.sh` and capture
+     any remaining fork patches in the matching `codex-*` crate for future
+     cleanup.
 
 4. **Ongoing maintenance**
    - Pull upstream changes directly into `codex-rs/`, resolve conflicts only
@@ -51,21 +56,31 @@ We already tried copying modules into `code-*` while leaving the originals in `c
 
 ## Execution Checklist
 
-1. Snapshot current state (branch + optional tag) so we can recover if the
-   reset uncovers regressions.
-2. `git mv codex-rs code-rs/codex-rs-fork` and ensure workspace tools still
-   locate the crates.
-3. Run the `codex-` → `code-` rename script over the moved tree; update
-   workspace members and dependencies accordingly.
-4. Fix build/scripts/tests that reference `codex-rs/…` paths (e.g.
-   `build-fast.sh`, CI workflows, developer docs).
-5. Verify `./build-fast.sh` succeeds using only the renamed fork crates.
-6. Replace `codex-rs/` with the upstream checkout and re-run
-   `./build-fast.sh`.
-7. Begin removing duplicated code area by area, leaning on upstream and
-   exposing wrapper shims only where the fork behavior diverges.
-8. When wrapper surfaces stabilize, drop any stale fork-only modules from
-   `code-rs/` and ensure all downstream crates import `code-*` exclusively.
+1. **DONE (2025-10-04):** Snapshot current state (branch + optional tag) so
+   we can recover if the reset uncovers regressions. Created
+   `snapshot/pre-upstream-reset-20251004` (branch) and
+   `snapshot-pre-upstream-reset-20251004` (tag) before upstream restore
+   work begins.
+2. **DONE (2025-10-04):** Duplicate `codex-rs/` into `code-rs/` so history
+   follows the fork. Bulk-renamed all crates/binaries from `codex-*` to
+   `code-*`, fixed module/file names, updated manifests, and confirmed
+   `./build-fast.sh --workspace code` passes.
+3. **DONE (2025-10-04):** Update shared tooling (`build-fast.sh`) to target
+   both workspaces and keep existing `codex` builds green (`./build-fast.sh`).
+4. **DONE (2025-10-04):** Audited all scripts, docs, and SDK samples to swap
+   `codex-rs/…` references over to `code-rs/…` (see commits touching
+   `build-fast.sh`, `scripts/ci-tests.sh`, TypeScript SDK, installation docs).
+5. **DONE (2025-10-04):** Checked out upstream `codex-rs/` at
+   `openai/codex@d7acd146` and re-ran `./build-fast.sh --workspace codex`
+   plus `./build-fast.sh --workspace code` to confirm both workspaces build.
+6. **DONE (2025-10-04):** Captured subsystem decisions in
+   `docs/subsystem-migration-status.md`, highlighting where we will reuse
+   upstream code versus keep fork-specialised wrappers.
+7. **DONE (2025-10-04):** Scheduled recurring `code-rs/` dead-code sweeps and
+   documented the cadence in `docs/code-dead-code-sweeps.md`.
+8. **DONE (2025-10-04):** Opened `docs/code-crate-parity-tracker.md` to record
+   when forked crates reach parity with upstream so we can delete duplicates
+   ahead of releases.
 
 ## Tracking
 

@@ -62,13 +62,6 @@ pub enum Op {
         items: Vec<InputItem>,
     },
 
-    /// Queue user input to be appended to the next model request without
-    /// interrupting the current turn.
-    QueueUserInput {
-        /// User input items, see `InputItem`
-        items: Vec<InputItem>,
-    },
-
     /// Similar to [`Op::UserInput`], but contains additional context required
     /// for a turn of a [`crate::codex_conversation::CodexConversation`].
     UserTurn {
@@ -142,15 +135,6 @@ pub enum Op {
         decision: ReviewDecision,
     },
 
-    /// Register a command pattern as approved for the remainder of the session.
-    RegisterApprovedCommand {
-        command: Vec<String>,
-        match_kind: ApprovedCommandMatchKind,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[serde(default)]
-        semantic_prefix: Option<Vec<String>>,
-    },
-
     /// Approve a code patch
     PatchApproval {
         /// The id of the submission we are approving
@@ -166,11 +150,6 @@ pub enum Op {
     AddToHistory {
         /// The message text to be stored.
         text: String,
-    },
-
-    /// Persist the full chat history snapshot for the current session.
-    PersistHistorySnapshot {
-        snapshot: serde_json::Value,
     },
 
     /// Request a single history entry identified by `log_id` + `offset`.
@@ -225,13 +204,6 @@ pub enum AskForApproval {
     /// Never ask the user to approve commands. Failures are immediately returned
     /// to the model, and never escalated to the user for approval.
     Never,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash, TS)]
-#[serde(rename_all = "kebab-case")]
-pub enum ApprovedCommandMatchKind {
-    Exact,
-    Prefix,
 }
 
 /// Determines execution restrictions for model shell commands.
@@ -436,40 +408,12 @@ pub enum InputItem {
 }
 
 /// Event Queue Entry - events from agent
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Event {
     /// Submission `id` that this event is correlated with.
     pub id: String,
-    /// Monotonic, per-turn sequence for ordering within a submission id.
-    /// Resets to 0 at TaskStarted and increments for each subsequent event.
-    pub event_seq: u64,
     /// Payload
     pub msg: EventMsg,
-    /// Optional model-provided ordering metadata (when applicable)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub order: Option<OrderMeta>,
-}
-
-/// Lightweight representation of an event suitable for persistence and replay.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct RecordedEvent {
-    pub id: String,
-    pub event_seq: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub order: Option<OrderMeta>,
-    pub msg: EventMsg,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct OrderMeta {
-    /// 1-based ordinal of this request/turn in the session
-    pub request_ordinal: u64,
-    /// Model-provided output_index for the top-level item
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_index: Option<u32>,
-    /// Model-provided sequence_number within the output_index stream
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sequence_number: Option<u64>,
 }
 
 /// Response event from the agent
@@ -602,7 +546,7 @@ pub struct TaskStartedEvent {
     pub model_context_window: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, TS)]
 pub struct TokenUsage {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
@@ -611,7 +555,7 @@ pub struct TokenUsage {
     pub total_tokens: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
     pub last_token_usage: TokenUsage,
@@ -648,19 +592,19 @@ impl TokenUsageInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct RateLimitSnapshot {
     pub primary: Option<RateLimitWindow>,
     pub secondary: Option<RateLimitWindow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct RateLimitWindow {
     /// Percentage (0-100) of the window that has been consumed.
     pub used_percent: f64,
@@ -668,14 +612,6 @@ pub struct RateLimitWindow {
     pub window_minutes: Option<u64>,
     /// Seconds until the window resets.
     pub resets_in_seconds: Option<u64>,
-}
-
-/// Payload for `ReplayHistory` containing prior `ResponseItem`s.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
-pub struct ReplayHistoryEvent {
-    pub items: Vec<crate::models::ResponseItem>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_snapshot: Option<serde_json::Value>,
 }
 
 // Includes prompts, tools and space to call compact.
@@ -965,7 +901,7 @@ impl InitialHistory {
                     .history
                     .iter()
                     .filter_map(|ri| match ri {
-                        RolloutItem::Event(ev) => Some(ev.msg.clone()),
+                        RolloutItem::EventMsg(ev) => Some(ev.clone()),
                         _ => None,
                     })
                     .collect(),
@@ -974,7 +910,7 @@ impl InitialHistory {
                 items
                     .iter()
                     .filter_map(|ri| match ri {
-                        RolloutItem::Event(ev) => Some(ev.msg.clone()),
+                        RolloutItem::EventMsg(ev) => Some(ev.clone()),
                         _ => None,
                     })
                     .collect(),
@@ -1037,7 +973,7 @@ pub enum RolloutItem {
     ResponseItem(ResponseItem),
     Compacted(CompactedItem),
     TurnContext(TurnContextItem),
-    Event(RecordedEvent),
+    EventMsg(EventMsg),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, TS)]
@@ -1093,25 +1029,6 @@ pub struct GitInfo {
 pub struct ReviewRequest {
     pub prompt: String,
     pub user_facing_hint: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub metadata: Option<ReviewContextMetadata>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS, Default)]
-pub struct ReviewContextMetadata {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub scope: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub commit: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub base_branch: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub current_branch: Option<String>,
 }
 
 /// Structured review result produced by a child review session.
@@ -1289,7 +1206,6 @@ pub struct GetHistoryEntryResponseEvent {
     pub entry: Option<HistoryEntry>,
 }
 
-/// Response payload for `Op::ListMcpTools`.
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 pub struct McpListToolsResponseEvent {
     /// Fully qualified tool name -> tool definition.
@@ -1350,7 +1266,7 @@ pub enum ReviewDecision {
     Abort,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum FileChange {
     Add {
@@ -1362,8 +1278,6 @@ pub enum FileChange {
     Update {
         unified_diff: String,
         move_path: Option<PathBuf>,
-        original_content: String,
-        new_content: String,
     },
 }
 
@@ -1403,7 +1317,6 @@ mod tests {
         let rollout_file = NamedTempFile::new()?;
         let event = Event {
             id: "1234".to_string(),
-            event_seq: 1,
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id: conversation_id,
                 model: "codex-mini-latest".to_string(),
@@ -1413,7 +1326,6 @@ mod tests {
                 initial_messages: None,
                 rollout_path: rollout_file.path().to_path_buf(),
             }),
-            order: None,
         };
 
         let expected = json!({

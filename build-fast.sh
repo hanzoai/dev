@@ -14,6 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
+  --workspace codex|code|both         Select workspace to build (default: codex)
 
 Examples:
   ./build-fast.sh
@@ -43,7 +44,7 @@ resolve_bin_path() {
   if [ -n "${CARGO_TARGET_DIR:-}" ]; then
     target_root="${CARGO_TARGET_DIR}"
   else
-    target_root="${REPO_ROOT}/codex-rs/target"
+    target_root="${REPO_ROOT}/${WORKSPACE_DIR}/target"
   fi
 
   if [[ "${target_root}" != /* ]]; then
@@ -51,10 +52,10 @@ resolve_bin_path() {
   fi
 
   TARGET_DIR_ABS="${target_root}"
-  BIN_CARGO_FILENAME="code"
-  BIN_FILENAME="code"
+  BIN_CARGO_FILENAME="${CRATE_PREFIX}"
+  BIN_FILENAME="${CRATE_PREFIX}"
   if [ "$PROFILE" = "perf" ]; then
-    BIN_FILENAME="code-perf"
+    BIN_FILENAME="${CRATE_PREFIX}-perf"
   fi
   BIN_SUBPATH="${BIN_SUBDIR}/${BIN_FILENAME}"
   BIN_CARGO_SUBPATH="${BIN_SUBDIR}/${BIN_CARGO_FILENAME}"
@@ -63,7 +64,7 @@ resolve_bin_path() {
   BIN_LINK_PATH="./target/${BIN_SUBPATH}"
 
   if [ -n "${REPO_TARGET_ABS:-}" ] && [ "${TARGET_DIR_ABS}" = "${REPO_TARGET_ABS}" ]; then
-    BIN_DISPLAY_PATH="./codex-rs/target/${BIN_SUBPATH}"
+    BIN_DISPLAY_PATH="./${WORKSPACE_DIR}/target/${BIN_SUBPATH}"
   else
     BIN_DISPLAY_PATH="${BIN_PATH}"
   fi
@@ -75,10 +76,24 @@ esac
 
 RUN_AFTER_BUILD=0
 ARG_PROFILE=""
+WORKSPACE_CHOICE="${WORKSPACE:-}"
+PASSTHROUGH_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     run)
       RUN_AFTER_BUILD=1
+      PASSTHROUGH_ARGS+=("$1")
+      ;;
+    --workspace)
+      shift || { echo "Error: --workspace requires a value." >&2; usage; exit 1; }
+      WORKSPACE_CHOICE="$1"
+      ;;
+    --workspace=*)
+      WORKSPACE_CHOICE="${1#*=}"
+      ;;
+    -h|--help)
+      usage
+      exit 0
       ;;
     *)
       if [ -n "$ARG_PROFILE" ]; then
@@ -87,10 +102,26 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       ARG_PROFILE="$1"
+      PASSTHROUGH_ARGS+=("$1")
       ;;
   esac
   shift
 done
+
+if [ -z "$WORKSPACE_CHOICE" ]; then
+  WORKSPACE_CHOICE="codex"
+fi
+
+if [ "$WORKSPACE_CHOICE" = "both" ]; then
+  if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
+    echo "Error: --workspace both cannot be combined with 'run'." >&2
+    exit 1
+  fi
+  for ws in codex code; do
+    WORKSPACE="$ws" "$0" "${PASSTHROUGH_ARGS[@]}" --workspace "$ws"
+  done
+  exit 0
+fi
 
 if [ "$ARG_PROFILE" = "pref" ]; then
   ARG_PROFILE="perf"
@@ -100,8 +131,38 @@ fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 CALLER_CWD="$(pwd)"
 
-# Change to the Rust project root directory (codex-rs) regardless of caller CWD
-cd "${SCRIPT_DIR}/codex-rs"
+case "$WORKSPACE_CHOICE" in
+  codex|codex-rs)
+    WORKSPACE_DIR="codex-rs"
+    CRATE_PREFIX="codex"
+    ;;
+  code|code-rs)
+    WORKSPACE_DIR="code-rs"
+    CRATE_PREFIX="code"
+    ;;
+  *)
+    echo "Error: Unknown workspace '${WORKSPACE_CHOICE}'. Use codex, code, or both." >&2
+    exit 1
+    ;;
+esac
+
+WORKSPACE_PATH="${SCRIPT_DIR}/${WORKSPACE_DIR}"
+if [ ! -d "$WORKSPACE_PATH" ]; then
+  echo "Error: Workspace directory '${WORKSPACE_PATH}' not found." >&2
+  exit 1
+fi
+
+# Change to the selected Rust workspace root regardless of caller CWD
+cd "${WORKSPACE_PATH}"
+
+CLI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' cli/Cargo.toml | head -n1)"
+TUI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' tui/Cargo.toml | head -n1)"
+EXEC_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' exec/Cargo.toml | head -n1)"
+CRATE_PREFIX="${CLI_PACKAGE%%-*}"
+EXEC_BIN="$(awk 'BEGIN{inbin=0} /^\[\[bin\]\]/{inbin=1; next} inbin && /^name[[:space:]]*=/{gsub(/.*"/,"",$0); gsub(/"/,"",$0); print; exit}' exec/Cargo.toml)"
+if [ -z "${EXEC_BIN}" ]; then
+  EXEC_BIN="${EXEC_PACKAGE}"
+fi
 
 # Compute repository root (the directory containing this script)
 # Note: We intentionally set REPO_ROOT to SCRIPT_DIR so any defaults (like CARGO_HOME)
@@ -149,6 +210,26 @@ if [ "${DETERMINISTIC:-}" = "1" ]; then
         export SOURCE_DATE_EPOCH="$(git -C "$REPO_ROOT" log -1 --pretty=%ct 2>/dev/null || true)"
     fi
     # Keep debuginfo intact so profiling tools can resolve symbols.
+fi
+
+ORIGINAL_PROFILE="$PROFILE"
+if [ "$PROFILE" != "dev" ] && [ "$PROFILE" != "release" ]; then
+  if ! grep -F "[profile.${PROFILE}]" Cargo.toml >/dev/null 2>&1; then
+    case "$PROFILE" in
+      dev-fast)
+        PROFILE="dev"
+        ;;
+      perf|release-prod)
+        PROFILE="release"
+        ;;
+      *)
+        PROFILE="dev"
+        ;;
+    esac
+    if [ "$ORIGINAL_PROFILE" != "$PROFILE" ]; then
+      echo "Profile ${ORIGINAL_PROFILE} not defined in ${WORKSPACE_DIR}/Cargo.toml; falling back to ${PROFILE}."
+    fi
+  fi
 fi
 
 # Select the cargo/rustc toolchain to match deploy
@@ -232,7 +313,7 @@ if [ "${DEBUG_SYMBOLS:-}" = "1" ]; then
   export CARGO_PROFILE_RELEASE_PROD_STRIP="none"
 fi
 
-echo "Building code binary (${PROFILE} mode)..."
+echo "Building ${CRATE_PREFIX} binary (${PROFILE} mode)..."
 
 # Ensure Cargo cache locations are stable.
 # In CI, we can optionally enforce a specific CARGO_HOME regardless of caller env
@@ -253,7 +334,7 @@ if [ -z "${RUSTUP_HOME:-}" ]; then
   export RUSTUP_HOME="${CARGO_HOME%/}/rustup"
 fi
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
-  export CARGO_TARGET_DIR="${SCRIPT_DIR}/codex-rs/target"
+  export CARGO_TARGET_DIR="${WORKSPACE_PATH}/target"
 fi
 mkdir -p "${CARGO_HOME}" "${CARGO_TARGET_DIR}" 2>/dev/null || true
 # Ensure repo-local target directory exists for compatibility symlinks
@@ -373,17 +454,15 @@ fi
 # Build for native target (no --target flag) for maximum speed
 # This reuses the host stdlib and normal cache
 
-# Determine exec binary name based on workspace (support forks)
-EXEC_BIN="codex-exec"
-# Detect legacy bin name used in some forks
-if grep -q '^name\s*=\s*"code-exec"' ./exec/Cargo.toml 2>/dev/null; then
-  EXEC_BIN="code-exec"
+# Determine exec binary name based on workspace metadata
+if [ -z "${EXEC_BIN}" ]; then
+  EXEC_BIN="${CRATE_PREFIX}-exec"
 fi
 
 # Build with or without --locked based on lockfile validity
 # Keep stderr and stdout separate so downstream tools can capture both streams.
 echo "Using exec bin: ${EXEC_BIN}"
-${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin code --bin code-tui --bin "${EXEC_BIN}"
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin "${CRATE_PREFIX}" --bin "${CRATE_PREFIX}-tui" --bin "${EXEC_BIN}"
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
@@ -412,13 +491,41 @@ if [ $? -eq 0 ]; then
     # Keep old symlink locations working for compatibility
     # Create symlink in target/release for npm wrapper expectations
     release_link_target="../${BIN_SUBDIR}/${BIN_FILENAME}"
-    cli_link_target="../../codex-rs/target/${BIN_SUBDIR}/${BIN_FILENAME}"
     dev_fast_link_target="../${BIN_SUBDIR}/${BIN_FILENAME}"
 
+    SYMLINK_PREFIXES=("${CRATE_PREFIX}")
+    if [ "${CRATE_PREFIX}" = "code" ]; then
+      SYMLINK_PREFIXES+=("coder")
+    fi
+
+    create_cli_symlinks() {
+      local cli_dir="$1"
+      local default_target="$2"
+      mkdir -p "$cli_dir"
+      local link_target="$default_target"
+      if [ -n "${CLI_LINK_ABSOLUTE}" ]; then
+        link_target="${CLI_LINK_ABSOLUTE}"
+      fi
+      for PREFIX in "${SYMLINK_PREFIXES[@]}"; do
+        local dest="${cli_dir}/${PREFIX}-${TRIPLE}"
+        [ -e "$dest" ] && rm -f "$dest"
+        ln -sf "${link_target}" "$dest"
+      done
+      for PREFIX in "${SYMLINK_PREFIXES[@]}"; do
+        local dest="${cli_dir}/${PREFIX}-aarch64-apple-darwin"
+        [ -e "$dest" ] && rm -f "$dest"
+        ln -sf "${link_target}" "$dest"
+      done
+    }
+
+    CLI_TARGET_CODE="../../target/${BIN_SUBDIR}/${BIN_FILENAME}"
+    CLI_TARGET_CODEX="../../${WORKSPACE_DIR}/target/${BIN_SUBDIR}/${BIN_FILENAME}"
+
+    CLI_LINK_ABSOLUTE=""
     if [ "${TARGET_DIR_ABS}" != "${REPO_TARGET_ABS}" ]; then
       release_link_target="${BIN_PATH}"
-      cli_link_target="${BIN_PATH}"
       dev_fast_link_target="${BIN_PATH}"
+      CLI_LINK_ABSOLUTE="${BIN_PATH}"
 
       # Maintain repo-local path for downstream tooling when target dir is external
       if [ -n "${BIN_LINK_PATH:-}" ]; then
@@ -431,36 +538,28 @@ if [ $? -eq 0 ]; then
     fi
 
     mkdir -p ./target/release
-    if [ -e "./target/release/code" ]; then
-        rm -f ./target/release/code
+    if [ -e "./target/release/${CRATE_PREFIX}" ]; then
+        rm -f "./target/release/${CRATE_PREFIX}"
     fi
-    ln -sf "${release_link_target}" "./target/release/code"
+    ln -sf "${release_link_target}" "./target/release/${CRATE_PREFIX}"
 
-    # Update the symlinks in codex-cli/bin
-    CLI_BIN_DIR="../codex-cli/bin"
-    mkdir -p "$CLI_BIN_DIR"
-    # Dynamic arch-targeted names
-    for LINK in "code-${TRIPLE}" "coder-${TRIPLE}"; do
-      DEST="${CLI_BIN_DIR}/${LINK}"
-      [ -e "$DEST" ] && rm -f "$DEST"
-      ln -sf "${cli_link_target}" "$DEST"
-    done
-    # Back-compat fixed names (Apple Silicon triple)
-    for LINK in code-aarch64-apple-darwin coder-aarch64-apple-darwin; do
-      DEST="${CLI_BIN_DIR}/${LINK}"
-      [ -e "$DEST" ] && rm -f "$DEST"
-      ln -sf "${cli_link_target}" "$DEST"
-    done
+    # Update the symlinks in CLI wrapper directories
+    if [ -d "../codex-cli/bin" ]; then
+      create_cli_symlinks "../codex-cli/bin" "${CLI_TARGET_CODEX}"
+    fi
+    if [ -d "./code-cli/bin" ]; then
+      create_cli_symlinks "./code-cli/bin" "${CLI_TARGET_CODE}"
+    fi
 
-    # Ensure repo-local 'code-dev' path stays mapped to latest build output
-    # so the user's alias `code-dev` (if pointing at target/dev-fast/code) keeps working
+    # Ensure repo-local developer alias stays mapped to latest build output
+    # so the user's `${CRATE_PREFIX}-dev` alias keeps working when pointing at target/dev-fast/${CRATE_PREFIX}
     # Only create this symlink if we're not already building in dev-fast profile
     if [ "$PROFILE" != "dev-fast" ]; then
       mkdir -p ./target/dev-fast
-      if [ -e "./target/dev-fast/code" ]; then
-        rm -f ./target/dev-fast/code
+      if [ -e "./target/dev-fast/${CRATE_PREFIX}" ]; then
+        rm -f "./target/dev-fast/${CRATE_PREFIX}"
       fi
-      ln -sf "${dev_fast_link_target}" "./target/dev-fast/code"
+      ln -sf "${dev_fast_link_target}" "./target/dev-fast/${CRATE_PREFIX}"
     fi
 
     # Optional post-link step for deterministic builds: re-link executables
@@ -468,13 +567,9 @@ if [ $? -eq 0 ]; then
     # dependencies/proc-macro dylibs are not affected.
     if [ "${DETERMINISTIC_NO_UUID:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
       echo "Deterministic post-link: removing LC_UUID from executables"
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-cli --bin code -- -C link-arg=-Wl,-no_uuid || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-tui --bin code-tui -- -C link-arg=-Wl,-no_uuid || true
-      if [ "$EXEC_BIN" = "codex-exec" ]; then
-        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin codex-exec -- -C link-arg=-Wl,-no_uuid || true
-      else
-        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p codex-exec --bin code-exec -- -C link-arg=-Wl,-no_uuid || true
-      fi
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${CLI_PACKAGE}" --bin "${CRATE_PREFIX}" -- -C link-arg=-Wl,-no_uuid || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${TUI_PACKAGE}" --bin "${CRATE_PREFIX}-tui" -- -C link-arg=-Wl,-no_uuid || true
+      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${EXEC_PACKAGE}" --bin "${EXEC_BIN}" -- -C link-arg=-Wl,-no_uuid || true
     fi
 
     # Compute absolute path and SHA256 for clarity (after any post-linking)

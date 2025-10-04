@@ -63,18 +63,14 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
     use reqwest::header::USER_AGENT;
 
     set_user_agent_suffix("codex_cloud_tasks_tui");
-    let ua = codex_core::default_client::get_codex_user_agent(None);
+    let ua = codex_core::default_client::get_codex_user_agent();
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
     );
     if let Ok(home) = codex_core::config::find_codex_home() {
-        let am = codex_login::AuthManager::new(
-            home,
-            codex_login::AuthMode::ChatGPT,
-            codex_core::default_client::DEFAULT_ORIGINATOR.to_string(),
-        );
+        let am = codex_login::AuthManager::new(home, false);
         if let Some(auth) = am.auth()
             && let Ok(tok) = auth.get_token().await
             && !tok.is_empty()

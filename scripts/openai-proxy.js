@@ -20,7 +20,7 @@
 //   # 3) Run the local Codex binary with the proxy (dummy key to client)
 //   #    Build the binary first: ./build-fast.sh
 //   OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:${PORT:-5055}/v1" \
-//     ./codex-rs/target/dev-fast/code llm request \
+//     ./code-rs/target/dev-fast/code llm request \
 //       --developer "Say 'pong' as plain text" \
 //       --message "ping" \
 //       --format-type json_schema \

@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::cell::UnsafeCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::num::{NonZero, NonZeroUsize};
+use std::num::NonZero;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -283,45 +283,6 @@ pub fn run(
         matches,
         total_match_count,
     })
-}
-
-/// Streaming variant used by the TUI. For now, this is a thin wrapper around
-/// `run` that sends one final batch of results over the provided channel.
-///
-/// Parameters mirror the upstream API for compatibility.
-pub fn run_streaming(
-    pattern_text: &str,
-    limit: NonZeroUsize,
-    search_directory: &Path,
-    exclude: Vec<String>,
-    threads: NonZeroUsize,
-    cancel_flag: Arc<AtomicBool>,
-    compute_indices: bool,
-    part_tx: std::sync::mpsc::Sender<Vec<FileMatch>>,
-    _update_interval: std::time::Duration,
-    _prefer_cwd: bool,
-) -> anyhow::Result<FileSearchResults> {
-    if cancel_flag.load(Ordering::Relaxed) {
-        return Ok(FileSearchResults { matches: Vec::new(), total_match_count: 0 });
-    }
-
-    // Convert NonZeroUsize → NonZero<usize>
-    let limit_nz = NonZero::new(limit.get()).expect("NonZeroUsize.get() > 0");
-    let threads_nz = NonZero::new(threads.get()).expect("NonZeroUsize.get() > 0");
-
-    let results = run(
-        pattern_text,
-        limit_nz,
-        search_directory,
-        exclude,
-        threads_nz,
-        cancel_flag.clone(),
-        compute_indices,
-    )?;
-
-    // Best-effort: send a single batch with all matches.
-    let _ = part_tx.send(results.matches.clone());
-    Ok(results)
 }
 
 /// Sort matches in-place by descending score, then ascending path.

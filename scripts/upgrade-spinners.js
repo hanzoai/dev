@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- Upgrade codex-rs/tui/assets/spinners.json to include human labels and groups.
+ Upgrade code-rs/tui/assets/spinners.json to include human labels and groups.
  Usage:
    node scripts/upgrade-spinners.js            # writes in place
    node scripts/upgrade-spinners.js --dry-run  # prints a summary only
@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const file = path.join(__dirname, '..', 'codex-rs', 'tui', 'assets', 'spinners.json');
+const file = path.join(__dirname, '..', 'code-rs', 'tui', 'assets', 'spinners.json');
 
 function humanize(name) {
   // camelCase / kebab-case / snake_case → Title Case with digits spaced

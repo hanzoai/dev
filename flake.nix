@@ -25,25 +25,25 @@
           pnpm
           husky
         ];
-        codex-rs = import ./codex-rs {
+        code-rs = import ./code-rs {
           pkgs = pkgsWithRust;
           inherit monorepo-deps;
         };
       in
       {
         packages = {
-          codex-rs = codex-rs.package;
-          default = codex-rs.package;
+          code-rs = code-rs.package;
+          default = code-rs.package;
         };
 
         devShells = {
-          codex-rs = codex-rs.devShell;
-          default = codex-rs.devShell;
+          code-rs = code-rs.devShell;
+          default = code-rs.devShell;
         };
 
         apps = {
-          codex-rs = codex-rs.app;
-          default = codex-rs.app;
+          code-rs = code-rs.app;
+          default = code-rs.app;
         };
       }
     );

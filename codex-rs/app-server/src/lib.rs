@@ -8,7 +8,7 @@ use codex_common::CliConfigOverrides;
 use codex_core::config::Config;
 use codex_core::config::ConfigOverrides;
 
-use mcp_types::JSONRPCMessage;
+use codex_app_server_protocol::JSONRPCMessage;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
@@ -23,12 +23,11 @@ use crate::message_processor::MessageProcessor;
 use crate::outgoing_message::OutgoingMessage;
 use crate::outgoing_message::OutgoingMessageSender;
 
-pub mod codex_message_processor;
+mod codex_message_processor;
 mod error_code;
 mod fuzzy_file_search;
 mod message_processor;
-pub mod outgoing_message;
-
+mod outgoing_message;
 
 /// Size of the bounded channels used to communicate between tasks. The value
 /// is a balance between throughput and memory usage – 128 messages should be
@@ -82,6 +81,7 @@ pub async fn run_main(
         )
     })?;
     let config = Config::load_with_cli_overrides(cli_kv_overrides, ConfigOverrides::default())
+        .await
         .map_err(|e| {
             std::io::Error::new(ErrorKind::InvalidData, format!("error loading config: {e}"))
         })?;
@@ -112,15 +112,15 @@ pub async fn run_main(
     let stdout_writer_handle = tokio::spawn(async move {
         let mut stdout = io::stdout();
         while let Some(outgoing_message) = outgoing_rx.recv().await {
-            let msg: JSONRPCMessage = outgoing_message.into();
-            match serde_json::to_string(&msg) {
-                Ok(json) => {
+            let Ok(value) = serde_json::to_value(outgoing_message) else {
+                error!("Failed to convert OutgoingMessage to JSON value");
+                continue;
+            };
+            match serde_json::to_string(&value) {
+                Ok(mut json) => {
+                    json.push('\n');
                     if let Err(e) = stdout.write_all(json.as_bytes()).await {
                         error!("Failed to write to stdout: {e}");
-                        break;
-                    }
-                    if let Err(e) = stdout.write_all(b"\n").await {
-                        error!("Failed to write newline to stdout: {e}");
                         break;
                     }
                 }

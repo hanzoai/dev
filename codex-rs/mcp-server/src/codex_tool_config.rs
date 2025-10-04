@@ -1,20 +1,16 @@
 //! Configuration object accepted by the `codex` MCP tool-call.
 
-use agent_client_protocol as acp;
-use codex_core::config_types::ClientTools;
 use codex_core::protocol::AskForApproval;
 use codex_protocol::config_types::SandboxMode;
 use codex_utils_json_to_toml::json_to_toml;
 use mcp_types::Tool;
 use mcp_types::ToolInputSchema;
-use mcp_types::ToolOutputSchema;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaSettings;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde_json::json;
 
 /// Client-supplied configuration for a `codex` tool-call.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -133,108 +129,10 @@ pub(crate) fn create_tool_for_codex_tool_call_param() -> Tool {
     }
 }
 
-/// Builds a `Tool` definition for the `acp/new_session` tool-call.
-pub(crate) fn create_tool_for_acp_new_session() -> Tool {
-    let input_schema = ToolInputSchema {
-        r#type: "object".to_string(),
-        required: Some(vec!["cwd".to_string()]),
-        properties: Some(json!({
-            "cwd": {"type": "string"},
-            "mcpServers": {"type": "array"},
-            "clientTools": {"type": "object"}
-        })),
-    };
-    let output_schema = ToolOutputSchema {
-        r#type: "object".to_string(),
-        properties: None,
-        required: None,
-    };
-
-    Tool {
-        name: acp::AGENT_METHOD_NAMES.session_new.to_string(),
-        title: Some(acp::AGENT_METHOD_NAMES.session_new.to_string()),
-        input_schema,
-        output_schema: Some(output_schema),
-        description: Some("Start a Codex session over ACP.".to_string()),
-        annotations: None,
-    }
-}
-
-/// Builds a `Tool` definition for the `acp/prompt` tool-call.
-pub(crate) fn create_tool_for_acp_prompt() -> Tool {
-    let input_schema = ToolInputSchema {
-        r#type: "object".to_string(),
-        required: Some(vec!["sessionId".to_string(), "prompt".to_string()]),
-        properties: Some(json!({
-            "sessionId": {"type": "string"},
-            "prompt": {"type": "array"},
-            "meta": {"type": "object"}
-        })),
-    };
-
-    Tool {
-        name: acp::AGENT_METHOD_NAMES.session_prompt.to_string(),
-        title: Some(acp::AGENT_METHOD_NAMES.session_prompt.to_string()),
-        input_schema,
-        output_schema: None,
-        description: Some("Send a prompt to an existing ACP Codex session.".to_string()),
-        annotations: None,
-    }
-}
-
-/// Builds a `Tool` definition for the `acp/set_model` tool-call.
-pub(crate) fn create_tool_for_acp_set_model() -> Tool {
-    let input_schema = ToolInputSchema {
-        r#type: "object".to_string(),
-        required: Some(vec!["sessionId".to_string(), "modelId".to_string()]),
-        properties: Some(json!({
-            "sessionId": {"type": "string"},
-            "modelId": {"type": "string"}
-        })),
-    };
-
-    Tool {
-        name: acp::AGENT_METHOD_NAMES.model_select.to_string(),
-        title: Some(acp::AGENT_METHOD_NAMES.model_select.to_string()),
-        input_schema,
-        output_schema: None,
-        description: Some("Select a model for an existing ACP Codex session.".to_string()),
-        annotations: None,
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AcpNewSessionToolArgs {
-    #[serde(flatten)]
-    pub request: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_tools: Option<ClientTools>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AcpPromptToolArgs {
-    #[serde(rename = "sessionId")]
-    pub session_id: acp::SessionId,
-    pub prompt: Vec<acp::ContentBlock>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AcpSetModelToolArgs {
-    #[serde(rename = "sessionId")]
-    pub session_id: acp::SessionId,
-    #[serde(rename = "modelId")]
-    pub model_id: acp::ModelId,
-}
-
 impl CodexToolCallParam {
     /// Returns the initial user prompt to start the Codex conversation and the
     /// effective Config object generated from the supplied parameters.
-    pub fn into_config(
+    pub async fn into_config(
         self,
         codex_linux_sandbox_exe: Option<PathBuf>,
     ) -> std::io::Result<(String, codex_core::config::Config)> {
@@ -264,12 +162,8 @@ impl CodexToolCallParam {
             include_plan_tool,
             include_apply_patch_tool: None,
             include_view_image_tool: None,
-            disable_response_storage: None,
             show_raw_agent_reasoning: None,
-            debug: None,
             tools_web_search_request: None,
-            mcp_servers: None,
-            experimental_client_tools: None,
         };
 
         let cli_overrides = cli_overrides
@@ -278,7 +172,8 @@ impl CodexToolCallParam {
             .map(|(k, v)| (k, json_to_toml(v)))
             .collect();
 
-        let cfg = codex_core::config::Config::load_with_cli_overrides(cli_overrides, overrides)?;
+        let cfg =
+            codex_core::config::Config::load_with_cli_overrides(cli_overrides, overrides).await?;
 
         Ok((prompt, cfg))
     }
@@ -287,8 +182,8 @@ impl CodexToolCallParam {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexToolCallReplyParam {
-    /// The *session id* for this conversation.
-    pub session_id: String,
+    /// The conversation id for this Codex session.
+    pub conversation_id: String,
 
     /// The *next user prompt* to continue the Codex conversation.
     pub prompt: String,
@@ -319,7 +214,8 @@ pub(crate) fn create_tool_for_codex_tool_call_reply_param() -> Tool {
         input_schema: tool_input_schema,
         output_schema: None,
         description: Some(
-            "Continue a Codex session by providing the session id and prompt.".to_string(),
+            "Continue a Codex conversation by providing the conversation id and prompt."
+                .to_string(),
         ),
         annotations: None,
     }
@@ -344,7 +240,6 @@ mod tests {
     #[test]
     fn verify_codex_tool_json_schema() {
         let tool = create_tool_for_codex_tool_call_param();
-        #[expect(clippy::expect_used)]
         let tool_json = serde_json::to_value(&tool).expect("tool serializes");
         let expected_tool_json = serde_json::json!({
           "name": "codex",
@@ -413,24 +308,23 @@ mod tests {
     #[test]
     fn verify_codex_tool_reply_json_schema() {
         let tool = create_tool_for_codex_tool_call_reply_param();
-        #[expect(clippy::expect_used)]
         let tool_json = serde_json::to_value(&tool).expect("tool serializes");
         let expected_tool_json = serde_json::json!({
-          "description": "Continue a Codex session by providing the session id and prompt.",
+          "description": "Continue a Codex conversation by providing the conversation id and prompt.",
           "inputSchema": {
             "properties": {
+              "conversationId": {
+                "description": "The conversation id for this Codex session.",
+                "type": "string"
+              },
               "prompt": {
                 "description": "The *next user prompt* to continue the Codex conversation.",
                 "type": "string"
               },
-              "sessionId": {
-                "description": "The *session id* for this conversation.",
-                "type": "string"
-              },
             },
             "required": [
+              "conversationId",
               "prompt",
-              "sessionId",
             ],
             "type": "object",
           },

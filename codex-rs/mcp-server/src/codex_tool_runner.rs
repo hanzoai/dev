@@ -5,6 +5,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::exec_approval::handle_exec_approval_request;
+use crate::outgoing_message::OutgoingMessageSender;
+use crate::outgoing_message::OutgoingNotificationMeta;
+use crate::patch_approval::handle_patch_approval_request;
 use codex_core::CodexConversation;
 use codex_core::ConversationManager;
 use codex_core::NewConversation;
@@ -18,20 +22,13 @@ use codex_core::protocol::InputItem;
 use codex_core::protocol::Op;
 use codex_core::protocol::Submission;
 use codex_core::protocol::TaskCompleteEvent;
+use codex_protocol::ConversationId;
 use mcp_types::CallToolResult;
 use mcp_types::ContentBlock;
 use mcp_types::RequestId;
 use mcp_types::TextContent;
 use serde_json::json;
 use tokio::sync::Mutex;
-use uuid::Uuid;
-
-use crate::exec_approval::handle_exec_approval_request;
-use crate::outgoing_message::OutgoingMessageSender;
-use crate::outgoing_message::OutgoingMessageSenderExt;
-use crate::outgoing_message::OutgoingNotificationMeta;
-use crate::patch_approval::handle_patch_approval_request;
-use crate::session_store::{SessionEntry, SessionMap};
 
 pub(crate) const INVALID_PARAMS_ERROR_CODE: i64 = -32602;
 
@@ -44,11 +41,9 @@ pub async fn run_codex_tool_session(
     initial_prompt: String,
     config: CodexConfig,
     outgoing: Arc<OutgoingMessageSender>,
-    session_map: SessionMap,
     conversation_manager: Arc<ConversationManager>,
-    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
+    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ConversationId>>>,
 ) {
-    let config_for_session = config.clone();
     let NewConversation {
         conversation_id,
         conversation,
@@ -69,16 +64,11 @@ pub async fn run_codex_tool_session(
             return;
         }
     };
-    let session_uuid: Uuid = conversation_id.into();
-    let entry = SessionEntry::new(conversation.clone(), config_for_session);
-    session_map.lock().await.insert(session_uuid, entry);
 
     let session_configured_event = Event {
         // Use a fake id value for now.
         id: "".to_string(),
-        event_seq: 0,
         msg: EventMsg::SessionConfigured(session_configured.clone()),
-        order: None,
     };
     outgoing
         .send_event_as_notification(
@@ -97,7 +87,7 @@ pub async fn run_codex_tool_session(
     running_requests_id_to_codex_uuid
         .lock()
         .await
-        .insert(id.clone(), session_uuid);
+        .insert(id.clone(), conversation_id);
     let submission = Submission {
         id: sub_id.clone(),
         op: Op::UserInput {
@@ -128,13 +118,13 @@ pub async fn run_codex_tool_session_reply(
     outgoing: Arc<OutgoingMessageSender>,
     request_id: RequestId,
     prompt: String,
-    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
-    session_id: Uuid,
+    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ConversationId>>>,
+    conversation_id: ConversationId,
 ) {
     running_requests_id_to_codex_uuid
         .lock()
         .await
-        .insert(request_id.clone(), session_id);
+        .insert(request_id.clone(), conversation_id);
     if let Err(e) = conversation
         .submit(Op::UserInput {
             items: vec![InputItem::Text { text: prompt }],
@@ -163,7 +153,7 @@ async fn run_codex_tool_session_inner(
     codex: Arc<CodexConversation>,
     outgoing: Arc<OutgoingMessageSender>,
     request_id: RequestId,
-    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, Uuid>>>,
+    running_requests_id_to_codex_uuid: Arc<Mutex<HashMap<RequestId, ConversationId>>>,
 ) {
     let request_id_str = match &request_id {
         RequestId::String(s) => s.clone(),
@@ -232,7 +222,7 @@ async fn run_codex_tool_session_inner(
                     }
                     EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                         let text = match last_agent_message {
-                            Some(msg) => msg.clone(),
+                            Some(msg) => msg,
                             None => "".to_string(),
                         };
                         let result = CallToolResult {
@@ -266,35 +256,33 @@ async fn run_codex_tool_session_inner(
                     }
                     EventMsg::AgentReasoningRawContent(_)
                     | EventMsg::AgentReasoningRawContentDelta(_)
-                    | EventMsg::TaskStarted
+                    | EventMsg::TaskStarted(_)
                     | EventMsg::TokenCount(_)
                     | EventMsg::AgentReasoning(_)
                     | EventMsg::AgentReasoningSectionBreak(_)
                     | EventMsg::McpToolCallBegin(_)
                     | EventMsg::McpToolCallEnd(_)
-                    // | EventMsg::McpListToolsResponse(_)
+                    | EventMsg::McpListToolsResponse(_)
+                    | EventMsg::ListCustomPromptsResponse(_)
                     | EventMsg::ExecCommandBegin(_)
                     | EventMsg::ExecCommandOutputDelta(_)
                     | EventMsg::ExecCommandEnd(_)
                     | EventMsg::BackgroundEvent(_)
+                    | EventMsg::StreamError(_)
                     | EventMsg::PatchApplyBegin(_)
                     | EventMsg::PatchApplyEnd(_)
                     | EventMsg::TurnDiff(_)
                     | EventMsg::WebSearchBegin(_)
-                    | EventMsg::WebSearchComplete(_)
+                    | EventMsg::WebSearchEnd(_)
                     | EventMsg::GetHistoryEntryResponse(_)
-                    | EventMsg::ReplayHistory(_)
                     | EventMsg::PlanUpdate(_)
-                    | EventMsg::BrowserScreenshotUpdate(_)
-                    | EventMsg::AgentStatusUpdate(_)
                     | EventMsg::TurnAborted(_)
                     | EventMsg::ConversationPath(_)
                     | EventMsg::UserMessage(_)
                     | EventMsg::ShutdownComplete
+                    | EventMsg::ViewImageToolCall(_)
                     | EventMsg::EnteredReviewMode(_)
-                    | EventMsg::ExitedReviewMode(_)
-                    | EventMsg::CustomToolCallBegin(_)
-                    | EventMsg::CustomToolCallEnd(_) => {
+                    | EventMsg::ExitedReviewMode(_) => {
                         // For now, we do not do anything extra for these
                         // events. Note that
                         // send(codex_event_to_notification(&event)) above has

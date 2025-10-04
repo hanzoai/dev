@@ -6,10 +6,10 @@ Guarantee that all UI background events carry immutable order metadata captured 
 
 ## Scope
 
-- `codex-rs/tui/src/chatwidget.rs`
-- `codex-rs/tui/src/app_event_sender.rs`
+- `code-rs/tui/src/chatwidget.rs`
+- `code-rs/tui/src/app_event_sender.rs`
 - Async producers that currently call `AppEventSender::send_background_event*`
-- Associated unit tests under `codex-rs/tui/src/chatwidget.rs`
+- Associated unit tests under `code-rs/tui/src/chatwidget.rs`
 
 ## Constraints & Signals
 
@@ -26,7 +26,7 @@ Guarantee that all UI background events carry immutable order metadata captured 
 ### 1. Promote Order Handles to Public API
 
 - Expose a new lightweight wrapper (e.g., `BackgroundOrderTicket`) that encapsulates `UiBackgroundOrderHandle`.
-- Store it in `codex-rs/tui/src/app_event_sender.rs` so async producers can hold a clone even after moving off the main thread.
+- Store it in `code-rs/tui/src/app_event_sender.rs` so async producers can hold a clone even after moving off the main thread.
 - Provide constructors on `ChatWidget`:
   - `fn make_background_tail_ticket(&mut self) -> BackgroundOrderTicket`
   - `fn make_background_before_next_output_ticket(&mut self) -> BackgroundOrderTicket`
