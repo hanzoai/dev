@@ -1672,6 +1672,31 @@ impl App<'_> {
                         );
                     }
                 }
+                AppEvent::AutoSetupToggleReview => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_setup_toggle_review();
+                    }
+                }
+                AppEvent::AutoSetupToggleSubagents => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_setup_toggle_subagents();
+                    }
+                }
+                AppEvent::AutoSetupSelectCountdown(mode) => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_setup_select_countdown(mode);
+                    }
+                }
+                AppEvent::AutoSetupConfirm => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_setup_confirm();
+                    }
+                }
+                AppEvent::AutoSetupCancel => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_setup_cancel();
+                    }
+                }
                 AppEvent::PerformUndoRestore {
                     commit,
                     restore_files,
