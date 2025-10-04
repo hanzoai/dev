@@ -1,10 +1,13 @@
 use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs as stdfs;
-use std::path::{Path, PathBuf};
+use std::io::{Error as IoError, ErrorKind};
+use std::path::{Component, Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
+use tokio::task;
 
 /// Sanitize a string to be used as a single git refname component.
 ///
@@ -54,6 +57,7 @@ pub fn generate_branch_name_from_task(task: Option<&str>) -> String {
 
 pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
 const BRANCH_METADATA_DIR: &str = "_branch-meta";
+const DEFAULT_BRANCH_CACHE_DIRS: &[&str] = &["node_modules"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BranchMetadata {
@@ -454,7 +458,172 @@ pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path)
             }
         }
     }
+    let cache_count = copy_branch_cache_dirs(src_root, worktree_path).await?;
+    Ok(count + cache_count)
+}
+
+async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result<usize, String> {
+    let candidates = gather_branch_cache_candidates(src_root);
+    let mut seen = HashSet::new();
+    let mut total = 0usize;
+
+    for candidate in candidates {
+        let Some(rel) = sanitize_relative_path(&candidate) else { continue };
+        if !seen.insert(rel.clone()) { continue; }
+
+        let src_dir = src_root.join(&rel);
+        let metadata = match tokio::fs::metadata(&src_dir).await {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(format!("Failed to inspect {}: {}", src_dir.display(), err));
+            }
+        };
+        if !metadata.is_dir() { continue; }
+
+        let dst_dir = worktree_path.join(&rel);
+        let label = rel.to_string_lossy().to_string();
+        let src_clone = src_dir.clone();
+        let dst_clone = dst_dir.clone();
+
+        let copied = task::spawn_blocking(move || copy_dir_recursive_blocking(&src_clone, &dst_clone))
+            .await
+            .map_err(|err| format!("Failed to mirror cached directory {label}: {err}"))?
+            .map_err(|err| format!("Failed to mirror cached directory {label}: {err}"))?;
+
+        total += copied;
+    }
+
+    Ok(total)
+}
+
+fn gather_branch_cache_candidates(src_root: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = DEFAULT_BRANCH_CACHE_DIRS
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+
+    append_cargo_targets(src_root, &mut out);
+
+    if let Some(raw) = std::env::var_os("CODEX_BRANCH_COPY_DIRS") {
+        out.extend(std::env::split_paths(&raw));
+    }
+
+    if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
+        let path = PathBuf::from(raw);
+        if let Some(rel) = relative_candidate_path(&path, src_root) {
+            out.push(rel);
+        }
+    }
+
+    out
+}
+
+fn append_cargo_targets(src_root: &Path, out: &mut Vec<PathBuf>) {
+    if manifest_sits_here(src_root) {
+        out.push(PathBuf::from("target"));
+    }
+
+    if let Ok(entries) = stdfs::read_dir(src_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            if !manifest_sits_here(&path) { continue; }
+            if let Ok(relative) = path.strip_prefix(src_root) {
+                out.push(relative.join("target"));
+            }
+        }
+    }
+}
+
+fn manifest_sits_here(dir: &Path) -> bool {
+    dir.join("Cargo.toml").is_file()
+}
+
+fn relative_candidate_path(path: &Path, repo_root: &Path) -> Option<PathBuf> {
+    if path.as_os_str().is_empty() { return None; }
+    if path.is_relative() { return Some(path.to_path_buf()); }
+    if let Ok(stripped) = path.strip_prefix(repo_root) {
+        return Some(stripped.to_path_buf());
+    }
+    None
+}
+
+fn sanitize_relative_path(path: &Path) -> Option<PathBuf> {
+    let mut clean = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => continue,
+            Component::Normal(part) => clean.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    if clean.as_os_str().is_empty() { None } else { Some(clean) }
+}
+
+fn copy_dir_recursive_blocking(src: &Path, dst: &Path) -> Result<usize, IoError> {
+    let mut count = 0usize;
+    copy_dir_recursive_inner(src, dst, &mut count)?;
     Ok(count)
+}
+
+fn copy_dir_recursive_inner(src: &Path, dst: &Path, count: &mut usize) -> Result<(), IoError> {
+    stdfs::create_dir_all(dst)?;
+    let mut entries = stdfs::read_dir(src)?;
+    while let Some(entry) = entries.next() {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive_inner(&from, &to, count)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = to.parent() { stdfs::create_dir_all(parent)?; }
+            stdfs::copy(&from, &to)?;
+            *count += 1;
+        } else if file_type.is_symlink() {
+            recreate_symlink_blocking(&from, &to)?;
+            *count += 1;
+        }
+    }
+    Ok(())
+}
+
+fn recreate_symlink_blocking(src: &Path, dst: &Path) -> Result<(), IoError> {
+    if let Some(parent) = dst.parent() { stdfs::create_dir_all(parent)?; }
+    let target = stdfs::read_link(src)?;
+    remove_existing_path(dst)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(&target, dst)?;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+        let meta = stdfs::symlink_metadata(src)?;
+        if meta.file_type().is_symlink_dir() {
+            symlink_dir(&target, dst)?;
+        } else {
+            symlink_file(&target, dst)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_existing_path(path: &Path) -> Result<(), IoError> {
+    match stdfs::remove_file(path) {
+        Ok(_) => return Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == ErrorKind::IsADirectory => {}
+        Err(err) => return Err(err),
+    }
+    match stdfs::remove_dir_all(path) {
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 /// Determine repository default branch. Prefers `origin/HEAD` symbolic ref, then local `main`/`master`.
