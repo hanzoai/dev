@@ -47,6 +47,6 @@
   testing.
 
 ## References
-- `codex-rs/tui/HISTORY_CELLS_PLAN.md` – Step 3, Event Pipeline Consolidation
+- `code-rs/tui/HISTORY_CELLS_PLAN.md` – Step 3, Event Pipeline Consolidation
   Plan (Phase C – wave 1).
-- `codex-rs/tui/src/chatwidget/events_audit.md` – mutation inventory.
+- `code-rs/tui/src/chatwidget/events_audit.md` – mutation inventory.

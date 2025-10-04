@@ -14,7 +14,7 @@ Assuming you are trying to publish `0.21.0`, first you would run:
 
 ```shell
 VERSION=0.21.0
-./codex-rs/scripts/create_github_release.sh "$VERSION"
+./code-rs/scripts/create_github_release.sh "$VERSION"
 ```
 
 This will kick off a GitHub Action to build the release, so go to https://github.com/openai/codex/actions/workflows/rust-release.yml to find the corresponding workflow. (Note: we should automate finding the workflow URL with `gh`.)

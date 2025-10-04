@@ -115,7 +115,7 @@ fn final_answer_without_newline_is_flushed_immediately() {
     chat.handle_code_event(Event {
         id: "sub-a".into(),
         msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
-            delta: "Hi! How can I help with codex-rs or anything else today?".into(),
+            delta: "Hi! How can I help with code-rs or anything else today?".into(),
         }),
     });
 
@@ -123,7 +123,7 @@ fn final_answer_without_newline_is_flushed_immediately() {
     chat.handle_code_event(Event {
         id: "sub-a".into(),
         msg: EventMsg::AgentMessage(AgentMessageEvent {
-            message: "Hi! How can I help with codex-rs or anything else today?".into(),
+            message: "Hi! How can I help with code-rs or anything else today?".into(),
         }),
     });
 
@@ -136,7 +136,7 @@ fn final_answer_without_newline_is_flushed_immediately() {
             .flat_map(|l| l.spans.iter())
             .map(|sp| sp.content.clone())
             .collect::<String>();
-        s.contains("Hi! How can I help with codex-rs or anything else today?")
+        s.contains("Hi! How can I help with code-rs or anything else today?")
     });
     assert!(
         found_final,
@@ -4481,7 +4481,7 @@ fn streaming_answer_then_finalize_does_not_truncate() {
     chat.handle_code_event(Event {
         id: "s1".into(),
         msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
-            delta: "- codex-rs/tui/src/markdown.rs: Guard against list markers...\n".into(),
+            delta: "- code-rs/tui/src/markdown.rs: Guard against list markers...\n".into(),
         }),
     });
     chat.handle_code_event(Event {

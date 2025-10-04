@@ -52,5 +52,5 @@
   with progress notes or follow-up TODOs.
 
 ## References
-- `codex-rs/tui/HISTORY_CELLS_PLAN.md` – Step 2 bridge & Step 3 Phase C wave 2.
-- `codex-rs/tui/src/chatwidget/events_audit.md` – exec/stream mutation list.
+- `code-rs/tui/HISTORY_CELLS_PLAN.md` – Step 2 bridge & Step 3 Phase C wave 2.
+- `code-rs/tui/src/chatwidget/events_audit.md` – exec/stream mutation list.

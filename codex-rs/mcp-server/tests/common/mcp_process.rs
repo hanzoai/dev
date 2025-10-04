@@ -12,14 +12,6 @@ use tokio::process::ChildStdout;
 use anyhow::Context;
 use assert_cmd::prelude::*;
 use codex_mcp_server::CodexToolCallParam;
-use codex_app_server_protocol::AddConversationListenerParams;
-use codex_app_server_protocol::CancelLoginChatGptParams;
-use codex_app_server_protocol::GetAuthStatusParams;
-use codex_app_server_protocol::InterruptConversationParams;
-use codex_app_server_protocol::NewConversationParams;
-use codex_app_server_protocol::RemoveConversationListenerParams;
-use codex_app_server_protocol::SendUserMessageParams;
-use codex_app_server_protocol::SendUserTurnParams;
 
 use mcp_types::CallToolRequestParams;
 use mcp_types::ClientCapabilities;
@@ -64,8 +56,8 @@ impl McpProcess {
         env_overrides: &[(&str, Option<&str>)],
     ) -> anyhow::Result<Self> {
         // Use assert_cmd to locate the binary path and then switch to tokio::process::Command
-        let std_cmd = StdCommand::cargo_bin("code-mcp-server")
-            .context("should find binary for code-mcp-server")?;
+        let std_cmd = StdCommand::cargo_bin("codex-mcp-server")
+            .context("should find binary for codex-mcp-server")?;
 
         let program = std_cmd.get_program().to_owned();
 
@@ -91,7 +83,7 @@ impl McpProcess {
         let mut process = cmd
             .kill_on_drop(true)
             .spawn()
-            .context("code-mcp-server proc should start")?;
+            .context("codex-mcp-server proc should start")?;
         let stdin = process
             .stdin
             .take()
@@ -169,7 +161,7 @@ impl McpProcess {
                         },
                     },
                     "serverInfo": {
-                        "name": "code-mcp-server",
+                        "name": "codex-mcp-server",
                         "title": "Codex",
                         "version": "0.0.0",
                         "user_agent": user_agent
@@ -206,116 +198,6 @@ impl McpProcess {
             Some(serde_json::to_value(codex_tool_call_params)?),
         )
         .await
-    }
-
-    pub async fn send_tool_call(
-        &mut self,
-        name: &str,
-        arguments: Option<serde_json::Value>,
-    ) -> anyhow::Result<i64> {
-        let params = CallToolRequestParams {
-            name: name.to_string(),
-            arguments,
-        };
-        self.send_request(
-            mcp_types::CallToolRequest::METHOD,
-            Some(serde_json::to_value(params)?),
-        )
-        .await
-    }
-
-    pub async fn send_list_tools_request(&mut self) -> anyhow::Result<i64> {
-        self.send_request(mcp_types::ListToolsRequest::METHOD, None)
-            .await
-    }
-
-    /// Send a `newConversation` JSON-RPC request.
-    pub async fn send_new_conversation_request(
-        &mut self,
-        params: NewConversationParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("newConversation", params).await
-    }
-
-    /// Send an `addConversationListener` JSON-RPC request.
-    pub async fn send_add_conversation_listener_request(
-        &mut self,
-        params: AddConversationListenerParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("addConversationListener", params).await
-    }
-
-    /// Send a `sendUserMessage` JSON-RPC request with a single text item.
-    pub async fn send_send_user_message_request(
-        &mut self,
-        params: SendUserMessageParams,
-    ) -> anyhow::Result<i64> {
-        // Wire format expects variants in camelCase; text item uses external tagging.
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("sendUserMessage", params).await
-    }
-
-    /// Send a `removeConversationListener` JSON-RPC request.
-    pub async fn send_remove_conversation_listener_request(
-        &mut self,
-        params: RemoveConversationListenerParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("removeConversationListener", params)
-            .await
-    }
-
-    /// Send a `sendUserTurn` JSON-RPC request.
-    pub async fn send_send_user_turn_request(
-        &mut self,
-        params: SendUserTurnParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("sendUserTurn", params).await
-    }
-
-    /// Send a `interruptConversation` JSON-RPC request.
-    pub async fn send_interrupt_conversation_request(
-        &mut self,
-        params: InterruptConversationParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("interruptConversation", params).await
-    }
-
-    /// Send a `getAuthStatus` JSON-RPC request.
-    pub async fn send_get_auth_status_request(
-        &mut self,
-        params: GetAuthStatusParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("getAuthStatus", params).await
-    }
-
-    /// Send a `getConfigToml` JSON-RPC request.
-    pub async fn send_get_config_toml_request(&mut self) -> anyhow::Result<i64> {
-        self.send_request("getConfigToml", None).await
-    }
-
-    /// Send a `loginChatGpt` JSON-RPC request.
-    pub async fn send_login_chat_gpt_request(&mut self) -> anyhow::Result<i64> {
-        self.send_request("loginChatGpt", None).await
-    }
-
-    /// Send a `cancelLoginChatGpt` JSON-RPC request.
-    pub async fn send_cancel_login_chat_gpt_request(
-        &mut self,
-        params: CancelLoginChatGptParams,
-    ) -> anyhow::Result<i64> {
-        let params = Some(serde_json::to_value(params)?);
-        self.send_request("cancelLoginChatGpt", params).await
-    }
-
-    /// Send a `logoutChatGpt` JSON-RPC request.
-    pub async fn send_logout_chat_gpt_request(&mut self) -> anyhow::Result<i64> {
-        self.send_request("logoutChatGpt", None).await
     }
 
     async fn send_request(
@@ -357,7 +239,7 @@ impl McpProcess {
         Ok(())
     }
 
-    pub async fn read_jsonrpc_message(&mut self) -> anyhow::Result<JSONRPCMessage> {
+    async fn read_jsonrpc_message(&mut self) -> anyhow::Result<JSONRPCMessage> {
         let mut line = String::new();
         self.stdout.read_line(&mut line).await?;
         let message = serde_json::from_str::<JSONRPCMessage>(&line)?;

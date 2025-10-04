@@ -16,14 +16,13 @@ use crate::operations::run_git_for_status;
 use crate::operations::run_git_for_stdout;
 
 /// Default commit message used for ghost commits when none is provided.
-const DEFAULT_COMMIT_MESSAGE: &str = "code snapshot";
+const DEFAULT_COMMIT_MESSAGE: &str = "codex snapshot";
 
 /// Options to control ghost commit creation.
 pub struct CreateGhostCommitOptions<'a> {
     pub repo_path: &'a Path,
     pub message: Option<&'a str>,
     pub force_include: Vec<PathBuf>,
-    pub parent: Option<&'a str>,
 }
 
 impl<'a> CreateGhostCommitOptions<'a> {
@@ -33,19 +32,12 @@ impl<'a> CreateGhostCommitOptions<'a> {
             repo_path,
             message: None,
             force_include: Vec::new(),
-            parent: None,
         }
     }
 
     /// Sets a custom commit message for the ghost commit.
     pub fn message(mut self, message: &'a str) -> Self {
         self.message = Some(message);
-        self
-    }
-
-    /// Overrides the parent commit for the ghost snapshot when provided.
-    pub fn parent(mut self, parent: &'a str) -> Self {
-        self.parent = Some(parent);
         self
     }
 
@@ -76,12 +68,7 @@ pub fn create_ghost_commit(
 
     let repo_root = resolve_repository_root(options.repo_path)?;
     let repo_prefix = repo_subdir(repo_root.as_path(), options.repo_path);
-    let parent_override = options.parent.map(|value| value.to_string());
-    let resolved_parent = resolve_head(repo_root.as_path())?;
-    let parent_ref = parent_override
-        .as_deref()
-        .or(resolved_parent.as_deref())
-        .map(|value| value.to_string());
+    let parent = resolve_head(repo_root.as_path())?;
 
     let normalized_force = options
         .force_include
@@ -90,7 +77,7 @@ pub fn create_ghost_commit(
         .collect::<Result<Vec<_>, _>>()?;
     let force_include =
         apply_repo_prefix_to_force_include(repo_prefix.as_deref(), &normalized_force);
-    let index_tempdir = Builder::new().prefix("code-git-index-").tempdir()?;
+    let index_tempdir = Builder::new().prefix("codex-git-index-").tempdir()?;
     let index_path = index_tempdir.path().join("index");
     let base_env = vec![(
         OsString::from("GIT_INDEX_FILE"),
@@ -126,7 +113,7 @@ pub fn create_ghost_commit(
     let message = options.message.unwrap_or(DEFAULT_COMMIT_MESSAGE);
     let commit_args = {
         let mut result = vec![OsString::from("commit-tree"), OsString::from(&tree_id)];
-        if let Some(parent) = parent_ref.as_deref() {
+        if let Some(parent) = parent.as_deref() {
             result.extend([OsString::from("-p"), OsString::from(parent)]);
         }
         result.extend([OsString::from("-m"), OsString::from(message)]);
@@ -140,7 +127,7 @@ pub fn create_ghost_commit(
         Some(commit_env.as_slice()),
     )?;
 
-    Ok(GhostCommit::new(commit_id, parent_ref))
+    Ok(GhostCommit::new(commit_id, parent))
 }
 
 /// Restore the working tree to match the provided ghost commit.
@@ -178,19 +165,19 @@ fn default_commit_identity() -> Vec<(OsString, OsString)> {
     vec![
         (
             OsString::from("GIT_AUTHOR_NAME"),
-            OsString::from("Code Snapshot"),
+            OsString::from("Codex Snapshot"),
         ),
         (
             OsString::from("GIT_AUTHOR_EMAIL"),
-            OsString::from("snapshot@code.local"),
+            OsString::from("snapshot@codex.local"),
         ),
         (
             OsString::from("GIT_COMMITTER_NAME"),
-            OsString::from("Code Snapshot"),
+            OsString::from("Codex Snapshot"),
         ),
         (
             OsString::from("GIT_COMMITTER_EMAIL"),
-            OsString::from("snapshot@code.local"),
+            OsString::from("snapshot@codex.local"),
         ),
     ]
 }
@@ -411,7 +398,7 @@ mod tests {
         assert_eq!(root_after, "root after\n");
         let nested_after = std::fs::read_to_string(workspace.join("nested.txt"))?;
         assert_eq!(nested_after, "nested modified\n");
-        assert!(!workspace.join("code-rs").exists());
+        assert!(!workspace.join("codex-rs").exists());
 
         Ok(())
     }
@@ -423,7 +410,7 @@ mod tests {
         let repo = temp.path();
         init_test_repo(repo);
 
-        let workspace = repo.join("code-rs");
+        let workspace = repo.join("codex-rs");
         std::fs::create_dir_all(&workspace)?;
         std::fs::write(repo.join(".gitignore"), ".vscode/\n")?;
         std::fs::write(workspace.join("tracked.txt"), "snapshot version\n")?;
