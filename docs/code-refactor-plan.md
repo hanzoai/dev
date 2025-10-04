@@ -36,11 +36,16 @@ We already tried copying modules into `code-*` while leaving the originals in `c
    - Point binaries and downstream crates at the `code-*` versions first so
      the product keeps working.
    - For each fork feature area (TUI, app-server, CLI, core, browser, etc.)
-     replace the copy in `code-rs/` with thin wrappers that call into
-     upstream `codex-*` modules. When the wrapper is thin enough, delete the
-     duplicated implementation from `code-rs/` and rely on upstream.
-   - After each feature area is reconciled, re-run `./build-fast.sh` and
-     remove any leftover fork patches from the matching `codex-*` crate.
+     decide whether we can extend upstream `codex-*` code or must keep the
+     forked implementation. Favor reusing large upstream sections where the
+     integration cost is manageable; otherwise, maintain the fork logic and
+     document why it diverges.
+   - When we do integrate, prefer targeted extension points or light
+     wrappers instead of one-to-one rewrites, and retire duplicate modules
+     only after the shared path is verified.
+   - After each feature area decision, re-run `./build-fast.sh` and capture
+     any remaining fork patches in the matching `codex-*` crate for future
+     cleanup.
 
 4. **Ongoing maintenance**
    - Pull upstream changes directly into `codex-rs/`, resolve conflicts only
@@ -51,9 +56,11 @@ We already tried copying modules into `code-*` while leaving the originals in `c
 
 ## Execution Checklist
 
-1. Snapshot current state (branch + optional tag) so we can recover if the
-   reset uncovers regressions. *(Owner: pending — take snapshot before
-   upstream restore work begins.)*
+1. **DONE (2025-10-04):** Snapshot current state (branch + optional tag) so
+   we can recover if the reset uncovers regressions. Created
+   `snapshot/pre-upstream-reset-20251004` (branch) and
+   `snapshot-pre-upstream-reset-20251004` (tag) before upstream restore
+   work begins.
 2. **DONE (2025-10-04):** Duplicate `codex-rs/` into `code-rs/` so history
    follows the fork. Bulk-renamed all crates/binaries from `codex-*` to
    `code-*`, fixed module/file names, updated manifests, and confirmed
@@ -66,10 +73,18 @@ We already tried copying modules into `code-*` while leaving the originals in `c
 5. Replace `codex-rs/` with the upstream checkout and re-run
    `./build-fast.sh`. *(Owner: pending — execute after snapshot & tooling
    audit.)*
-6. Begin removing duplicated code area by area, leaning on upstream and
-   exposing wrapper shims only where the fork behavior diverges.
-7. When wrapper surfaces stabilize, drop any stale fork-only modules from
-   `code-rs/` and ensure all downstream crates import `code-*` exclusively.
+6. Review each major subsystem to pinpoint the largest chunks we can
+   realistically source from upstream, implementing extension hooks or local
+   overrides only where forked behavior is essential.
+7. Schedule regular dead-code sweeps in `code-rs/` to prune legacy modules
+   we inherited from upstream but no longer reference; document each removal
+   so future merges stay clean.
+8. As upstream-backed sections land, retire redundant fork modules and,
+   when a `code-*` crate is effectively identical (exact replica or only an
+   ancestor without new commits) to its upstream counterpart, delete the
+   duplicate crate in favor of the `codex-rs/` version before cutting a
+   release. Ensure downstream crates import the appropriate `code-*` or
+   upstream paths based on the documented decision.
 
 ## Tracking
 
