@@ -7,9 +7,10 @@ use uuid::Uuid;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -976,6 +977,48 @@ async fn execute_cloud_built_in_streaming(
     if let Some(t) = stderr_task { let _ = t.await; }
     if !status.success() {
         return Err(format!("cloud submit exited with status {}", status));
+    }
+
+    if let Some(dir) = working_dir.as_ref() {
+        let diff_text_opt = if stdout_buf.starts_with("diff --git ") {
+            Some(stdout_buf.trim())
+        } else {
+            stdout_buf
+                .find("\ndiff --git ")
+                .map(|idx| stdout_buf[idx + 1..].trim())
+        };
+
+        if let Some(diff_text) = diff_text_opt {
+            if !diff_text.is_empty() {
+                let mut apply = Command::new("git");
+                apply.arg("apply").arg("--whitespace=nowarn");
+                apply.current_dir(dir);
+                apply.stdin(Stdio::piped());
+
+                let mut child = apply
+                    .spawn()
+                    .map_err(|e| format!("Failed to spawn git apply: {}", e))?;
+
+                if let Some(mut stdin) = child.stdin.take() {
+                    stdin
+                        .write_all(diff_text.as_bytes())
+                        .await
+                        .map_err(|e| format!("Failed to write diff to git apply: {}", e))?;
+                }
+
+                let status = child
+                    .wait()
+                    .await
+                    .map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+
+                if !status.success() {
+                    return Err(format!(
+                        "git apply exited with status {} while applying cloud diff",
+                        status
+                    ));
+                }
+            }
+        }
     }
 
     // Truncate large outputs
