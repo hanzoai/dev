@@ -2,7 +2,7 @@
 
 This fork extends upstream `openai/codex` in several areas. These bullets are a starting point — not a complete list. Before merging, scan the codebase and history (CHANGELOG.md, recent commits) to discover additional or newer fork‑only behavior and preserve it.
 
-- Browser Integration (codex-rs/browser, TUI + core wiring)
+- Browser Integration (code-rs/browser, TUI + core wiring)
   - Internal CDP browser manager with global access and /browser command.
   - Tool family: `browser_*` (open, status, click, move, type, key, javascript, scroll, history, inspect, console, cleanup, cdp).
   - Screenshot capture with segmentation, cursor overlay, asset storage, and per‑turn injection/queueing; TUI rendering with friendly titles.

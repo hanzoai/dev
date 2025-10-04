@@ -7,7 +7,7 @@ in
 rec {
   package = pkgs.rustPlatform.buildRustPackage {
     inherit env;
-    pname = "codex-rs";
+    pname = "code-rs";
     version = "0.1.0";
     cargoLock.lockFile = ./Cargo.lock;
     doCheck = false;
@@ -24,13 +24,13 @@ rec {
   };
   devShell = pkgs.mkShell {
     inherit env;
-    name = "codex-rs-dev";
+    name = "code-rs-dev";
     packages = monorep-deps ++ [
       pkgs.cargo
       package
     ];
     shellHook = ''
-      echo "Entering development shell for codex-rs"
+      echo "Entering development shell for code-rs"
       alias codex="cd ${package.src}/tui; cargo run; cd -"
       ${pkgs.rustPlatform.cargoSetupHook}
     '';

@@ -55,7 +55,7 @@ fn run_live(prompt: &str) -> (assert_cmd::assert::Assert, TempDir) {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().expect("failed to spawn codex-rs");
+    let mut child = cmd.spawn().expect("failed to spawn code-rs");
 
     // Send the terminating newline so Session::run exits after the first turn.
     child

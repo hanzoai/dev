@@ -47,5 +47,5 @@
   implementation.
 
 ## References
-- `codex-rs/tui/HISTORY_CELLS_PLAN.md` – Step 6 renderer cache design sketch.
-- `codex-rs/tui/src/chatwidget/history_render.rs` – existing memoization hooks.
+- `code-rs/tui/HISTORY_CELLS_PLAN.md` – Step 6 renderer cache design sketch.
+- `code-rs/tui/src/chatwidget/history_render.rs` – existing memoization hooks.

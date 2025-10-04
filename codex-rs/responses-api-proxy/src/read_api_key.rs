@@ -35,6 +35,13 @@ where
         buf.zeroize();
     })?;
 
+    if read == buf.len() - AUTH_HEADER_PREFIX.len() {
+        buf.zeroize();
+        return Err(anyhow!(
+            "OPENAI_API_KEY is too large to fit in the 512-byte buffer"
+        ));
+    }
+
     let mut total = AUTH_HEADER_PREFIX.len() + read;
     while total > AUTH_HEADER_PREFIX.len() && (buf[total - 1] == b'\n' || buf[total - 1] == b'\r') {
         total -= 1;
@@ -44,13 +51,6 @@ where
         buf.zeroize();
         return Err(anyhow!(
             "OPENAI_API_KEY must be provided via stdin (e.g. printenv OPENAI_API_KEY | codex responses-api-proxy)"
-        ));
-    }
-
-    if total == buf.len() {
-        buf.zeroize();
-        return Err(anyhow!(
-            "OPENAI_API_KEY is too large to fit in the 1024-byte buffer"
         ));
     }
 
@@ -180,24 +180,7 @@ mod tests {
         })
         .unwrap_err();
         let message = format!("{err:#}");
-        assert!(message.contains("OPENAI_API_KEY is too large to fit in the 1024-byte buffer"));
-    }
-
-    #[test]
-    fn accepts_near_limit_key_with_newline() {
-        let key_len = BUFFER_SIZE - AUTH_HEADER_PREFIX.len() - 1;
-        let mut data = vec![b'a'; key_len];
-        data.push(b'\n');
-
-        let header = read_auth_header_with(|buf| {
-            buf[..data.len()].copy_from_slice(&data);
-            Ok(data.len())
-        })
-        .expect("expected near-limit key with newline to succeed");
-
-        assert_eq!(header.len(), AUTH_HEADER_PREFIX.len() + key_len);
-        assert!(header.starts_with("Bearer "));
-        assert!(!header.ends_with('\n'));
+        assert!(message.contains("OPENAI_API_KEY is too large to fit in the 512-byte buffer"));
     }
 
     #[test]

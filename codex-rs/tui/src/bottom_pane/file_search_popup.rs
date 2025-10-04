@@ -1,9 +1,10 @@
 use codex_file_search::FileMatch;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::layout::Margin;
 use ratatui::widgets::WidgetRef;
-use ratatui::prelude::Stylize;
+
+use crate::render::Insets;
+use crate::render::RectExt;
 
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
@@ -53,21 +54,6 @@ impl FileSearchPopup {
         if !keep_existing {
             self.matches.clear();
             self.state.reset();
-        } else {
-            // While waiting for new results, proactively trim any rows that
-            // no longer plausibly match the refined query to avoid stale
-            // completions completing the wrong path on double-Tab.
-            let ql = query.to_lowercase();
-            self.matches.retain(|m| {
-                let path_l = m.path.to_lowercase();
-                if path_l.contains(&ql) { return true; }
-                // Also match basename for convenience
-                if let Some((_, base)) = m.path.rsplit_once('/') {
-                    return base.to_lowercase().contains(&ql);
-                }
-                false
-            });
-            self.state.clamp_selection(self.matches.len());
         }
     }
 
@@ -127,49 +113,42 @@ impl FileSearchPopup {
 
         self.matches.len().clamp(1, MAX_POPUP_ROWS) as u16
     }
-
-    /// Return the number of current matches shown in the popup.
-    pub(crate) fn match_count(&self) -> usize {
-        self.matches.len()
-    }
 }
 
 impl WidgetRef for &FileSearchPopup {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        // Match the slash-command popup: add two spaces of left padding so
-        // rows align with the text inside the composer (border + inner pad).
-        let indented_area = area.inner(Margin::new(2, 0));
         // Convert matches to GenericDisplayRow, translating indices to usize at the UI boundary.
-        let rows_all: Vec<GenericDisplayRow> = self
-            .matches
-            .iter()
-            .map(|m| GenericDisplayRow {
-                name: m.path.clone(),
-                match_indices: m
-                    .indices
-                    .as_ref()
-                    .map(|v| v.iter().map(|&i| i as usize).collect()),
-                is_current: false,
-                description: None,
-                // Use default text color for file matches
-                name_color: None,
-            })
-            .collect();
-
-        if self.waiting && rows_all.is_empty() {
-            // Show a friendly "searching…" placeholder instead of "no matches" while waiting
-            let msg = "searching…";
-            // Draw centered within the first row of the hint area
-            let x = indented_area.x;
-            let y = indented_area.y;
-            let w = indented_area.width;
-            let start = x.saturating_add(w.saturating_sub(msg.len() as u16) / 2);
-            for xi in x..x + w {
-                buf[(xi, y)].set_char(' ');
-            }
-            buf.set_string(start, y, msg, ratatui::style::Style::default().dim());
+        let rows_all: Vec<GenericDisplayRow> = if self.matches.is_empty() {
+            Vec::new()
         } else {
-            render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS, false);
-        }
+            self.matches
+                .iter()
+                .map(|m| GenericDisplayRow {
+                    name: m.path.clone(),
+                    match_indices: m
+                        .indices
+                        .as_ref()
+                        .map(|v| v.iter().map(|&i| i as usize).collect()),
+                    is_current: false,
+                    display_shortcut: None,
+                    description: None,
+                })
+                .collect()
+        };
+
+        let empty_message = if self.waiting {
+            "loading..."
+        } else {
+            "no matches"
+        };
+
+        render_rows(
+            area.inset(Insets::tlbr(0, 2, 0, 0)),
+            buf,
+            &rows_all,
+            &self.state,
+            MAX_POPUP_ROWS,
+            empty_message,
+        );
     }
 }

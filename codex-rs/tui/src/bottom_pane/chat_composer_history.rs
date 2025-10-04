@@ -28,10 +28,6 @@ pub(crate) struct ChatComposerHistory {
     /// history navigation. Used to decide if further Up/Down presses should be
     /// treated as navigation versus normal cursor movement.
     last_history_text: Option<String>,
-
-    /// The original text that was in the composer before starting history navigation.
-    /// This allows us to restore it when pressing down past the newest entry.
-    original_text: Option<String>,
 }
 
 impl ChatComposerHistory {
@@ -43,7 +39,6 @@ impl ChatComposerHistory {
             fetched_history: HashMap::new(),
             history_cursor: None,
             last_history_text: None,
-            original_text: None,
         }
     }
 
@@ -55,7 +50,6 @@ impl ChatComposerHistory {
         self.local_history.clear();
         self.history_cursor = None;
         self.last_history_text = None;
-        self.original_text = None;
     }
 
     /// Record a message submitted by the user in the current session so it can
@@ -64,29 +58,16 @@ impl ChatComposerHistory {
         if text.is_empty() {
             return;
         }
+
         // Avoid inserting a duplicate if identical to the previous entry.
-        if self
-            .local_history
-            .last()
-            .is_some_and(|prev| prev == text)
-        {
+        if self.local_history.last().is_some_and(|prev| prev == text) {
             return;
         }
+
         self.local_history.push(text.to_string());
         self.history_cursor = None;
         self.last_history_text = None;
-        self.original_text = None;
     }
-
-    /// Reset navigation state (used when clearing input with double-Esc or when text is edited)
-    pub fn reset_navigation(&mut self) {
-        self.history_cursor = None;
-        self.last_history_text = None;
-        self.original_text = None;
-    }
-
-    /// Returns true if the user is currently browsing history.
-    pub fn is_browsing(&self) -> bool { self.history_cursor.is_some() }
 
     /// Should Up/Down key presses be interpreted as history navigation given
     /// the current content and cursor position of `textarea`?
@@ -95,55 +76,26 @@ impl ChatComposerHistory {
             return false;
         }
 
-        // Empty textarea - always handle navigation
         if text.is_empty() {
             return true;
         }
 
-        // If we're currently browsing history and the text matches the last history text,
-        // continue handling navigation (allows continued browsing)
-        if self.history_cursor.is_some() {
-            if let Some(ref last) = self.last_history_text {
-                if last == text {
-                    return true;
-                }
-            }
+        // Textarea is not empty – only navigate when cursor is at start and
+        // text matches last recalled history entry so regular editing is not
+        // hijacked.
+        if cursor != 0 {
+            return false;
         }
 
-        // If cursor at start and text is either original or a history entry, handle navigation
-        if cursor == 0 {
-            // Check if it's the original text we saved
-            if let Some(ref orig) = self.original_text {
-                if orig == text {
-                    return true;
-                }
-            }
-            // Check if it matches last history text
-            if let Some(ref last) = self.last_history_text {
-                if last == text {
-                    return true;
-                }
-            }
-        }
-
-        false
+        matches!(&self.last_history_text, Some(prev) if prev == text)
     }
 
     /// Handle <Up>. Returns true when the key was consumed and the caller
     /// should request a redraw.
-    pub fn navigate_up(
-        &mut self,
-        current_text: &str,
-        app_event_tx: &AppEventSender,
-    ) -> Option<String> {
+    pub fn navigate_up(&mut self, app_event_tx: &AppEventSender) -> Option<String> {
         let total_entries = self.history_entry_count + self.local_history.len();
         if total_entries == 0 {
             return None;
-        }
-
-        // If we're not browsing yet, save the current text as the original
-        if self.history_cursor.is_none() && self.original_text.is_none() {
-            self.original_text = Some(current_text.to_string());
         }
 
         let next_idx = match self.history_cursor {
@@ -175,12 +127,10 @@ impl ChatComposerHistory {
                 self.populate_history_at_index(idx as usize, app_event_tx)
             }
             None => {
-                // Past newest – restore original text and exit browsing mode.
-                let result = self.original_text.clone().unwrap_or_default();
+                // Past newest – clear and exit browsing mode.
                 self.history_cursor = None;
                 self.last_history_text = None;
-                self.original_text = None;
-                Some(result)
+                Some(String::new())
             }
         }
     }
@@ -237,17 +187,39 @@ impl ChatComposerHistory {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
-    #![expect(clippy::expect_used)]
     use super::*;
     use crate::app_event::AppEvent;
     use codex_core::protocol::Op;
-    use std::sync::mpsc::channel;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[test]
+    fn duplicate_submissions_are_not_recorded() {
+        let mut history = ChatComposerHistory::new();
+
+        // Empty submissions are ignored.
+        history.record_local_submission("");
+        assert_eq!(history.local_history.len(), 0);
+
+        // First entry is recorded.
+        history.record_local_submission("hello");
+        assert_eq!(history.local_history.len(), 1);
+        assert_eq!(history.local_history.last().unwrap(), "hello");
+
+        // Identical consecutive entry is skipped.
+        history.record_local_submission("hello");
+        assert_eq!(history.local_history.len(), 1);
+
+        // Different entry is recorded.
+        history.record_local_submission("world");
+        assert_eq!(history.local_history.len(), 2);
+        assert_eq!(history.local_history.last().unwrap(), "world");
+    }
 
     #[test]
     fn navigation_with_async_fetch() {
-        let (tx, rx) = channel::<AppEvent>();
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx);
 
         let mut history = ChatComposerHistory::new();
@@ -256,7 +228,7 @@ mod tests {
 
         // First Up should request offset 2 (latest) and await async data.
         assert!(history.should_handle_navigation("", 0));
-        assert!(history.navigate_up("", &tx).is_none()); // don't replace the text yet
+        assert!(history.navigate_up(&tx).is_none()); // don't replace the text yet
 
         // Verify that an AppEvent::CodexOp with the correct GetHistoryEntryRequest was sent.
         let event = rx.try_recv().expect("expected AppEvent to be sent");
@@ -278,7 +250,7 @@ mod tests {
         );
 
         // Next Up should move to offset 1.
-        assert!(history.navigate_up("latest", &tx).is_none()); // don't replace the text yet
+        assert!(history.navigate_up(&tx).is_none()); // don't replace the text yet
 
         // Verify second CodexOp event for offset 1.
         let event2 = rx.try_recv().expect("expected second event");

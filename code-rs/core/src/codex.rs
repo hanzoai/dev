@@ -10770,14 +10770,14 @@ mod command_guard_detection_tests {
         let argv = vec![
             "bash".to_string(),
             "-lc".to_string(),
-            "cat <<'EOF' > codex-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
+            "cat <<'EOF' > code-rs/git-tooling/Cargo.toml\n[package]\nname = \"demo\"\nEOF".to_string(),
         ];
 
         let suggestion = detect_cat_write(&argv).expect("should flag cat write");
         assert_eq!(suggestion.label, "original_script");
         assert!(suggestion
             .original_value
-            .contains("cat <<'EOF' > codex-rs/git-tooling/Cargo.toml"));
+            .contains("cat <<'EOF' > code-rs/git-tooling/Cargo.toml"));
     }
 
     #[test]

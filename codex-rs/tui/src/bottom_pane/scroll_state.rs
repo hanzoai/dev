@@ -84,7 +84,7 @@ impl ScrollState {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::ScrollState;
 

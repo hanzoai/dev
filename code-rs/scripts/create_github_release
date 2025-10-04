@@ -10,7 +10,7 @@ import sys
 
 REPO = "openai/codex"
 BRANCH_REF = "heads/main"
-CARGO_TOML_PATH = "codex-rs/Cargo.toml"
+CARGO_TOML_PATH = "code-rs/Cargo.toml"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

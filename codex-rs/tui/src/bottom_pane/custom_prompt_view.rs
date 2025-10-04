@@ -12,9 +12,9 @@ use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::Widget;
 use std::cell::RefCell;
 
-use super::popup_consts::_STANDARD_POPUP_HINT_LINE as STANDARD_POPUP_HINT_LINE;
-use crate::app_event_sender::AppEventSender;
-use crate::bottom_pane::SelectionAction;
+use crate::render::renderable::Renderable;
+
+use super::popup_consts::standard_popup_hint_line;
 
 use super::CancellationEvent;
 use super::bottom_pane_view::BottomPaneView;
@@ -30,8 +30,6 @@ pub(crate) struct CustomPromptView {
     placeholder: String,
     context_label: Option<String>,
     on_submit: PromptSubmitted,
-    app_event_tx: AppEventSender,
-    on_escape: Option<SelectionAction>,
 
     // UI state
     textarea: TextArea,
@@ -44,8 +42,6 @@ impl CustomPromptView {
         title: String,
         placeholder: String,
         context_label: Option<String>,
-        app_event_tx: AppEventSender,
-        on_escape: Option<SelectionAction>,
         on_submit: PromptSubmitted,
     ) -> Self {
         Self {
@@ -53,8 +49,6 @@ impl CustomPromptView {
             placeholder,
             context_label,
             on_submit,
-            app_event_tx,
-            on_escape,
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
             complete: false,
@@ -62,13 +56,13 @@ impl CustomPromptView {
     }
 }
 
-impl BottomPaneView<'_> for CustomPromptView {
-    fn handle_key_event(&mut self, pane: &mut super::BottomPane<'_>, key_event: KeyEvent) {
+impl BottomPaneView for CustomPromptView {
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
                 code: KeyCode::Esc, ..
             } => {
-                self.on_ctrl_c(pane);
+                self.on_ctrl_c();
             }
             KeyEvent {
                 code: KeyCode::Enter,
@@ -93,11 +87,8 @@ impl BottomPaneView<'_> for CustomPromptView {
         }
     }
 
-    fn on_ctrl_c(&mut self, _pane: &mut super::BottomPane<'_>) -> CancellationEvent {
+    fn on_ctrl_c(&mut self) -> CancellationEvent {
         self.complete = true;
-        if let Some(cb) = &self.on_escape {
-            cb(&self.app_event_tx);
-        }
         CancellationEvent::Handled
     }
 
@@ -105,6 +96,36 @@ impl BottomPaneView<'_> for CustomPromptView {
         self.complete
     }
 
+    fn handle_paste(&mut self, pasted: String) -> bool {
+        if pasted.is_empty() {
+            return false;
+        }
+        self.textarea.insert_str(&pasted);
+        true
+    }
+
+    fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        if area.height < 2 || area.width <= 2 {
+            return None;
+        }
+        let text_area_height = self.input_height(area.width).saturating_sub(1);
+        if text_area_height == 0 {
+            return None;
+        }
+        let extra_offset: u16 = if self.context_label.is_some() { 1 } else { 0 };
+        let top_line_count = 1u16 + extra_offset;
+        let textarea_rect = Rect {
+            x: area.x.saturating_add(2),
+            y: area.y.saturating_add(top_line_count).saturating_add(1),
+            width: area.width.saturating_sub(2),
+            height: text_area_height,
+        };
+        let state = *self.textarea_state.borrow();
+        self.textarea.cursor_pos_with_state(textarea_rect, state)
+    }
+}
+
+impl Renderable for CustomPromptView {
     fn desired_height(&self, width: u16) -> u16 {
         let extra_top: u16 = if self.context_label.is_some() { 1 } else { 0 };
         1u16 + extra_top + self.input_height(width) + 3u16
@@ -200,7 +221,7 @@ impl BottomPaneView<'_> for CustomPromptView {
 
         let hint_y = hint_blank_y.saturating_add(1);
         if hint_y < area.y.saturating_add(area.height) {
-            Paragraph::new(STANDARD_POPUP_HINT_LINE).render(
+            Paragraph::new(standard_popup_hint_line()).render(
                 Rect {
                     x: area.x,
                     y: hint_y,
@@ -210,14 +231,6 @@ impl BottomPaneView<'_> for CustomPromptView {
                 buf,
             );
         }
-    }
-
-    fn handle_paste(&mut self, pasted: String) -> super::bottom_pane_view::ConditionalUpdate {
-        if pasted.is_empty() {
-            return super::bottom_pane_view::ConditionalUpdate::NoRedraw;
-        }
-        self.textarea.insert_str(&pasted);
-        super::bottom_pane_view::ConditionalUpdate::NeedsRedraw
     }
 }
 

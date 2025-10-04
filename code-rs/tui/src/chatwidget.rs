@@ -10050,7 +10050,7 @@ impl ChatWidget<'_> {
                     "streaming preview: drafting deployment summary…",
                     "streaming preview: cross-checking lint targets…",
                 ],
-                "**Here's a demo walkthrough:**\n\n1. Run `./build-fast.sh perf` to compile quickly.\n2. Cache artifacts in `codex-rs/target/perf`.\n3. Finish by sharing `./build-fast.sh run` output.\n\n```bash\n./build-fast.sh perf run\n```",
+                "**Here's a demo walkthrough:**\n\n1. Run `./build-fast.sh perf` to compile quickly.\n2. Cache artifacts in `code-rs/target/perf`.\n3. Finish by sharing `./build-fast.sh run` output.\n\n```bash\n./build-fast.sh perf run\n```",
                 vec![
                     (vec!["git", "status"], "On branch main\nnothing to commit, working tree clean\n"),
                     (vec!["rg", "--files"], ""),

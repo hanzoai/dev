@@ -112,8 +112,14 @@ function readFileSafe(p) { try { return fs.readFileSync(p, 'utf8'); } catch { re
 
 function loadCodexPrompts() {
   const root = path.resolve(__dirname, '..');
-  const base = readFileSafe(path.join(root, 'codex-rs', 'core', 'prompt.md')) || 'You are Codex.';
-  const coder = readFileSafe(path.join(root, 'codex-rs', 'core', 'prompt_coder.md')) || '';
+  const base =
+    readFileSafe(path.join(root, 'code-rs', 'core', 'prompt.md')) ||
+    readFileSafe(path.join(root, 'codex-rs', 'core', 'prompt.md')) ||
+    'You are Codex.';
+  const coder =
+    readFileSafe(path.join(root, 'code-rs', 'core', 'prompt_coder.md')) ||
+    readFileSafe(path.join(root, 'codex-rs', 'core', 'prompt_coder.md')) ||
+    '';
   return { base, coder };
 }
 

@@ -3,14 +3,12 @@
 This document describes Codex’s experimental MCP interface: a JSON‑RPC API that runs over the Model Context Protocol (MCP) transport to control a local Codex engine.
 
 - Status: experimental and subject to change without notice
-- Recommended entry point: `code mcp` (alias: `code acp`; both wrap the same binary used by the CLI)
-- Underlying Rust binary (for development): `cargo run -p code-mcp-server`
-- ACP compatibility: surfaces `session/new` + `session/prompt` as MCP tools and emits `session/update` notifications
+- Server binary: `codex mcp-server` (or `codex-mcp-server`)
 - Transport: standard MCP over stdio (JSON‑RPC 2.0, line‑delimited)
 
 ## Overview
 
-Codex exposes a small set of MCP‑compatible methods to create and manage conversations, send user input, receive live events, and handle approval prompts. The types are defined in `app-server-protocol/src/protocol.rs` and re-used by the MCP server implementation in `mcp-server/`.
+Codex exposes a small set of MCP‑compatible methods to create and manage conversations, send user input, receive live events, and handle approval prompts. The types are defined in `protocol/src/mcp_protocol.rs` and re‑used by the MCP server implementation in `mcp-server/`.
 
 At a glance:
 
@@ -31,7 +29,7 @@ At a glance:
   - `loginChatGptComplete`, `authStatusChange`
   - `codex/event` stream with agent events
 
-See code for full type definitions and exact shapes: `app-server-protocol/src/protocol.rs`.
+See code for full type definitions and exact shapes: `protocol/src/mcp_protocol.rs`.
 
 ## Starting the server
 
@@ -123,4 +121,4 @@ While processing, the server emits `codex/event` notifications containing agent 
 
 ## Compatibility and stability
 
-This interface is experimental. Method names, fields, and event shapes may evolve. For the authoritative schema, consult `app-server-protocol/src/protocol.rs` and the corresponding server wiring in `mcp-server/`.
+This interface is experimental. Method names, fields, and event shapes may evolve. For the authoritative schema, consult `protocol/src/mcp_protocol.rs` and the corresponding server wiring in `mcp-server/`.

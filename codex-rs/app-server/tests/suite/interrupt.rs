@@ -2,17 +2,18 @@
 // Support code lives in the `app_test_support` crate under tests/common.
 
 use std::path::Path;
-use codex_protocol::protocol::TurnAbortReason;
+
 use codex_app_server_protocol::AddConversationListenerParams;
 use codex_app_server_protocol::InterruptConversationParams;
 use codex_app_server_protocol::InterruptConversationResponse;
+use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::NewConversationParams;
 use codex_app_server_protocol::NewConversationResponse;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SendUserMessageParams;
 use codex_app_server_protocol::SendUserMessageResponse;
-use core_test_support::non_sandbox_test;
-use mcp_types::JSONRPCResponse;
-use mcp_types::RequestId;
+use codex_core::protocol::TurnAbortReason;
+use core_test_support::skip_if_no_network;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
@@ -25,7 +26,7 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_shell_command_interruption() {
-    non_sandbox_test!();
+    skip_if_no_network!();
 
     if let Err(err) = shell_command_interruption().await {
         panic!("failure: {err}");

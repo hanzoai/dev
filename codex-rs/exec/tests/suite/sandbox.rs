@@ -56,6 +56,7 @@ async fn spawn_command_under_sandbox(
 
 #[tokio::test]
 async fn python_multiprocessing_lock_works_under_sandbox() {
+    core_test_support::skip_if_sandbox!();
     #[cfg(target_os = "macos")]
     let writable_roots = Vec::<PathBuf>::new();
 
@@ -71,7 +72,6 @@ async fn python_multiprocessing_lock_works_under_sandbox() {
         network_access: false,
         exclude_tmpdir_env_var: false,
         exclude_slash_tmp: false,
-        allow_git_writes: true,
     };
 
     let python_code = r#"import multiprocessing
@@ -111,6 +111,7 @@ if __name__ == '__main__':
 
 #[tokio::test]
 async fn sandbox_distinguishes_command_and_policy_cwds() {
+    core_test_support::skip_if_sandbox!();
     let temp = tempfile::tempdir().expect("should be able to create temp dir");
     let sandbox_root = temp.path().join("sandbox");
     let command_root = temp.path().join("command");
@@ -131,7 +132,6 @@ async fn sandbox_distinguishes_command_and_policy_cwds() {
         network_access: false,
         exclude_tmpdir_env_var: true,
         exclude_slash_tmp: true,
-        allow_git_writes: true,
     };
 
     // Attempt to write inside the command cwd, which is outside of the sandbox policy cwd.
