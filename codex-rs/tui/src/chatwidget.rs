@@ -6536,6 +6536,9 @@ impl ChatWidget<'_> {
     fn refresh_explore_trailing_flags(&mut self) {}
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
+        if self.layout.scroll_offset > 0 {
+            layout_scroll::to_bottom(self);
+        }
         // Surface a local diagnostic note and anchor it to the NEXT turn,
         // placing it directly after the user prompt so ordering is stable.
         // (debug message removed)
@@ -9903,8 +9906,7 @@ impl ChatWidget<'_> {
                     }
                 }
                 if self.auto_state.active && self.auto_state.waiting_for_review {
-                    self.auto_state.waiting_for_review = false;
-                    self.auto_send_conversation();
+                    self.maybe_resume_auto_after_review();
                 } else {
                     self.request_redraw();
                 }
@@ -12177,11 +12179,15 @@ fi\n\
             }
         };
 
-        self.auto_resolve_state = Some(AutoResolveState::new(
-            prompt.clone(),
-            hint.clone(),
-            auto_metadata.clone(),
-        ));
+        if self.config.tui.review_auto_resolve {
+            self.auto_resolve_state = Some(AutoResolveState::new(
+                prompt.clone(),
+                hint.clone(),
+                auto_metadata.clone(),
+            ));
+        } else {
+            self.auto_resolve_state = None;
+        }
         self.begin_review(prompt, hint, Some(preparation), review_metadata);
     }
 
@@ -18718,10 +18724,34 @@ impl ChatWidget<'_> {
 
     fn auto_resolve_clear(&mut self) {
         self.auto_resolve_state = None;
+        self.maybe_resume_auto_after_review();
     }
 
     fn auto_resolve_notice<S: Into<String>>(&mut self, message: S) {
         self.push_background_tail(message.into());
+        self.request_redraw();
+    }
+
+    fn auto_resolve_should_block_auto_resume(&self) -> bool {
+        match self.auto_resolve_state.as_ref().map(|state| &state.phase) {
+            Some(AutoResolvePhase::PendingFix { .. })
+            | Some(AutoResolvePhase::AwaitingFix { .. })
+            | Some(AutoResolvePhase::AwaitingJudge { .. }) => true,
+            Some(AutoResolvePhase::WaitingForReview) => self.is_review_flow_active(),
+            None => false,
+        }
+    }
+
+    fn maybe_resume_auto_after_review(&mut self) {
+        if !self.auto_state.active || !self.auto_state.waiting_for_review {
+            return;
+        }
+        if self.is_review_flow_active() || self.auto_resolve_should_block_auto_resume() {
+            self.request_redraw();
+            return;
+        }
+        self.auto_state.waiting_for_review = false;
+        self.auto_send_conversation();
         self.request_redraw();
     }
 
