@@ -59,6 +59,17 @@ pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
 const BRANCH_METADATA_DIR: &str = "_branch-meta";
 const DEFAULT_BRANCH_CACHE_DIRS: &[&str] = &["node_modules"];
 
+fn branch_copy_cache_dirs_enabled() -> bool {
+    const TOGGLES: &[&str] = &["CODE_BRANCH_COPY_CACHES", "CODEX_BRANCH_COPY_CACHES"];
+    for var in TOGGLES {
+        if let Ok(value) = std::env::var(var) {
+            let value = value.to_ascii_lowercase();
+            return matches!(value.as_str(), "1" | "true" | "yes");
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BranchMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -498,22 +509,25 @@ async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result
 }
 
 fn gather_branch_cache_candidates(src_root: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = DEFAULT_BRANCH_CACHE_DIRS
-        .iter()
-        .map(PathBuf::from)
-        .collect();
+    let mut out: Vec<PathBuf> = Vec::new();
 
-    append_cargo_targets(src_root, &mut out);
+    if branch_copy_cache_dirs_enabled() {
+        out.extend(DEFAULT_BRANCH_CACHE_DIRS.iter().map(PathBuf::from));
+        append_cargo_targets(src_root, &mut out);
+        if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
+            let path = PathBuf::from(raw);
+            if let Some(rel) = relative_candidate_path(&path, src_root) {
+                out.push(rel);
+            }
+        }
+    }
 
-    if let Some(raw) = std::env::var_os("CODEX_BRANCH_COPY_DIRS") {
+    if let Some(raw) = std::env::var_os("CODE_BRANCH_COPY_DIRS") {
         out.extend(std::env::split_paths(&raw));
     }
 
-    if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
-        let path = PathBuf::from(raw);
-        if let Some(rel) = relative_candidate_path(&path, src_root) {
-            out.push(rel);
-        }
+    if let Some(raw) = std::env::var_os("CODEX_BRANCH_COPY_DIRS") {
+        out.extend(std::env::split_paths(&raw));
     }
 
     out
