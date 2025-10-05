@@ -18,7 +18,7 @@ This document provides a comprehensive inventory of dead or unused code in the c
 - ✅ **6 orphaned modules** totaling ~72,700 bytes — **REMOVED** (see Section 2.1)
 - ✅ **Feature flag audit complete** — `code-fork` feature is properly used and enabled by default
 - ✅ **Core modules audit complete** — All modules (`codex/`, `unified_exec/`, `exec_command/`) are actively used
-- ⏳ **TUI modules audit** — Backtrack overlay stack still under evaluation (`backtrack_helpers.rs`, `pager_overlay.rs`, `resume_picker.rs` remain)
+- ⏳ **TUI modules audit** — Streaming controller/markdown modules still under review; overlay stack (`pager_overlay.rs`, `backtrack_helpers.rs`, `resume_picker.rs`) deleted
 - **9 modules** marked with `#![allow(dead_code)]` at file level — **ACCEPTABLE** (mostly helpers and utilities)
 - ✅ `vt100-tests` feature flag removed from `code-rs/tui/Cargo.toml` (2025-10-05)
 - **0 orphaned prompt files** (all are actively used, documented in `docs/maintenance/prompt-architecture.md`)
@@ -35,7 +35,7 @@ This document provides a comprehensive inventory of dead or unused code in the c
 **Items Removed:**
 - `legacy_tests` feature flag from `code-rs/tui/Cargo.toml`
 - All 27 gated test modules (~11,232 lines)
-- Orphaned modules: `app_backtrack.rs`, `custom_terminal.rs`, `scroll_view.rs`, `text_block.rs`, `transcript_app.rs`
+- Orphaned modules: `app_backtrack.rs`, `custom_terminal.rs`, `scroll_view.rs`, `text_block.rs`, `transcript_app.rs`, `pager_overlay.rs`, `backtrack_helpers.rs`, `resume_picker.rs`
 - Legacy `exec_cell/render.rs`
 - Introduced new smoke scaffold at `code-rs/tui/tests/ui_smoke.rs`
 
@@ -216,26 +216,18 @@ cargo build -p code-tui
 
 ---
 
-#### 2.1.4 resume_picker.rs ⏳ PENDING
+#### 2.1.4 resume_picker.rs ✅ REMOVED
 
-**Location:** `code-rs/tui/src/resume_picker.rs`
+**Location:** `code-rs/tui/src/resume_picker.rs` (DELETED)
 **Size:** 37,218 bytes
-**Status:** Still present; depends on now-removed `custom_terminal.rs`
+**Status:** REMOVED - Alternate-screen picker superseded by inline resume prompt
 
-**Note:** Needs replacement or deletion once resume UX plan is finalized.
-
-**Deletion Plan:**
-```bash
-# Candidate removal once replacement flow lands
-# rm code-rs/tui/src/resume_picker.rs
-```
-
-**Verification (current state):**
+**Verification:**
 ```bash
 rg "resume_picker" code-rs/tui/
 ```
 
-**Risk:** MEDIUM - Module references legacy terminal helpers
+**Risk:** NONE - No code paths referenced the module
 
 ---
 
@@ -358,17 +350,15 @@ cargo test -p code-core --test suite
 
 | File | Size | Status |
 |------|------|--------|
-| `src/pager_overlay.rs` | 25,058 B | `#![allow(dead_code, unused_imports, unused_variables)]` — PENDING REVIEW |
 | `src/streaming/controller.rs` | 18,450 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/streaming/mod.rs` | 3,952 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/markdown_stream.rs` | 41,063 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/markdown.rs` | 28,666 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | ✅ ~~`src/transcript_app.rs`~~ | ~~9,904 B~~ | **REMOVED** |
-| `src/backtrack_helpers.rs` | 4,919 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/bottom_pane/list_selection_view.rs` | ? | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/bottom_pane/paste_burst.rs` | ? | `#![allow(dead_code, unused_imports, unused_variables)]` — PENDING REVIEW |
 
-**Remaining:** ~102,000+ bytes requiring investigation
+**Remaining:** ~70,000+ bytes requiring investigation
 
 ### 3.2 Core Modules (code-rs/core)
 

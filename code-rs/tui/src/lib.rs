@@ -31,7 +31,6 @@ use uuid::Uuid;
 mod app;
 mod app_event;
 mod app_event_sender;
-mod backtrack_helpers;
 mod account_label;
 mod bottom_pane;
 mod chatwidget;
@@ -57,7 +56,6 @@ mod markdown_renderer;
 mod markdown_stream;
 mod syntax_highlight;
 pub mod onboarding;
-mod pager_overlay;
 pub mod public_widgets;
 mod render;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration

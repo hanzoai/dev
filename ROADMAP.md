@@ -26,6 +26,7 @@ Supporting detail: `DEAD_CODE_INVENTORY.md`
   - Removed ~35,000 lines of outdated test code
   - See `docs/migration/legacy-tests-retirement.md` for porting plan
 - ✅ Removed legacy TUI test harness files (`chatwidget/tests.rs`, `chatwidget/tests_retry.rs`) and the orphaned `exec_cell/render.rs`
+- ✅ Removed defunct TUI overlay/backtrack modules (`pager_overlay.rs`, `backtrack_helpers.rs`, `resume_picker.rs`)
 - ✅ Archived `code-rs/tui/agent_tasks/` planning docs under `docs/archive/tui-migrations/`
 - ✅ Deleted `code-rs/tui/src/compat.rs` ratatui adapter layer; import ratatui types directly
 - ✅ Removed all `cfg(feature = "legacy_tests")` blocks
@@ -33,7 +34,7 @@ Supporting detail: `DEAD_CODE_INVENTORY.md`
 - ✅ Created comprehensive migration documentation in `docs/migration/` and `docs/maintenance/`
 
 ### Needs Follow-Up
-- ⏳ TUI overlay/backtrack modules still present pending replacement (`code-rs/tui/src/backtrack_helpers.rs`, `code-rs/tui/src/pager_overlay.rs`, `code-rs/tui/src/resume_picker.rs`)
+- ⏳ Audit remaining TUI modules marked `#![allow(dead_code)]` (streaming controller, markdown stack)
 - ⏳ Reconcile vt100 rendering coverage — upstream snapshots live only in `codex-rs`
 
 ### Active Work
