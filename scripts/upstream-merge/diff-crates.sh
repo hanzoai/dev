@@ -81,6 +81,7 @@ diff_crate() {
     local sanitized_path="${temp_dir}/${crate_name}"
 
     rsync -a --delete "$code_path/" "$sanitized_path/"
+    find "$sanitized_path" -name '.DS_Store' -delete
 
     # Rewrite code-* / code_* identifiers back to codex-* so the diff highlights
     # real behavioural changes instead of fork re-branding noise. Limit to
@@ -89,7 +90,7 @@ diff_crate() {
         xargs -0 perl -pi -e 's/\bcode-([a-z0-9_]+)/codex-$1/g; s/\bcode_([a-z0-9_]+)/codex_$1/g'
 
     # Generate diff with context using the sanitized fork copy
-    if diff -Naur --exclude="target" --exclude="*.lock" --exclude="node_modules" \
+    if diff -Naur --exclude="target" --exclude="*.lock" --exclude="node_modules" --exclude=".DS_Store" \
         "$codex_path" "$sanitized_path" > "$output_file" 2>&1; then
         echo "   ✅ No differences found"
         rm "$output_file"
@@ -175,6 +176,7 @@ main() {
     case "$1" in
         --all)
             echo "🔍 Comparing all shared crates..."
+            rm -f "${OUTPUT_DIR}"/*.diff
             for crate in "${SHARED_CRATES[@]}"; do
                 diff_crate "$crate"
             done
