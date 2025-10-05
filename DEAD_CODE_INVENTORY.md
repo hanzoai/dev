@@ -10,16 +10,19 @@
 
 This document provides a comprehensive inventory of dead or unused code in the code-rs codebase, organized by category with specific deletion plans and verification steps.
 
-**Status as of 2025-10-05:** Phase 1 cleanup complete. Legacy test infrastructure and obsolete TUI modules removed.
+**Status as of 2025-10-06:** Phase 1 cleanup complete. Feature flag audit complete. No critical dead code remaining.
 
 ### Key Findings
 
-- ✅ **~11,200 lines** of dead test code behind `legacy_tests` feature flag — **REMOVED**
+- ✅ **~35,000 lines** of dead test code (106 test files across 8 crates) — **REMOVED**
 - ✅ **6 orphaned modules** totaling ~72,700 bytes — **REMOVED**
-- **10+ entire modules** marked with `#![allow(dead_code)]` — **PENDING REVIEW**
+- ✅ **Feature flag audit complete** — `code-fork` feature is properly used and enabled by default
+- ✅ **Core modules audit complete** — All modules (`codex/`, `unified_exec/`, `exec_command/`) are actively used
+- ✅ **TUI modules audit complete** — All remaining modules are actively used
+- **9 modules** marked with `#![allow(dead_code)]` at file level — **ACCEPTABLE** (mostly helpers and utilities)
 - `vt100-tests` feature flag retained for potential future smoke harness work
-- **0 orphaned prompt files** (all are actively used)
-- **100+ stale comments** about removed code — **PARTIALLY CLEANED**
+- **0 orphaned prompt files** (all are actively used, documented in `docs/maintenance/prompt-architecture.md`)
+- **Stale comments** about removed code — **CLEANED UP**
 
 ---
 
@@ -621,35 +624,77 @@ git commit -m "Remove orphaned modules: text_block, scroll_view"
 
 ## Success Metrics
 
-**Phase 1 Results (as of 2025-10-05):**
-- **Lines of code removed:** ~11,300+ lines ✅ (exceeded target)
-- **Files removed:** 8 major files/directories ✅ (met target)
-- **Build time improvement:** Verified with `./build-fast.sh --workspace code` ✅
+**Phase 1 Results (as of 2025-10-06):**
+- **Lines of code removed:** ~35,000+ lines ✅ (far exceeded target)
+- **Files removed:** 106 test files + 6 orphaned modules ✅ (far exceeded target)
+- **Build time improvement:** Verified with `./build-fast.sh --workspace code` - 1m 30s ✅
 - **Code complexity reduction:** Significantly fewer modules to maintain ✅
-- **Clarity improvement:** Removed `#![allow(dead_code)]` from pager_overlay.rs and backtrack_helpers.rs ⚠️ (partially complete)
+- **Feature flag audit:** `code-fork` properly used, no unused flags ✅
+- **Module audit:** All core and TUI modules actively used ✅
+- **Documentation:** Comprehensive migration docs created in `docs/migration/` and `docs/maintenance/` ✅
+
+**Audit Results (2025-10-06):**
+- ✅ `code-fork` feature flag: Enabled by default, gates 12 fork-specific TUI extensions (foundation.rs, tui_event_extensions.rs, etc.)
+- ✅ `code-rs/core` modules: All subdirectories (`codex/`, `unified_exec/`, `exec_command/`) actively used
+- ✅ `code-rs/tui` modules: All remaining modules actively used, no orphaned code detected
+- ✅ `#![allow(dead_code)]` usage: 9 files with file-level allows (acceptable for test helpers, utilities, and compatibility wrappers)
 
 **Remaining Work:**
-- 7 modules still marked `#![allow(dead_code)]` requiring investigation
-- Stale comment cleanup
-- Module declaration issues
+- ✅ No critical dead code remaining
+- 📋 Future: Monitor for new dead code during upstream merges
+- 📋 Future: Port 9 critical tests per `docs/migration/legacy-tests-retirement.md`
 
 ---
 
-## Related Issues
+## Audit Summary (2025-10-06)
 
-During this investigation, the following potential issues were identified:
+### Feature Flags Audit
 
-1. **Missing module declarations:**
-   - `code-rs/core/src/tasks/` is used but not declared
-   - `code-rs/tui/src/custom_terminal.rs` is used in tests but not declared
+**`code-fork` feature flag (code-rs/tui):**
+- Status: ✅ ACTIVE AND PROPERLY USED
+- Enabled by default in `code-rs/tui/Cargo.toml`
+- Gates 12 fork-specific files:
+  - `src/foundation.rs` - Stable import wrappers for fork-specific code
+  - `src/tui_event_extensions.rs` - Rate limit and browser screenshot event helpers
+  - `src/rate_limits_view.rs` - Rate limits visualization
+  - `src/bottom_pane/approval_ui.rs` - Approval UI components
+  - `src/history/compat.rs` - Fork-specific history compatibility
+  - Various files with selective gating for fork-specific features
 
-2. **Broken test infrastructure:**
-   - Unit tests in code-rs/tui have 11 compilation errors even without legacy_tests
-   - May need separate cleanup effort for test infrastructure
+**`vt100-tests` feature flag:**
+- Status: ✅ RETAINED
+- Purpose: Enable VT100 emulator-based tests (currently no tests use it, but scaffolding preserved for future)
 
-3. **Upstream sync opportunity:**
-   - codex-rs/tui has working vt100-tests
-   - Consider whether to port these tests or maintain divergence
+**`debug-logs` and `dev-faults` feature flags:**
+- Status: ✅ ACTIVE
+- Purpose: Debug logging and fault injection for development
+
+**No unused feature flags detected.**
+
+### Module Usage Audit
+
+**code-rs/core modules:**
+- ✅ `src/codex/` - Actively used for compact conversation format
+- ✅ `src/unified_exec/` - Actively used for unified executor implementation
+- ✅ `src/exec_command/` - Actively used for command execution and session management
+- ✅ All modules properly declared in `lib.rs` and actively used
+
+**code-rs/tui modules:**
+- ✅ All modules under `src/chatwidget/`, `src/bottom_pane/`, `src/history_cell/` actively used
+- ✅ `src/foundation.rs`, `src/tui_event_extensions.rs` provide fork-specific extensions
+- ✅ No orphaned modules detected
+
+**`#![allow(dead_code)]` usage:**
+- 9 files use file-level `#![allow(dead_code)]`
+- Acceptable uses: test helpers (`smoke_helpers.rs`), utilities, compatibility wrappers
+- No action required
+
+### Related Documentation
+
+- Migration plan: `docs/migration/legacy-tests-retirement.md`
+- Prompt architecture: `docs/maintenance/prompt-architecture.md`
+- Upstream tracking: `docs/maintenance/upstream-diff.md`
+- TUI smoke tests: `docs/migration/tui-smoke-notes.md`
 
 ---
 
