@@ -59,6 +59,16 @@ pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
 const BRANCH_METADATA_DIR: &str = "_branch-meta";
 const DEFAULT_BRANCH_CACHE_DIRS: &[&str] = &["node_modules"];
 
+fn branch_copy_targets_enabled() -> bool {
+    std::env::var("CODEX_BRANCH_COPY_TARGETS")
+        .ok()
+        .map(|v| {
+            let v = v.to_ascii_lowercase();
+            v == "1" || v == "true" || v == "yes"
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BranchMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -503,7 +513,9 @@ fn gather_branch_cache_candidates(src_root: &Path) -> Vec<PathBuf> {
         .map(PathBuf::from)
         .collect();
 
-    append_cargo_targets(src_root, &mut out);
+    if branch_copy_targets_enabled() {
+        append_cargo_targets(src_root, &mut out);
+    }
 
     if let Some(raw) = std::env::var_os("CODEX_BRANCH_COPY_DIRS") {
         out.extend(std::env::split_paths(&raw));
