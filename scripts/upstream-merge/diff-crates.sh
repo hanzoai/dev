@@ -74,15 +74,30 @@ diff_crate() {
 
     echo "📊 Comparing ${crate_name}..."
 
-    # Generate diff with context
+    # Prepare sanitized copy of the fork crate so simple `code-*/code_*`
+    # branding changes do not overwhelm the diff output.
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    local sanitized_path="${temp_dir}/${crate_name}"
+
+    rsync -a --delete "$code_path/" "$sanitized_path/"
+
+    local crate_snake="${crate_name//-/_}"
+    if [[ -f "${sanitized_path}/Cargo.toml" ]]; then
+        perl -pi -e "s/code-${crate_name}/codex-${crate_name}/g; s/code_${crate_snake}/codex_${crate_snake}/g" "${sanitized_path}/Cargo.toml"
+    fi
+
+    # Generate diff with context using the sanitized fork copy
     if diff -Naur --exclude="target" --exclude="*.lock" --exclude="node_modules" \
-        "$codex_path" "$code_path" > "$output_file" 2>&1; then
+        "$codex_path" "$sanitized_path" > "$output_file" 2>&1; then
         echo "   ✅ No differences found"
         rm "$output_file"
+        rm -rf "$temp_dir"
         return 0
     else
         local line_count=$(wc -l < "$output_file")
         echo "   📝 Differences found: ${line_count} lines written to ${output_file}"
+        rm -rf "$temp_dir"
         return 0
     fi
 }
