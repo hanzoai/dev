@@ -473,10 +473,9 @@ impl<'a> RenderRequest<'a> {
             }
         }
 
-        if let RenderRequestKind::Explore { id } = self.kind {
+        if let RenderRequestKind::Explore { id, hold_header } = self.kind {
             if let Some(HistoryRecord::Explore(record)) = history_state.record(id) {
-                let hold_title = explore_should_hold_title(history_state, id);
-                return explore_lines_from_record_with_force(record, hold_title);
+                return explore_lines_from_record_with_force(record, hold_header);
             }
         }
 
@@ -517,33 +516,10 @@ pub(crate) enum RenderRequestKind {
     Legacy,
     Exec { id: HistoryId },
     MergedExec { id: HistoryId },
-    Explore { id: HistoryId },
+    Explore { id: HistoryId, hold_header: bool },
     Diff { id: HistoryId },
     Streaming { id: HistoryId },
     Assistant { id: HistoryId },
-}
-
-pub(crate) fn explore_should_hold_title(history_state: &HistoryState, explore_id: HistoryId) -> bool {
-    if explore_id == HistoryId::ZERO {
-        return true;
-    }
-
-    let Some(mut idx) = history_state.index_of(explore_id) else {
-        return true;
-    };
-
-    idx += 1;
-    while let Some(record) = history_state.get(idx) {
-        match record {
-            HistoryRecord::Reasoning(_) => {
-                idx += 1;
-                continue;
-            }
-            _ => return false,
-        }
-    }
-
-    true
 }
 
 /// Output from `HistoryRenderState::visible_cells()`. Contains the resolved

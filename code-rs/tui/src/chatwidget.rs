@@ -89,8 +89,7 @@ use self::auto_coordinator::{
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{
-    explore_should_hold_title, CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind,
-    RenderSettings, VisibleCell,
+    CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings, VisibleCell,
 };
 use code_core::parse_command::ParsedCommand;
 use code_core::protocol::AgentMessageDeltaEvent;
@@ -2665,23 +2664,12 @@ impl ChatWidget<'_> {
             }
         }
 
-        for cell in &mut self.history_cells {
-            if let Some(explore_cell) = cell
-                .as_any_mut()
-                .downcast_mut::<history_cell::ExploreAggregationCell>()
-            {
-                let should_force =
-                    explore_should_hold_title(&self.history_state, explore_cell.record().id);
-                if explore_cell.set_force_exploring_header(should_force) {
-                    needs_invalidate = true;
-                }
-            }
-        }
-
         if needs_invalidate {
             self.invalidate_height_cache();
             self.request_redraw();
         }
+
+        self.refresh_explore_trailing_flags();
     }
 
     /// Handle streaming delta for both answer and reasoning
@@ -5975,10 +5963,7 @@ impl ChatWidget<'_> {
                 Some(Box::new(history_cell::PatchSummaryCell::from_record(state.clone())))
             }
             HistoryRecord::Explore(state) => {
-                let mut cell = history_cell::ExploreAggregationCell::from_record(state.clone());
-                let hold_title = explore_should_hold_title(&self.history_state, state.id);
-                cell.set_force_exploring_header(hold_title);
-                Some(Box::new(cell))
+                Some(Box::new(history_cell::ExploreAggregationCell::from_record(state.clone())))
             }
             HistoryRecord::RateLimits(state) => Some(Box::new(
                 history_cell::RateLimitsCell::from_record(state.clone()),
@@ -6591,7 +6576,83 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn refresh_explore_trailing_flags(&mut self) {}
+    fn refresh_explore_trailing_flags(&mut self) -> bool {
+        let mut updated = false;
+        for idx in 0..self.history_cells.len() {
+            let is_explore = self.history_cells[idx]
+                .as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .is_some();
+            if !is_explore {
+                continue;
+            }
+
+            let hold_title = self.rendered_explore_should_hold(idx);
+
+            if let Some(explore_cell) = self.history_cells[idx]
+                .as_any_mut()
+                .downcast_mut::<history_cell::ExploreAggregationCell>()
+            {
+                if explore_cell.set_force_exploring_header(hold_title) {
+                    updated = true;
+                    if let Some(Some(id)) = self.history_cell_ids.get(idx) {
+                        self.history_render.invalidate_history_id(*id);
+                    }
+                }
+            }
+        }
+
+        if updated {
+            self.invalidate_height_cache();
+            self.request_redraw();
+        }
+
+        updated
+    }
+
+    fn rendered_explore_should_hold(&self, idx: usize) -> bool {
+        if idx >= self.history_cells.len() {
+            return true;
+        }
+
+        let mut next = idx + 1;
+        while next < self.history_cells.len() {
+            let cell = &self.history_cells[next];
+
+            if cell.should_remove() {
+                next += 1;
+                continue;
+            }
+
+            match cell.kind() {
+                history_cell::HistoryCellType::Reasoning
+                | history_cell::HistoryCellType::Loading
+                | history_cell::HistoryCellType::PlanUpdate => {
+                    next += 1;
+                    continue;
+                }
+                _ => {}
+            }
+
+            if cell
+                .as_any()
+                .downcast_ref::<history_cell::WaitStatusCell>()
+                .is_some()
+            {
+                next += 1;
+                continue;
+            }
+
+            if cell.display_lines_trimmed().is_empty() {
+                next += 1;
+                continue;
+            }
+
+            return false;
+        }
+
+        true
+    }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
         if self.layout.scroll_offset > 0 {
@@ -23100,7 +23161,15 @@ impl WidgetRef for &ChatWidget<'_> {
                             kind = RenderRequestKind::MergedExec { id: history_id };
                         }
                         HistoryRecord::Explore(_) => {
-                            kind = RenderRequestKind::Explore { id: history_id };
+                            let hold_header = if idx < self.history_cells.len() {
+                                self.rendered_explore_should_hold(idx)
+                            } else {
+                                true
+                            };
+                            kind = RenderRequestKind::Explore {
+                                id: history_id,
+                                hold_header,
+                            };
                         }
                         HistoryRecord::Diff(_) => {
                             kind = RenderRequestKind::Diff { id: history_id };

@@ -4068,23 +4068,6 @@ fn new_exec_command_generic(
     lines.extend(highlighted_cmd);
 
     let mut preview_lines = output_lines(display_output, false, true);
-    if let Some(output) = output {
-        if output.exit_code == 0 {
-            if preview_lines
-                .last()
-                .map(|line| line.spans.iter().all(|span| span.content.as_ref().trim().is_empty()))
-                .unwrap_or(false)
-            {
-                preview_lines.pop();
-            }
-            preview_lines.push(Line::styled(
-                format!("Success (exit code {})", output.exit_code),
-                Style::default()
-                    .fg(crate::colors::success())
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-    }
     if let Some(status_line) = running_status {
         if let Some(last) = preview_lines.last() {
             let is_blank = last
@@ -5700,7 +5683,7 @@ impl PatchSummaryCell {
         let title = match record.patch_type {
             HistoryPatchEventType::ApprovalRequest => "proposed patch".to_string(),
             HistoryPatchEventType::ApplyBegin { .. } => "Updated".to_string(),
-            HistoryPatchEventType::ApplySuccess => "Patch applied".to_string(),
+            HistoryPatchEventType::ApplySuccess => "Updated".to_string(),
             HistoryPatchEventType::ApplyFailure => "Patch failed".to_string(),
         };
         Self {
