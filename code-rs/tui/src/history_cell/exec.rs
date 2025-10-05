@@ -487,14 +487,13 @@ impl ExecCell {
             return None;
         }
         if let Some(run_duration) = state.run_duration {
-            if run_duration.is_zero() {
-                return None;
+            if run_duration >= Duration::from_secs(10) {
+                let text = format!("Ran for {}", format_duration(run_duration));
+                return Some(Line::styled(
+                    text,
+                    Style::default().fg(crate::colors::text_dim()),
+                ));
             }
-            let text = format!("Ran for {}", format_duration(run_duration));
-            return Some(Line::styled(
-                text,
-                Style::default().fg(crate::colors::text_dim()),
-            ));
         }
         let total = state.total_wait?;
         if total.is_zero() {
@@ -625,23 +624,6 @@ impl ExecCell {
                 out.splice(insert_at..insert_at, block);
             }
 
-            if let Some(output) = self.output.as_ref() {
-                if output.exit_code == 0 {
-                    if out
-                        .last()
-                        .map(|line| line.spans.iter().all(|span| span.content.as_ref().trim().is_empty()))
-                        .unwrap_or(false)
-                    {
-                        out.pop();
-                    }
-                    out.push(Line::styled(
-                        format!("Success (exit code {})", output.exit_code),
-                        Style::default()
-                            .fg(crate::colors::success())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-            }
         }
 
         (pre, out, if self.output.is_none() { status } else { None })
