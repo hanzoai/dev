@@ -661,7 +661,7 @@ fn error_tint() -> Color { tinted_bg_toward(crate::colors::error()) }
 // Removed per-line tinted backgrounds per design feedback
 
 #[allow(clippy::expect_used)]
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use insta::assert_snapshot;

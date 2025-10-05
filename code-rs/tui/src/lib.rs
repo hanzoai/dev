@@ -80,6 +80,10 @@ mod util {
 }
 mod spinner;
 mod tui;
+#[cfg(feature = "code-fork")]
+mod tui_event_extensions;
+#[cfg(feature = "code-fork")]
+mod foundation;
 mod ui_consts;
 mod user_approval_widget;
 mod height_manager;

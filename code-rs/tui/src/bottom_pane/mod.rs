@@ -3,7 +3,7 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
-use crate::user_approval_widget::ApprovalRequest;
+use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
 use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
 use code_core::protocol::TokenUsage;
@@ -16,6 +16,8 @@ use ratatui::widgets::{Widget, WidgetRef};
 use std::time::Duration;
 
 mod approval_modal_view;
+#[cfg(feature = "code-fork")]
+mod approval_ui;
 mod auto_coordinator_view;
 mod bottom_pane_view;
 mod chat_composer;
@@ -80,6 +82,8 @@ pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSet
 
 use code_core::protocol::Op;
 use approval_modal_view::ApprovalModalView;
+#[cfg(feature = "code-fork")]
+use approval_ui::ApprovalUi;
 use code_common::model_presets::ModelPreset;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::TextVerbosity;
@@ -963,6 +967,24 @@ impl BottomPane<'_> {
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
 
+#[cfg(feature = "code-fork")]
+fn build_user_approval_widget<'a>(
+    request: ApprovalRequest,
+    ticket: BackgroundOrderTicket,
+    app_event_tx: AppEventSender,
+) -> UserApprovalWidget<'a> {
+    <UserApprovalWidget<'a> as ApprovalUi>::build(request, ticket, app_event_tx)
+}
+
+#[cfg(not(feature = "code-fork"))]
+fn build_user_approval_widget<'a>(
+    request: ApprovalRequest,
+    ticket: BackgroundOrderTicket,
+    app_event_tx: AppEventSender,
+) -> UserApprovalWidget<'a> {
+    UserApprovalWidget::new(request, ticket, app_event_tx)
+}
+
 impl WidgetRef for &BottomPane<'_> {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         // Base clear: fill the entire bottom pane with the theme background so
@@ -1055,7 +1077,7 @@ impl WidgetRef for &BottomPane<'_> {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests_removed {
     use super::*;
     use crate::app_event::AppEvent;

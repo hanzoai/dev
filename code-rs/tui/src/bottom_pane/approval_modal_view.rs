@@ -27,7 +27,7 @@ impl ApprovalModalView<'_> {
         app_event_tx: AppEventSender,
     ) -> Self {
         Self {
-            current: UserApprovalWidget::new(request, ticket, app_event_tx.clone()),
+            current: super::build_user_approval_widget(request, ticket, app_event_tx.clone()),
             queue: VecDeque::new(),
             app_event_tx,
         }
@@ -46,7 +46,7 @@ impl ApprovalModalView<'_> {
         if self.current.is_complete() {
             if let Some((req, ticket)) = self.queue.pop_front() {
                 self.current =
-                    UserApprovalWidget::new(req, ticket, self.app_event_tx.clone());
+                    super::build_user_approval_widget(req, ticket, self.app_event_tx.clone());
             }
         }
     }
@@ -86,7 +86,7 @@ impl<'a> BottomPaneView<'a> for ApprovalModalView<'a> {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_event::AppEvent;

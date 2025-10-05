@@ -1703,7 +1703,7 @@ fn to_superscript(s: &str) -> String {
         .collect()
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::style::Modifier;
@@ -1760,7 +1760,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod fenced_padding_tests {
     use super::*;
     use unicode_width::UnicodeWidthStr;
