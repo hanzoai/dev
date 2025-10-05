@@ -82,10 +82,11 @@ diff_crate() {
 
     rsync -a --delete "$code_path/" "$sanitized_path/"
 
-    local crate_snake="${crate_name//-/_}"
-    if [[ -f "${sanitized_path}/Cargo.toml" ]]; then
-        perl -pi -e "s/code-${crate_name}/codex-${crate_name}/g; s/code_${crate_snake}/codex_${crate_snake}/g" "${sanitized_path}/Cargo.toml"
-    fi
+    # Rewrite code-* / code_* identifiers back to codex-* so the diff highlights
+    # real behavioural changes instead of fork re-branding noise. Limit to
+    # textual sources we care about (.toml/.rs).
+    find "$sanitized_path" -type f \( -name '*.toml' -o -name '*.rs' \) -print0 |
+        xargs -0 perl -pi -e 's/\bcode-([a-z0-9_]+)/codex-$1/g; s/\bcode_([a-z0-9_]+)/codex_$1/g'
 
     # Generate diff with context using the sanitized fork copy
     if diff -Naur --exclude="target" --exclude="*.lock" --exclude="node_modules" \
