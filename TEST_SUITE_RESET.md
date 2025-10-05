@@ -290,10 +290,144 @@ If integration tests are re-introduced later:
 
 ### Next Steps (Phase 2)
 - [x] Seed TUI smoke scaffold (`tui/tests/ui_smoke.rs`)
+- [x] Create test helper module (`chatwidget::smoke_helpers`)
 - [ ] Expand TUI smoke tests to cover executor streaming + MCP interactions
 - [ ] Draft executor smoke coverage plan (command lifecycle, approvals)
 - [ ] Draft MCP smoke coverage plan (handshake + tool call)
 - [ ] Document manual validation procedures for critical paths
+- [ ] Port 9 critical tests from codex-rs (see `docs/migration/legacy-tests-retirement.md`)
+
+---
+
+## Test Scaffolding Patterns (2025-10-06)
+
+### TUI Test Helpers
+
+**Location:** `code-rs/tui/src/chatwidget/smoke_helpers.rs`
+
+This module provides test infrastructure for writing ChatWidget smoke tests without requiring terminal I/O dependencies.
+
+#### ChatWidgetHarness
+
+A test harness that constructs a fully-functional ChatWidget instance suitable for testing:
+
+```rust
+use code_tui::chatwidget::smoke_helpers::ChatWidgetHarness;
+use code_core::protocol::Event;
+
+#[test]
+fn test_basic_message_flow() {
+    let mut harness = ChatWidgetHarness::new();
+
+    // Send events to the widget
+    harness.handle_event(Event::TextDelta { ... });
+
+    // Check emitted app events
+    let events = harness.drain_events();
+    assert_has_insert_history(&events);
+}
+```
+
+**Key features:**
+- Creates a default test configuration
+- Sets up event channels (AppEvent sender/receiver)
+- Provides a shared tokio runtime for async operations
+- Exposes event handling and assertion helpers
+
+**Available helpers:**
+- `ChatWidgetHarness::new()` - Construct harness with default config
+- `harness.handle_event(event)` - Send a protocol event to the widget
+- `harness.drain_events()` - Collect all emitted AppEvents
+- `harness.chat()` - Access the underlying ChatWidget for inspection
+
+#### Assertion Helpers
+
+Pre-built assertions for common test patterns:
+
+```rust
+// Assert history insertion occurred
+assert_has_insert_history(&events);
+
+// Assert background event with specific content
+assert_has_background_event_containing(&events, "Error:");
+
+// Assert terminal output chunk contains text
+assert_has_terminal_chunk_containing(&events, "$ ls");
+
+// Assert CodexEvent was emitted
+assert_has_codex_event(&events);
+
+// Assert no events were emitted
+assert_no_events(&events);
+```
+
+These helpers reduce boilerplate and make test failures more readable by showing the full event list on assertion failure.
+
+### Usage Example
+
+From `code-rs/tui/tests/ui_smoke.rs`:
+
+```rust
+#[test]
+fn test_approval_flow() {
+    let mut harness = ChatWidgetHarness::new();
+
+    // Simulate approval request
+    harness.handle_event(Event::BashRequest { command: "rm -rf /" });
+
+    // Verify approval modal was shown
+    let events = harness.drain_events();
+    assert_has_background_event_containing(&events, "Approval required");
+
+    // Approve the command
+    harness.handle_event(Event::ApprovalResponse { approved: true });
+
+    // Verify execution started
+    let events = harness.drain_events();
+    assert_has_terminal_chunk_containing(&events, "rm -rf /");
+}
+```
+
+### Best Practices
+
+1. **Use harness for integration-style tests** - Test widget behavior through public event interfaces
+2. **Keep assertions focused** - One logical assertion per helper call
+3. **Drain events between steps** - Clear event queue to isolate test phases
+4. **Avoid testing internal state** - Focus on observable outputs (emitted events, rendered output)
+5. **Use descriptive test names** - `test_approval_flow_rejects_dangerous_commands` over `test_approval`
+
+### Extending the Harness
+
+To add new test helpers:
+
+1. Add new assertion functions to `smoke_helpers.rs`:
+   ```rust
+   pub fn assert_has_error_message(events: &[AppEvent], error: &str) {
+       let found = events.iter().any(|event| {
+           matches!(event, AppEvent::Error(msg) if msg.contains(error))
+       });
+       assert!(found, "expected error '{error}', got: {events:#?}");
+   }
+   ```
+
+2. Add builder methods to `ChatWidgetHarness` for custom configurations:
+   ```rust
+   impl ChatWidgetHarness {
+       pub fn with_config(cfg: Config) -> Self {
+           // Custom initialization
+       }
+   }
+   ```
+
+### Future Test Infrastructure
+
+**Planned additions:**
+- `AppHarness` - Full app-level test harness (includes bottom pane, status bar)
+- `ExecutorHarness` - Test harness for executor flows (command lifecycle, approvals)
+- `MCPHarness` - Test harness for MCP server interactions (handshake, tool calls)
+- VT100 replay tests - Capture/replay terminal sequences for rendering regression tests
+
+See `docs/migration/tui-gap-report.md` for details on planned test automation.
 
 ---
 
