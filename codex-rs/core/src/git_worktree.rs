@@ -59,8 +59,8 @@ pub const LOCAL_DEFAULT_REMOTE: &str = "local-default";
 const BRANCH_METADATA_DIR: &str = "_branch-meta";
 const DEFAULT_BRANCH_CACHE_DIRS: &[&str] = &["node_modules"];
 
-fn branch_copy_targets_enabled() -> bool {
-    std::env::var("CODEX_BRANCH_COPY_TARGETS")
+fn branch_copy_cache_dirs_enabled() -> bool {
+    std::env::var("CODEX_BRANCH_COPY_CACHES")
         .ok()
         .map(|v| {
             let v = v.to_ascii_lowercase();
@@ -512,24 +512,21 @@ async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result
 }
 
 fn gather_branch_cache_candidates(src_root: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = DEFAULT_BRANCH_CACHE_DIRS
-        .iter()
-        .map(PathBuf::from)
-        .collect();
+    let mut out: Vec<PathBuf> = Vec::new();
 
-    if branch_copy_targets_enabled() {
+    if branch_copy_cache_dirs_enabled() {
+        out.extend(DEFAULT_BRANCH_CACHE_DIRS.iter().map(PathBuf::from));
         append_cargo_targets(src_root, &mut out);
+        if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
+            let path = PathBuf::from(raw);
+            if let Some(rel) = relative_candidate_path(&path, src_root) {
+                out.push(rel);
+            }
+        }
     }
 
     if let Some(raw) = std::env::var_os("CODEX_BRANCH_COPY_DIRS") {
         out.extend(std::env::split_paths(&raw));
-    }
-
-    if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
-        let path = PathBuf::from(raw);
-        if let Some(rel) = relative_candidate_path(&path, src_root) {
-            out.push(rel);
-        }
     }
 
     out
