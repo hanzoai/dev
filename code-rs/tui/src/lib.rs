@@ -28,6 +28,7 @@ use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+mod compat;
 mod app;
 mod app_event;
 mod app_event_sender;

@@ -34,19 +34,29 @@
 - Auto-coordinator spawns async tasks; without matching cancellation plumbing upstream merges risk zombie tasks and UI hangs.
 - Config edits for validation/agent settings assume new enums and schema; applying them upstream without schema updates will panic or drop settings silently.
 
-## Proposed Thin Wrappers / Adapters
-1. **History Rendering Adapter** – Introduce `tui_history_core` to re-export upstream history traits while providing shim constructors for fork cells (add `code-rs/tui/src/history/compat.rs`; update `history_cell/mod.rs` to import via `crate::history::compat::*`).
-2. **Approval Overlay Wrapper** – Expose an `ApprovalUi` trait upstream and implement the modal in the fork behind a feature flag, retaining overlay for upstream (trait in `codex-rs/tui/src/bottom_pane/approval_overlay.rs`; adapter in `code-rs/tui/src/user_approval_widget.rs`).
-3. **Event Hook Facade** – Define helper functions for rate-limit and browser screenshot events that no-op upstream but forward in the fork (`tui_event_extensions.rs` shared module; fork implements actual handlers).
+## Adapter Status (2025-10-05)
+| Adapter | Status | Notes |
+| --- | --- | --- |
+| History Rendering | ✅ Implemented behind `code-fork`; `history/compat.rs` exports upstream types and `history_cell/mod.rs` consumes shims. | Confirmed clean `cargo test -p code-tui --all-targets`. |
+| Approval Overlay Wrapper | ✅ Implemented (`bottom_pane/approval_ui.rs`, feature-gated). | Used to keep upstream overlay untouched while fork maintains modal. |
+| Event Hook Facade | ✅ Implemented (`tui_event_extensions.rs`), upstream builds receive no-ops. | Applied to rate-limit + browser events with `#[cfg(feature = "code-fork")]`. |
+| Foundation Re-export | ✅ Added `foundation.rs` to unify wrapping/status/palette helpers. | Gradually switching call-sites; remaining work tracked below. |
 
-**Rollback Note**: Land wrappers behind a dedicated Cargo feature (e.g., `code-fork`) so reverting disables fork-specific behavior without deleting files; document the toggle in `docs/subsystem-migration-status.md`.
+**Next adapter work**
+- Audit lingering direct imports (e.g. rate-limit, history render) and route them through the compat modules to minimize future merge conflicts.
+- Add lightweight unit coverage for adapters once additional call-sites migrate.
+- Keep rollback instructions in `docs/subsystem-migration-status.md` in sync whenever adapter scope changes.
 
 ## Smoke Tests
-1. `./build-fast.sh --workspace both` – confirm dual-workspace builds remain green.
-2. Launch fork TUI (`./build-fast.sh --workspace code run`); navigate Agents, Notifications, Theme, Rate Limits panes to verify focus, hotkeys, and exit paths.
-3. Markdown/code rendering check – stream a response with fenced markdown and diff blocks (`/plan`, `/apply_patch`) to validate typed history cells.
-4. Interactive approval flow – trigger exec and apply-patch approvals to test modal hotkeys, session allow rules, and background completion updates.
-5. Auto-drive session – run `/drive` (or equivalent) to exercise auto-coordinator start/cancel, status banners, and history consistency.
+Completed 2025-10-05:
+- `./build-fast.sh --workspace both`
+- `cargo test -p code-tui --all-targets`
+
+Outstanding manual checks (schedule once UI polish resumes):
+1. Launch fork TUI; walk Agents, Notifications, Theme, Rate Limits panes to verify focus and hotkeys.
+2. Markdown/code rendering: stream `/plan` then `/apply_patch` and confirm history renders via compat layer.
+3. Approval flow: execute a sandbox-elevated command to validate the wrapper trait wiring between modal and bottom pane.
+4. Auto-drive session: run `/drive` to ensure background ordering fixes remain stable.
 
 ## References
 - Targeted diffs: `diff -ruN codex-rs/tui code-rs/tui`

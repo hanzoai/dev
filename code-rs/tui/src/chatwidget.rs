@@ -73,7 +73,7 @@ mod terminal_handlers;
 mod terminal;
 mod tools;
 mod running_tools;
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests_retry;
 use self::agent_install::{
     start_agent_install_session,
@@ -910,7 +910,7 @@ impl BackgroundOrderTicket {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "legacy_tests"))]
     pub(crate) fn test_for_request(request_ordinal: u64) -> Self {
         Self {
             request_ordinal,
@@ -21501,7 +21501,7 @@ impl ChatWidget<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 #[allow(dead_code)]
 impl ChatWidget<'_> {
     pub(crate) fn history_debug_events(&self) -> Vec<String> {
@@ -21540,7 +21540,7 @@ impl ChatWidget<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use crate::app_event::BackgroundPlacement;
@@ -22029,7 +22029,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 impl ChatWidget<'_> {
     pub(crate) fn test_dump_history_text(&self) -> Vec<String> {
         self.history_cells

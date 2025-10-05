@@ -90,7 +90,7 @@ pub fn try_decode_base64_image_to_temp_png(pasted: &str) -> Result<(PathBuf, Pas
         return Err(PasteImageError::DecodeFailed("empty".into()));
     }
 
-    let (maybe_mime, b64) = if let Some(rest) = s.strip_prefix("data:") {
+    let (_maybe_mime, b64) = if let Some(rest) = s.strip_prefix("data:") {
         if let Some(idx) = rest.find(',') {
             let (head, tail) = rest.split_at(idx);
             if !head.contains(";base64") {

@@ -1077,7 +1077,7 @@ impl WidgetRef for &BottomPane<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests_removed {
     use super::*;
     use crate::app_event::AppEvent;

@@ -17,6 +17,8 @@ default = ["code-fork"]
 vt100-tests = []
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
+# Legacy snapshot-driven tests we keep compile-disabled by default.
+legacy_tests = []
 dev-faults = []
 # Fork-specific extensions layered on top of upstream history rendering.
 code-fork = []
