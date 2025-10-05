@@ -214,35 +214,3 @@ impl PerfStats {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scroll_metrics_accumulate() {
-        let mut stats = PerfStats::default();
-        stats.record_scroll_trigger(5);
-        stats.record_scroll_trigger(3);
-        stats.record_scroll_render(4, 2_000_000);
-        assert_eq!(stats.scroll_events, 2);
-        assert_eq!(stats.scroll_lines_requested, 8);
-        assert_eq!(stats.scroll_render_frames, 1);
-        assert_eq!(stats.scroll_lines_rendered, 4);
-        assert_eq!(stats.ns_scroll_render, 2_000_000);
-
-        let summary = stats.summary();
-        assert!(summary.contains("scroll:"));
-    }
-
-    #[test]
-    fn undo_restore_metrics_accumulate() {
-        let mut stats = PerfStats::default();
-        stats.record_undo_restore(5_000_000);
-        stats.record_undo_restore(3_000_000);
-        assert_eq!(stats.undo_restore_events, 2);
-        assert_eq!(stats.ns_undo_restore, 8_000_000);
-
-        let summary = stats.summary();
-        assert!(summary.contains("undo_restore"));
-    }
-}

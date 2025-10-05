@@ -117,9 +117,11 @@ Validates that the fork still builds and maintains critical functionality after 
 - Version handling intact
 - Branding consistency
 
-## Typical Workflow
+## Monthly Cadence
 
-### Weekly Upstream Check
+We follow a two-phase cadence. Use the first Monday for lightweight scans; reserve the second Monday for merge planning if changes warrant action.
+
+### First Monday — Quick Diff
 
 ```bash
 # Fetch latest upstream
@@ -128,12 +130,31 @@ git fetch upstream
 # Check for new commits
 git log HEAD..upstream/main --oneline
 
-# If changes exist, start tracking
+# Generate structural diff
 ./scripts/upstream-merge/diff-crates.sh --all
-./scripts/upstream-merge/highlight-critical-changes.sh --all
+
+# Review high-level summary
+cat .github/auto/upstream-diffs/SUMMARY.md
 ```
 
-### Planning a Merge
+Goal: understand upstream churn. If nothing critical changed, stop here.
+
+### Second Monday — Merge Planning (Conditional)
+
+```bash
+# Highlight critical changes
+./scripts/upstream-merge/highlight-critical-changes.sh --all
+
+# Review critical summary
+cat .github/auto/upstream-diffs/critical-changes/CRITICAL-SUMMARY.md
+
+# Initialize merge log when planning an integration
+./scripts/upstream-merge/log-merge.sh init upstream/main
+```
+
+Goal: categorize changes (adopt/adapt/preserve) and document decisions.
+
+## Typical Workflow
 
 ```bash
 # 1. Initialize merge log

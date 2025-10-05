@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use crate::compat::{
-    Buffer, Line, Modifier, Paragraph, Rect, Span, Style, Stylize, Widget, WidgetRef, Wrap,
-};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Widget, WidgetRef, Wrap};
 use code_core::config::set_project_access_mode;
 use code_core::config::set_project_trusted;
 use code_core::protocol::AskForApproval;

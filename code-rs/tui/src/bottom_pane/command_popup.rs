@@ -33,11 +33,6 @@ pub(crate) struct CommandPopup {
 }
 
 impl CommandPopup {
-    #[cfg(all(test, feature = "legacy_tests"))]
-    pub(crate) fn new() -> Self {
-        Self::new_with_filter(false)
-    }
-    
     pub(crate) fn new_with_filter(hide_verbosity: bool) -> Self {
         let mut commands = built_in_slash_commands();
         if hide_verbosity {
@@ -258,98 +253,6 @@ impl WidgetRef for CommandPopup {
             &self.state,
             MAX_POPUP_ROWS,
             false,
-        );
-    }
-}
-
-#[cfg(all(test, feature = "legacy_tests"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn filter_includes_init_when_typing_prefix() {
-        let mut popup = CommandPopup::new(Vec::new());
-        // Simulate the composer line starting with '/in' so the popup filters
-        // matching commands by prefix.
-        popup.on_composer_text_change("/in".to_string());
-
-        // Access the filtered list via the selected command and ensure that
-        // one of the matches is the new "init" command.
-        let matches = popup.filtered_items();
-        let has_init = matches.iter().any(|item| match item {
-            CommandItem::Builtin(cmd) => cmd.command() == "init",
-            CommandItem::UserPrompt(_) => false,
-        });
-        assert!(
-            has_init,
-            "expected '/init' to appear among filtered commands"
-        );
-    }
-
-    #[test]
-    fn selecting_init_by_exact_match() {
-        let mut popup = CommandPopup::new(Vec::new());
-        popup.on_composer_text_change("/init".to_string());
-
-        // When an exact match exists, the selected command should be that
-        // command by default.
-        let selected = popup.selected_item();
-        match selected {
-            Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "init"),
-            Some(CommandItem::UserPrompt(_)) => panic!("unexpected prompt selected for '/init'"),
-            None => panic!("expected a selected command for exact match"),
-        }
-    }
-
-    #[test]
-    fn prompt_discovery_lists_custom_prompts() {
-        let prompts = vec![
-            CustomPrompt {
-                name: "foo".to_string(),
-                path: "/tmp/foo.md".to_string().into(),
-                content: "hello from foo".to_string(),
-                description: None,
-                argument_hint: None,
-            },
-            CustomPrompt {
-                name: "bar".to_string(),
-                path: "/tmp/bar.md".to_string().into(),
-                content: "hello from bar".to_string(),
-                description: None,
-                argument_hint: None,
-            },
-        ];
-        let popup = CommandPopup::new(prompts);
-        let items = popup.filtered_items();
-        let mut prompt_names: Vec<String> = items
-            .into_iter()
-            .filter_map(|it| match it {
-                CommandItem::UserPrompt(i) => popup.prompt(i).map(|p| p.name.clone()),
-                _ => None,
-            })
-            .collect();
-        prompt_names.sort();
-        assert_eq!(prompt_names, vec!["bar".to_string(), "foo".to_string()]);
-    }
-
-    #[test]
-    fn prompt_name_collision_with_builtin_is_ignored() {
-        // Create a prompt named like a builtin (e.g. "init").
-        let popup = CommandPopup::new(vec![CustomPrompt {
-            name: "init".to_string(),
-            path: "/tmp/init.md".to_string().into(),
-            content: "should be ignored".to_string(),
-            description: None,
-            argument_hint: None,
-        }]);
-        let items = popup.filtered_items();
-        let has_collision_prompt = items.into_iter().any(|it| match it {
-            CommandItem::UserPrompt(i) => popup.prompt(i).is_some_and(|p| p.name == "init"),
-            _ => false,
-        });
-        assert!(
-            !has_collision_prompt,
-            "prompt with builtin name should be ignored"
         );
     }
 }

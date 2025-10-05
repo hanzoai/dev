@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::markdown_stream::AnimatedLineStreamer;
 use crate::markdown_stream::MarkdownStreamCollector;
 pub(crate) mod controller;
@@ -20,17 +18,6 @@ pub(crate) struct StreamState {
 }
 
 impl StreamState {
-    pub(crate) fn new() -> Self {
-        Self {
-            collector: MarkdownStreamCollector::new(),
-            streamer: AnimatedLineStreamer::new(),
-            has_seen_delta: false,
-            last_commit_instant: None,
-            tail_chars_since_commit: 0,
-            last_sequence_number: None,
-        }
-    }
-    
     pub(crate) fn new_for_kind(kind: StreamKind) -> Self {
         // Bold the first sentence for assistant answers; reasoning stays normal.
         let collector = match kind {
@@ -164,20 +151,5 @@ impl HeaderEmitter {
         let was_just_emitted = self.just_emitted_header;
         self.just_emitted_header = false;
         was_just_emitted
-    }
-}
-
-fn render_header_line(kind: StreamKind) -> ratatui::text::Line<'static> {
-    match kind {
-        // Reasoning header uses theme primary color
-        StreamKind::Reasoning => ratatui::text::Line::styled(
-            "thinking",
-            ratatui::style::Style::default().fg(crate::colors::primary()),
-        ),
-        // Agent/Codex header in bright text
-        StreamKind::Answer => ratatui::text::Line::styled(
-            "codex",
-            ratatui::style::Style::default().fg(crate::colors::text_bright()),
-        ),
     }
 }

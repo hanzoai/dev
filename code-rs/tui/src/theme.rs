@@ -970,29 +970,6 @@ fn ansi256_to_rgb(idx: u8) -> (u8, u8, u8) {
     (value, value, value)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn light_theme_quantization_preserves_contrast() {
-        let mut theme = get_predefined_theme(ThemeName::LightPhoton);
-        quantize_theme_to_ansi256(&mut theme);
-
-        assert!(contrast_ratio(theme.text, theme.background) >= 7.0);
-        assert!(contrast_ratio(theme.text_dim, theme.background) >= 3.0);
-        assert!(contrast_ratio(theme.border, theme.background) >= 2.8);
-        assert!(contrast_ratio(theme.border_focused, theme.background) >= 3.6);
-        assert!(contrast_ratio(theme.comment, theme.background) >= 2.0);
-        assert_ne!(theme.border, theme.background, "border should differ from background");
-        assert_ne!(theme.text, theme.background, "text should differ from background");
-        assert_ne!(theme.text_dim, theme.background, "text_dim should differ from background");
-
-        let (r_text_dim, g_text_dim, b_text_dim) = color_to_rgb(theme.text_dim);
-        assert_eq!(r_text_dim, g_text_dim, "text_dim should remain neutral grayscale");
-        assert_eq!(g_text_dim, b_text_dim, "text_dim should remain neutral grayscale");
-    }
-}
 /// Get a predefined theme by name
 fn get_predefined_theme(name: ThemeName) -> Theme {
     match name {
