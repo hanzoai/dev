@@ -31,8 +31,8 @@ jobs:
       # Consistent Cargo/rustup homes for caching across all workflows
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
-      RUST_WORKSPACE_DIR: ${{ hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs' }}
-      CARGO_TARGET_DIR: ${{ format('{0}/{1}/target', github.workspace, hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs') }}
+      RUST_WORKSPACE_DIR: code-rs
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +73,7 @@ jobs:
           prefix-key: v1-preview
           shared-key: preview-${{ matrix.target }}-rust-1.89
           workspaces: |
-            ${{ env.RUST_WORKSPACE_DIR }} -> target
+            code-rs -> target
             codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true

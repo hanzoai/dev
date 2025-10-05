@@ -51,8 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      RUST_WORKSPACE_DIR: ${{ hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs' }}
-      CARGO_TARGET_DIR: ${{ format('{0}/{1}/target', github.workspace, hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs') }}
+      RUST_WORKSPACE_DIR: code-rs
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
 
     steps:
       - name: Checkout repository
