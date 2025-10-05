@@ -1,14 +1,6 @@
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::prelude::Constraint;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
-use ratatui::text::Line;
-use ratatui::text::Span;
-use ratatui::widgets::Cell;
-use ratatui::widgets::Row;
-use ratatui::widgets::Table;
-use ratatui::widgets::Widget;
+use crate::compat::{
+    Buffer, Cell, Color, Constraint, Line, Modifier, Rect, Row, Span, Style, Table, Widget,
+};
 
 use super::scroll_state::ScrollState;
 
@@ -19,7 +11,7 @@ pub(crate) struct GenericDisplayRow {
     pub is_current: bool,
     pub description: Option<String>, // optional grey text after the name
     /// Optional explicit color for the `name` span. When `None`, default text color is used.
-    pub name_color: Option<ratatui::style::Color>,
+    pub name_color: Option<Color>,
 }
 
 impl GenericDisplayRow {}

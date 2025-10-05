@@ -147,8 +147,7 @@ impl AutoDriveHistory {
         self.converted.is_empty()
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
+    #[cfg(all(test, feature = "legacy_tests"))]
     pub(crate) fn raw_items(&self) -> &[ResponseItem] {
         &self.raw
     }
