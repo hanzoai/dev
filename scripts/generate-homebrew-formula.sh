@@ -6,8 +6,17 @@ set -euo pipefail
 # into a tap repo to publish.
 
 owner_repo="just-every/code"
-# Version can be passed as $1 or inferred from codex-cli/package.json (which CI bumps).
-version="${1:-$(jq -r .version codex-cli/package.json)}"
+version="${1:-}"
+if [ -z "$version" ] && [ -f "code-rs/Cargo.toml" ]; then
+  version="$(awk -F '"' '/^\[workspace.package\]/{f=1; next} f && $1 ~ /version/ {print $2; exit}' code-rs/Cargo.toml)"
+fi
+if [ -z "$version" ] && [ -f "codex-cli/package.json" ]; then
+  version="$(jq -r .version codex-cli/package.json)"
+fi
+if [ -z "$version" ]; then
+  echo "Unable to infer release version; pass it as \$1 or ensure code-rs/Cargo.toml or codex-cli/package.json are available." >&2
+  exit 1
+fi
 
 # Optional directory where CI placed artifacts (step: Prepare release assets)
 RELEASE_ASSETS_DIR=${RELEASE_ASSETS_DIR:-"release-assets"}

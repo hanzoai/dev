@@ -403,6 +403,7 @@ pub(super) fn build_observer_conversation(
     coordinator_prompt: Option<&str>,
 ) -> Vec<ResponseItem> {
     let mut filtered: Vec<ResponseItem> = Vec::new();
+    let mut prefer_assistant_prompt = true;
 
     for item in conversation {
         match item {
@@ -416,7 +417,11 @@ pub(super) fn build_observer_conversation(
                     for entry in content {
                         match entry {
                             ContentItem::InputText { text } => {
-                                let prefixed = if text.trim_start().starts_with("Coordinator:") {
+                                let already_prefixed = text.trim_start().starts_with("Coordinator:");
+                                if !already_prefixed {
+                                    prefer_assistant_prompt = false;
+                                }
+                                let prefixed = if already_prefixed {
                                     text
                                 } else {
                                     format!("Coordinator: {text}")
@@ -424,7 +429,11 @@ pub(super) fn build_observer_conversation(
                                 new_content.push(ContentItem::InputText { text: prefixed });
                             }
                             ContentItem::OutputText { text } => {
-                                let prefixed = if text.trim_start().starts_with("Coordinator:") {
+                                let already_prefixed = text.trim_start().starts_with("Coordinator:");
+                                if !already_prefixed {
+                                    prefer_assistant_prompt = false;
+                                }
+                                let prefixed = if already_prefixed {
                                     text
                                 } else {
                                     format!("Coordinator: {text}")
@@ -460,11 +469,36 @@ pub(super) fn build_observer_conversation(
         } else {
             format!("Coordinator: {prompt}")
         };
-        filtered.push(ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText { text }],
-        });
+        let append_as_assistant = prefer_assistant_prompt
+            && filtered
+                .last()
+                .map(|item| match item {
+                    ResponseItem::Message { role, content, .. } if role == "assistant" => content
+                        .iter()
+                        .all(|chunk| match chunk {
+                        ContentItem::InputText { text }
+                        | ContentItem::OutputText { text } => {
+                            text.trim_start().starts_with("Coordinator:")
+                        }
+                        _ => false,
+                    }),
+                _ => false,
+            })
+            .unwrap_or(false);
+
+        if append_as_assistant {
+            filtered.push(ResponseItem::Message {
+                id: None,
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText { text }],
+            });
+        } else {
+            filtered.push(ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText { text }],
+            });
+        }
     }
 
     filtered

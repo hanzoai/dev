@@ -69,8 +69,8 @@ impl AutoCoordinatorHandle {
         self.cancel_token.cancel();
     }
 
-    #[cfg(test)]
-    pub(super) fn for_tests(tx: Sender<AutoCoordinatorCommand>) -> Self {
+#[cfg(all(test, feature = "legacy_tests"))]
+pub(super) fn for_tests(tx: Sender<AutoCoordinatorCommand>) -> Self {
         Self {
             tx,
             cancel_token: CancellationToken::new(),
@@ -985,7 +985,7 @@ fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
     })
 }
 
-fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
+pub(crate) fn classify_model_error(error: &anyhow::Error) -> RetryDecision {
     if let Some(code_err) = find_in_chain::<CodexErr>(error) {
         match code_err {
             CodexErr::Stream(message, _) => {
@@ -1199,7 +1199,7 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 pub(crate) use classify_model_error as test_classify_model_error;
 
 #[cfg(test)]

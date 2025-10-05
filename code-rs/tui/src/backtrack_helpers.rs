@@ -111,7 +111,7 @@ fn highlight_range_from_header(lines: &[Line<'_>], header_idx: usize) -> (usize,
     (header_idx, end)
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::text::Span;

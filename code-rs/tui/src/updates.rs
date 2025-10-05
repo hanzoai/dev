@@ -50,7 +50,7 @@ fn force_upgrade_preview_enabled() -> bool {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 pub(crate) fn reset_force_upgrade_preview_for_tests() {
     FORCE_UPGRADE_PREVIEW.store(FORCE_UPGRADE_UNSET, Ordering::Relaxed);
 }
@@ -586,7 +586,7 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     Some((maj, min, pat))
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

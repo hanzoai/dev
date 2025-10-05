@@ -1,3 +1,6 @@
+#[cfg(feature = "code-fork")]
+use crate::foundation::palette as colors;
+#[cfg(not(feature = "code-fork"))]
 use crate::colors;
 use chrono::{DateTime, Datelike, Local, Utc};
 use code_common::elapsed::format_duration;
@@ -77,6 +80,7 @@ impl LimitsView {
 
     pub(crate) fn gauge_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.grid_state
+            .filter(|state| state.weekly_used_ratio.is_finite())
             .map(|state| render_limit_grid(state, self.grid, width))
             .unwrap_or_default()
     }
@@ -111,9 +115,13 @@ pub(crate) fn build_limits_view(
     grid_config: GridConfig,
 ) -> LimitsView {
     let metrics = RateLimitMetrics::from_snapshot(snapshot);
-    let grid_state = extract_capacity_fraction(snapshot)
-        .and_then(|fraction| compute_grid_state(&metrics, fraction))
-        .map(|state| scale_grid_state(state, grid_config));
+    let grid_state = if gauge_inputs_available(snapshot) {
+        extract_capacity_fraction(snapshot)
+            .and_then(|fraction| compute_grid_state(&metrics, fraction))
+            .map(|state| scale_grid_state(state, grid_config))
+    } else {
+        None
+    };
 
     LimitsView {
         summary_lines: build_summary_lines(&metrics, snapshot, &reset_info),
@@ -174,7 +182,7 @@ fn build_summary_lines(
 
     lines.push(section_header("Hourly Limit"));
     lines.push(build_bar_line(
-        "Usage",
+        "Used",
         metrics.hourly_used,
         "",
         Style::default().fg(colors::text()),
@@ -849,18 +857,23 @@ fn format_minutes_round_units(minutes: u64) -> String {
 
 fn extract_capacity_fraction(snapshot: &RateLimitSnapshotEvent) -> Option<f64> {
     let ratio = snapshot.primary_to_secondary_ratio_percent;
-    if ratio.is_finite() && ratio > 0.0 {
-        return Some((ratio / 100.0).clamp(0.0, 1.0));
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return None;
     }
 
-    // Fallback: derive capacity share from the reported window lengths.
-    let primary = snapshot.primary_window_minutes as f64;
-    let secondary = snapshot.secondary_window_minutes as f64;
-    if primary.is_finite() && secondary.is_finite() && primary > 0.0 && secondary > 0.0 {
-        return Some((primary / secondary).clamp(0.0, 1.0));
+    Some((ratio / 100.0).clamp(0.0, 1.0))
+}
+
+fn gauge_inputs_available(snapshot: &RateLimitSnapshotEvent) -> bool {
+    let ratio = snapshot.primary_to_secondary_ratio_percent;
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return false;
     }
 
-    None
+    snapshot.primary_used_percent.is_finite()
+        && snapshot.secondary_used_percent.is_finite()
+        && snapshot.primary_window_minutes > 0
+        && snapshot.secondary_window_minutes > 0
 }
 
 fn compute_grid_state(metrics: &RateLimitMetrics, capacity_fraction: f64) -> Option<GridState> {

@@ -1,8 +1,5 @@
+use crate::compat::{Line, Span, Stylize, Text};
 use pretty_assertions::assert_eq;
-use ratatui::style::Stylize;
-use ratatui::text::Line;
-use ratatui::text::Span;
-use ratatui::text::Text;
 
 use crate::markdown_render::render_markdown_text;
 use insta::assert_snapshot;

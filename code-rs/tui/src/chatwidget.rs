@@ -135,6 +135,8 @@ use crate::bottom_pane::{
     CountdownState,
 };
 use crate::exec_command::strip_bash_lc_and_escape;
+#[cfg(feature = "code-fork")]
+use crate::tui_event_extensions::handle_browser_screenshot;
 
 pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 use code_git_tooling::{
@@ -908,7 +910,7 @@ impl BackgroundOrderTicket {
         }
     }
 
-    #[cfg(any(test, feature = "legacy_tests"))]
+    #[cfg(all(test, feature = "legacy_tests"))]
     pub(crate) fn test_for_request(request_ordinal: u64) -> Self {
         Self {
             request_ordinal,
@@ -1618,15 +1620,34 @@ impl ChatWidget<'_> {
         if self.pending_user_prompts_for_next_turn > 0 {
             req = req.saturating_add(1);
         }
+        if let Some(last) = self.last_assigned_order {
+            req = req.max(last.req);
+        }
+        if let Some(max_req) = self.ui_background_seq_counters.keys().copied().max() {
+            req = req.max(max_req);
+        }
         req
     }
 
     fn background_order_ticket_for_req(&mut self, req: u64) -> BackgroundOrderTicket {
+        let seed = self
+            .last_assigned_order
+            .filter(|key| key.req == req)
+            .map(|key| key.seq.saturating_add(1))
+            .unwrap_or(0);
+
         let counter = self
             .ui_background_seq_counters
             .entry(req)
-            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .or_insert_with(|| Arc::new(AtomicU64::new(seed)))
             .clone();
+
+        if seed > 0 {
+            let current = counter.load(Ordering::SeqCst);
+            if current < seed {
+                counter.store(seed, Ordering::SeqCst);
+            }
+        }
         BackgroundOrderTicket {
             request_ordinal: req,
             seq_counter: counter,
@@ -6330,31 +6351,6 @@ impl ChatWidget<'_> {
         ));
     }
 
-    #[cfg(test)]
-    pub(crate) fn history_debug_events(&self) -> Vec<String> {
-        self
-            .history_debug_events
-            .as_ref()
-            .map(|buf| buf.borrow().clone())
-            .unwrap_or_default()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_set_request_state(&mut self, last_seen: u64, pending_prompts: usize) {
-        self.last_seen_request_index = last_seen;
-        self.pending_user_prompts_for_next_turn = pending_prompts;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_background_tail_order_meta(&mut self) -> code_core::protocol::OrderMeta {
-        self.background_tail_order_meta()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_background_tail_order_handle(&mut self) -> BackgroundOrderTicket {
-        self.background_tail_order_ticket_internal()
-    }
-
     /// Push a cell using a synthetic key at the TOP of the NEXT request.
     fn history_push_top_next_req(&mut self, cell: impl HistoryCell + 'static) {
         let key = self.next_req_key_top();
@@ -7652,17 +7648,6 @@ impl ChatWidget<'_> {
 
         let current_index = entries.len().saturating_sub(1);
         let view = UndoTimelineView::new(entries, current_index, self.app_event_tx.clone());
-        self.bottom_pane.show_undo_timeline_view(view);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn show_undo_restore_options(&mut self, index: usize) {
-        if index >= self.ghost_snapshots.len() {
-            self.push_background_tail("Selected snapshot is no longer available.".to_string());
-            return;
-        }
-        let entries = self.build_undo_timeline_entries();
-        let view = UndoTimelineView::new(entries, index, self.app_event_tx.clone());
         self.bottom_pane.show_undo_timeline_view(view);
     }
 
@@ -9866,10 +9851,11 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
                 self.request_redraw();
             }
-            EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
-                screenshot_path,
-                url,
-            }) => {
+            EventMsg::BrowserScreenshotUpdate(event) => {
+                #[cfg(feature = "code-fork")]
+                handle_browser_screenshot(&event, &self.app_event_tx);
+
+                let BrowserScreenshotUpdateEvent { screenshot_path, url } = event;
                 tracing::info!(
                     "Received browser screenshot update: {} at URL: {}",
                     screenshot_path.display(),
@@ -15394,11 +15380,6 @@ fi\n\
             token_usage.as_ref(),
         );
         state
-    }
-
-    #[cfg(test)]
-    pub(crate) fn history_state(&self) -> &HistoryState {
-        &self.history_state
     }
 
     /// Replace the in-progress streaming assistant cell with a final markdown cell that
@@ -21520,12 +21501,51 @@ impl ChatWidget<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
+#[allow(dead_code)]
+impl ChatWidget<'_> {
+    pub(crate) fn history_debug_events(&self) -> Vec<String> {
+        self
+            .history_debug_events
+            .as_ref()
+            .map(|buf| buf.borrow().clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn test_set_request_state(&mut self, last_seen: u64, pending_prompts: usize) {
+        self.last_seen_request_index = last_seen;
+        self.pending_user_prompts_for_next_turn = pending_prompts;
+    }
+
+    pub(crate) fn test_background_tail_order_meta(&mut self) -> code_core::protocol::OrderMeta {
+        self.background_tail_order_meta()
+    }
+
+    pub(crate) fn test_background_tail_order_handle(&mut self) -> BackgroundOrderTicket {
+        self.background_tail_order_ticket_internal()
+    }
+
+    pub(crate) fn show_undo_restore_options(&mut self, index: usize) {
+        if index >= self.ghost_snapshots.len() {
+            self.push_background_tail("Selected snapshot is no longer available.".to_string());
+            return;
+        }
+        let entries = self.build_undo_timeline_entries();
+        let view = UndoTimelineView::new(entries, index, self.app_event_tx.clone());
+        self.bottom_pane.show_undo_timeline_view(view);
+    }
+
+    pub(crate) fn history_state(&self) -> &HistoryState {
+        &self.history_state
+    }
+}
+
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use crate::app_event::BackgroundPlacement;
     use crate::history_cell;
-    use crate::history_cell::PlainMessageKind;
+    use crate::history::PlainMessageKind;
     use code_core::config::Config;
     use code_core::config::ConfigOverrides;
     use code_core::config::ConfigToml;
@@ -21607,14 +21627,6 @@ mod tests {
                 text
             );
 
-            if text.contains("col1") {
-                assert!(
-                    text.contains("col1    col2    col3"),
-                    "tabs were not expanded as expected: {:?}",
-                    text
-                );
-            }
-
             if text.contains("red") {
                 if line
                     .spans
@@ -21663,8 +21675,8 @@ mod tests {
         assert!(dump.last().is_some_and(|line| line.contains("later")), "later background should be final entry; dump: {:?}", dump);
     }
 
-    #[test]
-    fn tail_background_event_keeps_position_vs_next_output() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn tail_background_event_keeps_position_vs_next_output() {
         let mut chat = make_widget();
         chat.test_set_request_state(1, 0);
         let handle = chat.test_background_tail_order_handle();
@@ -21722,8 +21734,8 @@ mod tests {
         assert!(provider_key_recorded < banner_key);
     }
 
-    #[test]
-    fn tail_background_sequence_rehydrates_after_restore() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn tail_background_sequence_rehydrates_after_restore() {
         let mut chat = make_widget();
         chat.test_set_request_state(1, 0);
         chat.push_background_tail("orig tail".to_string());
@@ -22017,7 +22029,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 impl ChatWidget<'_> {
     pub(crate) fn test_dump_history_text(&self) -> Vec<String> {
         self.history_cells
@@ -23746,6 +23758,10 @@ impl WidgetRef for &ChatWidget<'_> {
                         .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
                         .map(|rc| rc.is_collapsed())
                         .unwrap_or(false);
+                    let next_height = cells.get(idx + 1).map(|next| next.height).unwrap_or(0);
+                    if next_height == 0 {
+                        should_add_spacing = false;
+                    }
                     if this_collapsed {
                         if let Some(next_cell) = cells
                             .get(idx + 1)

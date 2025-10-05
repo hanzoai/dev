@@ -31,7 +31,8 @@ jobs:
       # Consistent Cargo/rustup homes for caching across all workflows
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
-      CARGO_TARGET_DIR: ${{ github.workspace }}/codex-rs/target
+      RUST_WORKSPACE_DIR: ${{ hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs' }}
+      CARGO_TARGET_DIR: ${{ format('{0}/{1}/target', github.workspace, hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs') }}
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +73,7 @@ jobs:
           prefix-key: v1-preview
           shared-key: preview-${{ matrix.target }}-rust-1.89
           workspaces: |
+            ${{ env.RUST_WORKSPACE_DIR }} -> target
             codex-rs -> target
           cache-targets: true
           cache-workspace-crates: true
@@ -128,7 +130,7 @@ jobs:
           }
 
       - name: Prefetch deps
-        working-directory: codex-rs
+        working-directory: ${{ env.RUST_WORKSPACE_DIR }}
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: cargo fetch --locked
@@ -136,17 +138,17 @@ jobs:
       - name: Build code (release)
         shell: bash
         run: |
-          cd codex-rs
-          cargo build --release --locked --target ${{ matrix.target }} --bin code
+          cd "${RUST_WORKSPACE_DIR}"
+          cargo build --release --locked --target "${{ matrix.target }}" --bin code
 
       - name: Prepare artifacts
         shell: bash
         run: |
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp codex-rs/target/${{ matrix.target }}/release/code.exe artifacts/${{ matrix.artifact }}
+            cp "${RUST_WORKSPACE_DIR}/target/${{ matrix.target }}/release/code.exe" "artifacts/${{ matrix.artifact }}"
           else
-            cp codex-rs/target/${{ matrix.target }}/release/code artifacts/${{ matrix.artifact }}
+            cp "${RUST_WORKSPACE_DIR}/target/${{ matrix.target }}/release/code" "artifacts/${{ matrix.artifact }}"
           fi
 
       - name: Compress artifacts (Windows)
