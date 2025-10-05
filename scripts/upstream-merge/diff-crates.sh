@@ -86,7 +86,7 @@ diff_crate() {
     # Rewrite code-* / code_* identifiers back to codex-* so the diff highlights
     # real behavioural changes instead of fork re-branding noise. Limit to
     # textual sources we care about (.toml/.rs).
-    find "$sanitized_path" -type f \( -name '*.toml' -o -name '*.rs' \) -print0 |
+    find "$sanitized_path" -type f \( -name '*.toml' -o -name '*.rs' -o -name '*.md' -o -name '*.json' \) -print0 |
         xargs -0 perl -pi -e 's/\bcode-([a-z0-9_]+)/codex-$1/g; s/\bcode_([a-z0-9_]+)/codex_$1/g'
 
     # Generate diff with context using the sanitized fork copy
