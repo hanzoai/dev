@@ -425,8 +425,12 @@ pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path)
         if rel.starts_with(".git/") { continue; }
         let from = src_root.join(&rel);
         let to = worktree_path.join(&rel);
-        let meta = match tokio::fs::metadata(&from).await { Ok(m) => m, Err(_) => continue };
-        if !meta.is_file() { continue; }
+        let meta = match tokio::fs::symlink_metadata(&from).await { Ok(m) => m, Err(_) => continue };
+        if meta.file_type().is_symlink() {
+            // Build outputs often exist as symlinks into target/; skip them so /branch is resilient.
+            continue;
+        }
+        if !meta.file_type().is_file() { continue; }
         if let Some(parent) = to.parent() { tokio::fs::create_dir_all(parent).await.map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?; }
         // Use copy for files; skip if it's a directory (shouldn't appear from ls-files)
         match tokio::fs::copy(&from, &to).await {
