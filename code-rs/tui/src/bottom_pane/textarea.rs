@@ -3,11 +3,11 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::widgets::StatefulWidgetRef;
-use ratatui::widgets::WidgetRef;
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::Style;
+use crate::compat::StatefulWidgetRef;
+use crate::compat::WidgetRef;
 use std::cell::Ref;
 use std::cell::RefCell;
 use std::ops::Range;
@@ -135,7 +135,7 @@ impl TextArea {
         self.wrapped_lines(width).len() as u16
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         self.cursor_pos_with_state(area, TextAreaState::default())
     }
@@ -962,7 +962,7 @@ mod tests {
     use super::*;
     // crossterm types are intentionally not imported here to avoid unused warnings
     use rand::prelude::*;
-    use ratatui::layout::Rect;
+    use crate::compat::Rect;
 
     fn rand_grapheme(rng: &mut rand::rngs::StdRng) -> String {
         let r: u8 = rng.gen_range(0..100);
@@ -1460,7 +1460,7 @@ mod tests {
 
         // Render with state to update actual scroll value
         let mut buf = Buffer::empty(small_area);
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), small_area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), small_area, &mut buf, &mut state);
         // After render, state.scroll should be adjusted so cursor row fits
         let effective_lines = t.desired_height(small_area.width);
         assert!(state.scroll < effective_lines);
@@ -1559,35 +1559,35 @@ mod tests {
 
         // Start at beginning
         t.set_cursor(0);
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!((x, y), (0, 0));
 
         // Move down to second visual line; should be at bottom row (row 1) within 2-line viewport
         t.move_cursor_down();
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!((x, y), (0, 1));
 
         // Move down to third visual line; viewport scrolls and keeps cursor on bottom row
         t.move_cursor_down();
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!((x, y), (0, 1));
 
         // Move up to second visual line; with current scroll, it appears on top row
         t.move_cursor_up();
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!((x, y), (0, 0));
 
         // Column preservation across moves: set to col 2 on first line, move down
         t.set_cursor(2);
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x0, y0) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!((x0, y0), (2, 0));
         t.move_cursor_down();
-        ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
+        crate::compat::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
         let (x1, y1) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!((x1, y1), (2, 1));
     }
@@ -1841,7 +1841,7 @@ mod tests {
                 let total_lines = ta.desired_height(width);
                 let full_area = Rect::new(0, 0, width, total_lines.max(1));
                 let mut buf = Buffer::empty(full_area);
-                ratatui::widgets::WidgetRef::render_ref(&(&ta), full_area, &mut buf);
+                crate::compat::WidgetRef::render_ref(&(&ta), full_area, &mut buf);
 
                 // cursor_pos: x must be within width when present
                 let baseline_state = TextAreaState::default();
@@ -1854,7 +1854,7 @@ mod tests {
 
                 // Stateful render should not panic, and updates scroll
                 let mut sbuf = Buffer::empty(area);
-                ratatui::widgets::StatefulWidgetRef::render_ref(
+                crate::compat::StatefulWidgetRef::render_ref(
                     &(&ta),
                     area,
                     &mut sbuf,

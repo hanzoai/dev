@@ -5,11 +5,11 @@ use crate::colors;
 use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::spinner;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::{Modifier, Style};
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 

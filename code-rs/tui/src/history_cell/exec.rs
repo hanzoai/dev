@@ -3,10 +3,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use code_common::elapsed::format_duration;
 use code_core::parse_command::ParsedCommand;
-use ratatui::prelude::{Buffer, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Padding, Widget};
+use crate::compat::{Buffer, Rect};
+use crate::compat::{Modifier, Style};
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Padding, Widget};
 
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history::state::{
@@ -517,7 +517,7 @@ impl ExecCell {
     }
 
     #[cfg(test)]
-    pub(crate) fn has_bold_command(&self) -> bool {
+    fn has_bold_command(&self) -> bool {
         self.has_bold_command
     }
 
@@ -628,24 +628,6 @@ impl ExecCell {
                 }
 
                 out.splice(insert_at..insert_at, block);
-            }
-
-            if let Some(output) = self.output.as_ref() {
-                if output.exit_code == 0 {
-                    if out
-                        .last()
-                        .map(|line| line.spans.iter().all(|span| span.content.as_ref().trim().is_empty()))
-                        .unwrap_or(false)
-                    {
-                        out.pop();
-                    }
-                    out.push(Line::styled(
-                        format!("Success (exit code {})", output.exit_code),
-                        Style::default()
-                            .fg(crate::colors::success())
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
             }
         }
 
@@ -897,8 +879,8 @@ pub(crate) fn display_lines_from_record(record: &ExecRecord) -> Vec<Line<'static
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
+    use crate::compat::Buffer;
+    use crate::compat::Rect;
 
     #[test]
     fn render_running_exec_includes_stream_output() {
