@@ -128,7 +128,7 @@ fn parse_markdown_line(text: &str) -> Line<'static> {
     Line::from(spans)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
 

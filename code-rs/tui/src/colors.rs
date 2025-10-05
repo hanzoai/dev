@@ -1,5 +1,5 @@
+use crate::compat::Color;
 use crate::theme::{current_theme, palette_mode, quantize_color_for_palette, PaletteMode};
-use ratatui::style::Color;
 
 // Legacy color constants - now redirect to theme
 pub(crate) fn light_blue() -> Color {

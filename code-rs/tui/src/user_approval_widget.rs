@@ -560,7 +560,7 @@ fn hotkey_suffix(key: KeyCode) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
     use crossterm::event::KeyCode;

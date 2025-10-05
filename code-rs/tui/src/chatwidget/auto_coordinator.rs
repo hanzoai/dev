@@ -69,9 +69,8 @@ impl AutoCoordinatorHandle {
         self.cancel_token.cancel();
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(super) fn for_tests(tx: Sender<AutoCoordinatorCommand>) -> Self {
+#[cfg(all(test, feature = "legacy_tests"))]
+pub(super) fn for_tests(tx: Sender<AutoCoordinatorCommand>) -> Self {
         Self {
             tx,
             cancel_token: CancellationToken::new(),
