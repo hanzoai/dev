@@ -1,4 +1,6 @@
-use crate::compat::{Buffer, Clear, Rect, Widget, WidgetRef};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::{Clear, Widget, WidgetRef};
 use code_core::git_info::get_git_repo_root;
 use crossterm::event::KeyEvent;
 

@@ -2,25 +2,37 @@
 
 Quick reference for maintaining parity with codex-rs MCP components.
 
-## Weekly Monitoring (Every Monday)
+**Status (2025-10-06):** MCP crates re-export upstream `codex-rs` crates. Monitoring now focuses on upstream commits and wrapper glue.
 
-### Code Changes
-- [ ] Check [codex-rs commits](https://github.com/openai/codex-rs/commits/main) for changes to:
+## Monthly Cadence
+
+We follow a two-step cycle aligned with the broader upstream diff process (see `docs/maintenance/upstream-diff.md`).
+
+### First Monday — Quick Diff
+- [ ] Fetch latest upstream: `git fetch upstream`
+- [ ] Inspect new commits: `git log HEAD..upstream/main --oneline`
+- [ ] Run structural diff: `./scripts/upstream-merge/diff-crates.sh --all`
+- [ ] Review summary: `cat .github/auto/upstream-diffs/SUMMARY.md`
+- [ ] Check key crates for breaking changes:
   - [ ] `mcp-client/`
   - [ ] `responses-api-proxy/`
   - [ ] `process-hardening/`
-- [ ] Review commit messages for breaking changes or new features
-- [ ] Check if changes affect code-rs usage patterns
+  - [ ] `mcp-types/`
+- [ ] Decide whether a merge plan is required this month
 
-### Testing
-- [ ] Run `cargo test -p core -- mcp::` with latest upstream
-- [ ] Run `cargo test -p cli -- proxy::` if proxy changes detected
-- [ ] Verify no new test failures introduced by upstream changes
+### Second Monday — Merge Planning (if needed)
+- [ ] Highlight critical changes: `./scripts/upstream-merge/highlight-critical-changes.sh --all`
+- [ ] Review critical summary: `cat .github/auto/upstream-diffs/critical-changes/CRITICAL-SUMMARY.md`
+- [ ] Initialize merge log: `./scripts/upstream-merge/log-merge.sh init upstream/main`
+- [ ] Categorize each change (adopt/adapt/preserve) and document decisions
+- [ ] Identify wrapper updates required in `code-rs`
+- [ ] Queue follow-up work items (smoke tests, documentation)
 
-### Issues/PRs
-- [ ] Review open issues in codex-rs relevant to MCP
-- [ ] Check open PRs that may affect our components
-- [ ] Comment on issues affecting code-rs use cases
+### Standing Checks
+- [ ] Run `cargo build --workspace`
+- [ ] Run `cargo test -p mcp-types`
+- [ ] Review relevant upstream issues/PRs affecting MCP components
+- [ ] Note manual validation required for MCP client/proxy flows (legacy integration suite removed)
 
 ## Monthly Deep Dive
 
@@ -39,11 +51,12 @@ Quick reference for maintaining parity with codex-rs MCP components.
 - [ ] Review upstream security advisories
 - [ ] Check for CVEs in MCP component dependencies
 
-### Code Review
+### Code Review (Re-Export Model)
 - [ ] Review all upstream changes since last month
-- [ ] Identify opportunities for code-rs improvements
-- [ ] Identify code-rs features worth contributing upstream
-- [ ] Update fork divergence documentation if needed
+- [ ] Verify re-export wrappers (`code-mcp-client`, `code-responses-api-proxy`, `code-process-hardening`, `code-mcp-types`) remain thin/minimal
+- [ ] Identify opportunities for code-rs usage patterns to simplify
+- [ ] Identify code-rs integration improvements worth contributing upstream
+- [ ] **Note:** Divergence now minimal; focus on ensuring re-exports stay up-to-date
 
 ### Documentation
 - [ ] Update upstream-mcp-reuse-strategy.md with new findings
@@ -59,12 +72,13 @@ Quick reference for maintaining parity with codex-rs MCP components.
 - [ ] Plan migration for breaking changes
 - [ ] Create test branch for upgrade
 
-### Testing
-- [ ] Run full test suite: `cargo test --workspace`
-- [ ] Integration tests with real MCP servers
-- [ ] Performance regression tests
-- [ ] Security hardening validation
-- [ ] Cross-platform testing (Linux, macOS, Windows)
+### Testing (Post-Phase 1 Cleanup)
+- [ ] Run full build: `cargo build --workspace`
+- [ ] Run minimal test suite: `cargo test -p mcp-types -p code-linux-sandbox -p code-cloud-tasks`
+- [ ] Manual integration validation with real MCP servers (no automated tests currently)
+- [ ] Security hardening validation (landlock tests in `linux-sandbox`)
+- [ ] Cross-platform build verification (Linux, macOS, Windows)
+- [ ] **Note:** Full integration test suite removed; rely on build verification and manual validation
 
 ### Documentation
 - [ ] Update dependency versions in docs
@@ -111,24 +125,25 @@ Quick reference for maintaining parity with codex-rs MCP components.
   - [ ] Replace with alternative
 - [ ] Document decision and rationale
 
-## Quick Commands Reference
+## Quick Commands Reference (Updated for Re-Export Model)
 
 ```bash
 # Check upstream changes
 cd codex-rs
 git fetch origin
-git log origin/main --since="1 week ago" -- mcp-client/ responses-api-proxy/ process-hardening/
+git log origin/main --since="1 week ago" -- mcp-client/ responses-api-proxy/ process-hardening/ mcp-types/
 
-# Run MCP-specific tests
+# Verify re-exports build with upstream changes
 cd code-rs
-cargo test -p core -- mcp::
-cargo test -p cli -- proxy::
+cargo build --workspace
+
+# Run minimal test suite
+cargo test -p mcp-types
+cargo test -p code-linux-sandbox
+cargo test -p code-cloud-tasks
 
 # Security audit
 cargo audit
-
-# Performance benchmark
-cargo bench --bench mcp_client_bench
 
 # Check process hardening (Linux)
 ps aux | grep code-responses
@@ -138,9 +153,9 @@ cat /proc/$(pgrep code-responses)/status | grep Dumpable
 ps aux | grep code-responses
 lldb -p $(pgrep code-responses)  # Should fail
 
-# Diff implementations (if maintaining fork)
-diff -u codex-rs/mcp-client/src/mcp_client.rs code-rs/mcp-client/src/mcp_client.rs
-diff -u codex-rs/responses-api-proxy/src/lib.rs code-rs/responses-api-proxy/src/lib.rs
+# Verify re-export wrappers are minimal (no local forks to diff)
+# code-mcp-client, code-responses-api-proxy, code-process-hardening, code-mcp-types
+# should all be thin re-export wrappers pointing to codex-rs counterparts
 ```
 
 ## GitHub Notifications Setup
@@ -156,16 +171,19 @@ diff -u codex-rs/responses-api-proxy/src/lib.rs code-rs/responses-api-proxy/src/
    - Path filter: `mcp-client/**`
    - Path filter: `responses-api-proxy/**`
    - Path filter: `process-hardening/**`
+   - Path filter: `mcp-types/**`
 
-## Metrics to Track
+## Metrics to Track (Updated for Re-Export Model)
 
-| Metric | Target | Current | Trend |
-|--------|--------|---------|-------|
-| Upstream divergence (lines) | <10 | 1 | ↓ |
-| Test coverage | >90% | - | - |
-| Large response handling (2MB) | <100ms | - | - |
-| Security audit issues | 0 | - | - |
-| Days since upstream sync | <7 | - | - |
+| Metric | Target | Current (2025-10-05) | Trend |
+|--------|--------|----------------------|-------|
+| Upstream divergence (wrapper LOC) | <50 | ~0 (re-exports only) | ✅ |
+| Re-export wrapper complexity | Minimal | Thin wrappers | ✅ |
+| Build success with latest upstream | 100% | ✅ | — |
+| Security audit issues | 0 | TBD | — |
+| Days since upstream sync check | <7 | 0 | — |
+
+**Note:** With re-export model, "divergence" is effectively zero. Focus shifts to monitoring upstream API stability and ensuring wrappers remain minimal.
 
 ## Contact
 
@@ -184,3 +202,4 @@ When upstream reuse is complete and stable, archive this checklist with:
 
 **Last Updated**: 2025-10-05
 **Next Review**: 2025-10-12
+**Model**: Re-export wrappers (`code-mcp-client`, `code-responses-api-proxy`, `code-process-hardening`, `code-mcp-types` all re-export from `codex-rs`)

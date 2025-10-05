@@ -1,17 +1,20 @@
-#![allow(dead_code, unused_imports, unused_variables)]
 use std::time::Duration;
 use std::time::Instant;
 
 // Heuristic thresholds for detecting paste-like input bursts.
 // Detect quickly to avoid showing typed prefix before paste is recognized
+#[allow(dead_code)]
 const PASTE_BURST_MIN_CHARS: u16 = 3;
 const PASTE_BURST_CHAR_INTERVAL: Duration = Duration::from_millis(8);
+#[allow(dead_code)]
 const PASTE_ENTER_SUPPRESS_WINDOW: Duration = Duration::from_millis(120);
 
 #[derive(Default)]
 pub(crate) struct PasteBurst {
     last_plain_char_time: Option<Instant>,
+    #[allow(dead_code)]
     consecutive_plain_char_burst: u16,
+    #[allow(dead_code)]
     burst_window_until: Option<Instant>,
     buffer: String,
     active: bool,
@@ -19,6 +22,7 @@ pub(crate) struct PasteBurst {
     pending_first_char: Option<(char, Instant)>,
 }
 
+#[allow(dead_code)]
 pub(crate) enum CharDecision {
     /// Start buffering and retroactively capture some already-inserted chars.
     BeginBuffer { retro_chars: u16 },
@@ -31,6 +35,7 @@ pub(crate) enum CharDecision {
     BeginBufferFromPending,
 }
 
+#[allow(dead_code)]
 pub(crate) struct RetroGrab {
     pub start_byte: usize,
     pub grabbed: String,
@@ -43,11 +48,13 @@ impl PasteBurst {
     ///
     /// Primarily used by tests and by the TUI to reliably cross the
     /// paste-burst timing threshold.
+    #[allow(dead_code)]
     pub fn recommended_flush_delay() -> Duration {
         PASTE_BURST_CHAR_INTERVAL + Duration::from_millis(1)
     }
 
     /// Entry point: decide how to treat a plain char with current timing.
+    #[allow(dead_code)]
     pub fn on_plain_char(&mut self, ch: char, now: Instant) -> CharDecision {
         match self.last_plain_char_time {
             Some(prev) if now.duration_since(prev) <= PASTE_BURST_CHAR_INTERVAL => {
@@ -122,6 +129,7 @@ impl PasteBurst {
     ///
     /// Returns true if a newline was appended (we are in a burst context),
     /// false otherwise.
+    #[allow(dead_code)]
     pub fn append_newline_if_active(&mut self, now: Instant) -> bool {
         if self.is_active() {
             self.buffer.push('\n');
@@ -133,17 +141,20 @@ impl PasteBurst {
     }
 
     /// Decide if Enter should insert a newline (burst context) vs submit.
+    #[allow(dead_code)]
     pub fn newline_should_insert_instead_of_submit(&self, now: Instant) -> bool {
         let in_burst_window = self.burst_window_until.is_some_and(|until| now <= until);
         self.is_active() || in_burst_window
     }
 
     /// Keep the burst window alive.
+    #[allow(dead_code)]
     pub fn extend_window(&mut self, now: Instant) {
         self.burst_window_until = Some(now + PASTE_ENTER_SUPPRESS_WINDOW);
     }
 
     /// Begin buffering with retroactively grabbed text.
+    #[allow(dead_code)]
     pub fn begin_with_retro_grabbed(&mut self, grabbed: String, now: Instant) {
         if !grabbed.is_empty() {
             self.buffer.push_str(&grabbed);
@@ -153,6 +164,7 @@ impl PasteBurst {
     }
 
     /// Append a char into the burst buffer.
+    #[allow(dead_code)]
     pub fn append_char_to_buffer(&mut self, ch: char, now: Instant) {
         self.buffer.push(ch);
         self.burst_window_until = Some(now + PASTE_ENTER_SUPPRESS_WINDOW);
@@ -169,6 +181,7 @@ impl PasteBurst {
     ///
     /// Returns Some(RetroGrab) with the start byte and grabbed text when we
     /// decide to buffer retroactively; otherwise None.
+    #[allow(dead_code)]
     pub fn decide_begin_buffer(
         &mut self,
         now: Instant,
@@ -205,6 +218,7 @@ impl PasteBurst {
     ///
     /// Does not emit or clear the buffered text itself; callers should have
     /// already flushed (if needed) via one of the flush methods above.
+    #[allow(dead_code)]
     pub fn clear_window_after_non_char(&mut self) {
         self.consecutive_plain_char_burst = 0;
         self.last_plain_char_time = None;
@@ -224,6 +238,7 @@ impl PasteBurst {
         self.active || !self.buffer.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn clear_after_explicit_paste(&mut self) {
         self.last_plain_char_time = None;
         self.consecutive_plain_char_burst = 0;
@@ -234,6 +249,7 @@ impl PasteBurst {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn retro_start_index(before: &str, retro_chars: usize) -> usize {
     if retro_chars == 0 {
         return before.len();

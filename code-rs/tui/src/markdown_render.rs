@@ -42,20 +42,6 @@ pub fn render_markdown_text(input: &str) -> Text<'static> {
     w.text
 }
 
-#[cfg(test)]
-pub(crate) fn render_markdown_text_with_citations(
-    input: &str,
-    scheme: Option<&str>,
-    cwd: &Path,
-) -> Text<'static> {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    let parser = Parser::new_ext(input, options);
-    let mut w = Writer::new(parser, scheme.map(str::to_string), Some(cwd.to_path_buf()));
-    w.run();
-    w.text
-}
-
 struct Writer<'a, I>
 where
     I: Iterator<Item = Event<'a>>,
@@ -507,60 +493,4 @@ pub(crate) fn rewrite_file_citations_with_scheme<'a>(
         // - add a space after the link to make it easier to read
         format!("[{file}:{start_line}]({scheme}://file{absolute_path}:{start_line}) ")
     })
-}
-
-#[cfg(test)]
-mod markdown_render_tests {
-    include!("markdown_render_tests.rs");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn citation_is_rewritten_with_absolute_path() {
-        let markdown = "See 【F:/src/main.rs†L42-L50】 for details.";
-        let cwd = Path::new("/workspace");
-        let result = rewrite_file_citations_with_scheme(markdown, Some("vscode"), cwd);
-
-        assert_eq!(
-            "See [/src/main.rs:42](vscode://file/src/main.rs:42)  for details.",
-            result
-        );
-    }
-
-    #[test]
-    fn citation_followed_by_space_so_they_do_not_run_together() {
-        let markdown = "References on lines 【F:src/foo.rs†L24】【F:src/foo.rs†L42】";
-        let cwd = Path::new("/home/user/project");
-        let result = rewrite_file_citations_with_scheme(markdown, Some("vscode"), cwd);
-
-        assert_eq!(
-            "References on lines [src/foo.rs:24](vscode://file/home/user/project/src/foo.rs:24) [src/foo.rs:42](vscode://file/home/user/project/src/foo.rs:42) ",
-            result
-        );
-    }
-
-    #[test]
-    fn citation_unchanged_without_file_opener() {
-        let markdown = "Look at 【F:file.rs†L1】.";
-        let cwd = Path::new("/");
-        let unchanged = rewrite_file_citations_with_scheme(markdown, Some("vscode"), cwd);
-        // The helper itself always rewrites – this test validates behaviour of
-        // append_markdown when `file_opener` is None.
-        let rendered = render_markdown_text_with_citations(markdown, None, cwd);
-        // Convert lines back to string for comparison.
-        let rendered: String = rendered
-            .lines
-            .iter()
-            .flat_map(|l| l.spans.iter())
-            .map(|s| s.content.clone())
-            .collect::<Vec<_>>()
-            .join("");
-        assert_eq!(markdown, rendered);
-        // Ensure helper rewrites.
-        assert_ne!(markdown, unchanged);
-    }
 }

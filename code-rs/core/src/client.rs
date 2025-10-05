@@ -642,8 +642,6 @@ impl ModelClient {
         self.config.model_context_window
     }
 
-    // duplicate of earlier helpers removed during merge cleanup
-
     #[allow(dead_code)]
     pub fn get_auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()

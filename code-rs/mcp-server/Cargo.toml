@@ -41,10 +41,3 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 uuid = { workspace = true, features = ["serde", "v7"] }
 
 [dev-dependencies]
-assert_cmd = { workspace = true }
-core_test_support = { workspace = true }
-mcp_test_support = { workspace = true }
-os_info = { workspace = true }
-pretty_assertions = { workspace = true }
-tempfile = { workspace = true }
-wiremock = { workspace = true }

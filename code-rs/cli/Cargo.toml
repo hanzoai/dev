@@ -59,6 +59,3 @@ tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
-assert_cmd = { workspace = true }
-predicates = { workspace = true }
-pretty_assertions = { workspace = true }

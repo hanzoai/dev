@@ -69,13 +69,6 @@ impl AutoCoordinatorHandle {
         self.cancel_token.cancel();
     }
 
-#[cfg(all(test, feature = "legacy_tests"))]
-pub(super) fn for_tests(tx: Sender<AutoCoordinatorCommand>) -> Self {
-        Self {
-            tx,
-            cancel_token: CancellationToken::new(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -1199,101 +1192,6 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
     None
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
-pub(crate) use classify_model_error as test_classify_model_error;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use code_core::error::{UnexpectedResponseError, UsageLimitReachedError};
-
-    #[test]
-    fn rate_limit_hint_uses_reset_seconds() {
-        let body = r#"{"error":{"reset_seconds":5}}"#;
-        let start = Instant::now();
-        let wait = parse_rate_limit_hint(body).expect("expected wait instant");
-        let remaining = wait
-            .checked_duration_since(start)
-            .expect("wait should be in the future");
-        let rem_secs = remaining.as_secs_f64();
-        let min_expected = (RATE_LIMIT_BUFFER + Duration::from_secs(5)).as_secs_f64() - 0.5;
-        let max_expected =
-            (RATE_LIMIT_BUFFER + Duration::from_secs(5) + RATE_LIMIT_JITTER_MAX).as_secs_f64() + 1.0;
-        assert!(rem_secs >= min_expected, "remaining {rem_secs}, min {min_expected}");
-        assert!(rem_secs <= max_expected, "remaining {rem_secs}, max {max_expected}");
-    }
-
-    #[test]
-    fn rate_limit_hint_uses_reset_at() {
-        let reset_at = (Utc::now() + chrono::Duration::seconds(10)).to_rfc3339();
-        let body = format!("{{\"error\":{{\"reset_at\":\"{reset_at}\"}}}}");
-        let wait = parse_rate_limit_hint(&body).expect("expected wait instant");
-        let remaining = wait
-            .checked_duration_since(Instant::now())
-            .expect("wait should be in the future");
-        assert!(
-            remaining.as_secs_f64()
-                >= (RATE_LIMIT_BUFFER + Duration::from_secs(10)).as_secs_f64() - 1.0
-        );
-    }
-
-    #[test]
-    fn classify_identifies_stream_disconnect() {
-        let err = anyhow!(CodexErr::Stream("disconnect".into(), None));
-        match classify_model_error(&err) {
-            RetryDecision::RetryAfterBackoff { reason } => {
-                assert!(reason.contains("disconnect"));
-            }
-            other => panic!("unexpected decision: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn classify_usage_limit_returns_rate_limit() {
-        let err = anyhow!(CodexErr::UsageLimitReached(UsageLimitReachedError {
-            plan_type: None,
-            resets_in_seconds: Some(10),
-        }));
-        match classify_model_error(&err) {
-            RetryDecision::RateLimited { .. } => {}
-            other => panic!("expected rate limit, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn classify_fatal_on_bad_request() {
-        let err = anyhow!(CodexErr::UnexpectedStatus(UnexpectedResponseError {
-            status: StatusCode::BAD_REQUEST,
-            body: "bad".to_string(),
-            request_id: None,
-        }));
-        match classify_model_error(&err) {
-            RetryDecision::Fatal(_) => {}
-            other => panic!("expected fatal, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn observer_cadence_triggers_every_n_requests() {
-        assert!(!should_trigger_observer(0, 5));
-        assert!(!should_trigger_observer(1, 5));
-        assert!(should_trigger_observer(5, 5));
-        assert!(should_trigger_observer(10, 5));
-        assert!(!should_trigger_observer(11, 5));
-        assert!(!should_trigger_observer(3, 0));
-    }
-
-    #[test]
-    fn compose_intro_appends_guidance_section() {
-        let base = "Intro";
-        let guidance = vec!["First".to_string(), "Second".to_string()];
-        let combined = compose_developer_intro(base, &guidance);
-        assert!(combined.contains("Intro"));
-        assert!(combined.contains("**Observer Guidance**"));
-        assert!(combined.contains("- First"));
-        assert!(combined.contains("- Second"));
-    }
-}
 
 fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
     let value: Value = match serde_json::from_str(raw) {

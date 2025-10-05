@@ -28,7 +28,6 @@ use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
-mod compat;
 mod app;
 mod app_event;
 mod app_event_sender;
@@ -88,7 +87,6 @@ mod foundation;
 mod ui_consts;
 mod user_approval_widget;
 mod height_manager;
-mod transcript_app;
 mod clipboard_paste;
 mod greeting;
 // Upstream introduced a standalone status indicator widget. Our fork renders
@@ -99,9 +97,6 @@ mod agent_install_helpers;
 
 // Internal vt100-based replay tests live as a separate source file to keep them
 // close to the widget code. Include them in unit tests.
-#[cfg(all(test, feature = "legacy_tests"))]
-mod chatwidget_stream_tests;
-
 mod updates;
 
 pub use cli::Cli;

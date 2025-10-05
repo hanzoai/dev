@@ -1,4 +1,4 @@
-use crate::compat::{Line, Span};
+use ratatui::text::{Line, Span};
 
 /// Clone a borrowed ratatui `Line` into an owned `'static` line.
 #[allow(dead_code)]

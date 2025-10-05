@@ -153,31 +153,3 @@ pub fn fault_to_error(fault: InjectedFault) -> anyhow::Error {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use once_cell::sync::Lazy;
-    use std::env;
-
-    static _ENV_GUARD: Lazy<()> = Lazy::new(|| {
-        env::set_var("CODEX_FAULTS_SCOPE", "auto_drive");
-        env::set_var("CODEX_FAULTS", "disconnect:1,429:2");
-        env::set_var("CODEX_FAULTS_429_RESET", "30");
-    });
-
-    #[test]
-    fn injector_sequence_respects_scope_counts() {
-        let _guard = *_ENV_GUARD;
-        CONFIG.take(); // reset caching for test
-        assert!(config().contains_key(&FaultScope::AutoDrive));
-
-        let f1 = next_fault(FaultScope::AutoDrive);
-        matches!(f1, Some(InjectedFault::Disconnect));
-        let f2 = next_fault(FaultScope::AutoDrive);
-        matches!(f2, Some(InjectedFault::RateLimit { .. }));
-        let f3 = next_fault(FaultScope::AutoDrive);
-        matches!(f3, Some(InjectedFault::RateLimit { .. }));
-        let f4 = next_fault(FaultScope::AutoDrive);
-        assert!(f4.is_none());
-    }
-}

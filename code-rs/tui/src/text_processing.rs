@@ -128,28 +128,3 @@ fn parse_markdown_line(text: &str) -> Line<'static> {
     Line::from(spans)
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bold_parsing() {
-        let line = parse_markdown_line("Hello **world** and **bold text** here");
-        // Check that we have multiple spans with different styles
-        assert!(line.spans.len() > 1);
-    }
-
-    #[test]
-    fn test_preserve_lines() {
-        let lines = process_markdown_text("Line one\nLine two\nLine three", 80);
-        assert_eq!(lines.len(), 3);
-    }
-
-    #[test]
-    fn test_markdown_text() {
-        let lines = process_markdown_text("Normal **bold** text", 80);
-        assert_eq!(lines.len(), 1);
-        // The first line should have spans for normal, bold, and text
-        assert!(lines[0].spans.len() >= 3);
-    }
-}

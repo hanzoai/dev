@@ -2536,10 +2536,8 @@ impl Session {
 
     fn abort(&self) {
         info!("Aborting existing session");
-        // (debug removed)
 
         let mut state = self.state.lock().unwrap();
-        // (debug removed)
         state.pending_approvals.clear();
         // Do not clear `pending_input` here. When a user submits a new message
         // immediately after an interrupt, it may have been routed to
@@ -2551,17 +2549,12 @@ impl Session {
         drop(state);
         if let Some(agent) = current {
             agent.abort(TurnAbortReason::Interrupted);
-            // (debug removed)
-        } else {
-            // (debug removed)
         }
         // Also terminate any running exec sessions (PTY-based) so child processes do not linger.
         // Best-effort cleanup for PTY-based exec sessions would go here. The
         // PTY implementation already kills processes on session drop; in the
         // common LocalShellCall path we also kill processes immediately via
         // KillOnDrop in exec.rs.
-
-        // (debug removed)
     }
 
     /// Spawn the configured notifier (if any) with the given JSON payload as
@@ -2881,7 +2874,6 @@ async fn submission_loop(
     // To break out of this loop, send Op::Shutdown.
     while let Ok(sub) = rx_sub.recv().await {
         debug!(?sub, "Submission");
-        // (submission diagnostics removed)
         match sub.op {
             Op::Interrupt => {
                 let sess = match sess.as_ref() {
@@ -9007,7 +8999,6 @@ async fn capture_browser_screenshot(_sess: &Session) -> Result<(PathBuf, String)
         }
     }
 }
-// removed upstream exit_review_mode helper: not used in fork
 
 /// Send agent status update event to the TUI
 async fn send_agent_status_update(sess: &Session) {
