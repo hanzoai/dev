@@ -10,17 +10,17 @@
 
 This document provides a comprehensive inventory of dead or unused code in the code-rs codebase, organized by category with specific deletion plans and verification steps.
 
-**Status as of 2025-10-06:** Phase 1 cleanup complete. Feature flag audit complete. No critical dead code remaining.
+**Status as of 2025-10-05:** Phase 1 cleanup complete. Feature flag audit complete. Pending follow-up on TUI overlay/backtrack modules.
 
 ### Key Findings
 
 - ✅ **~35,000 lines** of dead test code (106 test files across 8 crates) — **REMOVED**
-- ✅ **6 orphaned modules** totaling ~72,700 bytes — **REMOVED**
+- ✅ **6 orphaned modules** totaling ~72,700 bytes — **REMOVED** (see Section 2.1)
 - ✅ **Feature flag audit complete** — `code-fork` feature is properly used and enabled by default
 - ✅ **Core modules audit complete** — All modules (`codex/`, `unified_exec/`, `exec_command/`) are actively used
-- ✅ **TUI modules audit complete** — All remaining modules are actively used
+- ⏳ **TUI modules audit** — Backtrack overlay stack still under evaluation (`backtrack_helpers.rs`, `pager_overlay.rs`, `resume_picker.rs` remain)
 - **9 modules** marked with `#![allow(dead_code)]` at file level — **ACCEPTABLE** (mostly helpers and utilities)
-- `vt100-tests` feature flag retained for potential future smoke harness work
+- ✅ `vt100-tests` feature flag removed from `code-rs/tui/Cargo.toml` (2025-10-05)
 - **0 orphaned prompt files** (all are actively used, documented in `docs/maintenance/prompt-architecture.md`)
 - **Stale comments** about removed code — **CLEANED UP**
 
@@ -35,9 +35,8 @@ This document provides a comprehensive inventory of dead or unused code in the c
 **Items Removed:**
 - `legacy_tests` feature flag from `code-rs/tui/Cargo.toml`
 - All 27 gated test modules (~11,232 lines)
-- Orphaned modules: `app_backtrack.rs`, `resume_picker.rs`, `backtrack_helpers.rs`
-- Pager overlay stack and associated test infrastructure
-- `text_block.rs`, `scroll_view.rs`, `custom_terminal.rs`, `exec_cell/` directory
+- Orphaned modules: `app_backtrack.rs`, `custom_terminal.rs`, `scroll_view.rs`, `text_block.rs`, `transcript_app.rs`
+- Legacy `exec_cell/render.rs`
 - Introduced new smoke scaffold at `code-rs/tui/tests/ui_smoke.rs`
 
 **Verification:** Build passes with `./build-fast.sh --workspace code`
@@ -134,16 +133,15 @@ rg "legacy_tests" code-rs/
 
 ---
 
-### 1.2 vt100-tests Feature Flag (KEEP)
+### 1.2 vt100-tests Feature Flag ✅ REMOVED (2025-10-05)
 
-**Location:** `code-rs/tui/Cargo.toml`
+**Location:** `code-rs/tui/Cargo.toml` (lines removed)
 
-**Status:** RETAINED – the feature gates legacy vt100-based replay tests that may return in future smoke coverage.
+**Status:** Feature flag deleted; remaining vt100 usage is runtime-only (`chatwidget/terminal.rs`).
 
-**Rationale:**
-- The `vt100` crate remains in use by production code (`chatwidget/terminal.rs`).
-- Keeping the flag avoids churn if we reintroduce terminal snapshot tests.
-- The flag is disabled by default, so it does not affect build artifacts.
+**Notes:**
+- VT100-based snapshot tests now live only in the upstream mirror (`codex-rs`).
+- Re-introduce the feature if/when fork-specific vt100 tests return.
 
 ---
 
@@ -218,27 +216,26 @@ cargo build -p code-tui
 
 ---
 
-#### 2.1.4 resume_picker.rs ✅ REMOVED
+#### 2.1.4 resume_picker.rs ⏳ PENDING
 
-**Location:** `code-rs/tui/src/resume_picker.rs` (DELETED)
+**Location:** `code-rs/tui/src/resume_picker.rs`
 **Size:** 37,218 bytes
-**Status:** REMOVED - File deleted
+**Status:** Still present; depends on now-removed `custom_terminal.rs`
 
-**Note:** Deleted along with dependent `custom_terminal.rs`
+**Note:** Needs replacement or deletion once resume UX plan is finalized.
 
 **Deletion Plan:**
 ```bash
-rm code-rs/tui/src/resume_picker.rs
+# Candidate removal once replacement flow lands
+# rm code-rs/tui/src/resume_picker.rs
 ```
 
-**Verification:**
+**Verification (current state):**
 ```bash
 rg "resume_picker" code-rs/tui/
-rg "PickerState" code-rs/tui/
-cargo build -p code-tui
 ```
 
-**Risk:** LOW - Not integrated into module tree
+**Risk:** MEDIUM - Module references legacy terminal helpers
 
 ---
 
@@ -355,19 +352,19 @@ cargo test -p code-core --test suite
 
 ## Category 3: Modules Marked #[allow(dead_code)]
 
-**Status:** Partially cleaned; pager overlay stack and backtrack helpers removed.
+**Status:** Partially cleaned; pager overlay stack and backtrack helpers remain under review.
 
 ### 3.1 Remaining Candidates for Review (code-rs/tui)
 
 | File | Size | Status |
 |------|------|--------|
-| ✅ ~~`src/pager_overlay.rs`~~ | ~~25,058 B~~ | **REMOVED** |
+| `src/pager_overlay.rs` | 25,058 B | `#![allow(dead_code, unused_imports, unused_variables)]` — PENDING REVIEW |
 | `src/streaming/controller.rs` | 18,450 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/streaming/mod.rs` | 3,952 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/markdown_stream.rs` | 41,063 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/markdown.rs` | 28,666 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | ✅ ~~`src/transcript_app.rs`~~ | ~~9,904 B~~ | **REMOVED** |
-| ✅ ~~`src/backtrack_helpers.rs`~~ | ~~4,919 B~~ | **REMOVED** |
+| `src/backtrack_helpers.rs` | 4,919 B | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/bottom_pane/list_selection_view.rs` | ? | `#![allow(dead_code)]` — PENDING REVIEW |
 | `src/bottom_pane/paste_burst.rs` | ? | `#![allow(dead_code, unused_imports, unused_variables)]` — PENDING REVIEW |
 
@@ -624,7 +621,7 @@ git commit -m "Remove orphaned modules: text_block, scroll_view"
 
 ## Success Metrics
 
-**Phase 1 Results (as of 2025-10-06):**
+**Phase 1 Results (as of 2025-10-05):**
 - **Lines of code removed:** ~35,000+ lines ✅ (far exceeded target)
 - **Files removed:** 106 test files + 6 orphaned modules ✅ (far exceeded target)
 - **Build time improvement:** Verified with `./build-fast.sh --workspace code` - 1m 30s ✅
@@ -633,7 +630,7 @@ git commit -m "Remove orphaned modules: text_block, scroll_view"
 - **Module audit:** All core and TUI modules actively used ✅
 - **Documentation:** Comprehensive migration docs created in `docs/migration/` and `docs/maintenance/` ✅
 
-**Audit Results (2025-10-06):**
+**Audit Results (2025-10-05):**
 - ✅ `code-fork` feature flag: Enabled by default, gates 12 fork-specific TUI extensions (foundation.rs, tui_event_extensions.rs, etc.)
 - ✅ `code-rs/core` modules: All subdirectories (`codex/`, `unified_exec/`, `exec_command/`) actively used
 - ✅ `code-rs/tui` modules: All remaining modules actively used, no orphaned code detected
@@ -646,7 +643,7 @@ git commit -m "Remove orphaned modules: text_block, scroll_view"
 
 ---
 
-## Audit Summary (2025-10-06)
+## Audit Summary (2025-10-05)
 
 ### Feature Flags Audit
 

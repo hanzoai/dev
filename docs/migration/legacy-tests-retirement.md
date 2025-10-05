@@ -33,19 +33,17 @@ These tests exist in `codex-rs/` but not in `code-rs/`:
 
 | Test File | Coverage Area | Code-rs Replacement | Gap Status |
 |-----------|---------------|---------------------|------------|
-| `status_indicator.rs` | Status widget rendering | ❌ No TUI tests in code-rs | **COVERAGE GAP** - Medium |
-| `vt100_history.rs` | VT100 history rendering, wrapping, ANSI | ❌ No TUI tests in code-rs | **COVERAGE GAP** - High |
-| `vt100_live_commit.rs` | VT100 live commit rendering | ❌ No TUI tests in code-rs | **COVERAGE GAP** - Medium |
+| `status_indicator.rs` | Status widget rendering | ❌ No focused assertions yet | **COVERAGE GAP** - Medium |
+| `vt100_history.rs` | VT100 history rendering, wrapping, ANSI | ❌ vt100 harness not ported | **COVERAGE GAP** - High |
+| `vt100_live_commit.rs` | VT100 live commit rendering | ❌ vt100 harness not ported | **COVERAGE GAP** - Medium |
 
-### Fork-Only Tests (New Coverage)
+### Fork-Only Tests (Current Coverage)
 
-These tests exist only in `code-rs/` and represent new functionality:
+The fork currently adds a single smoke suite:
 
 | Test File | Package | Coverage Area | Notes |
 |-----------|---------|---------------|-------|
-| `rollout_resume.rs` | core | Rollout resume/restore functionality | Fork-specific feature ✅ |
-| `stream_order.rs` | core | Stream event ordering validation | Fork enhancement ✅ |
-| `common.rs` | exec | Shared test utilities | Test infrastructure ✅ |
+| `tui/tests/ui_smoke.rs` | tui | CLI flag defaults, streaming events, approvals | Requires `chatwidget::smoke_helpers`; fails without `#[cfg(test)]` exports |
 
 ### Identical Tests (Safe to Keep in code-rs)
 
@@ -136,8 +134,8 @@ The following test files exist in both trees with equivalent coverage:
 - Live commit display
 
 **Blockers:**
-- ❌ `code-rs/tui/` has no `tests/` directory
-- ⚠️  Fork uses legacy TUI layout (fork-primary per migration status)
+- ⚠️ Existing smoke test depends on private modules gated behind `#[cfg(test)]`
+- ⚠️ Fork uses legacy TUI layout (fork-primary per migration status)
 
 **Prerequisites for Deletion:**
 1. Create `code-rs/tui/tests/` directory structure
