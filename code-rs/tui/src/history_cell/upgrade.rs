@@ -7,7 +7,7 @@ const TARGET_WIDTH: u16 = 70;
 
 pub(crate) struct UpgradeNoticeCell {
     state: UpgradeNoticeState,
-    backdrop: ratatui::style::Color,
+    backdrop: crate::compat::Color,
     border_style: Style,
 }
 

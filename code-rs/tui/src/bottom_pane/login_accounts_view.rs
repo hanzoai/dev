@@ -8,11 +8,11 @@ use code_core::auth;
 use code_core::auth_accounts::{self, StoredAccount};
 use code_login::AuthMode;
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use crate::compat::Buffer;
+use crate::compat::{Alignment, Rect};
+use crate::compat::{Modifier, Style};
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::AppEvent;

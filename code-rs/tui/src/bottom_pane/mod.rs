@@ -3,21 +3,19 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
-use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
+use crate::user_approval_widget::ApprovalRequest;
 use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
 use code_core::protocol::TokenUsage;
 use code_file_search::FileMatch;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Widget, WidgetRef};
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::{Line, Span};
+use crate::compat::{Widget, WidgetRef};
 use std::time::Duration;
 
 mod approval_modal_view;
-#[cfg(feature = "code-fork")]
-mod approval_ui;
 mod auto_coordinator_view;
 mod bottom_pane_view;
 mod chat_composer;
@@ -82,8 +80,6 @@ pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSet
 
 use code_core::protocol::Op;
 use approval_modal_view::ApprovalModalView;
-#[cfg(feature = "code-fork")]
-use approval_ui::ApprovalUi;
 use code_common::model_presets::ModelPreset;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::TextVerbosity;
@@ -612,7 +608,7 @@ impl BottomPane<'_> {
 
     /// Show the diffs popup with tabs for each file.
     #[allow(dead_code)]
-    pub fn show_diff_popup(&mut self, tabs: Vec<(String, Vec<ratatui::text::Line<'static>>)>) {
+    pub fn show_diff_popup(&mut self, tabs: Vec<(String, Vec<crate::compat::Line<'static>>)>) {
         let view = diff_popup::DiffPopupView::new(tabs);
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
@@ -915,7 +911,7 @@ impl BottomPane<'_> {
             return;
         }
 
-        let base_style = ratatui::style::Style::default()
+        let base_style = crate::compat::Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
@@ -925,10 +921,10 @@ impl BottomPane<'_> {
             .standard_terminal_hint()
             .unwrap_or("Esc to stop Auto Drive");
 
-        let warning_style = ratatui::style::Style::default()
+        let warning_style = crate::compat::Style::default()
             .fg(crate::colors::warning())
-            .add_modifier(ratatui::style::Modifier::BOLD);
-        let label_style = ratatui::style::Style::default().fg(crate::colors::text_dim());
+            .add_modifier(crate::compat::Modifier::BOLD);
+        let label_style = crate::compat::Style::default().fg(crate::colors::text_dim());
 
         let mut content_spans: Vec<Span> = Vec::new();
         if let Some((first, rest)) = hint_text.split_once(' ') {
@@ -959,30 +955,12 @@ impl BottomPane<'_> {
         line_spans.push(Span::from(" "));
 
         let line = Line::from(line_spans)
-            .style(ratatui::style::Style::default().bg(crate::colors::background()));
+            .style(crate::compat::Style::default().bg(crate::colors::background()));
 
-        ratatui::widgets::Paragraph::new(line).render(area, buf);
+        crate::compat::Paragraph::new(line).render(area, buf);
     }
 
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
-}
-
-#[cfg(feature = "code-fork")]
-fn build_user_approval_widget<'a>(
-    request: ApprovalRequest,
-    ticket: BackgroundOrderTicket,
-    app_event_tx: AppEventSender,
-) -> UserApprovalWidget<'a> {
-    <UserApprovalWidget<'a> as ApprovalUi>::build(request, ticket, app_event_tx)
-}
-
-#[cfg(not(feature = "code-fork"))]
-fn build_user_approval_widget<'a>(
-    request: ApprovalRequest,
-    ticket: BackgroundOrderTicket,
-    app_event_tx: AppEventSender,
-) -> UserApprovalWidget<'a> {
-    UserApprovalWidget::new(request, ticket, app_event_tx)
 }
 
 impl WidgetRef for &BottomPane<'_> {
@@ -990,7 +968,7 @@ impl WidgetRef for &BottomPane<'_> {
         // Base clear: fill the entire bottom pane with the theme background so
         // newly exposed rows (e.g., when the composer grows on paste) do not
         // show stale pixels from history.
-        let base_style = ratatui::style::Style::default()
+        let base_style = crate::compat::Style::default()
             .bg(crate::colors::background())
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
@@ -1037,7 +1015,7 @@ impl WidgetRef for &BottomPane<'_> {
                         height: view_height,
                     };
                     // Ensure view background is painted under its content
-                    let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
+                    let view_bg = crate::compat::Style::default().bg(crate::colors::background());
                     fill_rect(buf, view_rect, None, view_bg);
                     view.render(view_rect, buf);
 
@@ -1070,7 +1048,7 @@ impl WidgetRef for &BottomPane<'_> {
                 - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1)),
         };
         // Paint the composer area background before rendering widgets
-        let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
+        let comp_bg = crate::compat::Style::default().bg(crate::colors::background());
         fill_rect(buf, composer_rect, None, comp_bg);
         (&self.composer).render_ref(composer_rect, buf);
         }
@@ -1082,8 +1060,8 @@ mod tests_removed {
     use super::*;
     use crate::app_event::AppEvent;
     use crate::chatwidget::BackgroundOrderTicket;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
+    use crate::compat::Buffer;
+    use crate::compat::Rect;
     use std::sync::mpsc::channel;
 
     fn exec_request() -> ApprovalRequest {

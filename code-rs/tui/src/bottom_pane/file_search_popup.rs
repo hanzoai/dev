@@ -1,9 +1,9 @@
 use code_file_search::FileMatch;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::layout::Margin;
-use ratatui::widgets::WidgetRef;
-use ratatui::prelude::Stylize;
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::Margin;
+use crate::compat::WidgetRef;
+use crate::compat::Stylize;
 
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
@@ -167,7 +167,7 @@ impl WidgetRef for &FileSearchPopup {
             for xi in x..x + w {
                 buf[(xi, y)].set_char(' ');
             }
-            buf.set_string(start, y, msg, ratatui::style::Style::default().dim());
+            buf.set_string(start, y, msg, crate::compat::Style::default().dim());
         } else {
             render_rows(indented_area, buf, &rows_all, &self.state, MAX_POPUP_ROWS, false);
         }

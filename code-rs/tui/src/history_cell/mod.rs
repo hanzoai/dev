@@ -8,7 +8,7 @@ use crate::slash_command::SlashCommand;
 use crate::util::buffer::{fill_rect, write_line};
 use crate::insert_history::word_wrap_lines;
 use crate::text_formatting::format_json_compact;
-use crate::history::compat::{
+use crate::history::state::{
     AssistantStreamState,
     BackgroundEventRecord,
     ExecAction,
@@ -30,7 +30,7 @@ use crate::history::compat::{
     ToolStatus as HistoryToolStatus,
     UpgradeNoticeState,
 };
-use crate::history::compat::{ArgumentValue, ToolArgument, ToolResultPreview};
+use crate::history::state::{ArgumentValue, ToolArgument, ToolResultPreview};
 use base64::Engine;
 use code_ansi_escape::ansi_escape_line;
 use code_common::create_config_summary_entries;
@@ -50,15 +50,15 @@ use ::image::ImageReader;
 use sha2::{Digest, Sha256};
 use mcp_types::EmbeddedResourceResource;
 use mcp_types::ResourceLink;
-use ratatui::prelude::*;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
-use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
-use ratatui::widgets::Padding;
-use ratatui::widgets::Paragraph;
-use ratatui::widgets::WidgetRef;
-use ratatui::widgets::Wrap;
+use crate::compat::{Buffer, Rect, Line, Span, Text, Style, Stylize, Alignment};
+use crate::compat::Modifier;
+use crate::compat::Block;
+use crate::compat::Borders;
+use crate::compat::Padding;
+use crate::compat::Paragraph;
+use crate::compat::Widget;
+use crate::compat::WidgetRef;
+use crate::compat::Wrap;
 use shlex::Shlex;
 
 use std::collections::HashMap;
@@ -600,7 +600,7 @@ impl MergedExecCell {
         if self.kind != ExecKind::Read {
             return None;
         }
-        use ratatui::text::Span;
+        use crate::compat::Span;
 
         fn parse_read_line(line: &Line<'_>) -> Option<(String, u32, u32)> {
             if line.spans.is_empty() {
@@ -1859,9 +1859,9 @@ fn exec_render_parts_parsed(
 
 // Local helper: coalesce "<file> (lines A to B)" entries when contiguous.
 fn coalesce_read_ranges_in_lines_local(lines: &mut Vec<Line<'static>>) {
-    use ratatui::style::Modifier;
-    use ratatui::style::Style;
-    use ratatui::text::Span;
+    use crate::compat::Modifier;
+    use crate::compat::Style;
+    use crate::compat::Span;
     // Nothing to do for empty/single line vectors
     if lines.len() <= 1 {
         return;
@@ -2600,8 +2600,8 @@ pub(crate) fn new_user_prompt(message: String) -> PlainMessageState {
 /// Visually identical to a normal user cell, but the header shows a
 /// small "(queued)" suffix so it’s clear it hasn’t been executed yet.
 pub(crate) fn new_queued_user_prompt(message: String) -> PlainMessageState {
-    use ratatui::style::Style;
-    use ratatui::text::Span;
+    use crate::compat::Style;
+    use crate::compat::Span;
     let mut lines: Vec<Line<'static>> = Vec::new();
     // Header: "user (queued)"
     lines.push(Line::from(vec![
@@ -2710,23 +2710,14 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
     // head -n N => lines 1..N
     if lower.contains("head") && lower.contains("-n") {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
-        // Find the position of "head" command first
-        let head_pos = parts.iter().position(|p| {
-            let lower = p.to_lowercase();
-            lower == "head" || lower.ends_with("/head")
-        });
-
-        if let Some(head_idx) = head_pos {
-            // Only look for -n after the head command position
-            for i in head_idx..parts.len() {
-                if parts[i] == "-n" && i + 1 < parts.len() {
-                    if let Ok(n) = parts[i + 1]
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .parse::<u32>()
-                    {
-                        return (Some(format!("(lines 1 to {})", n)), Some((1, n)));
-                    }
+        for i in 0..parts.len() {
+            if parts[i] == "-n" && i + 1 < parts.len() {
+                if let Ok(n) = parts[i + 1]
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .parse::<u32>()
+                {
+                    return (Some(format!("(lines 1 to {})", n)), Some((1, n)));
                 }
             }
         }
@@ -2741,24 +2732,15 @@ fn parse_read_line_annotation_with_range(cmd: &str) -> (Option<String>, Option<(
     // tail -n +K => from K to end; tail -n N => last N lines
     if lower.contains("tail") && lower.contains("-n") {
         let parts: Vec<&str> = cmd.split_whitespace().collect();
-        // Find the position of "tail" command first
-        let tail_pos = parts.iter().position(|p| {
-            let lower = p.to_lowercase();
-            lower == "tail" || lower.ends_with("/tail")
-        });
-
-        if let Some(tail_idx) = tail_pos {
-            // Only look for -n after the tail command position
-            for i in tail_idx..parts.len() {
-                if parts[i] == "-n" && i + 1 < parts.len() {
-                    let val = parts[i + 1].trim_matches('"').trim_matches('\'');
-                    if let Some(rest) = val.strip_prefix('+') {
-                        if let Ok(k) = rest.parse::<u32>() {
-                            return (Some(format!("(from {} to end)", k)), Some((k, u32::MAX)));
-                        }
-                    } else if let Ok(n) = val.parse::<u32>() {
-                        return (Some(format!("(last {} lines)", n)), None);
+        for i in 0..parts.len() {
+            if parts[i] == "-n" && i + 1 < parts.len() {
+                let val = parts[i + 1].trim_matches('"').trim_matches('\'');
+                if let Some(rest) = val.strip_prefix('+') {
+                    if let Ok(k) = rest.parse::<u32>() {
+                        return (Some(format!("(from {} to end)", k)), Some((k, u32::MAX)));
                     }
+                } else if let Ok(n) = val.parse::<u32>() {
+                    return (Some(format!("(last {} lines)", n)), None);
                 }
             }
         }
@@ -3032,7 +3014,8 @@ fn build_python_script_block(script: &str) -> Option<String> {
     let mut block = String::from("'\n");
     for line in indented {
         block.push_str("    ");
-        block.push_str(line.as_str());
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
         block.push('\n');
     }
     block.push('\'');
@@ -3091,7 +3074,8 @@ fn format_python_heredoc(command_escaped: &str) -> Option<String> {
 
     for line in script_lines {
         result.push_str("    ");
-        result.push_str(line.trim_end());
+        let escaped = escape_single_quotes_for_shell(line.trim_end());
+        result.push_str(escaped.as_str());
         result.push('\n');
     }
 
@@ -3396,6 +3380,21 @@ fn is_shell_executable(token: &str) -> bool {
     )
 }
 
+fn escape_single_quotes_for_shell(s: &str) -> String {
+    if !s.contains('\'') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut iter = s.split('\'');
+    if let Some(first) = iter.next() {
+        out.push_str(first);
+    }
+    for segment in iter {
+        out.push_str("'\\''");
+        out.push_str(segment);
+    }
+    out
+}
 
 fn is_node_invocation_token(token: &str) -> bool {
     let trimmed = token.trim_matches(|c| c == '\'' || c == '"');
@@ -3445,7 +3444,8 @@ fn build_js_script_block(script: &str) -> Option<String> {
     let mut block = String::from("'\n");
     for line in indented {
         block.push_str("    ");
-        block.push_str(line.as_str());
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
         block.push('\n');
     }
     block.push('\'');
@@ -3661,7 +3661,8 @@ fn build_shell_script_block(script: &str) -> Option<String> {
     let mut block = String::from("'\n");
     for line in indented {
         block.push_str("    ");
-        block.push_str(line.as_str());
+        let escaped = escape_single_quotes_for_shell(line.as_str());
+        block.push_str(escaped.as_str());
         block.push('\n');
     }
     block.push('\'');
@@ -4432,23 +4433,6 @@ fn new_exec_command_generic(
     lines.extend(highlighted_cmd);
 
     let mut preview_lines = output_lines(display_output, false, true);
-    if let Some(output) = output {
-        if output.exit_code == 0 {
-            if preview_lines
-                .last()
-                .map(|line| line.spans.iter().all(|span| span.content.as_ref().trim().is_empty()))
-                .unwrap_or(false)
-            {
-                preview_lines.pop();
-            }
-            preview_lines.push(Line::styled(
-                format!("Success (exit code {})", output.exit_code),
-                Style::default()
-                    .fg(crate::colors::success())
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-    }
     if let Some(status_line) = running_status {
         if let Some(last) = preview_lines.last() {
             let is_blank = last
@@ -5228,7 +5212,7 @@ fn build_web_fetch_sectioned_preview(md: &str, cfg: &Config) -> Vec<Line<'static
 
 // Post-process rendered markdown lines to dim emphasis, lists, and links for web_fetch only.
 fn dim_webfetch_emphasis_and_links(lines: &mut Vec<Line<'static>>) {
-    use ratatui::style::Modifier;
+    use crate::compat::Modifier;
     let text_dim = crate::colors::text_dim();
     let code_bg = crate::colors::code_block_bg();
     // Recompute the link color logic used by the markdown renderer to detect link spans
@@ -6477,5 +6461,3 @@ fn format_inline_shell_for_display(command_escaped: &str) -> Option<String> {
 
     format_shell_script(&tokens, script_idx, tokens[script_idx].as_str())
 }
-#[cfg(test)]
-pub(crate) use assistant::AssistantSeg;
