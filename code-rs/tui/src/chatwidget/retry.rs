@@ -170,7 +170,7 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel();
         let options = RetryOptions::with_defaults(Duration::from_secs(10));
-        let result = retry_with_backoff(
+        let result: Result<(), RetryError> = retry_with_backoff(
             || async { Err(anyhow!("boom")) },
             |_| RetryDecision::RetryAfterBackoff {
                 reason: "retry".to_string(),
@@ -196,7 +196,7 @@ mod tests {
         };
         let expected_opts = options.clone();
 
-        let result = retry_with_backoff(
+        let result: Result<(), RetryError> = retry_with_backoff(
             || async { Err(anyhow!("boom")) },
             |_| RetryDecision::RetryAfterBackoff {
                 reason: "transient".to_string(),
@@ -236,7 +236,7 @@ mod tests {
             max_elapsed: Duration::from_millis(60),
             jitter_seed: Some(5),
         };
-        let result = retry_with_backoff(
+        let result: Result<(), RetryError> = retry_with_backoff(
             || async { Err(anyhow!("boom")) },
             |_| RetryDecision::RetryAfterBackoff {
                 reason: "transient".to_string(),

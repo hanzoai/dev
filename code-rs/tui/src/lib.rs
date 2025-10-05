@@ -28,6 +28,7 @@ use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+mod compat;
 mod app;
 mod app_event;
 mod app_event_sender;
@@ -80,6 +81,10 @@ mod util {
 }
 mod spinner;
 mod tui;
+#[cfg(feature = "code-fork")]
+mod tui_event_extensions;
+#[cfg(feature = "code-fork")]
+mod foundation;
 mod ui_consts;
 mod user_approval_widget;
 mod height_manager;

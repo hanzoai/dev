@@ -517,7 +517,7 @@ impl ExecCell {
     }
 
     #[cfg(test)]
-    fn has_bold_command(&self) -> bool {
+    pub(crate) fn has_bold_command(&self) -> bool {
         self.has_bold_command
     }
 
@@ -628,6 +628,24 @@ impl ExecCell {
                 }
 
                 out.splice(insert_at..insert_at, block);
+            }
+
+            if let Some(output) = self.output.as_ref() {
+                if output.exit_code == 0 {
+                    if out
+                        .last()
+                        .map(|line| line.spans.iter().all(|span| span.content.as_ref().trim().is_empty()))
+                        .unwrap_or(false)
+                    {
+                        out.pop();
+                    }
+                    out.push(Line::styled(
+                        format!("Success (exit code {})", output.exit_code),
+                        Style::default()
+                            .fg(crate::colors::success())
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
             }
         }
 
