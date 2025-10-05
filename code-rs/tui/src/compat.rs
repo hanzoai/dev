@@ -1,23 +1,19 @@
-//! Compatibility layer for ratatui
+//! Compatibility layer for ratatui types.
 //!
-//! This module re-exports all ratatui types used throughout the TUI codebase.
-//! By importing from this module instead of ratatui directly, we can more
-//! easily migrate to a different TUI library in the future if needed.
+//! Re-export commonly used ratatui types so the rest of the crate can import
+//! from `crate::compat::*`. This keeps our call sites insulated from upstream
+//! renames or module moves.
 
-// Buffer types
+// Core rendering primitives
 pub use ratatui::buffer::Buffer;
-
-// Layout types
 pub use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
+pub use ratatui::style::{Color, Modifier, Style, Stylize};
+pub use ratatui::text::{Line, Span};
+#[cfg(test)]
+pub use ratatui::text::Text;
 
-// Style types
-pub use ratatui::style::{Color, Modifier, Style, Styled, Stylize};
-
-// Text types
-pub use ratatui::text::{Line, Span, Text};
-
-// Widget types
+// Widget traits and common widgets
 pub use ratatui::widgets::{
-    Block, Borders, Cell, Clear, Padding, Paragraph, Row, StatefulWidgetRef, Table, Tabs, Widget,
-    WidgetRef, Wrap,
+    Block, Borders, Cell, Clear, Paragraph, Row, StatefulWidgetRef, Table, Widget, WidgetRef,
+    Wrap,
 };

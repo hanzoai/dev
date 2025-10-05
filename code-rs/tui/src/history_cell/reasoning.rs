@@ -14,7 +14,7 @@ use crate::history::state::{
 };
 use crate::history_cell::assistant::detect_bullet_prefix;
 use crate::render::line_utils;
-use crate::compat::Line;
+use ratatui::text::Line;
 use std::cell::{Cell, RefCell};
 use unicode_width::UnicodeWidthStr as _;
 

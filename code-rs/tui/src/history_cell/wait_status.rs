@@ -1,8 +1,8 @@
 use super::*;
 use crate::history::state::{HistoryId, TextTone, WaitStatusDetail, WaitStatusHeader, WaitStatusState};
 use crate::theme::{current_theme, Theme};
-use crate::compat::{Modifier, Style};
-use crate::compat::{Line, Span};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 
 pub(crate) struct WaitStatusCell {
     state: WaitStatusState,
@@ -93,7 +93,7 @@ fn render_detail(detail: &WaitStatusDetail, theme: &Theme) -> Line<'static> {
     Line::from(spans)
 }
 
-fn color_for_tone(tone: TextTone, theme: &Theme) -> crate::compat::Color {
+fn color_for_tone(tone: TextTone, theme: &Theme) -> ratatui::style::Color {
     match tone {
         TextTone::Default => theme.text,
         TextTone::Dim => theme.text_dim,

@@ -9,11 +9,11 @@ use super::bottom_pane_view::BottomPaneView;
 use super::bottom_pane_view::ConditionalUpdate;
 use super::BottomPane;
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::compat::Buffer;
-use crate::compat::{Alignment, Rect};
-use crate::compat::{Modifier, Style};
-use crate::compat::{Line, Span};
-use crate::compat::{Block, Borders, Clear, Padding, Paragraph, Wrap, Widget};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap, Widget};
 
 #[derive(Debug, Clone, Default)]
 pub struct UpdateSharedState {

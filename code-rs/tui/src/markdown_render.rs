@@ -7,11 +7,11 @@ use pulldown_cmark::Options;
 use pulldown_cmark::Parser;
 use pulldown_cmark::Tag;
 use pulldown_cmark::TagEnd;
-use crate::compat::Style;
-use crate::compat::Stylize;
-use crate::compat::Line;
-use crate::compat::Span;
-use crate::compat::Text;
+use ratatui::style::Style;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::text::Text;
 use std::borrow::Cow;
 use std::path::Path;
 

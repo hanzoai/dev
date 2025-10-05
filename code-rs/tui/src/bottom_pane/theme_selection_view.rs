@@ -2,19 +2,19 @@ use code_core::config_types::ThemeName;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
-use crate::compat::Buffer;
-use crate::compat::Alignment;
-use crate::compat::Rect;
-use crate::compat::Modifier;
-use crate::compat::Style;
-use crate::compat::Line;
-use crate::compat::Span;
-use crate::compat::Block;
-use crate::compat::Borders;
-use crate::compat::Paragraph;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
 // Cleanup: remove unused imports to satisfy warning-as-error policy
-use crate::compat::Clear;
-use crate::compat::Widget;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -568,9 +568,9 @@ impl ThemeSelectionView {
     ) {
         let tx = self.app_event_tx.clone();
         // Capture a compact example of the current theme as guidance
-        fn color_to_hex(c: crate::compat::Color) -> Option<String> {
+        fn color_to_hex(c: ratatui::style::Color) -> Option<String> {
             match c {
-                crate::compat::Color::Rgb(r, g, b) => {
+                ratatui::style::Color::Rgb(r, g, b) => {
                     Some(format!("#{:02X}{:02X}{:02X}", r, g, b))
                 }
                 _ => None,
@@ -1656,7 +1656,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
         }
 
         // Add one cell padding around the inside; body occupies full padded area
-        let padded = inner.inner(crate::compat::Margin::new(1, 1));
+        let padded = inner.inner(ratatui::layout::Margin::new(1, 1));
         let body_area = padded;
 
         // Visible rows = available body height (already sized to ≤10)
@@ -1983,7 +1983,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     ));
                     Paragraph::new(form_lines)
                         .alignment(Alignment::Left)
-                        .wrap(crate::compat::Wrap { trim: false })
+                        .wrap(ratatui::widgets::Wrap { trim: false })
                         .render(body_area, buf);
                     return;
                 }
@@ -2039,7 +2039,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                         form_lines.push(Line::from(spans));
                         Paragraph::new(form_lines)
                             .alignment(Alignment::Left)
-                            .wrap(crate::compat::Wrap { trim: false })
+                            .wrap(ratatui::widgets::Wrap { trim: false })
                             .render(body_area, buf);
                         return;
                     }
@@ -2143,7 +2143,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     form_lines.push(Line::from(spans));
                     Paragraph::new(form_lines)
                         .alignment(Alignment::Left)
-                        .wrap(crate::compat::Wrap { trim: false })
+                        .wrap(ratatui::widgets::Wrap { trim: false })
                         .render(body_area, buf);
                     return;
                 }
@@ -2229,7 +2229,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
 
                 Paragraph::new(form_lines)
                     .alignment(Alignment::Left)
-                    .wrap(crate::compat::Wrap { trim: false })
+                    .wrap(ratatui::widgets::Wrap { trim: false })
                     .render(body_area, buf);
             }
             return;
@@ -2358,7 +2358,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     ));
                     Paragraph::new(form_lines)
                         .alignment(Alignment::Left)
-                        .wrap(crate::compat::Wrap { trim: false })
+                        .wrap(ratatui::widgets::Wrap { trim: false })
                         .render(body_area, buf);
                     return;
                 }
@@ -2409,7 +2409,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     form_lines.push(Line::from(spans));
                     Paragraph::new(form_lines)
                         .alignment(Alignment::Left)
-                        .wrap(crate::compat::Wrap { trim: false })
+                        .wrap(ratatui::widgets::Wrap { trim: false })
                         .render(body_area, buf);
                     return;
                 }
@@ -2489,7 +2489,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 form_lines.push(Line::from(spans));
                 Paragraph::new(form_lines)
                     .alignment(Alignment::Left)
-                    .wrap(crate::compat::Wrap { trim: false })
+                    .wrap(ratatui::widgets::Wrap { trim: false })
                     .render(body_area, buf);
                 return;
             }

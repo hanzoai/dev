@@ -1,7 +1,7 @@
 use crossterm::event::KeyEvent;
-use crate::compat::Buffer;
-use crate::compat::Rect;
-use crate::compat::WidgetRef;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::WidgetRef;
 
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
@@ -27,7 +27,7 @@ impl ApprovalModalView<'_> {
         app_event_tx: AppEventSender,
     ) -> Self {
         Self {
-            current: UserApprovalWidget::new(request, ticket, app_event_tx.clone()),
+            current: super::build_user_approval_widget(request, ticket, app_event_tx.clone()),
             queue: VecDeque::new(),
             app_event_tx,
         }
@@ -46,7 +46,7 @@ impl ApprovalModalView<'_> {
         if self.current.is_complete() {
             if let Some((req, ticket)) = self.queue.pop_front() {
                 self.current =
-                    UserApprovalWidget::new(req, ticket, self.app_event_tx.clone());
+                    super::build_user_approval_widget(req, ticket, self.app_event_tx.clone());
             }
         }
     }

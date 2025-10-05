@@ -1,8 +1,8 @@
-use crate::compat::Color;
-use crate::compat::Modifier;
-use crate::compat::Style;
-use crate::compat::Line;
-use crate::compat::Span;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
 use regex_lite::Regex;
 
 /// Custom markdown renderer with full control over spacing and styling
@@ -137,8 +137,8 @@ impl MarkdownRenderer {
             let code_bg = crate::colors::code_block_bg();
             let mut highlighted =
                 crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
-            use crate::compat::Style;
-            use crate::compat::Span;
+            use ratatui::style::Style;
+            use ratatui::text::Span;
             use unicode_width::UnicodeWidthStr;
             let max_w: usize = highlighted
                 .iter()
@@ -685,8 +685,8 @@ impl MarkdownRenderer {
             let code_bg = crate::colors::code_block_bg();
             let mut highlighted =
                 crate::syntax_highlight::highlight_code_block(&self.code_block_buf, lang);
-            use crate::compat::Style;
-            use crate::compat::Span;
+            use ratatui::style::Style;
+            use ratatui::text::Span;
             use unicode_width::UnicodeWidthStr;
             let max_w: usize = highlighted
                 .iter()
@@ -1100,7 +1100,7 @@ fn parse_blockquotes(lines: &[&str]) -> Option<(usize, Vec<Line<'static>>)> {
 // Apply bold + text_bright to the first sentence in a span list (first line only),
 // preserving any existing bold spans and other inline styles.
 fn apply_first_sentence_style(spans: &mut Vec<Span<'static>>) -> bool {
-    use crate::compat::Modifier;
+    use ratatui::style::Modifier;
     // Concatenate text to find terminator
     let full: String = spans.iter().map(|s| s.content.as_ref()).collect();
     let trimmed = full.trim_start();
@@ -1706,7 +1706,7 @@ fn to_superscript(s: &str) -> String {
 #[cfg(all(test, feature = "legacy_tests"))]
 mod tests {
     use super::*;
-    use crate::compat::Modifier;
+    use ratatui::style::Modifier;
     use unicode_width::UnicodeWidthStr;
 
     #[test]

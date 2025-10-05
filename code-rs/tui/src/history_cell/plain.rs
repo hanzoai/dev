@@ -14,11 +14,11 @@ use crate::history::state::{
     TextTone,
 };
 use crate::theme::{current_theme, Theme};
-use crate::compat::Buffer;
-use crate::compat::Rect;
-use crate::compat::{Modifier, Style};
-use crate::compat::{Line, Span, Text};
-use crate::compat::{Block, Padding, Paragraph, Wrap};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Padding, Paragraph, Wrap};
 
 struct PlainLayoutCache {
     requested_width: u16,

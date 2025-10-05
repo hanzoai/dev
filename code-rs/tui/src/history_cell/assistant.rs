@@ -483,7 +483,7 @@ pub(crate) enum AssistantSeg {
 
 // Detect lines that start with a markdown bullet produced by our renderer and return (indent, bullet)
 pub(crate) fn detect_bullet_prefix(
-    line: &Line<'_>,
+    line: &ratatui::text::Line<'_>,
 ) -> Option<(usize, String)> {
     let bullets = ["-", "•", "◦", "·", "∘", "⋅", "☐", "✔"];
     let spans = &line.spans;
@@ -557,13 +557,13 @@ pub(crate) fn detect_bullet_prefix(
 
 // Wrap a bullet line with a hanging indent so wrapped lines align under the content start.
 pub(crate) fn wrap_bullet_line(
-    mut line: Line<'static>,
+    mut line: ratatui::text::Line<'static>,
     indent_spaces: usize,
     bullet: &str,
     width: u16,
-) -> Vec<Line<'static>> {
-    use crate::compat::Style;
-    use crate::compat::Span;
+) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::style::Style;
+    use ratatui::text::Span;
     use unicode_width::UnicodeWidthStr as UWStr;
 
     let width = width.saturating_sub(1) as usize;
@@ -616,7 +616,7 @@ pub(crate) fn wrap_bullet_line(
     let first_prefix = indent_spaces + bullet_cols + gap_after_bullet + extra_gap;
     let cont_prefix = indent_spaces + bullet_cols + gap_after_bullet + extra_gap;
 
-    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
     let mut pos = leading_content_spaces;
     let mut first = true;
     while pos < clusters.len() {
@@ -701,7 +701,7 @@ pub(crate) fn wrap_bullet_line(
         if !buf.is_empty() {
             seg_spans.push(Span::styled(buf, cur_style.unwrap()));
         }
-        out.push(Line::from(seg_spans));
+        out.push(ratatui::text::Line::from(seg_spans));
         pos = next_start;
         first = false;
     }
@@ -712,13 +712,13 @@ pub(crate) fn wrap_bullet_line(
             seg_spans.push(Span::raw(" ".repeat(indent_spaces)));
         }
         seg_spans.push(Span::styled(bullet.to_string(), bullet_style));
-        out.push(Line::from(seg_spans));
+        out.push(ratatui::text::Line::from(seg_spans));
     }
 
     out
 }
 
-pub(crate) fn is_horizontal_rule_line(line: &Line<'_>) -> bool {
+pub(crate) fn is_horizontal_rule_line(line: &ratatui::text::Line<'_>) -> bool {
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     let t = text.trim();
     if t.is_empty() {

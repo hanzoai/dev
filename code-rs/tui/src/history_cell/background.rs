@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::history::state::BackgroundEventRecord;
-use crate::compat::Style;
-use crate::compat::{Line, Span};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 pub(crate) struct BackgroundEventCell {
     state: BackgroundEventRecord,
