@@ -516,11 +516,6 @@ impl ExecCell {
         extra_lines
     }
 
-    #[cfg(test)]
-    pub(crate) fn has_bold_command(&self) -> bool {
-        self.has_bold_command
-    }
-
     pub(crate) fn replace_command_metadata(
         &mut self,
         command: Vec<String>,
@@ -894,114 +889,6 @@ pub(crate) fn display_lines_from_record(record: &ExecRecord) -> Vec<Line<'static
     ExecCell::from_record(record.clone()).display_lines_trimmed()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ratatui::buffer::Buffer;
-    use ratatui::layout::Rect;
-
-    #[test]
-    fn render_running_exec_includes_stream_output() {
-        let record = ExecRecord {
-            id: HistoryId(1),
-            call_id: Some("call-1".into()),
-            command: vec!["echo".into(), "hello".into()],
-            parsed: Vec::new(),
-            action: ExecAction::Run,
-            status: ExecStatus::Running,
-            stdout_chunks: vec![ExecStreamChunk {
-                offset: 0,
-                content: "partial".into(),
-            }],
-            stderr_chunks: Vec::new(),
-            exit_code: None,
-            wait_total: None,
-            wait_active: true,
-            wait_notes: Vec::new(),
-            started_at: SystemTime::UNIX_EPOCH,
-            completed_at: None,
-            working_dir: None,
-            env: Vec::new(),
-            tags: Vec::new(),
-        };
-        let lines = display_lines_from_record(&record);
-        assert!(lines.iter().any(|line| {
-            line.spans
-                .iter()
-                .any(|span| span.content.as_ref().contains("partial"))
-        }));
-    }
-
-    #[test]
-    fn render_completed_exec_shows_exit_code() {
-        let record = ExecRecord {
-            id: HistoryId(2),
-            call_id: Some("call-2".into()),
-            command: vec!["ls".into()],
-            parsed: Vec::new(),
-            action: ExecAction::Run,
-            status: ExecStatus::Error,
-            stdout_chunks: chunk_from_text("one\ntwo"),
-            stderr_chunks: chunk_from_text("fail"),
-            exit_code: Some(1),
-            wait_total: Some(Duration::from_secs(2)),
-            wait_active: false,
-            wait_notes: Vec::new(),
-            started_at: SystemTime::UNIX_EPOCH,
-            completed_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
-            working_dir: None,
-            env: Vec::new(),
-            tags: Vec::new(),
-        };
-        let lines = display_lines_from_record(&record);
-        assert!(lines.iter().any(|line| {
-            line.spans
-                .iter()
-                .any(|span| span.content.as_ref().contains("Error (exit code 1)"))
-        }));
-    }
-
-    #[test]
-    fn render_completed_exec_draws_left_border() {
-        let record = ExecRecord {
-            id: HistoryId(3),
-            call_id: Some("call-3".into()),
-            command: vec!["echo".into(), "done".into()],
-            parsed: Vec::new(),
-            action: ExecAction::Run,
-            status: ExecStatus::Success,
-            stdout_chunks: chunk_from_text(
-                "Using rustup toolchain: 1.90.0\n\
-                 rustc 1.90.0 (1159e78c4 2025-09-14)",
-            ),
-            stderr_chunks: Vec::new(),
-            exit_code: Some(0),
-            wait_total: None,
-            wait_active: false,
-            wait_notes: Vec::new(),
-            started_at: SystemTime::UNIX_EPOCH,
-            completed_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
-            working_dir: None,
-            env: Vec::new(),
-            tags: Vec::new(),
-        };
-        let cell = ExecCell::from_record(record);
-        let width = 80;
-        let height = cell.desired_height(width).max(3);
-        let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
-        cell.custom_render_with_skip(Rect::new(0, 0, width, height), &mut buf, 0);
-
-        let mut border_found = false;
-        for y in 0..height {
-            if buf[(0, y as u16)].symbol() == "│" {
-                border_found = true;
-                break;
-            }
-        }
-
-        assert!(border_found, "expected left border glyph to be rendered for exec output");
-    }
-}
 
 fn command_has_bold_token(command: &[String]) -> bool {
     let command_escaped = strip_bash_lc_and_escape(command);

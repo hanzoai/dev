@@ -45,7 +45,6 @@ edition = "2024"
 
 [workspace.dependencies]
 # Internal
-app_test_support = { path = "app-server/tests/common" }
 code-ansi-escape = { path = "ansi-escape" }
 code-app-server = { path = "app-server" }
 code-app-server-protocol = { path = "app-server-protocol" }
@@ -73,9 +72,11 @@ code-otel = { path = "otel" }
 code-tui = { path = "tui" }
 code-utils-json-to-toml = { path = "utils/json-to-toml" }
 code-utils-readiness = { path = "utils/readiness" }
-core_test_support = { path = "core/tests/common" }
-mcp-types = { path = "mcp-types" }
-mcp_test_support = { path = "mcp-server/tests/common" }
+mcp-types = { path = "mcp-types", package = "code-mcp-types" }
+codex-mcp-client = { path = "../codex-rs/mcp-client" }
+codex-process-hardening = { path = "../codex-rs/process-hardening" }
+codex-responses-api-proxy = { path = "../codex-rs/responses-api-proxy" }
+upstream-mcp-types = { path = "../codex-rs/mcp-types", package = "mcp-types" }
 
 # External
 allocative = "0.3.3"

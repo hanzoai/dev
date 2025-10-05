@@ -12,7 +12,6 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::slash_command::SlashCommand;
-use crate::transcript_app::TranscriptApp;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use code_core::config::add_project_allowed_command;
@@ -36,8 +35,6 @@ use crossterm::SynchronizedUpdate; // trait for stdout().sync_update
 use futures::FutureExt;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySize};
 use ratatui::buffer::Buffer;
-use ratatui::prelude::Rect;
-use ratatui::text::Line;
 use ratatui::CompletedFrame;
 use shlex::try_join;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -120,11 +117,6 @@ pub(crate) struct App<'a> {
     scheduled_frame_armed: Arc<AtomicBool>,
     /// Controls the input reader thread spawned at startup.
     input_running: Arc<AtomicBool>,
-
-    // Transcript overlay state
-    _transcript_overlay: Option<TranscriptApp>,
-    _deferred_history_lines: Vec<Line<'static>>,
-    _transcript_saved_viewport: Option<Rect>,
 
     enhanced_keys_supported: bool,
     /// Tracks keys seen as pressed when keyboard enhancements are unavailable
@@ -396,9 +388,6 @@ impl App<'_> {
             post_frame_redraw,
             scheduled_frame_armed,
             input_running,
-            _transcript_overlay: None,
-            _deferred_history_lines: Vec::new(),
-            _transcript_saved_viewport: None,
             enhanced_keys_supported,
             non_enhanced_pressed_keys: HashSet::new(),
             _debug: debug,

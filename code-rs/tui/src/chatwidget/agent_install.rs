@@ -132,38 +132,19 @@ pub(super) fn start_upgrade_terminal_session(
     config: Config,
     debug_enabled: bool,
 ) {
-    #[cfg(test)]
-    {
-        let _ = (
-            app_event_tx,
-            terminal_id,
+    start_guided_terminal_session(
+        app_event_tx,
+        terminal_id,
+        GuidedTerminalMode::Upgrade {
             initial_command,
             latest_version,
-            cwd,
-            controller,
-            controller_rx,
-            config,
-            debug_enabled,
-        );
-        return;
-    }
-
-    #[cfg(not(test))]
-    {
-        start_guided_terminal_session(
-            app_event_tx,
-            terminal_id,
-            GuidedTerminalMode::Upgrade {
-                initial_command,
-                latest_version,
-            },
-            cwd,
-            controller,
-            controller_rx,
-            Some(config),
-            debug_enabled,
-        );
-    }
+        },
+        cwd,
+        controller,
+        controller_rx,
+        Some(config),
+        debug_enabled,
+    );
 }
 
 fn start_guided_terminal_session(

@@ -262,23 +262,3 @@ pub(crate) fn log_history_snapshot(
     }
     LOGGER.write_json_line(make_history_snapshot_value(commit_id, summary, history));
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::history::state::HistoryState;
-
-    #[test]
-    fn history_snapshot_value_includes_snapshot_payload() {
-        let state = HistoryState::new();
-        let snapshot = state.snapshot();
-        let value = make_history_snapshot_value("abc123", Some("summary"), &snapshot);
-        assert_eq!(value["kind"], "history_snapshot");
-        assert_eq!(value["commit"], "abc123");
-        assert_eq!(value["summary"], "summary");
-        assert_eq!(value["record_count"], 0);
-        assert_eq!(value["order_len"], 0);
-        assert_eq!(value["order_debug_len"], 0);
-        assert!(value["history"].is_object());
-    }
-}

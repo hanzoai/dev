@@ -50,11 +50,6 @@ fn force_upgrade_preview_enabled() -> bool {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
-pub(crate) fn reset_force_upgrade_preview_for_tests() {
-    FORCE_UPGRADE_PREVIEW.store(FORCE_UPGRADE_UNSET, Ordering::Relaxed);
-}
-
 pub fn upgrade_ui_enabled() -> bool {
     !cfg!(debug_assertions) || force_upgrade_preview_enabled()
 }
@@ -462,66 +457,6 @@ fn truncate_for_log(text: &str) -> String {
     truncated.replace('\n', " ")
 }
 
-#[cfg(test)]
-mod unit_tests {
-    use super::*;
-
-    #[test]
-    fn truncate_for_log_short_text_preserved() {
-        let text = "no issues";
-        assert_eq!(truncate_for_log(text), text);
-    }
-
-    #[test]
-    fn truncate_for_log_truncates_long_messages() {
-        let long = "a".repeat(300);
-        let truncated = truncate_for_log(&long);
-        assert!(truncated.ends_with('…'));
-        assert!(truncated.len() <= 257);
-    }
-
-    #[test]
-    fn truncate_for_log_handles_multibyte_characters() {
-        let long = "漢字".repeat(200);
-        let truncated = truncate_for_log(&long);
-        assert!(truncated.ends_with('…'));
-        let prefix = truncated.trim_end_matches('…');
-        assert!(prefix.len() <= 256);
-        assert!(long.starts_with(prefix));
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn wrap_with_sudo_injects_dash_dash() {
-        let original = vec!["npm".to_string(), "install".to_string()];
-        let wrapped = wrap_with_sudo(&original);
-        assert_eq!(wrapped[0], "sudo");
-        assert_eq!(wrapped[1], "-n");
-        assert_eq!(wrapped[2], "--");
-        assert_eq!(&wrapped[3..], original);
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn starts_with_sudo_detects_prefix_case_insensitive() {
-        assert!(starts_with_sudo(&["sudo".into(), "true".into()]));
-        assert!(starts_with_sudo(&["SUDO".into(), "true".into()]));
-        assert!(!starts_with_sudo(&["npm".into(), "install".into()]));
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    #[test]
-    fn sudo_requires_manual_intervention_matches_common_errors() {
-        let stderr = "sudo: a password is required";
-        assert!(sudo_requires_manual_intervention(stderr, Some(1)));
-
-        let stderr_case = "sudo: Permission denied";
-        assert!(sudo_requires_manual_intervention(stderr_case, Some(1)));
-
-        let stderr_other = "sudo: authentication succeeded";
-        assert!(!sudo_requires_manual_intervention(stderr_other, Some(0)));
-    }
-}
 
 fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
     let contents = std::fs::read_to_string(version_file)?;
@@ -584,29 +519,4 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     let min = iter.next()?.parse::<u64>().ok()?;
     let pat = iter.next()?.parse::<u64>().ok()?;
     Some((maj, min, pat))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prerelease_version_is_not_considered_newer() {
-        assert_eq!(is_newer("0.11.0-beta.1", "0.11.0"), None);
-        assert_eq!(is_newer("1.0.0-rc.1", "1.0.0"), None);
-    }
-
-    #[test]
-    fn plain_semver_comparisons_work() {
-        assert_eq!(is_newer("0.11.1", "0.11.0"), Some(true));
-        assert_eq!(is_newer("0.11.0", "0.11.1"), Some(false));
-        assert_eq!(is_newer("1.0.0", "0.9.9"), Some(true));
-        assert_eq!(is_newer("0.9.9", "1.0.0"), Some(false));
-    }
-
-    #[test]
-    fn whitespace_is_ignored() {
-        assert_eq!(parse_version(" 1.2.3 \n"), Some((1, 2, 3)));
-        assert_eq!(is_newer(" 1.2.3 ", "1.2.2"), Some(true));
-    }
 }

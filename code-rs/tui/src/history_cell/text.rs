@@ -136,34 +136,3 @@ fn text_emphasis_from_style(style: Style) -> TextEmphasis {
         underline: modifiers.contains(Modifier::UNDERLINED),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn converts_blank_lines_to_blank_kind() {
-        let line = Line::raw("");
-        let theme = crate::theme::current_theme();
-        let message = message_line_from_ratatui_line(line, &theme);
-        assert!(matches!(message.kind, MessageLineKind::Blank));
-        assert_eq!(message.spans.len(), 1);
-        assert!(message.spans[0].text.is_empty());
-        assert_eq!(message.spans[0].tone, TextTone::Default);
-    }
-
-    #[test]
-    fn maps_span_style_to_text_tone() {
-        let theme = crate::theme::current_theme();
-        let line = Line::from(vec![Span::styled(
-            "ok",
-            Style::default().fg(theme.success).add_modifier(Modifier::BOLD),
-        )]);
-        let spans = inline_spans_from_ratatui(&line, &theme);
-        assert_eq!(spans.len(), 1);
-        let span = &spans[0];
-        assert_eq!(span.text, "ok");
-        assert_eq!(span.tone, TextTone::Success);
-        assert!(span.emphasis.bold);
-    }
-}

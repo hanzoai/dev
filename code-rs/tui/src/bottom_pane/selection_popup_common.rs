@@ -1,6 +1,8 @@
-use crate::compat::{
-    Buffer, Cell, Color, Constraint, Line, Modifier, Rect, Row, Span, Style, Table, Widget,
-};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Cell, Row, Table, Widget};
 
 use super::scroll_state::ScrollState;
 

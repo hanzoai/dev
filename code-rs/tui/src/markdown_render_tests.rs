@@ -1,4 +1,5 @@
-use crate::compat::{Line, Span, Stylize, Text};
+use ratatui::style::Stylize;
+use ratatui::text::{Line, Span, Text};
 use pretty_assertions::assert_eq;
 
 use crate::markdown_render::render_markdown_text;

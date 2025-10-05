@@ -1,4 +1,4 @@
-use crate::compat::Color;
+use ratatui::style::Color;
 use crate::theme::{current_theme, palette_mode, quantize_color_for_palette, PaletteMode};
 
 // Legacy color constants - now redirect to theme

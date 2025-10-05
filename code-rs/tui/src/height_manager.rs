@@ -4,7 +4,7 @@
 //! applying small-change hysteresis and quantized HUD heights. It is designed
 //! to be minimally invasive and can be enabled via an environment flag.
 
-use crate::compat::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HeightEvent {

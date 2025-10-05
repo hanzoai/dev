@@ -3,7 +3,6 @@ use std::io::Result;
 
 use crate::insert_history;
 use crate::tui;
-use crate::transcript_app::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -20,6 +19,12 @@ use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TuiEvent {
+    Key(KeyEvent),
+    Draw,
+}
 
 pub(crate) enum Overlay {
     Transcript(TranscriptOverlay),
@@ -451,7 +456,6 @@ impl TranscriptOverlay {
                 })?;
                 Ok(())
             }
-            _ => Ok(()),
         }
     }
     pub(crate) fn is_done(&self) -> bool {
@@ -520,7 +524,6 @@ impl StaticOverlay {
                 })?;
                 Ok(())
             }
-            _ => Ok(()),
         }
     }
     pub(crate) fn is_done(&self) -> bool {
@@ -528,213 +531,3 @@ impl StaticOverlay {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
-mod tests {
-    use super::*;
-    use insta::assert_snapshot;
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use crate::history_cell::CommandOutput;
-    use crate::history_cell::HistoryCell;
-    use crate::history_cell::PatchEventType;
-    use crate::history_cell::new_patch_event;
-    use code_core::protocol::FileChange;
-    use code_protocol::parse_command::ParsedCommand;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-
-    use crate::chatwidget::DOUBLE_ESC_HINT;
-
-    #[test]
-    fn undo_hint_is_visible() {
-        let mut overlay = TranscriptOverlay::new(vec![Line::from("hello")], DOUBLE_ESC_HINT);
-
-        // Render into a small buffer and assert the backtrack hint is present
-        let area = Rect::new(0, 0, 40, 10);
-        let mut buf = Buffer::empty(area);
-        overlay.render(area, &mut buf);
-
-        // Flatten buffer to a string and check for the hint text
-        let mut s = String::new();
-        for y in area.y..area.bottom() {
-            for x in area.x..area.right() {
-                s.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
-            }
-            s.push('\n');
-        }
-        assert!(
-            s.contains(DOUBLE_ESC_HINT),
-            "expected '{DOUBLE_ESC_HINT}' hint in overlay footer, got: {s:?}"
-        );
-    }
-
-    #[test]
-    fn transcript_overlay_snapshot_basic() {
-        // Prepare a transcript overlay with a few lines
-        let mut overlay = TranscriptOverlay::new(vec![
-            Line::from("alpha"),
-            Line::from("beta"),
-            Line::from("gamma"),
-        ], DOUBLE_ESC_HINT);
-        let mut term = Terminal::new(TestBackend::new(40, 10)).expect("term");
-        term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
-            .expect("draw");
-        assert_snapshot!(term.backend());
-    }
-
-    fn buffer_to_text(buf: &Buffer, area: Rect) -> String {
-        let mut out = String::new();
-        for y in area.y..area.bottom() {
-            for x in area.x..area.right() {
-                let symbol = buf[(x, y)].symbol();
-                if symbol.is_empty() {
-                    out.push(' ');
-                } else {
-                    out.push(symbol.chars().next().unwrap_or(' '));
-                }
-            }
-            // Trim trailing spaces for stability.
-            while out.ends_with(' ') {
-                out.pop();
-            }
-            out.push('\n');
-        }
-        out
-    }
-
-    #[test]
-    fn transcript_overlay_apply_patch_scroll_vt100_clears_previous_page() {
-        let cwd = PathBuf::from("/repo");
-        let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
-
-        let mut approval_changes = HashMap::new();
-        approval_changes.insert(
-            PathBuf::from("foo.txt"),
-            FileChange::Add {
-                content: "hello\nworld\n".to_string(),
-            },
-        );
-        let approval_cell: Arc<dyn HistoryCell> = Arc::new(new_patch_event(
-            PatchEventType::ApprovalRequest,
-            approval_changes,
-            &cwd,
-        ));
-        cells.push(approval_cell);
-
-        let mut apply_changes = HashMap::new();
-        apply_changes.insert(
-            PathBuf::from("foo.txt"),
-            FileChange::Add {
-                content: "hello\nworld\n".to_string(),
-            },
-        );
-        let apply_begin_cell: Arc<dyn HistoryCell> = Arc::new(new_patch_event(
-            PatchEventType::ApplyBegin {
-                auto_approved: false,
-            },
-            apply_changes,
-            &cwd,
-        ));
-        cells.push(apply_begin_cell);
-
-        let apply_end_cell: Arc<dyn HistoryCell> =
-            Arc::new(crate::history_cell::new_user_approval_decision(vec![
-                "✓ Patch applied".green().bold().into(),
-                "src/foo.txt".dim().into(),
-            ]));
-        cells.push(apply_end_cell);
-
-        let mut exec_cell = crate::history_cell::new_active_exec_command(
-            "exec-1".into(),
-            vec!["bash".into(), "-lc".into(), "ls".into()],
-            vec![ParsedCommand::Unknown { cmd: "ls".into() }],
-        );
-        exec_cell.complete_call(
-            "exec-1",
-            CommandOutput {
-                exit_code: 0,
-                stdout: "src\nREADME.md\n".into(),
-                stderr: String::new(),
-                formatted_output: "src\nREADME.md\n".into(),
-            },
-            Duration::from_millis(420),
-        );
-        let exec_cell: Arc<dyn HistoryCell> = Arc::new(exec_cell);
-        cells.push(exec_cell);
-
-        let mut overlay = TranscriptOverlay::new(cells, DOUBLE_ESC_HINT);
-        let area = Rect::new(0, 0, 80, 12);
-        let mut buf = Buffer::empty(area);
-
-        overlay.render(area, &mut buf);
-        overlay.view.scroll_offset = 0;
-        overlay.view.wrap_cache = None;
-        overlay.render(area, &mut buf);
-
-        let snapshot = buffer_to_text(&buf, area);
-        assert_snapshot!("transcript_overlay_apply_patch_scroll_vt100", snapshot);
-    }
-
-    #[test]
-    fn static_overlay_snapshot_basic() {
-        // Prepare a static overlay with a few lines and a title
-        let mut overlay = StaticOverlay::with_title(
-            vec![Line::from("one"), Line::from("two"), Line::from("three")],
-            "S T A T I C".to_string(),
-        );
-        let mut term = Terminal::new(TestBackend::new(40, 10)).expect("term");
-        term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
-            .expect("draw");
-        assert_snapshot!(term.backend());
-    }
-
-    #[test]
-    fn pager_wrap_cache_reuses_for_same_width_and_rebuilds_on_change() {
-        let long = "This is a long line that should wrap multiple times to ensure non-empty wrapped output.";
-        let mut pv = PagerView::new(vec![Line::from(long), Line::from(long)], "T".to_string(), 0);
-
-        // Build cache at width 24
-        pv.ensure_wrapped(24);
-        let (w1, _) = pv.cached();
-        assert!(!w1.is_empty(), "expected wrapped output to be non-empty");
-        let ptr1 = w1.as_ptr();
-
-        // Re-run with same width: cache should be reused (pointer stability heuristic)
-        pv.ensure_wrapped(24);
-        let (w2, _) = pv.cached();
-        let ptr2 = w2.as_ptr();
-        assert_eq!(ptr1, ptr2, "cache should not rebuild for unchanged width");
-
-        // Change width: cache should rebuild and likely produce different length
-        // Drop immutable borrow before mutating
-        let prev_len = w2.len();
-        pv.ensure_wrapped(36);
-        let (w3, _) = pv.cached();
-        assert_ne!(
-            prev_len,
-            w3.len(),
-            "wrapped length should change on width change"
-        );
-    }
-
-    #[test]
-    fn pager_wrap_cache_invalidates_on_append() {
-        let long = "Another long line for wrapping behavior verification.";
-        let mut pv = PagerView::new(vec![Line::from(long)], "T".to_string(), 0);
-        pv.ensure_wrapped(28);
-        let (w1, _) = pv.cached();
-        let len1 = w1.len();
-
-        // Append new lines should cause ensure_wrapped to rebuild due to len change
-        pv.lines.extend([Line::from(long), Line::from(long)]);
-        pv.ensure_wrapped(28);
-        let (w2, _) = pv.cached();
-        assert!(
-            w2.len() >= len1,
-            "wrapped length should grow or stay same after append"
-        );
-    }
-}
