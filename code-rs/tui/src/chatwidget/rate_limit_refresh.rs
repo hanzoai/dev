@@ -11,6 +11,9 @@ use futures::StreamExt;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
+#[cfg(feature = "code-fork")]
+use crate::tui_event_extensions::handle_rate_limit;
+
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 
@@ -81,6 +84,9 @@ fn run_refresh(
         let proto_snapshot = snapshot.context("rate limit snapshot missing from response")?;
 
         let snapshot: RateLimitSnapshotEvent = proto_snapshot.clone();
+
+        #[cfg(feature = "code-fork")]
+        handle_rate_limit(&snapshot, &app_event_tx);
 
         let event = Event {
             id: "rate-limit-refresh".to_string(),

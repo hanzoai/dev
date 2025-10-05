@@ -2179,7 +2179,7 @@ impl WidgetRef for ChatComposer {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use crate::app_event::AppEvent;
     use crate::bottom_pane::AppEventSender;

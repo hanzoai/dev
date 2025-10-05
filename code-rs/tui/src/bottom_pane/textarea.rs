@@ -135,7 +135,8 @@ impl TextArea {
         self.wrapped_lines(width).len() as u16
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         self.cursor_pos_with_state(area, TextAreaState::default())
     }
@@ -956,7 +957,7 @@ impl TextArea {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
