@@ -1,14 +1,6 @@
-use crate::compat::Buffer;
-use crate::compat::Rect;
-use crate::compat::Constraint;
-use crate::compat::Modifier;
-use crate::compat::Style;
-use crate::compat::Line;
-use crate::compat::Span;
-use crate::compat::Cell;
-use crate::compat::Row;
-use crate::compat::Table;
-use crate::compat::Widget;
+use crate::compat::{
+    Buffer, Cell, Color, Constraint, Line, Modifier, Rect, Row, Span, Style, Table, Widget,
+};
 
 use super::scroll_state::ScrollState;
 
@@ -19,7 +11,7 @@ pub(crate) struct GenericDisplayRow {
     pub is_current: bool,
     pub description: Option<String>, // optional grey text after the name
     /// Optional explicit color for the `name` span. When `None`, default text color is used.
-    pub name_color: Option<crate::compat::Color>,
+    pub name_color: Option<Color>,
 }
 
 impl GenericDisplayRow {}

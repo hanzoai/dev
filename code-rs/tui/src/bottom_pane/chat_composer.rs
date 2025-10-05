@@ -1,22 +1,12 @@
+use crate::compat::{
+    Block, Borders, Buffer, Constraint, Layout, Line, Margin, Modifier, Rect, Span,
+    StatefulWidgetRef, Style, Stylize, WidgetRef,
+};
 use code_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use crate::compat::Buffer;
-use crate::compat::Constraint;
-use crate::compat::Layout;
-use crate::compat::Margin;
-use crate::compat::Rect;
-use crate::compat::Modifier;
-use crate::compat::Style;
-use crate::compat::Stylize;
-use crate::compat::Line;
-use crate::compat::Span;
-use crate::compat::Block;
-use crate::compat::Borders;
-use crate::compat::StatefulWidgetRef;
-use crate::compat::WidgetRef;
 
 use super::chat_composer_history::ChatComposerHistory;
 use super::command_popup::CommandItem;
@@ -2413,8 +2403,8 @@ mod tests {
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
         use insta::assert_snapshot;
-        use crate::compat::Terminal;
-        use crate::compat::backend::TestBackend;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);
@@ -2872,9 +2862,9 @@ mod tests {
 
     #[test]
     fn test_placeholder_behavior_after_user_interaction() {
-        use crate::compat::Terminal;
-        use crate::compat::backend::TestBackend;
-        use crate::compat::Buffer;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        use ratatui::buffer::Buffer;
 
         let (tx, _rx) = std::sync::mpsc::channel();
         let sender = AppEventSender::new(tx);

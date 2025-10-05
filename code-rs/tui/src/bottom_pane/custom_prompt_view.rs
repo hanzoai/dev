@@ -1,15 +1,15 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
-use crate::compat::Buffer;
-use crate::compat::Rect;
-use crate::compat::Stylize;
-use crate::compat::Line;
-use crate::compat::Span;
-use crate::compat::Clear;
-use crate::compat::Paragraph;
-use crate::compat::StatefulWidgetRef;
-use crate::compat::Widget;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Clear;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::StatefulWidgetRef;
+use ratatui::widgets::Widget;
 use std::cell::RefCell;
 
 use super::popup_consts::_STANDARD_POPUP_HINT_LINE as STANDARD_POPUP_HINT_LINE;

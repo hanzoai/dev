@@ -28,6 +28,7 @@ use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+mod compat;
 mod app;
 mod app_event;
 mod app_event_sender;
@@ -40,7 +41,6 @@ mod cloud_tasks_service;
 mod cli;
 mod common;
 mod colors;
-mod compat;
 mod diff_render;
 mod exec_command;
 mod file_search;

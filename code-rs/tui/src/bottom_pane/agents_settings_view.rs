@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::compat::Buffer;
-use crate::compat::{Alignment, Rect, Margin};
-use crate::compat::{Modifier, Style};
-use crate::compat::{Line, Span};
-use crate::compat::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Alignment, Rect, Margin};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -356,7 +356,7 @@ impl<'a> BottomPaneView<'a> for SubagentEditorView {
 
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
-            .wrap(crate::compat::Wrap { trim: false })
+            .wrap(ratatui::widgets::Wrap { trim: false })
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()));
         paragraph.render(content_rect, buf);
 

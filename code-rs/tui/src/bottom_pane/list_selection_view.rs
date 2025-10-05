@@ -2,15 +2,15 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
-use crate::compat::Buffer;
-use crate::compat::Rect;
-use crate::compat::Modifier;
-use crate::compat::Style;
-use crate::compat::Line;
-use crate::compat::Span;
-use crate::compat::{Paragraph, Block, Borders, Clear};
-use crate::compat::Alignment;
-use crate::compat::Widget;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::{Paragraph, Block, Borders, Clear};
+use ratatui::layout::Alignment;
+use ratatui::widgets::Widget;
 
 use crate::app_event_sender::AppEventSender;
 

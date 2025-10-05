@@ -2,8 +2,8 @@ use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::ApprovalRequest;
 use crossterm::event::KeyEvent;
 use std::any::Any;
-use crate::compat::Buffer;
-use crate::compat::Rect;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 
 use super::BottomPane;
 use super::CancellationEvent;
