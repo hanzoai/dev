@@ -38,12 +38,20 @@ fi
   echo "[verify] STEP 2: cargo check (core tests compile)"
 }
 # Respect pre-set CARGO_HOME/TARGET_DIR to share caches across steps
+CODE_TARGET_DIR="$ROOT_DIR/code-rs/target"
+CODEX_TARGET_DIR="$ROOT_DIR/codex-rs/target"
 export CARGO_HOME="${CARGO_HOME:-$ROOT_DIR/.cargo-home}"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT_DIR/codex-rs/target}"
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  if [ -d "$ROOT_DIR/code-rs" ]; then
+    export CARGO_TARGET_DIR="$CODE_TARGET_DIR"
+  else
+    export CARGO_TARGET_DIR="$CODEX_TARGET_DIR"
+  fi
+fi
 # Ensure rustup also uses a repo-local, writable directory to avoid HOME permission issues on CI
 export RUSTUP_HOME="${RUSTUP_HOME:-${CARGO_HOME%/}/rustup}"
 mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUSTUP_HOME" >/dev/null 2>&1 || true
-if ! (cd codex-rs && cargo check -p codex-core --test api_surface --quiet) 2>&1 | tee .github/auto/VERIFY_api-check.log; then
+if ! (CARGO_TARGET_DIR="$CODEX_TARGET_DIR" cd codex-rs && cargo check -p codex-core --test api_surface --quiet) 2>&1 | tee .github/auto/VERIFY_api-check.log; then
   status_api="fail"
 fi
 

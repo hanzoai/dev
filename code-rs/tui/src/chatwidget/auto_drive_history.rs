@@ -42,6 +42,11 @@ impl AutoDriveHistory {
             return tail;
         }
 
+        if self.should_skip_entire_tail(&tail) {
+            self.pending_duplicates.clear();
+            return Vec::new();
+        }
+
         if self.pending_duplicates.is_empty() {
             return tail;
         }
@@ -67,6 +72,46 @@ impl AutoDriveHistory {
         }
 
         filtered
+    }
+
+    fn should_skip_entire_tail(&self, tail: &[ResponseItem]) -> bool {
+        if self.pending_duplicates.is_empty() {
+            return false;
+        }
+
+        if tail.len() != self.pending_duplicates.len().saturating_add(1) {
+            return false;
+        }
+
+        let first_is_user = matches!(tail.first(), Some(ResponseItem::Message { role, .. }) if role == "user");
+        if !first_is_user {
+            return false;
+        }
+
+        tail.iter()
+            .skip(1)
+            .zip(self.pending_duplicates.iter())
+            .all(|(item, expected)| {
+                let Some(message) = normalize_message(item) else {
+                    return false;
+                };
+                if message.role != expected.role {
+                    return false;
+                }
+
+                let item_segments: Vec<&str> = message
+                    .content
+                    .iter()
+                    .filter_map(content_text)
+                    .collect();
+                let expected_segments: Vec<&str> = expected
+                    .content
+                    .iter()
+                    .filter_map(content_text)
+                    .collect();
+
+                item_segments == expected_segments
+            })
     }
 
     pub(crate) fn append_raw(&mut self, items: &[ResponseItem]) {
@@ -102,7 +147,7 @@ impl AutoDriveHistory {
         self.converted.is_empty()
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(all(test, feature = "legacy_tests"))]
     pub(crate) fn raw_items(&self) -> &[ResponseItem] {
         &self.raw
     }
@@ -242,5 +287,13 @@ fn normalize_message(item: &ResponseItem) -> Option<NormalizedMessage> {
         })
     } else {
         None
+    }
+}
+
+fn content_text(content: &NormalizedContent) -> Option<&str> {
+    match content {
+        NormalizedContent::InputText(text)
+        | NormalizedContent::OutputText(text)
+        | NormalizedContent::InputImage(text) => Some(text.as_str()),
     }
 }

@@ -12,13 +12,16 @@ name = "code_tui"
 path = "src/lib.rs"
 
 [features]
+default = ["code-fork"]
 # Enable vt100-based tests (emulator) when running with `--features vt100-tests`.
 vt100-tests = []
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
-# Disable legacy tests by default; enable with `--features legacy_tests` if needed.
+# Legacy snapshot-driven tests we keep compile-disabled by default.
 legacy_tests = []
 dev-faults = []
+# Fork-specific extensions layered on top of upstream history rendering.
+code-fork = []
 
 [lints]
 workspace = true

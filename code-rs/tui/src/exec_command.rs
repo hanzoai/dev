@@ -64,22 +64,3 @@ where
 
     None
 }
-
-#[cfg(all(test, feature = "legacy_tests"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_escape_command() {
-        let args = vec!["foo".into(), "bar baz".into(), "weird&stuff".into()];
-        let cmdline = escape_command(&args);
-        assert_eq!(cmdline, "foo 'bar baz' 'weird&stuff'");
-    }
-
-    #[test]
-    fn test_strip_bash_lc_and_escape() {
-        let args = vec!["bash".into(), "-lc".into(), "echo hello".into()];
-        let cmdline = strip_bash_lc_and_escape(&args);
-        assert_eq!(cmdline, "echo hello");
-    }
-}

@@ -51,6 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      RUST_WORKSPACE_DIR: ${{ hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs' }}
+      CARGO_TARGET_DIR: ${{ format('{0}/{1}/target', github.workspace, hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs') }}
 
     steps:
       - name: Checkout repository
@@ -574,7 +576,7 @@ jobs:
               OPENAI_API_KEY="x" OPENAI_BASE_URL="http://127.0.0.1:5056/v1" \
               CARGO_HOME="$GITHUB_WORKSPACE/.cargo-home" \
               RUSTUP_HOME="$GITHUB_WORKSPACE/.cargo-home/rustup" \
-              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/codex-rs/target" \
+              CARGO_TARGET_DIR="$GITHUB_WORKSPACE/${RUST_WORKSPACE_DIR}/target" \
               STRICT_CARGO_HOME="1" \
               npx -y @just-every/code@latest exec -s read-only --cd "$GITHUB_WORKSPACE" --skip-git-repo-check -; } \
             2>&1 | tee .github/auto/TRIAGE_AGENT_OUT.txt

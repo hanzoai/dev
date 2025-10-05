@@ -20,6 +20,9 @@ use crate::history_cell::{
     HistoryCell,
 };
 use code_core::config::Config;
+#[cfg(feature = "code-fork")]
+use crate::foundation::wrapping::word_wrap_lines;
+#[cfg(not(feature = "code-fork"))]
 use crate::insert_history::word_wrap_lines;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -161,13 +164,16 @@ impl HistoryRenderState {
                     .map(|cell| cell.has_custom_render())
                     .unwrap_or(false);
 
+                let prohibit_cache = matches!(req.kind, RenderRequestKind::Streaming { .. });
+                let use_cache = req.use_cache && !prohibit_cache;
+
                 let layout = if has_custom_render {
                     None
                 } else if settings.width == 0 {
                     None
                 } else if assistant_plan.is_some() {
                     None
-                } else if req.use_cache && req.history_id != HistoryId::ZERO {
+                } else if use_cache && req.history_id != HistoryId::ZERO {
                     Some(self.render_cached(req.history_id, settings, || {
                         req.build_lines(history_state)
                     }))
@@ -177,7 +183,7 @@ impl HistoryRenderState {
                     }))
                 };
 
-                let use_height_cache = req.use_cache && req.history_id != HistoryId::ZERO;
+                let use_height_cache = use_cache && req.history_id != HistoryId::ZERO;
                 let cached_height = if use_height_cache {
                     let key = CacheKey::new(req.history_id, settings);
                     self.height_cache
@@ -203,6 +209,42 @@ impl HistoryRenderState {
                     )
                 } else if let Some((h, src, measure)) = cached_height {
                     (h, src, measure)
+                } else if let Some(cell) = req.cell {
+                    if cell.has_custom_render() {
+                        let start = Instant::now();
+                        let computed = cell.desired_height(settings.width);
+                        let elapsed = start.elapsed().as_nanos();
+                        if use_height_cache {
+                            let key = CacheKey::new(req.history_id, settings);
+                            self.height_cache.borrow_mut().insert(key, computed);
+                        }
+                        (
+                            computed,
+                            HeightSource::DesiredHeight,
+                            Some(elapsed),
+                        )
+                    } else if let Some(lines) = req.fallback_lines.as_ref() {
+                        let wrapped = word_wrap_lines(lines, settings.width);
+                        let height = wrapped.len().min(u16::MAX as usize) as u16;
+                        if use_height_cache {
+                            let key = CacheKey::new(req.history_id, settings);
+                            self.height_cache.borrow_mut().insert(key, height);
+                        }
+                        (height, HeightSource::FallbackLines, None)
+                    } else {
+                        let start = Instant::now();
+                        let computed = cell.desired_height(settings.width);
+                        let elapsed = start.elapsed().as_nanos();
+                        if use_height_cache {
+                            let key = CacheKey::new(req.history_id, settings);
+                            self.height_cache.borrow_mut().insert(key, computed);
+                        }
+                        (
+                            computed,
+                            HeightSource::DesiredHeight,
+                            Some(elapsed),
+                        )
+                    }
                 } else if let Some(lines) = req.fallback_lines.as_ref() {
                     let wrapped = word_wrap_lines(lines, settings.width);
                     let height = wrapped.len().min(u16::MAX as usize) as u16;
@@ -211,19 +253,6 @@ impl HistoryRenderState {
                         self.height_cache.borrow_mut().insert(key, height);
                     }
                     (height, HeightSource::FallbackLines, None)
-                } else if let Some(cell) = req.cell {
-                    let start = Instant::now();
-                    let computed = cell.desired_height(settings.width);
-                    let elapsed = start.elapsed().as_nanos();
-                    if use_height_cache {
-                        let key = CacheKey::new(req.history_id, settings);
-                        self.height_cache.borrow_mut().insert(key, computed);
-                    }
-                    (
-                        computed,
-                        HeightSource::DesiredHeight,
-                        Some(elapsed),
-                    )
                 } else {
                     (0, HeightSource::Unknown, None)
                 };
@@ -548,7 +577,7 @@ mod tests {
         TextEmphasis,
         TextTone,
     };
-    use crate::history_cell::assistant::AssistantSeg;
+    use crate::history_cell::AssistantSeg;
     use crate::history_cell::CollapsibleReasoningCell;
     use std::time::{Duration, SystemTime};
 
@@ -1052,8 +1081,8 @@ mod tests {
             kind: RenderRequestKind::Assistant { id: final_id },
             config: &cfg,
         };
-        let plan = render_state
-            .visible_cells(&state, &[message_request], settings)
+        let cells = render_state.visible_cells(&state, &[message_request], settings);
+        let plan = cells
             .first()
             .and_then(|cell| cell.assistant_plan.as_ref())
             .expect("assistant message plan missing");
@@ -1088,8 +1117,8 @@ mod tests {
             config: &cfg,
         };
 
-        let plan = render_state
-            .visible_cells(&state, &[request], settings)
+        let cells = render_state.visible_cells(&state, &[request], settings);
+        let plan = cells
             .first()
             .and_then(|cell| cell.assistant_plan.as_ref())
             .expect("assistant plan missing");
@@ -1141,8 +1170,8 @@ mod tests {
             config: &cfg,
         };
 
-        let plan = render_state
-            .visible_cells(&state, &[request], settings)
+        let cells = render_state.visible_cells(&state, &[request], settings);
+        let plan = cells
             .first()
             .and_then(|cell| cell.assistant_plan.as_ref())
             .expect("assistant plan missing after insert");
@@ -1364,7 +1393,11 @@ mod tests {
             }
             accumulated = accumulated.saturating_add(cell.height);
             if idx < thinking_idx && idx < visible.len().saturating_sub(1) {
-                let mut should_add_spacing = cell.height > 0;
+                let mut should_add_spacing = cell.height > 0
+                    && visible
+                        .get(idx + 1)
+                        .map(|next| next.height > 0)
+                        .unwrap_or(false);
                 if should_add_spacing {
                     let this_collapsed = visible[idx]
                         .cell

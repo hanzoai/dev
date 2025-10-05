@@ -1,23 +1,15 @@
 use std::path::PathBuf;
 
-use code_core::config::set_project_trusted;
+use crate::compat::{
+    Buffer, Line, Modifier, Paragraph, Rect, Span, Style, Stylize, Widget, WidgetRef, Wrap,
+};
 use code_core::config::set_project_access_mode;
-use code_protocol::config_types::SandboxMode as SandboxModeCfg;
+use code_core::config::set_project_trusted;
 use code_core::protocol::AskForApproval;
 use code_core::protocol::SandboxPolicy;
+use code_protocol::config_types::SandboxMode as SandboxModeCfg;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::prelude::Widget;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
-use ratatui::style::Stylize;
-use ratatui::text::Line;
-use ratatui::text::Span;
-use ratatui::widgets::Paragraph;
-use ratatui::widgets::WidgetRef;
-use ratatui::widgets::Wrap;
 
 use crate::colors::light_blue;
 
