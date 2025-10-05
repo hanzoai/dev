@@ -201,7 +201,7 @@ pub fn take_prefix_by_width(text: &str, max_cols: usize) -> (String, &str, usize
     (prefix, suffix, cols)
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;

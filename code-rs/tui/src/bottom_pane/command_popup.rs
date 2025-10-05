@@ -33,7 +33,7 @@ pub(crate) struct CommandPopup {
 }
 
 impl CommandPopup {
-    #[cfg(all(test, feature = "legacy_tests"))]
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::new_with_filter(false)
     }
@@ -262,7 +262,7 @@ impl WidgetRef for CommandPopup {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

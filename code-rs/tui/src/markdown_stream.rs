@@ -648,7 +648,7 @@ impl AnimatedLineStreamer {
     }
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 pub(crate) fn simulate_stream_markdown_for_tests(
     deltas: &[&str],
     finalize: bool,
@@ -668,7 +668,7 @@ pub(crate) fn simulate_stream_markdown_for_tests(
     out
 }
 
-#[cfg(all(test, feature = "legacy_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use code_core::config::Config;
