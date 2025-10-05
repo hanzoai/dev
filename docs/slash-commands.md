@@ -29,9 +29,9 @@ Notes
   previous Code snapshot and optionally rewind the conversation to that point.
 - `/branch [task]`: create a worktree branch and switch to it. If a
   task/description is provided, it is used when naming the branch. Must be run
-  from the repository root (not inside another branch worktree). By default it
-  only mirrors `node_modules`; set `CODEX_BRANCH_COPY_TARGETS=1` to also copy
-  Rust build caches into the worktree.
+  from the repository root (not inside another branch worktree). Set
+  `CODEX_BRANCH_COPY_CACHES=1` to mirror `node_modules` and Rust build caches
+  into the worktree; otherwise no cache directories are copied automatically.
 - `/merge`: merge the current worktree branch back into the default branch and
   remove the worktree. Run this from inside the worktree created by `/branch`.
 - `/review [focus]`: without arguments, opens a review picker so you can audit
