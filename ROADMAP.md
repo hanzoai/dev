@@ -20,19 +20,21 @@
 ## Codebase Cleanup Plan
 Supporting detail: `DEAD_CODE_INVENTORY.md`
 
-### Completed (2025-10-06)
+### Completed (as of 2025-10-05)
 - ✅ Removed legacy test suite (`legacy_tests` feature and old codex execution tests)
   - Deleted ~106 test files across 8 crates (app-server, apply-patch, chatgpt, cli, core, exec, login, mcp-server)
   - Removed ~35,000 lines of outdated test code
   - See `docs/migration/legacy-tests-retirement.md` for porting plan
-- ✅ Deleted TUI overlay/backtrack modules and orphaned helpers
-  - Removed: `app_backtrack.rs`, `custom_terminal.rs`, `scroll_view.rs`, `text_block.rs`, `transcript_app.rs`
-  - Removed: `chatwidget/tests.rs`, `chatwidget/tests_retry.rs` (outdated test files)
-  - Removed: `exec_cell/render.rs` (unused rendering code)
+- ✅ Removed legacy TUI test harness files (`chatwidget/tests.rs`, `chatwidget/tests_retry.rs`) and the orphaned `exec_cell/render.rs`
 - ✅ Archived `code-rs/tui/agent_tasks/` planning docs under `docs/archive/tui-migrations/`
 - ✅ Deleted `code-rs/tui/src/compat.rs` ratatui adapter layer; import ratatui types directly
 - ✅ Removed all `cfg(feature = "legacy_tests")` blocks
+- ✅ Removed `vt100-tests` feature flag from `code-rs/tui/Cargo.toml` (2025-10-05)
 - ✅ Created comprehensive migration documentation in `docs/migration/` and `docs/maintenance/`
+
+### Needs Follow-Up
+- ⏳ TUI overlay/backtrack modules still present pending replacement (`code-rs/tui/src/backtrack_helpers.rs`, `code-rs/tui/src/pager_overlay.rs`, `code-rs/tui/src/resume_picker.rs`)
+- ⏳ Reconcile vt100 rendering coverage — upstream snapshots live only in `codex-rs`
 
 ### Active Work
 1. **Prune unused modules and assets**
@@ -47,7 +49,7 @@ Supporting detail: `DEAD_CODE_INVENTORY.md`
 ## Test Suite Reset
 Supporting detail: `TEST_SUITE_RESET.md`, `docs/migration/legacy-tests-retirement.md`
 
-### Phase 1: Completed (2025-10-06)
+### Phase 1: Completed (2025-10-05)
 - ✅ Removed `legacy_tests` feature and deleted unit tests targeting the old codex execution flow (~106 files, 35,000+ lines).
 - ✅ Dropped vt100 fixtures and binary-size snapshots that no longer reflect current UI behavior.
 - ✅ Verified TUI smoke tests passing (all bottom panes, approval flow, markdown/code streaming, auto-drive sessions).
@@ -92,18 +94,18 @@ See `docs/migration/legacy-tests-retirement.md` for detailed checklist, risk ass
 - For reusable crates we adopt, pin the upstream commit hash and bump deliberately (documenting any fork-specific patches).
 
 ## Execution Phases
-1. **Baseline & Tooling** ✅ *Complete (2025-10-06)*
+1. **Baseline & Tooling** ✅ *Complete (2025-10-05)*
    - ✅ Reverted/deleted unused compatibility modules (compat.rs, app_backtrack.rs, etc.)
    - ✅ Installed upstream diff scripts; verified they produce baseline reports (`scripts/upstream-merge/`)
    - ✅ Established parallel worktree workflow documentation
    - ✅ Created comprehensive docs in `docs/migration/` and `docs/maintenance/`
 
-2. **Crate Adoption Pass** ✅ *Complete (2025-10-06)*
+2. **Crate Adoption Pass** ✅ *Complete (2025-10-05)*
    - ✅ Adopted `codex-mcp-client` and `codex-responses-api-proxy` with thin wrappers
    - ✅ Documented wrapper decisions and pinned versions in `UPSTREAM_PARITY_CHECKLIST.md`
    - ✅ Verified build passes with upstream crate dependencies
 
-3. **Fork Cleanup Pass** ✅ *Complete (2025-10-06)*
+3. **Fork Cleanup Pass** ✅ *Complete (2025-10-05)*
    - ✅ Executed P0/P1 deletions from `DEAD_CODE_INVENTORY.md` (106 test files, ~35K lines)
    - ✅ Archived outdated planning docs under `docs/archive/tui-migrations/`
    - ✅ Removed `legacy_tests` feature flag and all associated test infrastructure
@@ -124,7 +126,7 @@ See `docs/migration/legacy-tests-retirement.md` for detailed checklist, risk ass
 
 ## Next Actions (Priority Order)
 
-### Completed (2025-10-06) ✅
+### Completed (2025-10-05) ✅
 1. ✅ **Audit remaining fork-specific code**
    - ✅ Reviewed `code-fork` feature flag usage - properly used, gates 12 fork-specific TUI extensions
    - ✅ Identified module usage in `code-rs/core` - all modules (`codex/`, `unified_exec/`, `exec_command/`) actively used
@@ -156,7 +158,7 @@ See `docs/migration/legacy-tests-retirement.md` for detailed checklist, risk ass
 ## Success Metrics
 Track progress against these deliverables:
 
-| Metric | Baseline (2025-10-06) | Target | Status |
+| Metric | Baseline (2025-10-05) | Target | Status |
 |--------|----------------------|--------|--------|
 | **Codebase Size** | 35K lines removed | Clean tree, fork-only modules | ✅ Complete |
 | **Test Files** | 106 legacy files deleted | 9 critical tests ported | 🔄 0/9 ported |
