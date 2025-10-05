@@ -1,8 +1,9 @@
-use crate::compat::{
-    Alignment, Block, Borders, Buffer, Clear, Line, Modifier, Paragraph, Rect, Span, Style,
-    Widget,
-};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::compat::Buffer;
+use crate::compat::{Alignment, Rect};
+use crate::compat::{Modifier, Style};
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;

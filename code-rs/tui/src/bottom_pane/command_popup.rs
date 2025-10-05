@@ -1,7 +1,7 @@
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::layout::Margin;
-use ratatui::widgets::WidgetRef;
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::Margin;
+use crate::compat::WidgetRef;
 
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;

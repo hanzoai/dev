@@ -9,11 +9,11 @@ use crate::bottom_pane::bottom_pane_view::BottomPaneView;
 use crate::bottom_pane::scroll_state::ScrollState;
 use crate::bottom_pane::selection_popup_common::{render_rows, GenericDisplayRow};
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::Style;
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Paragraph, Widget};
 
 const MAX_VISIBLE_ROWS: usize = 8;
 
@@ -232,7 +232,7 @@ fn build_rows(tasks: &[TaskSummary]) -> Vec<GenericDisplayRow> {
         .collect()
 }
 
-fn format_status(status: &TaskStatus) -> (&'static str, Option<ratatui::style::Color>) {
+fn format_status(status: &TaskStatus) -> (&'static str, Option<crate::compat::Color>) {
     match status {
         TaskStatus::Ready => ("READY", Some(crate::colors::success_green())),
         TaskStatus::Pending => ("PENDING", Some(crate::colors::text_mid())),

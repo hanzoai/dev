@@ -7,19 +7,19 @@ use crate::transcript_app::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::Color;
-use ratatui::style::Style;
-use ratatui::style::Styled;
-use ratatui::style::Stylize;
-use ratatui::text::Line;
-use ratatui::text::Span;
-use ratatui::text::Text;
-use ratatui::widgets::Clear;
-use ratatui::widgets::Paragraph;
-use ratatui::widgets::Widget;
-use ratatui::widgets::WidgetRef;
+use crate::compat::Buffer;
+use crate::compat::Rect;
+use crate::compat::Color;
+use crate::compat::Style;
+use crate::compat::Styled;
+use crate::compat::Stylize;
+use crate::compat::Line;
+use crate::compat::Span;
+use crate::compat::Text;
+use crate::compat::Clear;
+use crate::compat::Paragraph;
+use crate::compat::Widget;
+use crate::compat::WidgetRef;
 
 pub(crate) enum Overlay {
     Transcript(TranscriptOverlay),

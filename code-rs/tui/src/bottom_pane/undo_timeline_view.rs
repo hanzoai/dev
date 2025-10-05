@@ -1,11 +1,11 @@
 use std::cmp::max;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use crate::compat::Buffer;
+use crate::compat::{Alignment, Constraint, Layout, Rect};
+use crate::compat::{Modifier, Style};
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -392,7 +392,7 @@ impl UndoTimelineView {
         let paragraph = Paragraph::new(lines)
             .alignment(Alignment::Left)
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .wrap(ratatui::widgets::Wrap { trim: true });
+            .wrap(crate::compat::Wrap { trim: true });
         paragraph.render(area, buf);
     }
 
@@ -416,7 +416,7 @@ impl UndoTimelineView {
         let conversation_inner = conversation_block.inner(conversation_area);
         conversation_block.render(conversation_area, buf);
         let conversation = Paragraph::new(entry.conversation_lines.clone())
-            .wrap(ratatui::widgets::Wrap { trim: true })
+            .wrap(crate::compat::Wrap { trim: true })
             .style(Style::default().bg(crate::colors::background()))
             .alignment(Alignment::Left);
         conversation.render(conversation_inner, buf);
@@ -437,7 +437,7 @@ impl UndoTimelineView {
             entry.file_lines.clone()
         };
         let file_summary = Paragraph::new(file_lines)
-            .wrap(ratatui::widgets::Wrap { trim: true })
+            .wrap(crate::compat::Wrap { trim: true })
             .style(Style::default().bg(crate::colors::background()))
             .alignment(Alignment::Left);
         file_summary.render(files_inner, buf);
@@ -445,7 +445,7 @@ impl UndoTimelineView {
         let footer_lines = self.footer_lines(entry);
         Paragraph::new(footer_lines)
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
-            .wrap(ratatui::widgets::Wrap { trim: true })
+            .wrap(crate::compat::Wrap { trim: true })
             .render(footer_area, buf);
     }
 

@@ -1,8 +1,8 @@
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs, Widget};
+use crate::compat::Buffer;
+use crate::compat::{Constraint, Layout, Rect};
+use crate::compat::Style;
+use crate::compat::{Line, Span, Text};
+use crate::compat::{Block, Borders, Clear, Paragraph, Tabs, Widget};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 use super::{BottomPane, BottomPaneView, CancellationEvent};
@@ -104,7 +104,7 @@ impl<'a> BottomPaneView<'a> for DiffPopupView {
             let body_bg = Block::default().style(Style::default().bg(crate::colors::background()));
             body_bg.render(body_area, buf);
             let paragraph = Paragraph::new(Text::from(lines.clone()))
-                .wrap(ratatui::widgets::Wrap { trim: false });
+                .wrap(crate::compat::Wrap { trim: false });
             Widget::render(paragraph, body_area, buf);
         }
     }

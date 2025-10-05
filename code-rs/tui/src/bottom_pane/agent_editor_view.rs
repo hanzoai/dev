@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Margin, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use crate::compat::Buffer;
+use crate::compat::{Alignment, Margin, Rect};
+use crate::compat::{Modifier, Style};
+use crate::compat::{Line, Span};
+use crate::compat::{Block, Borders, Clear, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -349,7 +349,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
     fn desired_height(&self, width: u16) -> u16 {
         let content_width = width.saturating_sub(4).max(1);
         let layout = self.layout(content_width, None);
-        (layout.lines.len() as u16).saturating_add(2)
+        layout.lines.len().saturating_add(1) as u16
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -381,7 +381,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 
             Paragraph::new(lines)
                 .alignment(Alignment::Left)
-                .wrap(ratatui::widgets::Wrap { trim: false })
+                .wrap(crate::compat::Wrap { trim: false })
                 .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
                 .render(content, buf);
             return;
@@ -392,7 +392,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 
         Paragraph::new(lines)
             .alignment(Alignment::Left)
-            .wrap(ratatui::widgets::Wrap { trim: false })
+            .wrap(crate::compat::Wrap { trim: false })
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
             .render(content, buf);
 
@@ -446,7 +446,7 @@ impl<'a> BottomPaneView<'a> for AgentEditorView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{buffer::Buffer, layout::Rect};
+    use crate::compat::{buffer::Buffer, layout::Rect};
     use std::sync::mpsc::channel;
 
     #[test]
@@ -471,16 +471,16 @@ mod tests {
         let preferred_layout = view.layout(area.width.saturating_sub(4), None);
         assert_eq!(view.desired_height(area.width), preferred_layout.lines.len().saturating_add(2) as u16);
 
-        // The line before buttons should be blank (spacer)
-        let buttons_idx = preferred_layout.lines.iter().position(|line| {
-            line.spans.iter().any(|span| span.content.contains("[ Save ]"))
-        }).expect("Should find buttons index");
-
-        if buttons_idx > 0 {
-            let spacer_line = &preferred_layout.lines[buttons_idx - 1];
-            assert!(spacer_line.spans.iter().all(|span| span.content.trim().is_empty()),
-                "Expected blank line before buttons");
-        }
+        let spacer_idx = (preferred_layout.instr_offset + preferred_layout.instr_height) as usize;
+        assert!(preferred_layout.lines[spacer_idx].spans.iter().all(|span| span.content.trim().is_empty()));
+        let buttons_idx = spacer_idx + 1;
+        let buttons_line = &preferred_layout.lines[buttons_idx];
+        let buttons_text: String = buttons_line
+            .spans
+            .iter()
+            .map(|span| span.content.clone().into_owned())
+            .collect();
+        assert!(buttons_text.contains("[ Save ]"));
 
         let mut found = false;
         for y in area.y..area.y + area.height {
