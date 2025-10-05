@@ -1,5 +1,5 @@
-use crate::compat::{Color, Modifier, Style};
-use crate::compat::{Line, Span};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 
 use crate::history::state::{InlineSpan, MessageLine, MessageLineKind, TextEmphasis, TextTone};
 use crate::theme::Theme;

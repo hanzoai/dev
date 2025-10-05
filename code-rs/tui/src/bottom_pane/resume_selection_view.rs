@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::compat::Buffer;
-use crate::compat::{Alignment, Constraint, Rect};
-use crate::compat::{Modifier, Style};
-use crate::compat::{Line, Span};
-use crate::compat::{Block, Borders, Clear, Paragraph, Row, Table};
-use crate::compat::Widget;
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Alignment, Constraint, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Row, Table};
+use ratatui::widgets::Widget;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -172,7 +172,7 @@ impl BottomPaneView<'_> for ResumeSelectionView {
             let i = start + idx; // absolute index
             let cells = vec![
                 r.modified.clone(), r.created.clone(), r.msgs.clone(), r.branch.clone(), r.summary.clone()
-            ].into_iter().map(|c| crate::compat::Cell::from(c));
+            ].into_iter().map(|c| ratatui::widgets::Cell::from(c));
             let mut row = Row::new(cells).height(1);
             if i == self.selected {
                 row = row.style(Style::default().bg(crate::colors::selection()).add_modifier(Modifier::BOLD));

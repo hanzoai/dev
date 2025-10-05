@@ -2,7 +2,7 @@ use super::*;
 use crate::history::state::{RateLimitLegendEntry, RateLimitsRecord, TextTone};
 use code_common::elapsed::format_duration;
 use code_core::protocol::RateLimitSnapshotEvent;
-use crate::compat::Color;
+use ratatui::style::Color;
 use time::{
     format_description::FormatItem,
     macros::format_description,

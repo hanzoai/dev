@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crate::compat::{Buffer, Rect, Style, StatefulWidgetRef};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::StatefulWidgetRef};
 use std::cell::RefCell;
 
 use super::textarea::{TextArea, TextAreaState};

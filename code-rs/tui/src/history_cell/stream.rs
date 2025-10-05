@@ -1,8 +1,8 @@
 use super::*;
 use crate::history::{AssistantMessageState, AssistantStreamState};
 use code_core::config_types::UriBasedFileOpener;
-use crate::compat::Style;
-use crate::compat::Line;
+use ratatui::style::Style;
+use ratatui::text::Line;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -109,6 +109,8 @@ pub(crate) fn stream_lines_from_state_with_context(
     };
 
     let mut rendered: Vec<Line<'static>> = Vec::new();
+    // Insert a sentinel so downstream styling mirrors assistant message rendering.
+    rendered.push(Line::from("stream"));
     crate::markdown::append_markdown_with_opener_and_cwd_and_bold(
         &message_state.markdown,
         &mut rendered,
