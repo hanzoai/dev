@@ -4,7 +4,7 @@
 
 This document outlines the plan to reset the code-rs test infrastructure by removing the legacy integration test suite and establishing a minimal, maintainable testing baseline. The primary goal is to reduce CI time and maintenance burden while ensuring `./build-fast.sh --workspace code` remains the sole required gate.
 
-**Status (2025-10-06):** Phase 1 complete — legacy integration suites removed. Smoke scaffold landed in `code-rs/tui/tests/ui_smoke.rs` (commit 71046c588); expanding coverage is now the priority.
+**Status (2025-10-05):** Phase 1 complete — legacy integration suites removed. Smoke scaffold landed in `code-rs/tui/tests/ui_smoke.rs` (commit 71046c588); expanding coverage is now the priority.
 
 ## Current State Analysis
 
