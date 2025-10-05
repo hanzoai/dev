@@ -123,25 +123,35 @@ See `docs/migration/legacy-tests-retirement.md` for detailed checklist, risk ass
    - 📋 Capture learnings from each parallel-agent run to refine workflow
 
 ## Next Actions (Priority Order)
+
+### Completed (2025-10-06) ✅
+1. ✅ **Audit remaining fork-specific code**
+   - ✅ Reviewed `code-fork` feature flag usage - properly used, gates 12 fork-specific TUI extensions
+   - ✅ Identified module usage in `code-rs/core` - all modules (`codex/`, `unified_exec/`, `exec_command/`) actively used
+   - ✅ Documented findings in `DEAD_CODE_INVENTORY.md` with comprehensive audit summary
+
+2. ✅ **Document test scaffolding patterns**
+   - ✅ Documented ChatWidgetHarness and assertion helpers in `TEST_SUITE_RESET.md`
+   - ✅ Added usage examples, best practices, and extension guide
+   - ✅ Identified future test infrastructure needs (AppHarness, ExecutorHarness, MCPHarness)
+
+### Active Work
 1. **Begin Phase 2: Core Runtime Test Porting (Oct 20-31)**
    - Port 6 critical test files from `codex-rs/core/tests/suite/` to `code-rs/core/tests/suite/`
    - Focus: `model_tools.rs`, `tool_harness.rs`, `tools.rs`, `read_file.rs`, `view_image.rs`, `unified_exec.rs`
    - See detailed checklist in `docs/migration/legacy-tests-retirement.md`
+   - **Blocker:** Requires `codex-rs/` directory (upstream checkout)
 
-2. **Audit remaining fork-specific code**
-   - Review `code-fork` feature flag usage across codebase
-   - Identify unused modules in `code-rs/core` (executor skeletons, tool stubs)
-   - Document findings in `DEAD_CODE_INVENTORY.md`
-
-3. **Schedule upstream diff review**
+2. **Schedule upstream diff review**
    - Run `scripts/upstream-merge/diff-crates.sh --all` on first Monday of month
    - Review `CRITICAL-SUMMARY.md` for changes requiring attention
    - Log decisions per `docs/maintenance/upstream-diff.md` workflow
+   - **Prerequisite:** Checkout upstream to `codex-rs/` directory
 
-4. **Expand smoke test coverage** (ongoing)
+3. **Expand smoke test coverage** (ongoing)
    - Strengthen assertions in `tui/tests/ui_smoke.rs` for exec/approval/tool flows
-   - Add executor and MCP integration test helpers
-   - Document test scaffolding patterns in `TEST_SUITE_RESET.md`
+   - Add executor and MCP integration test helpers following documented patterns
+   - Expand `smoke_helpers.rs` with additional assertion helpers as needed
 
 ## Success Metrics
 Track progress against these deliverables:
