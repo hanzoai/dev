@@ -14,7 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
-  --workspace codex|code|both         Select workspace to build (default: codex)
+  --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
   ./build-fast.sh
@@ -109,7 +109,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$WORKSPACE_CHOICE" ]; then
-  WORKSPACE_CHOICE="codex"
+  WORKSPACE_CHOICE="code"
 fi
 
 if [ "$WORKSPACE_CHOICE" = "both" ]; then
