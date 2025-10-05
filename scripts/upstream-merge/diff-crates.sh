@@ -92,12 +92,15 @@ generate_summary() {
     echo "📋 Generating diff summary..."
     local summary_file="${OUTPUT_DIR}/SUMMARY.md"
 
-    cat > "$summary_file" <<'HEADER'
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+    cat > "$summary_file" <<HEADER
 # Upstream Diff Summary
 
-Generated: $(date -u +%Y-%m-%d\ %H:%M:%S\ UTC)
+Generated: ${timestamp}
 
-This report compares `codex-rs` (upstream baseline) vs `code-rs` (fork) for each shared crate.
+This report compares \`codex-rs\` (upstream baseline) vs \`code-rs\` (fork) for each shared crate.
 
 ## Overview
 
@@ -131,8 +134,8 @@ HEADER
             echo "" >> "$summary_file"
 
             # Extract added/removed line counts
-            local added=$(grep -c "^+" "$diff_file" || echo "0")
-            local removed=$(grep -c "^-" "$diff_file" || echo "0")
+            local added=$(grep -cE '^\+[^+]' "$diff_file" || echo "0")
+            local removed=$(grep -cE '^-[^-]' "$diff_file" || echo "0")
             echo "- Lines added: ${added}" >> "$summary_file"
             echo "- Lines removed: ${removed}" >> "$summary_file"
             echo "" >> "$summary_file"

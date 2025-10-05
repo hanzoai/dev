@@ -30,8 +30,8 @@ jobs:
       # Consistent Cargo/rustup homes for caching across all workflows
       CARGO_HOME: ${{ github.workspace }}/.cargo-home
       RUSTUP_HOME: ${{ github.workspace }}/.cargo-home/rustup
-      RUST_WORKSPACE_DIR: ${{ hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs' }}
-      CARGO_TARGET_DIR: ${{ format('{0}/{1}/target', github.workspace, hashFiles('code-rs/Cargo.toml') != '' && 'code-rs' || 'codex-rs') }}
+      RUST_WORKSPACE_DIR: code-rs
+      CARGO_TARGET_DIR: ${{ github.workspace }}/code-rs/target
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
       PROTECTED_GLOBS: |
         .github/**
@@ -157,7 +157,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            ${{ env.RUST_WORKSPACE_DIR }} -> target
+            code-rs -> target
             codex-rs -> target
           save-if: true
           cache-on-failure: true
