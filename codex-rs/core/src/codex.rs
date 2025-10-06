@@ -100,7 +100,9 @@ use crate::tasks::CompactTask;
 use crate::tasks::RegularTask;
 use crate::tasks::ReviewTask;
 use crate::tools::ToolRouter;
+use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::format_exec_output_str;
+use crate::tools::parallel::ToolCallRuntime;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::UnifiedExecSessionManager;
 use crate::user_instructions::UserInstructions;
@@ -932,7 +934,7 @@ impl Session {
     /// Returns the output of the exec tool call.
     pub(crate) async fn run_exec_with_events(
         &self,
-        turn_diff_tracker: &mut TurnDiffTracker,
+        turn_diff_tracker: SharedTurnDiffTracker,
         prepared: PreparedExec,
         approval_policy: AskForApproval,
     ) -> Result<ExecToolCallOutput, ExecError> {
@@ -941,7 +943,7 @@ impl Session {
         let sub_id = context.sub_id.clone();
         let call_id = context.call_id.clone();
 
-        self.on_exec_command_begin(turn_diff_tracker, context.clone())
+        self.on_exec_command_begin(turn_diff_tracker.clone(), context.clone())
             .await;
 
         let result = self
@@ -1930,7 +1932,10 @@ async fn run_turn(
     input: Vec<ResponseItem>,
 ) -> CodexResult<TurnRunResult> {
     let mcp_tools = sess.services.mcp_connection_manager.list_all_tools();
-    let router = ToolRouter::from_config(&turn_context.tools_config, Some(mcp_tools));
+    let router = Arc::new(ToolRouter::from_config(
+        &turn_context.tools_config,
+        Some(mcp_tools),
+    ));
 
     let model_supports_parallel = turn_context
         .client
@@ -1939,7 +1944,8 @@ async fn run_turn(
     let parallel_tool_calls = model_supports_parallel;
     let prompt = Prompt {
         input,
-        tools: router.specs().to_vec(),
+        tools: router.specs(),
+        parallel_tool_calls,
         base_instructions_override: turn_context.base_instructions.clone(),
         output_schema: turn_context.final_output_json_schema.clone(),
     };
@@ -1947,10 +1953,10 @@ async fn run_turn(
     let mut retries = 0;
     loop {
         match try_run_turn(
-            &router,
-            sess,
-            turn_context,
-            turn_diff_tracker,
+            Arc::clone(&router),
+            Arc::clone(&sess),
+            Arc::clone(&turn_context),
+            Arc::clone(&turn_diff_tracker),
             &sub_id,
             &prompt,
         )
@@ -1961,7 +1967,7 @@ async fn run_turn(
             Err(CodexErr::EnvVar(var)) => return Err(CodexErr::EnvVar(var)),
             Err(e @ CodexErr::Fatal(_)) => return Err(e),
             Err(e @ CodexErr::ContextWindowExceeded) => {
-                sess.set_total_tokens_full(&sub_id, turn_context).await;
+                sess.set_total_tokens_full(&sub_id, &turn_context).await;
                 return Err(e);
             }
             Err(CodexErr::UsageLimitReached(e)) => {
@@ -2022,10 +2028,10 @@ struct TurnRunResult {
 }
 
 async fn try_run_turn(
-    router: &crate::tools::ToolRouter,
-    sess: &Session,
-    turn_context: &TurnContext,
-    turn_diff_tracker: &mut TurnDiffTracker,
+    router: Arc<ToolRouter>,
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    turn_diff_tracker: SharedTurnDiffTracker,
     sub_id: &str,
     prompt: &Prompt,
 ) -> CodexResult<TurnRunResult> {
@@ -2133,16 +2139,66 @@ async fn try_run_turn(
         match event {
             ResponseEvent::Created => {}
             ResponseEvent::OutputItemDone(item) => {
-                let response = handle_response_item(
-                    router,
-                    sess,
-                    turn_context,
-                    turn_diff_tracker,
-                    sub_id,
-                    item.clone(),
-                )
-                .await?;
-                output.push(ProcessedResponseItem { item, response });
+                match ToolRouter::build_tool_call(sess.as_ref(), item.clone()) {
+                    Ok(Some(call)) => {
+                        let payload_preview = call.payload.log_payload().into_owned();
+                        tracing::info!("ToolCall: {} {}", call.tool_name, payload_preview);
+                        let index = output.len();
+                        output.push(ProcessedResponseItem {
+                            item,
+                            response: None,
+                        });
+                        tool_runtime
+                            .handle_tool_call(call, index, output.as_mut_slice())
+                            .await?;
+                    }
+                    Ok(None) => {
+                        let response = handle_non_tool_response_item(
+                            Arc::clone(&sess),
+                            Arc::clone(&turn_context),
+                            sub_id,
+                            item.clone(),
+                        )
+                        .await?;
+                        output.push(ProcessedResponseItem { item, response });
+                    }
+                    Err(FunctionCallError::MissingLocalShellCallId) => {
+                        let msg = "LocalShellCall without call_id or id";
+                        turn_context
+                            .client
+                            .get_otel_event_manager()
+                            .log_tool_failed("local_shell", msg);
+                        error!(msg);
+
+                        let response = ResponseInputItem::FunctionCallOutput {
+                            call_id: String::new(),
+                            output: FunctionCallOutputPayload {
+                                content: msg.to_string(),
+                                success: None,
+                            },
+                        };
+                        output.push(ProcessedResponseItem {
+                            item,
+                            response: Some(response),
+                        });
+                    }
+                    Err(FunctionCallError::RespondToModel(message)) => {
+                        let response = ResponseInputItem::FunctionCallOutput {
+                            call_id: String::new(),
+                            output: FunctionCallOutputPayload {
+                                content: message,
+                                success: None,
+                            },
+                        };
+                        output.push(ProcessedResponseItem {
+                            item,
+                            response: Some(response),
+                        });
+                    }
+                    Err(FunctionCallError::Fatal(message)) => {
+                        return Err(CodexErr::Fatal(message));
+                    }
+                }
             }
             ResponseEvent::WebSearchCallBegin { call_id } => {
                 let _ = sess
@@ -2229,88 +2285,40 @@ async fn try_run_turn(
     }
 }
 
-async fn handle_response_item(
-    router: &crate::tools::ToolRouter,
-    sess: &Session,
-    turn_context: &TurnContext,
-    turn_diff_tracker: &mut TurnDiffTracker,
+async fn handle_non_tool_response_item(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
     sub_id: &str,
     item: ResponseItem,
 ) -> CodexResult<Option<ResponseInputItem>> {
     debug!(?item, "Output item");
 
-    match ToolRouter::build_tool_call(sess, item.clone()) {
-        Ok(Some(call)) => {
-            let payload_preview = call.payload.log_payload().into_owned();
-            tracing::info!("ToolCall: {} {}", call.tool_name, payload_preview);
-            match router
-                .dispatch_tool_call(sess, turn_context, turn_diff_tracker, sub_id, call)
-                .await
-            {
-                Ok(response) => Ok(Some(response)),
-                Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
-                Err(other) => unreachable!("non-fatal tool error returned: {other:?}"),
+    match &item {
+        ResponseItem::Message { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::WebSearchCall { .. } => {
+            let msgs = match &item {
+                ResponseItem::Message { .. } if turn_context.is_review_mode => {
+                    trace!("suppressing assistant Message in review mode");
+                    Vec::new()
+                }
+                _ => map_response_item_to_event_messages(&item, sess.show_raw_agent_reasoning()),
+            };
+            for msg in msgs {
+                let event = Event {
+                    id: sub_id.to_string(),
+                    msg,
+                };
+                sess.send_event(event).await;
             }
         }
-        Ok(None) => {
-            match &item {
-                ResponseItem::Message { .. }
-                | ResponseItem::Reasoning { .. }
-                | ResponseItem::WebSearchCall { .. } => {
-                    let msgs = match &item {
-                        ResponseItem::Message { .. } if turn_context.is_review_mode => {
-                            trace!("suppressing assistant Message in review mode");
-                            Vec::new()
-                        }
-                        _ => map_response_item_to_event_messages(
-                            &item,
-                            sess.show_raw_agent_reasoning(),
-                        ),
-                    };
-                    for msg in msgs {
-                        let event = Event {
-                            id: sub_id.to_string(),
-                            msg,
-                        };
-                        sess.send_event(event).await;
-                    }
-                }
-                ResponseItem::FunctionCallOutput { .. }
-                | ResponseItem::CustomToolCallOutput { .. } => {
-                    debug!("unexpected tool output from stream");
-                }
-                _ => {}
-            }
-
-            Ok(None)
+        ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. } => {
+            debug!("unexpected tool output from stream");
         }
-        Err(FunctionCallError::MissingLocalShellCallId) => {
-            let msg = "LocalShellCall without call_id or id";
-            turn_context
-                .client
-                .get_otel_event_manager()
-                .log_tool_failed("local_shell", msg);
-            error!(msg);
-
-            Ok(Some(ResponseInputItem::FunctionCallOutput {
-                call_id: String::new(),
-                output: FunctionCallOutputPayload {
-                    content: msg.to_string(),
-                    success: None,
-                },
-            }))
-        }
-        Err(FunctionCallError::RespondToModel(msg)) => {
-            Ok(Some(ResponseInputItem::FunctionCallOutput {
-                call_id: String::new(),
-                output: FunctionCallOutputPayload {
-                    content: msg,
-                    success: None,
-                },
-            }))
-        }
-        Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
+        _ => {}
     }
+
+    Ok(None)
 }
 
 pub(super) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<String> {
@@ -2953,13 +2961,10 @@ mod tests {
     #[tokio::test]
     async fn fatal_tool_error_stops_turn_and_reports_error() {
         let (session, turn_context, _rx) = make_session_and_context_with_rx();
-        let session_ref = session.as_ref();
-        let turn_context_ref = turn_context.as_ref();
         let router = ToolRouter::from_config(
-            &turn_context_ref.tools_config,
-            Some(session_ref.services.mcp_connection_manager.list_all_tools()),
+            &turn_context.tools_config,
+            Some(session.services.mcp_connection_manager.list_all_tools()),
         );
-        let mut tracker = TurnDiffTracker::new();
         let item = ResponseItem::CustomToolCall {
             id: None,
             status: None,
@@ -2968,22 +2973,26 @@ mod tests {
             input: "{}".to_string(),
         };
 
-        let err = handle_response_item(
-            &router,
-            session_ref,
-            turn_context_ref,
-            &mut tracker,
-            "sub-id",
-            item,
-        )
-        .await
-        .expect_err("expected fatal error");
+        let call = ToolRouter::build_tool_call(session.as_ref(), item.clone())
+            .expect("build tool call")
+            .expect("tool call present");
+        let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
+        let err = router
+            .dispatch_tool_call(
+                Arc::clone(&session),
+                Arc::clone(&turn_context),
+                tracker,
+                "sub-id".to_string(),
+                call,
+            )
+            .await
+            .expect_err("expected fatal error");
 
         match err {
-            CodexErr::Fatal(message) => {
+            FunctionCallError::Fatal(message) => {
                 assert_eq!(message, "tool shell invoked with incompatible payload");
             }
-            other => panic!("expected CodexErr::Fatal, got {other:?}"),
+            other => panic!("expected FunctionCallError::Fatal, got {other:?}"),
         }
     }
 
