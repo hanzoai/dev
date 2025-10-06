@@ -2572,11 +2572,6 @@ fn emphasize_shell_command_name(line: &mut Line<'static>) {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-fn format_inline_python_for_display(command_escaped: &str) -> String {
-    try_format_inline_python(command_escaped).unwrap_or_else(|| command_escaped.to_string())
-}
-
 fn format_inline_script_for_display(command_escaped: &str) -> String {
     if let Some(formatted) = try_format_inline_python(command_escaped) {
         return formatted;

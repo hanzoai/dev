@@ -1037,6 +1037,22 @@ async fn doctor_main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    use code_protocol::mcp_protocol::ConversationId;
+    use code_protocol::protocol::EventMsg as ProtoEventMsg;
+    use code_protocol::protocol::RecordedEvent;
+    use code_protocol::protocol::RolloutItem;
+    use code_protocol::protocol::RolloutLine;
+    use code_protocol::protocol::SessionMeta;
+    use code_protocol::protocol::SessionMetaLine;
+    use code_protocol::protocol::SessionSource;
+    use code_protocol::protocol::UserMessageEvent;
 
     #[test]
     fn bash_completion_uses_code_command_name() {
@@ -1085,77 +1101,204 @@ mod tests {
         assert_eq!(interactive.resume_session_id, None);
     }
 
+    static CODE_HOME_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn with_temp_code_home<F, R>(f: F) -> R
+    where
+        F: FnOnce(&Path) -> R,
+    {
+        let _guard = CODE_HOME_MUTEX.lock().expect("lock CODE_HOME mutex");
+        let temp_home = TempDir::new().expect("temp code home");
+        let prev_code_home = std::env::var("CODE_HOME").ok();
+        let prev_codex_home = std::env::var("CODEX_HOME").ok();
+        set_env_var("CODE_HOME", temp_home.path());
+        remove_env_var("CODEX_HOME");
+
+        let result = f(temp_home.path());
+
+        match prev_code_home {
+            Some(val) => set_env_var("CODE_HOME", val),
+            None => remove_env_var("CODE_HOME"),
+        }
+        match prev_codex_home {
+            Some(val) => set_env_var("CODEX_HOME", val),
+            None => remove_env_var("CODEX_HOME"),
+        }
+
+        result
+    }
+
+    fn set_env_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env_var<K: AsRef<std::ffi::OsStr>>(key: K) {
+        unsafe { std::env::remove_var(key) }
+    }
+
+    fn create_session_fixture(code_home: &Path, id: &Uuid) -> PathBuf {
+        let sessions_dir = code_home
+            .join("sessions")
+            .join("2025")
+            .join("10")
+            .join("06");
+        std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+
+        let timestamp = "2025-10-06T12-00-00";
+        let filename = format!("rollout-{timestamp}-{id}.jsonl");
+        let path = sessions_dir.join(filename);
+
+        let session_id_str = id.to_string();
+
+        let session_meta = SessionMeta {
+            id: ConversationId::from(*id),
+            timestamp: timestamp.to_string(),
+            cwd: Path::new(".").to_path_buf(),
+            originator: "test".to_string(),
+            cli_version: "0.0.0-test".to_string(),
+            instructions: None,
+            source: SessionSource::Cli,
+        };
+
+        let session_line = RolloutLine {
+            timestamp: timestamp.to_string(),
+            item: RolloutItem::SessionMeta(SessionMetaLine {
+                meta: session_meta,
+                git: None,
+            }),
+        };
+
+        let event_line = RolloutLine {
+            timestamp: timestamp.to_string(),
+            item: RolloutItem::Event(RecordedEvent {
+                id: "event-0".to_string(),
+                event_seq: 0,
+                order: None,
+                msg: ProtoEventMsg::UserMessage(UserMessageEvent {
+                    message: "Hello".to_string(),
+                    kind: None,
+                    images: None,
+                }),
+            }),
+        };
+
+        let mut writer = std::io::BufWriter::new(std::fs::File::create(&path).expect("open session file"));
+        serde_json::to_writer(&mut writer, &session_line).expect("write session meta");
+        writer.write_all(b"\n").expect("newline");
+        serde_json::to_writer(&mut writer, &event_line).expect("write event");
+        writer.write_all(b"\n").expect("newline");
+        writer.flush().expect("flush session file");
+
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build runtime for session lookup");
+        runtime
+            .block_on(find_conversation_path_by_id_str(code_home, &session_id_str))
+            .expect("lookup session by id")
+            .expect("session file should be discoverable");
+
+        path
+    }
+
     #[test]
     fn resume_picker_logic_last() {
-        let interactive = finalize_from_args(["codex", "resume", "--last"].as_ref());
-        assert!(!interactive.resume_picker);
-        assert!(interactive.resume_last);
-        assert_eq!(interactive.resume_session_id, None);
+        with_temp_code_home(|code_home| {
+            let session_id = Uuid::new_v4();
+            create_session_fixture(code_home, &session_id);
+
+            let interactive = finalize_from_args(["codex", "resume", "--last"].as_ref());
+            assert!(!interactive.resume_picker);
+            assert!(interactive.resume_last);
+            assert_eq!(interactive.resume_session_id, None);
+        });
     }
 
     #[test]
     fn resume_picker_logic_with_session_id() {
-        let interactive = finalize_from_args(["codex", "resume", "1234"].as_ref());
-        assert!(!interactive.resume_picker);
-        assert!(!interactive.resume_last);
-        assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
+        with_temp_code_home(|code_home| {
+            let session_id = Uuid::new_v4();
+            let session_id_str = session_id.to_string();
+            create_session_fixture(code_home, &session_id);
+
+            let args = vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                session_id_str.clone(),
+            ];
+            let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+            let interactive = finalize_from_args(&arg_refs);
+            assert!(!interactive.resume_picker);
+            assert!(!interactive.resume_last);
+            assert_eq!(interactive.resume_session_id.as_deref(), Some(session_id_str.as_str()));
+        });
     }
 
     #[test]
     fn resume_merges_option_flags_and_full_auto() {
-        let interactive = finalize_from_args(
-            [
-                "codex",
-                "resume",
-                "sid",
-                "--oss",
-                "--full-auto",
-                "--search",
-                "--sandbox",
-                "workspace-write",
-                "--ask-for-approval",
-                "on-request",
-                "-m",
-                "gpt-5-test",
-                "-p",
-                "my-profile",
-                "-C",
-                "/tmp",
-                "-i",
-                "/tmp/a.png,/tmp/b.png",
-            ]
-            .as_ref(),
-        );
+        with_temp_code_home(|code_home| {
+            let session_id = Uuid::new_v4();
+            let session_id_str = session_id.to_string();
+            create_session_fixture(code_home, &session_id);
 
-        assert_eq!(interactive.model.as_deref(), Some("gpt-5-test"));
-        assert!(interactive.oss);
-        assert_eq!(interactive.config_profile.as_deref(), Some("my-profile"));
-        assert!(matches!(
-            interactive.sandbox_mode,
-            Some(code_common::SandboxModeCliArg::WorkspaceWrite)
-        ));
-        assert!(matches!(
-            interactive.approval_policy,
-            Some(code_common::ApprovalModeCliArg::OnRequest)
-        ));
-        assert!(interactive.full_auto);
-        assert_eq!(
-            interactive.cwd.as_deref(),
-            Some(std::path::Path::new("/tmp"))
-        );
-        assert!(interactive.web_search);
-        let has_a = interactive
-            .images
-            .iter()
-            .any(|p| p == std::path::Path::new("/tmp/a.png"));
-        let has_b = interactive
-            .images
-            .iter()
-            .any(|p| p == std::path::Path::new("/tmp/b.png"));
-        assert!(has_a && has_b);
-        assert!(!interactive.resume_picker);
-        assert!(!interactive.resume_last);
-        assert_eq!(interactive.resume_session_id.as_deref(), Some("sid"));
+            let args = vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                session_id_str.clone(),
+                "--oss".to_string(),
+                "--full-auto".to_string(),
+                "--search".to_string(),
+                "--sandbox".to_string(),
+                "workspace-write".to_string(),
+                "--ask-for-approval".to_string(),
+                "on-request".to_string(),
+                "-m".to_string(),
+                "gpt-5-test".to_string(),
+                "-p".to_string(),
+                "my-profile".to_string(),
+                "-C".to_string(),
+                "/tmp".to_string(),
+                "-i".to_string(),
+                "/tmp/a.png,/tmp/b.png".to_string(),
+            ];
+            let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+            let interactive = finalize_from_args(&arg_refs);
+
+            assert_eq!(interactive.model.as_deref(), Some("gpt-5-test"));
+            assert!(interactive.oss);
+            assert_eq!(interactive.config_profile.as_deref(), Some("my-profile"));
+            assert!(matches!(
+                interactive.sandbox_mode,
+                Some(code_common::SandboxModeCliArg::WorkspaceWrite)
+            ));
+            assert!(matches!(
+                interactive.approval_policy,
+                Some(code_common::ApprovalModeCliArg::OnRequest)
+            ));
+            assert!(interactive.full_auto);
+            assert_eq!(
+                interactive.cwd.as_deref(),
+                Some(std::path::Path::new("/tmp"))
+            );
+            assert!(interactive.web_search);
+            let has_a = interactive
+                .images
+                .iter()
+                .any(|p| p == std::path::Path::new("/tmp/a.png"));
+            let has_b = interactive
+                .images
+                .iter()
+                .any(|p| p == std::path::Path::new("/tmp/b.png"));
+            assert!(has_a && has_b);
+            assert!(!interactive.resume_picker);
+            assert!(!interactive.resume_last);
+            assert_eq!(
+                interactive.resume_session_id.as_deref(),
+                Some(session_id_str.as_str())
+            );
+        });
     }
 
     #[test]
