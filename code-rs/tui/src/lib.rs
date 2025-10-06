@@ -10,6 +10,7 @@ use code_core::config::Config;
 use code_core::config::ConfigOverrides;
 use code_core::config::ConfigToml;
 use code_core::config::find_code_home;
+use code_core::config::load_config_as_toml;
 use code_core::config::load_config_as_toml_with_cli_overrides;
 use code_core::protocol::AskForApproval;
 use code_core::protocol::SandboxPolicy;
@@ -290,6 +291,33 @@ pub async fn run_main(
         .iter()
         .any(|(path, _)| path.starts_with("tui.theme"));
 
+    let code_home = match find_code_home() {
+        Ok(code_home) => code_home,
+        #[allow(clippy::print_stderr)]
+        Err(err) => {
+            eprintln!("Error finding codex home: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    let workspace_write_network_access_explicit = {
+        let cli_override = cli_kv_overrides
+            .iter()
+            .any(|(path, _)| path == "sandbox_workspace_write.network_access");
+
+        if cli_override {
+            true
+        } else {
+            match load_config_as_toml(&code_home) {
+                Ok(raw) => raw
+                    .get("sandbox_workspace_write")
+                    .and_then(|value| value.as_table())
+                    .map_or(false, |table| table.contains_key("network_access")),
+                Err(_) => false,
+            }
+        }
+    };
+
     let mut config = {
         // Load configuration and support CLI overrides.
 
@@ -308,17 +336,9 @@ pub async fn run_main(
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
     let (config_toml, theme_set_in_config_file) = {
-        let code_home = match find_code_home() {
-            Ok(code_home) => code_home,
-            Err(err) => {
-                eprintln!("Error finding codex home: {err}");
-                std::process::exit(1);
-            }
-        };
-
         let theme_set_in_config_file = theme_configured_in_config_file(&code_home);
 
-        match load_config_as_toml_with_cli_overrides(&code_home, cli_kv_overrides) {
+        match load_config_as_toml_with_cli_overrides(&code_home, cli_kv_overrides.clone()) {
             Ok(config_toml) => (config_toml, theme_set_in_config_file),
             Err(err) => {
                 eprintln!("Error loading config.toml: {err}");
@@ -335,6 +355,7 @@ pub async fn run_main(
         approval_policy,
         sandbox_mode,
         cli.config_profile.clone(),
+        workspace_write_network_access_explicit,
     )?;
 
     let log_dir = code_core::config::log_dir(&config)?;
@@ -697,6 +718,7 @@ fn determine_repo_trust_state(
     approval_policy_overide: Option<AskForApproval>,
     sandbox_mode_override: Option<SandboxMode>,
     config_profile_override: Option<String>,
+    workspace_write_network_access_explicit: bool,
 ) -> std::io::Result<bool> {
     let config_profile = config_toml.get_config_profile(config_profile_override)?;
 
@@ -729,6 +751,31 @@ fn determine_repo_trust_state(
         // If the current cwd project is trusted and no explicit config has been set,
         // default to fully trusted, non‑interactive execution to match expected behavior.
         // This restores the previous semantics before the recent trust‑flow refactor.
+        if let Some(workspace_write) = config_toml.sandbox_workspace_write.as_ref() {
+            // Honor explicit sandbox WorkspaceWrite protections (like allow_git_writes = false)
+            // even when the project is marked as trusted.
+            if !workspace_write.allow_git_writes {
+                // Maintain the historical networking behaviour from DangerFullAccess: allow outbound
+                // network even when we pivot into WorkspaceWrite solely to protect `.git`.
+                let network_access = if workspace_write.network_access {
+                    true
+                } else if workspace_write_network_access_explicit {
+                    false
+                } else {
+                    true
+                };
+                config.approval_policy = AskForApproval::Never;
+                config.sandbox_policy = SandboxPolicy::WorkspaceWrite {
+                    writable_roots: workspace_write.writable_roots.clone(),
+                    network_access,
+                    exclude_tmpdir_env_var: workspace_write.exclude_tmpdir_env_var,
+                    exclude_slash_tmp: workspace_write.exclude_slash_tmp,
+                    allow_git_writes: workspace_write.allow_git_writes,
+                };
+                return Ok(false);
+            }
+        }
+
         config.approval_policy = AskForApproval::Never;
         config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         Ok(false)
@@ -737,4 +784,137 @@ fn determine_repo_trust_state(
         Ok(true)
     }
 }
- 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use code_core::config::ProjectConfig;
+    use code_core::config_types::SandboxWorkspaceWrite;
+    use code_core::protocol::AskForApproval;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    fn make_trusted_config(
+        sandbox_workspace_write: Option<SandboxWorkspaceWrite>,
+    ) -> std::io::Result<(Config, ConfigToml)> {
+        let code_home = TempDir::new()?;
+        let workspace = TempDir::new()?;
+
+        let mut config_toml = ConfigToml::default();
+        config_toml.sandbox_workspace_write = sandbox_workspace_write;
+
+        let mut projects = HashMap::new();
+        projects.insert(
+            workspace.path().to_string_lossy().to_string(),
+            ProjectConfig {
+                trust_level: Some("trusted".to_string()),
+                approval_policy: None,
+                sandbox_mode: None,
+                always_allow_commands: None,
+                hooks: vec![],
+                commands: vec![],
+            },
+        );
+        config_toml.projects = Some(projects);
+
+        let overrides = ConfigOverrides {
+            cwd: Some(workspace.path().to_path_buf()),
+            ..Default::default()
+        };
+
+        let config = Config::load_from_base_config_with_overrides(
+            config_toml.clone(),
+            overrides,
+            code_home.path().to_path_buf(),
+        )?;
+
+        Ok((config, config_toml))
+    }
+
+    #[test]
+    fn trusted_workspace_honors_allow_git_writes_override() -> std::io::Result<()> {
+        let (mut config, config_toml) = make_trusted_config(Some(SandboxWorkspaceWrite {
+            allow_git_writes: false,
+            ..Default::default()
+        }))?;
+
+        let show_trust = determine_repo_trust_state(
+            &mut config,
+            &config_toml,
+            None,
+            None,
+            None,
+            false,
+        )?;
+        assert!(!show_trust);
+
+        match &config.sandbox_policy {
+            SandboxPolicy::WorkspaceWrite {
+                allow_git_writes,
+                network_access,
+                ..
+            } => {
+                assert!(!allow_git_writes);
+                assert!(*network_access, "trusted WorkspaceWrite should retain network access");
+            }
+            other => panic!("expected workspace-write sandbox, got {other:?}"),
+        }
+
+        assert!(matches!(config.approval_policy, AskForApproval::Never));
+
+        Ok(())
+    }
+
+    #[test]
+    fn trusted_workspace_default_stays_danger_full_access() -> std::io::Result<()> {
+        let (mut config, config_toml) = make_trusted_config(None)?;
+
+        let show_trust = determine_repo_trust_state(
+            &mut config,
+            &config_toml,
+            None,
+            None,
+            None,
+            false,
+        )?;
+        assert!(!show_trust);
+
+        assert!(matches!(config.sandbox_policy, SandboxPolicy::DangerFullAccess));
+        assert!(matches!(config.approval_policy, AskForApproval::Never));
+
+        Ok(())
+    }
+
+    #[test]
+    fn trusted_workspace_respects_explicit_network_disable() -> std::io::Result<()> {
+        let (mut config, config_toml) = make_trusted_config(Some(SandboxWorkspaceWrite {
+            allow_git_writes: false,
+            network_access: false,
+            ..Default::default()
+        }))?;
+
+        let show_trust = determine_repo_trust_state(
+            &mut config,
+            &config_toml,
+            None,
+            None,
+            None,
+            true,
+        )?;
+        assert!(!show_trust);
+
+        match &config.sandbox_policy {
+            SandboxPolicy::WorkspaceWrite {
+                allow_git_writes,
+                network_access,
+                ..
+            } => {
+                assert!(!allow_git_writes);
+                assert!(!network_access, "explicit opt-out should disable network access");
+            }
+            other => panic!("expected workspace-write sandbox, got {other:?}"),
+        }
+
+        Ok(())
+    }
+}
