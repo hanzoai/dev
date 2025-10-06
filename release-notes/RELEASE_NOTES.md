@@ -1,18 +1,15 @@
-## @just-every/code v0.2.187
+## @just-every/code v0.2.188
 
-This release locks in reliable history playback and keeps session resumes steady for enterprise teams.
+Small release to tighten MCP integration checks and make automation safer during publishing.
 
 ### Changes
-
-- TUI: Maintain strict streaming order and stable scrollback so history stays put while answers land.
-- CLI: Prefer rollout `.jsonl` transcripts when resuming sessions so `code resume` stays reliable after snapshots.
-- Core/Auth: Automatically use stored API keys for enterprise ChatGPT plans and honor retry hints from rate-limit errors.
+- MCP: Validate stdio tool commands on PATH and surface clearer spawn errors during setup.
+- Release: Guard release notes generation so headers always match the published version.
 
 ### Install
-
 ```
 npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.186...v0.2.187
+Compare: https://github.com/just-every/code/compare/v0.2.187...v0.2.188
