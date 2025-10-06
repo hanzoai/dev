@@ -24,6 +24,7 @@ use code_common::elapsed::format_duration;
 use code_common::model_presets::ModelPreset;
 use code_common::model_presets::builtin_model_presets;
 use code_core::ConversationManager;
+use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
 use code_core::config::Config;
 use code_core::git_info::CommitLogEntry;
 use code_core::config_types::AgentConfig;
@@ -10732,14 +10733,16 @@ impl ChatWidget<'_> {
                 }
                 let name = a.name.clone();
                 let cmd = a.command.clone();
-                let builtin = matches!(cmd.as_str(), "code" | "codex");
+                let builtin = matches!(cmd.as_str(), "code" | "codex" | "cloud");
                 to_check.push((name, cmd, builtin));
             }
         } else {
-            to_check.push(("claude".to_string(), "claude".to_string(), false));
-            to_check.push(("gemini".to_string(), "gemini".to_string(), false));
-            to_check.push(("qwen".to_string(), "qwen".to_string(), false));
-            to_check.push(("code".to_string(), "code".to_string(), true));
+            for name in DEFAULT_AGENT_NAMES {
+                let name = (*name).to_string();
+                let cmd = name.clone();
+                let builtin = matches!(name.as_str(), "code" | "codex" | "cloud");
+                to_check.push((name, cmd, builtin));
+            }
         }
 
         // Helper: PATH presence + resolved path
@@ -10979,9 +10982,18 @@ impl ChatWidget<'_> {
             }
         }
 
+        fn is_builtin_agent(name: &str, command: &str) -> bool {
+            name.eq_ignore_ascii_case("code")
+                || name.eq_ignore_ascii_case("codex")
+                || name.eq_ignore_ascii_case("cloud")
+                || command.eq_ignore_ascii_case("code")
+                || command.eq_ignore_ascii_case("codex")
+                || command.eq_ignore_ascii_case("cloud")
+        }
+
         let mut agent_rows: Vec<(String, bool, bool, String)> = Vec::new();
-        // Desired presentation order for known agents
-        let preferred = ["code", "claude", "gemini", "qwen"];
+        // Desired presentation order for known agents, matching CLI defaults.
+        let preferred = DEFAULT_AGENT_NAMES;
         // Name -> config lookup
         let mut extras: Vec<String> = Vec::new();
         for a in &self.config.agents {
@@ -10991,10 +11003,7 @@ impl ChatWidget<'_> {
         }
         extras.sort();
         // Build ordered list of names
-        let mut ordered: Vec<String> = Vec::new();
-        for p in preferred {
-            ordered.push(p.to_string());
-        }
+        let mut ordered: Vec<String> = preferred.iter().map(|p| (*p).to_string()).collect();
         for e in extras {
             if !ordered.iter().any(|n| n.eq_ignore_ascii_case(&e)) {
                 ordered.push(e);
@@ -11008,7 +11017,8 @@ impl ChatWidget<'_> {
                 .iter()
                 .find(|a| a.name.eq_ignore_ascii_case(name))
             {
-                let installed = command_exists(&cfg.command);
+                let builtin = is_builtin_agent(&cfg.name, &cfg.command);
+                let installed = builtin || command_exists(&cfg.command);
                 agent_rows.push((
                     cfg.name.clone(),
                     cfg.enabled,
@@ -11018,7 +11028,8 @@ impl ChatWidget<'_> {
             } else {
                 // Default command = name, enabled=true, installed based on PATH
                 let cmd = name.clone();
-                let installed = command_exists(&cmd);
+                let builtin = is_builtin_agent(name, &cmd);
+                let installed = builtin || command_exists(&cmd);
                 // Keep display name as given (e.g., "code")
                 agent_rows.push((name.clone(), true, installed, cmd));
             }
