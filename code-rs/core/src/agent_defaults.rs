@@ -4,6 +4,10 @@
 //! explicit per‑mode args configured) and by the TUI editor (to prefill the
 //! read‑only/write parameter fields with sensible defaults).
 
+/// Canonical list of built-in agent names used when no `[[agents]]` entries
+/// are configured.
+pub const DEFAULT_AGENT_NAMES: &[&str] = &["claude", "gemini", "qwen", "code", "cloud"];
+
 /// Return default CLI arguments (excluding the prompt flag) for a given agent
 /// `name` and access mode.
 ///

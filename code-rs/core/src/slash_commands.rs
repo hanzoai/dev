@@ -1,3 +1,4 @@
+use crate::agent_defaults::DEFAULT_AGENT_NAMES;
 use crate::config_types::AgentConfig;
 use crate::config_types::SubagentCommandConfig;
 
@@ -17,13 +18,7 @@ pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
 
 /// Get default models if no agents are configured
 fn get_default_models() -> Vec<String> {
-    vec![
-        "claude".to_string(),
-        "gemini".to_string(),
-        "qwen".to_string(),
-        "code".to_string(),
-        "cloud".to_string(),
-    ]
+    DEFAULT_AGENT_NAMES.iter().map(|name| (*name).to_string()).collect()
 }
 
 /// Resolution result for a subagent command.
