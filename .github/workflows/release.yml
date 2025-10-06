@@ -28,6 +28,8 @@ jobs:
   preflight-tests:
     name: Preflight Tests (Linux fast E2E)
     runs-on: ubuntu-24.04
+    env:
+      CARGO_TARGET_DIR: /home/runner/.cargo-target
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -46,18 +48,22 @@ jobs:
           shared-key: code-preflight-1.90
           workspaces: |
             code-rs -> target
-          cache-targets: true
+          cache-targets: false
           cache-workspace-crates: true
-          cache-on-failure: true
+          cache-on-failure: false
 
-      - name: Build (fast profile)
+      - name: Build CLI (dev-fast)
         shell: bash
-        run: ./build-fast.sh
+        run: |
+          set -euo pipefail
+          cd code-rs
+          cargo build --locked --profile dev-fast --bin code
 
       - name: CLI smokes (skip duplicated cargo tests)
         shell: bash
         env:
           SKIP_CARGO_TESTS: "1"
+          CI_CLI_BIN: ${{ env.CARGO_TARGET_DIR }}/dev-fast/code
         run: bash scripts/ci-tests.sh
 
       - name: Install cargo-nextest
@@ -69,7 +75,18 @@ jobs:
         shell: bash
         run: |
           cd code-rs
-          cargo nextest run --no-fail-fast
+          cargo nextest run --no-fail-fast --cargo-args "--profile dev-fast --locked"
+
+      - name: Free disk after tests
+        if: always()
+        shell: bash
+        run: |
+          echo "Disk usage before cleanup" && df -h
+          rm -rf ~/.cache/sccache || true
+          rm -rf ~/.cargo/registry/index || true
+          rm -rf ~/.cargo/git/db || true
+          rm -rf "$CARGO_TARGET_DIR" || true
+          echo "Disk usage after cleanup" && df -h
 
   determine-version:
     name: Determine Version
