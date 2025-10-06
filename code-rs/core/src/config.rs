@@ -2287,13 +2287,10 @@ impl Config {
     }
     
     fn load_instructions(code_dir: Option<&Path>) -> Option<String> {
-        let mut p = match code_dir {
-            Some(p) => p.to_path_buf(),
-            None => return None,
-        };
+        let code_home = code_dir?;
+        let read_path = resolve_code_path_for_read(code_home, Path::new("AGENTS.md"));
 
-        p.push("AGENTS.md");
-        std::fs::read_to_string(&p).ok().and_then(|s| {
+        std::fs::read_to_string(&read_path).ok().and_then(|s| {
             let s = s.trim();
             if s.is_empty() {
                 None
@@ -2365,24 +2362,34 @@ fn env_overrides_present() -> bool {
         || matches!(std::env::var("CODEX_HOME"), Ok(ref v) if !v.trim().is_empty())
 }
 
+fn compute_legacy_code_home_dir() -> Option<PathBuf> {
+    if env_overrides_present() {
+        return None;
+    }
+    let Some(home) = home_dir() else {
+        return None;
+    };
+    let candidate = home.join(".codex");
+    if path_exists(&candidate) {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
 fn legacy_code_home_dir() -> Option<PathBuf> {
-    static LEGACY: OnceLock<Option<PathBuf>> = OnceLock::new();
-    LEGACY
-        .get_or_init(|| {
-            if env_overrides_present() {
-                return None;
-            }
-            let Some(home) = home_dir() else {
-                return None;
-            };
-            let candidate = home.join(".codex");
-            if path_exists(&candidate) {
-                Some(candidate)
-            } else {
-                None
-            }
-        })
-        .clone()
+    #[cfg(test)]
+    {
+        return compute_legacy_code_home_dir();
+    }
+
+    #[cfg(not(test))]
+    {
+        static LEGACY: OnceLock<Option<PathBuf>> = OnceLock::new();
+        LEGACY
+            .get_or_init(compute_legacy_code_home_dir)
+            .clone()
+    }
 }
 
 fn path_exists(path: &Path) -> bool {
@@ -2456,7 +2463,31 @@ mod tests {
 
     use super::*;
     use pretty_assertions::assert_eq;
+    use std::ffi::OsString;
     use tempfile::TempDir;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn new(key: &'static str) -> Self {
+            Self {
+                key,
+                original: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(val) => std::env::set_var(self.key, val),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn test_toml_parsing() {
@@ -2506,6 +2537,39 @@ persistence = "none"
         let parsed_bool = toml::from_str::<ConfigToml>(cfg_bool)
             .expect("boolean should deserialize");
         assert_eq!(parsed_bool.auto_upgrade_enabled, Some(true));
+    }
+
+    #[test]
+    fn load_instructions_reads_from_code_home() -> anyhow::Result<()> {
+        let code_home = TempDir::new()?;
+        std::fs::write(code_home.path().join("AGENTS.md"), "  keep me  \n")?;
+
+        let loaded = Config::load_instructions(Some(code_home.path()));
+
+        assert_eq!(loaded.as_deref(), Some("keep me"));
+        Ok(())
+    }
+
+    #[test]
+    fn load_instructions_falls_back_to_legacy_codex_home() -> anyhow::Result<()> {
+        let code_home = TempDir::new()?;
+        let legacy_home = TempDir::new()?;
+        let legacy_codex = legacy_home.path().join(".codex");
+        std::fs::create_dir_all(&legacy_codex)?;
+        std::fs::write(legacy_codex.join("AGENTS.md"), " legacy guidance \n")?;
+
+        let _home_guard = EnvVarGuard::new("HOME");
+        let _code_home_guard = EnvVarGuard::new("CODE_HOME");
+        let _codex_home_guard = EnvVarGuard::new("CODEX_HOME");
+
+        std::env::set_var("HOME", legacy_home.path());
+        std::env::remove_var("CODE_HOME");
+        std::env::remove_var("CODEX_HOME");
+
+        let loaded = Config::load_instructions(Some(code_home.path()));
+
+        assert_eq!(loaded.as_deref(), Some("legacy guidance"));
+        Ok(())
     }
 
     #[test]
