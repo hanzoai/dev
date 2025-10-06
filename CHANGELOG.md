@@ -3,6 +3,12 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.187] - 2025-10-06
+
+- TUI: Maintain strict streaming order and stable scrollback so history stays put while answers land. (554f2e6b)
+- CLI: Prefer rollout `.jsonl` transcripts when resuming sessions so `code resume` stays reliable after snapshots. (7f69aa55)
+- Core/Auth: Automatically use stored API keys for enterprise ChatGPT plans and honor retry hints from rate-limit errors. (fa1bd81f)
+
 ## [0.2.184] - 2025-10-03
 
 - Core: Record pid alongside port in server info to simplify local process debugging. (3778659)
