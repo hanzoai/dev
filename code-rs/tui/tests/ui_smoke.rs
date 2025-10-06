@@ -209,6 +209,77 @@ fn composer_input_shift_enter_no_submit() {
 }
 
 #[test]
+fn composer_input_backslash_continuation_inserts_newline() {
+    let mut composer = ComposerInput::new();
+    composer.handle_paste("Hello\\".to_string());
+
+    let enter = make_key(KeyCode::Enter, KeyModifiers::NONE);
+    match composer.input(enter) {
+        ComposerAction::None => {
+            assert_eq!(composer.text(), "Hello\n");
+            assert!(!composer.is_empty(), "composer should retain text after continuation");
+        }
+        ComposerAction::Submitted(_) => panic!("continuation should not submit"),
+    }
+}
+
+#[test]
+fn composer_input_backslash_continuation_trailing_space_submits() {
+    let mut composer = ComposerInput::new();
+    composer.handle_paste("Hello\\ ".to_string());
+
+    match composer.input(make_key(KeyCode::Enter, KeyModifiers::NONE)) {
+        ComposerAction::Submitted(text) => {
+            assert_eq!(text, "Hello\\ ");
+            assert!(composer.is_empty(), "composer should clear after submission");
+        }
+        ComposerAction::None => panic!("trailing space should cancel continuation"),
+    }
+}
+
+#[test]
+fn composer_input_backslash_even_count_submits() {
+    let mut composer = ComposerInput::new();
+    composer.handle_paste(String::from(r"Path: C\\"));
+
+    match composer.input(make_key(KeyCode::Enter, KeyModifiers::NONE)) {
+        ComposerAction::Submitted(text) => assert_eq!(text, String::from(r"Path: C\\")),
+        ComposerAction::None => panic!("even number of backslashes should submit"),
+    }
+}
+
+#[test]
+fn composer_input_backslash_multiple_continuations() {
+    let mut composer = ComposerInput::new();
+    composer.handle_paste("line1\\".to_string());
+
+    assert!(matches!(
+        composer.input(make_key(KeyCode::Enter, KeyModifiers::NONE)),
+        ComposerAction::None
+    ));
+    assert_eq!(composer.text(), "line1\n");
+
+    composer.handle_paste("line2\\".to_string());
+    assert!(matches!(
+        composer.input(make_key(KeyCode::Enter, KeyModifiers::NONE)),
+        ComposerAction::None
+    ));
+    assert_eq!(composer.text(), "line1\nline2\n");
+}
+
+#[test]
+fn composer_input_backslash_continuation_preserves_indent() {
+    let mut composer = ComposerInput::new();
+    composer.handle_paste("    indented\\".to_string());
+
+    assert!(matches!(
+        composer.input(make_key(KeyCode::Enter, KeyModifiers::NONE)),
+        ComposerAction::None
+    ));
+    assert_eq!(composer.text(), "    indented\n    ");
+}
+
+#[test]
 fn composer_input_ctrl_c_aborts_without_submit() {
     let mut composer = ComposerInput::new();
     composer.handle_paste("pending".to_string());
