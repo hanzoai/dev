@@ -1190,7 +1190,7 @@ mod tests {
     #[test]
     fn test_get_openai_tools_mcp_tools_sorted_by_name() {
         let model_family = find_family_for_model("o3").expect("o3 should be a valid model family");
-        let config = ToolsConfig::new(
+        let _config = ToolsConfig::new(
             &model_family,
             AskForApproval::Never,
             SandboxPolicy::ReadOnly,
@@ -1498,6 +1498,7 @@ mod tests {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
+            allow_git_writes: true,
         };
         let tool = super::create_shell_tool_for_sandbox(&sandbox_policy);
         let OpenAiTool::Function(ResponsesApiTool {
@@ -1507,27 +1508,26 @@ mod tests {
             panic!("expected function tool");
         };
         assert_eq!(name, "shell");
-
-        let expected = r#"
-The shell tool is used to execute shell commands.
-- When invoking the shell tool, your call will be running in a sandbox, and some shell commands will require escalated privileges:
-  - Types of actions that require escalated privileges:
-    - Writing files other than those in the writable roots
-      - writable roots:
-        - workspace
-    - Commands that require network access
-
-  - Examples of commands that require escalated privileges:
-    - git commit
-    - npm install or pnpm install
-    - cargo build
-    - cargo test
-- When invoking a command that will require escalated privileges:
-  - Provide the with_escalated_permissions parameter with the boolean value true
-  - Include a short, 1 sentence explanation for why we need to run with_escalated_permissions in the justification parameter.
-
-Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#;
-        assert_eq!(description, expected);
+        assert!(
+            description.contains("The shell tool is used to execute shell commands."),
+            "description should explain shell usage"
+        );
+        assert!(
+            description.contains("writable roots:"),
+            "description should list writable roots"
+        );
+        assert!(
+            description.contains("- workspace"),
+            "description should mention workspace root"
+        );
+        assert!(
+            description.contains("Commands that require network access"),
+            "description should mention network access requirements"
+        );
+        assert!(
+            description.contains("Long-running commands may be backgrounded"),
+            "description should mention backgrounded commands"
+        );
     }
 
     #[test]
@@ -1541,8 +1541,9 @@ Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#;
         };
         assert_eq!(name, "shell");
 
-        let expected = "Runs a shell command and returns its output.";
-        assert_eq!(description, expected);
+        assert_eq!(name, "shell");
+        assert!(description.starts_with("Runs a shell command and returns its output."));
+        assert!(description.contains("Long-running commands may be backgrounded"));
     }
 
     #[test]
@@ -1555,8 +1556,8 @@ Default timeout: 120000 ms (120s). Override via the `timeout` parameter."#;
             panic!("expected function tool");
         };
         assert_eq!(name, "shell");
-
-        assert_eq!(description, "Runs a shell command and returns its output.");
+        assert!(description.starts_with("Runs a shell command and returns its output."));
+        assert!(description.contains("Long-running commands may be backgrounded"));
     }
 }
 

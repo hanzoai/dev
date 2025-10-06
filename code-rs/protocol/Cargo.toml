@@ -33,6 +33,7 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 [dev-dependencies]
 anyhow = { workspace = true }
 tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
 
 [package.metadata.cargo-shear]
 # Required because the not imported as strum_macros in non-nightly builds.
