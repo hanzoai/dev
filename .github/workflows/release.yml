@@ -615,6 +615,8 @@ jobs:
 
           # Extract a Linux x86_64 Code binary from artifacts and make it runnable.
           mkdir -p .code-bin release-notes
+          # Always start from a blank file so stale content never leaks through
+          : > release-notes/RELEASE_NOTES.md
           LNX_ZST=$(ls -1 release-assets/code-x86_64-unknown-linux-musl.* 2>/dev/null | head -n1 || true)
           if [ -z "$LNX_ZST" ]; then
             echo "Could not find linux x86_64 Code artifact in release-assets/" >&2
@@ -755,6 +757,9 @@ jobs:
           if [ ! -s release-notes/RELEASE_NOTES.md ]; then
             awk -v v="${NEW_VERSION}" '/^## /{p=($2==("v"v)||$2==v)} p{print}' CHANGELOG.md > release-notes/RELEASE_NOTES.md || true
           fi
+          if [ ! -s release-notes/RELEASE_NOTES.md ]; then
+            printf "## @just-every/code v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > release-notes/RELEASE_NOTES.md
+          fi
 
           # Commit CHANGELOG changes if any.
           if ! git diff --quiet -- CHANGELOG.md; then
@@ -859,6 +864,12 @@ jobs:
           echo "Retrying push after policy merge..."
           git push origin main
           git push origin --tags || true
+
+      - name: Verify release notes header matches version
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/check-release-notes-version.sh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
