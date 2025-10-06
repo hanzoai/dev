@@ -342,15 +342,45 @@ pub fn upsert_chatgpt_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use crate::token_data::{IdTokenInfo, TokenData};
     use tempfile::tempdir;
 
     fn make_chatgpt_tokens(account_id: Option<&str>, email: Option<&str>) -> TokenData {
+        fn fake_jwt(account_id: Option<&str>, email: Option<&str>, plan: &str) -> String {
+            #[derive(Serialize)]
+            struct Header {
+                alg: &'static str,
+                typ: &'static str,
+            }
+            let header = Header {
+                alg: "none",
+                typ: "JWT",
+            };
+            let payload = serde_json::json!({
+                "email": email,
+                "https://api.openai.com/auth": {
+                    "chatgpt_plan_type": plan,
+                    "chatgpt_account_id": account_id.unwrap_or("acct"),
+                    "chatgpt_user_id": "user-12345",
+                    "user_id": "user-12345",
+                }
+            });
+            let b64 = |value: &serde_json::Value| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(serde_json::to_vec(value).expect("json to vec"))
+            };
+            let header_b64 = b64(&serde_json::to_value(header).expect("header value"));
+            let payload_b64 = b64(&payload);
+            let signature_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
+            format!("{header_b64}.{payload_b64}.{signature_b64}")
+        }
+
         TokenData {
             id_token: IdTokenInfo {
                 email: email.map(|s| s.to_string()),
                 chatgpt_plan_type: None,
-                raw_jwt: "header.payload.signature".to_string(),
+                raw_jwt: fake_jwt(account_id, email, "pro"),
             },
             access_token: "access".to_string(),
             refresh_token: "refresh".to_string(),
@@ -452,7 +482,7 @@ mod tests {
         .expect("insert chatgpt");
 
         let active_before = get_active_account_id(home.path()).expect("active id");
-        assert_eq!(active_before.as_deref(), Some(&stored.id));
+        assert_eq!(active_before.as_deref(), Some(stored.id.as_str()));
 
         let removed = remove_account(home.path(), &stored.id).expect("remove");
         assert!(removed.is_some());

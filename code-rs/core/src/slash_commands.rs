@@ -235,7 +235,7 @@ mod tests {
         let result = handle_slash_command("/plan implement a new feature", None);
         assert!(result.is_some());
         let plan_prompt = result.unwrap();
-        assert!(plan_prompt.contains("Create a comprehensive plan"));
+        assert!(plan_prompt.contains("final, comprehensive plan"));
         // Default agents list should include cloud when no [[agents]] configured
         assert!(plan_prompt.to_ascii_lowercase().contains("cloud"));
 
@@ -247,7 +247,8 @@ mod tests {
         // Test /code command
         let result = handle_slash_command("/code refactor the database module", None);
         assert!(result.is_some());
-        assert!(result.unwrap().contains("Perform a coding task"));
+        let code_prompt = result.unwrap();
+        assert!(code_prompt.contains("Complete a coding task"));
 
         // Test invalid command
         let result = handle_slash_command("/invalid test", None);
@@ -275,6 +276,9 @@ mod tests {
                 enabled: true,
                 description: None,
                 env: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
             },
             AgentConfig {
                 name: "test-gemini".to_string(),
@@ -284,6 +288,9 @@ mod tests {
                 enabled: false, // disabled
                 description: None,
                 env: None,
+                args_read_only: None,
+                args_write: None,
+                instructions: None,
             },
         ];
 

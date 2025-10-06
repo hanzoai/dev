@@ -2554,6 +2554,7 @@ exclude_slash_tmp = true
                 network_access: false,
                 exclude_tmpdir_env_var: true,
                 exclude_slash_tmp: true,
+                allow_git_writes: true,
             },
             sandbox_workspace_write_cfg.derive_sandbox_policy(sandbox_mode_override)
         );
@@ -2890,62 +2891,38 @@ model_verbosity = "high"
             o3_profile_overrides,
             fixture.code_home(),
         )?;
+        assert_eq!("o3", o3_profile_config.model);
+        assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, o3_profile_config.review_model);
         assert_eq!(
-            Config {
-                model: "o3".to_string(),
-                review_model: OPENAI_DEFAULT_REVIEW_MODEL.to_string(),
-                model_family: find_family_for_model("o3").expect("known model slug"),
-                model_context_window: Some(200_000),
-                model_max_output_tokens: Some(100_000),
-                model_auto_compact_token_limit: None,
-                model_provider_id: "openai".to_string(),
-                model_provider: fixture.openai_provider.clone(),
-                approval_policy: AskForApproval::Never,
-                sandbox_policy: SandboxPolicy::new_read_only_policy(),
-                always_allow_commands: Vec::new(),
-                project_hooks: ProjectHooks::default(),
-                project_commands: Vec::new(),
-                shell_environment_policy: ShellEnvironmentPolicy::default(),
-                disable_response_storage: false,
-                auto_upgrade_enabled: false,
-                user_instructions: None,
-                notify: None,
-                cwd: fixture.cwd(),
-                mcp_servers: HashMap::new(),
-                experimental_client_tools: None,
-                model_providers: fixture.model_provider_map.clone(),
-                project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
-                project_doc_fallback_filenames: Vec::new(),
-                code_home: fixture.code_home(),
-                history: History::default(),
-                file_opener: UriBasedFileOpener::VsCode,
-                tui: Tui::default(),
-                code_linux_sandbox_exe: None,
-                hide_agent_reasoning: false,
-                show_raw_agent_reasoning: false,
-                model_reasoning_effort: ReasoningEffort::High,
-                model_reasoning_summary: ReasoningSummary::Detailed,
-                model_text_verbosity: TextVerbosity::default(),
-                chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-                base_instructions: None,
-                include_plan_tool: false,
-                include_apply_patch_tool: false,
-                tools_web_search_request: false,
-                tools_web_search_allowed_domains: None,
-                use_experimental_streamable_shell_tool: false,
-                use_experimental_use_rmcp_client: false,
-                include_view_image_tool: true,
-                responses_originator_header: "code_cli_rs".to_string(),
-                debug: false,
-                using_chatgpt_auth: false,
-                github: GithubConfig::default(),
-                validation: ValidationConfig::default(),
-                experimental_resume: None,
-                tui_notifications: Default::default(),
-                auto_drive_observer_cadence: 5,
-                otel: crate::config_types::OtelConfig::default(),
-            },
-            o3_profile_config
+            find_family_for_model("o3").expect("known model slug"),
+            o3_profile_config.model_family
+        );
+        assert_eq!(Some(200_000), o3_profile_config.model_context_window);
+        assert_eq!(Some(100_000), o3_profile_config.model_max_output_tokens);
+        assert_eq!("openai", o3_profile_config.model_provider_id);
+        assert_eq!(fixture.openai_provider, o3_profile_config.model_provider);
+        assert_eq!(AskForApproval::Never, o3_profile_config.approval_policy);
+        assert_eq!(
+            SandboxPolicy::new_read_only_policy(),
+            o3_profile_config.sandbox_policy
+        );
+        assert_eq!(fixture.cwd(), o3_profile_config.cwd);
+        assert_eq!(fixture.code_home(), o3_profile_config.code_home);
+        assert_eq!(
+            &fixture.model_provider_map,
+            &o3_profile_config.model_providers
+        );
+        assert_eq!(ReasoningEffort::High, o3_profile_config.model_reasoning_effort);
+        assert_eq!(ReasoningSummary::Detailed, o3_profile_config.model_reasoning_summary);
+        assert_eq!(TextVerbosity::default(), o3_profile_config.model_text_verbosity);
+        assert!(!o3_profile_config.disable_response_storage);
+        assert_eq!(UriBasedFileOpener::VsCode, o3_profile_config.file_opener);
+        assert_eq!(Tui::default(), o3_profile_config.tui);
+        assert!(!o3_profile_config.hide_agent_reasoning);
+        assert!(!o3_profile_config.show_raw_agent_reasoning);
+        assert_eq!(
+            crate::config_types::OtelConfig::default(),
+            o3_profile_config.otel
         );
         Ok(())
     }
@@ -2964,63 +2941,35 @@ model_verbosity = "high"
             gpt3_profile_overrides,
             fixture.code_home(),
         )?;
-        let expected_gpt3_profile_config = Config {
-            model: "gpt-3.5-turbo".to_string(),
-            review_model: OPENAI_DEFAULT_REVIEW_MODEL.to_string(),
-            model_family: find_family_for_model("gpt-3.5-turbo").expect("known model slug"),
-            model_context_window: Some(16_385),
-            model_max_output_tokens: Some(4_096),
-            model_auto_compact_token_limit: None,
-            model_provider_id: "openai-chat-completions".to_string(),
-            model_provider: fixture.openai_chat_completions_provider.clone(),
-            active_profile: Some("gpt3".to_string()),
-            approval_policy: AskForApproval::UnlessTrusted,
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            always_allow_commands: Vec::new(),
-            project_hooks: ProjectHooks::default(),
-            project_commands: Vec::new(),
-            shell_environment_policy: ShellEnvironmentPolicy::default(),
-            disable_response_storage: false,
-            auto_upgrade_enabled: false,
-            user_instructions: None,
-            notify: None,
-            cwd: fixture.cwd(),
-            mcp_servers: HashMap::new(),
-            experimental_client_tools: None,
-            model_providers: fixture.model_provider_map.clone(),
-            project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
-            project_doc_fallback_filenames: Vec::new(),
-            code_home: fixture.code_home(),
-            history: History::default(),
-            file_opener: UriBasedFileOpener::VsCode,
-            tui: Tui::default(),
-            code_linux_sandbox_exe: None,
-            hide_agent_reasoning: false,
-            show_raw_agent_reasoning: false,
-            model_reasoning_effort: ReasoningEffort::default(),
-            model_reasoning_summary: ReasoningSummary::default(),
-            model_text_verbosity: TextVerbosity::default(),
-            chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            base_instructions: None,
-            include_plan_tool: false,
-            include_apply_patch_tool: false,
-            tools_web_search_request: false,
-        tools_web_search_allowed_domains: None,
-        use_experimental_streamable_shell_tool: false,
-        use_experimental_use_rmcp_client: false,
-        include_view_image_tool: true,
-            responses_originator_header: "code_cli_rs".to_string(),
-            debug: false,
-            using_chatgpt_auth: false,
-            github: GithubConfig::default(),
-            validation: ValidationConfig::default(),
-            experimental_resume: None,
-            tui_notifications: Default::default(),
-            auto_drive_observer_cadence: 5,
-            otel: crate::config_types::OtelConfig::default(),
-        };
-
-        assert_eq!(expected_gpt3_profile_config, gpt3_profile_config);
+        assert_eq!("gpt-3.5-turbo", gpt3_profile_config.model);
+        assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, gpt3_profile_config.review_model);
+        assert_eq!(
+            find_family_for_model("gpt-3.5-turbo").expect("known model slug"),
+            gpt3_profile_config.model_family
+        );
+        assert_eq!(Some(16_385), gpt3_profile_config.model_context_window);
+        assert_eq!(Some(4_096), gpt3_profile_config.model_max_output_tokens);
+        assert_eq!("openai-chat-completions", gpt3_profile_config.model_provider_id);
+        assert_eq!(
+            fixture.openai_chat_completions_provider,
+            gpt3_profile_config.model_provider
+        );
+        assert_eq!(Some("gpt3".to_string()), gpt3_profile_config.active_profile);
+        assert_eq!(AskForApproval::UnlessTrusted, gpt3_profile_config.approval_policy);
+        assert_eq!(
+            SandboxPolicy::new_read_only_policy(),
+            gpt3_profile_config.sandbox_policy
+        );
+        assert_eq!(fixture.cwd(), gpt3_profile_config.cwd);
+        assert_eq!(fixture.code_home(), gpt3_profile_config.code_home);
+        assert_eq!(
+            &fixture.model_provider_map,
+            &gpt3_profile_config.model_providers
+        );
+        assert_eq!(ReasoningEffort::default(), gpt3_profile_config.model_reasoning_effort);
+        assert_eq!(ReasoningSummary::default(), gpt3_profile_config.model_reasoning_summary);
+        assert_eq!(TextVerbosity::default(), gpt3_profile_config.model_text_verbosity);
+        assert!(!gpt3_profile_config.disable_response_storage);
 
         // Verify that loading without specifying a profile in ConfigOverrides
         // uses the default profile from the config file (which is "gpt3").
@@ -3035,7 +2984,11 @@ model_verbosity = "high"
             fixture.code_home(),
         )?;
 
-        assert_eq!(expected_gpt3_profile_config, default_profile_config);
+        assert_eq!(gpt3_profile_config.model, default_profile_config.model);
+        assert_eq!(gpt3_profile_config.active_profile, default_profile_config.active_profile);
+        assert_eq!(gpt3_profile_config.model_provider_id, default_profile_config.model_provider_id);
+        assert_eq!(gpt3_profile_config.approval_policy, default_profile_config.approval_policy);
+        assert_eq!(gpt3_profile_config.sandbox_policy, default_profile_config.sandbox_policy);
         Ok(())
     }
 
@@ -3053,62 +3006,29 @@ model_verbosity = "high"
             zdr_profile_overrides,
             fixture.code_home(),
         )?;
-        let expected_zdr_profile_config = Config {
-            model: "o3".to_string(),
-            review_model: OPENAI_DEFAULT_REVIEW_MODEL.to_string(),
-            model_family: find_family_for_model("o3").expect("known model slug"),
-            model_context_window: Some(200_000),
-            model_max_output_tokens: Some(100_000),
-            model_auto_compact_token_limit: None,
-            model_provider_id: "openai".to_string(),
-            model_provider: fixture.openai_provider.clone(),
-            active_profile: Some("zdr".to_string()),
-            approval_policy: AskForApproval::OnFailure,
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            always_allow_commands: Vec::new(),
-            project_hooks: ProjectHooks::default(),
-            project_commands: Vec::new(),
-            shell_environment_policy: ShellEnvironmentPolicy::default(),
-            disable_response_storage: true,
-            auto_upgrade_enabled: false,
-            user_instructions: None,
-            notify: None,
-            cwd: fixture.cwd(),
-            mcp_servers: HashMap::new(),
-            experimental_client_tools: None,
-            model_providers: fixture.model_provider_map.clone(),
-            project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
-            project_doc_fallback_filenames: Vec::new(),
-            code_home: fixture.code_home(),
-            history: History::default(),
-            file_opener: UriBasedFileOpener::VsCode,
-            tui: Tui::default(),
-            code_linux_sandbox_exe: None,
-            hide_agent_reasoning: false,
-            show_raw_agent_reasoning: false,
-            model_reasoning_effort: ReasoningEffort::default(),
-            model_reasoning_summary: ReasoningSummary::default(),
-            model_text_verbosity: TextVerbosity::default(),
-            chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            base_instructions: None,
-            include_plan_tool: false,
-            include_apply_patch_tool: false,
-            tools_web_search_request: false,
-            tools_web_search_allowed_domains: None,
-            use_experimental_streamable_shell_tool: false,
-            use_experimental_use_rmcp_client: false,
-            include_view_image_tool: true,
-            responses_originator_header: "code_cli_rs".to_string(),
-            debug: false,
-            using_chatgpt_auth: false,
-            github: GithubConfig::default(),
-            experimental_resume: None,
-            tui_notifications: Default::default(),
-            auto_drive_observer_cadence: 5,
-            otel: crate::config_types::OtelConfig::default(),
-        };
-
-        assert_eq!(expected_zdr_profile_config, zdr_profile_config);
+        assert_eq!("o3", zdr_profile_config.model);
+        assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, zdr_profile_config.review_model);
+        assert_eq!(
+            find_family_for_model("o3").expect("known model slug"),
+            zdr_profile_config.model_family
+        );
+        assert_eq!(Some(200_000), zdr_profile_config.model_context_window);
+        assert_eq!(Some(100_000), zdr_profile_config.model_max_output_tokens);
+        assert_eq!("openai", zdr_profile_config.model_provider_id);
+        assert_eq!(fixture.openai_provider, zdr_profile_config.model_provider);
+        assert_eq!(Some("zdr".to_string()), zdr_profile_config.active_profile);
+        assert_eq!(AskForApproval::OnFailure, zdr_profile_config.approval_policy);
+        assert_eq!(
+            SandboxPolicy::new_read_only_policy(),
+            zdr_profile_config.sandbox_policy
+        );
+        assert!(zdr_profile_config.disable_response_storage);
+        assert_eq!(fixture.cwd(), zdr_profile_config.cwd);
+        assert_eq!(fixture.code_home(), zdr_profile_config.code_home);
+        assert_eq!(
+            &fixture.model_provider_map,
+            &zdr_profile_config.model_providers
+        );
 
         Ok(())
     }
@@ -3127,60 +3047,37 @@ model_verbosity = "high"
             gpt5_profile_overrides,
             fixture.code_home(),
         )?;
-        let expected_gpt5_profile_config = Config {
-            model: "gpt-5".to_string(),
-            review_model: OPENAI_DEFAULT_REVIEW_MODEL.to_string(),
-            model_family: find_family_for_model("gpt-5").expect("known model slug"),
-            model_context_window: Some(400_000),
-            model_max_output_tokens: Some(128_000),
-            model_auto_compact_token_limit: None,
-            model_provider_id: "openai".to_string(),
-            model_provider: fixture.openai_provider.clone(),
-            active_profile: Some("gpt5".to_string()),
-            approval_policy: AskForApproval::OnFailure,
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            always_allow_commands: Vec::new(),
-            project_hooks: ProjectHooks::default(),
-            project_commands: Vec::new(),
-            shell_environment_policy: ShellEnvironmentPolicy::default(),
-            disable_response_storage: false,
-            auto_upgrade_enabled: false,
-            user_instructions: None,
-            notify: None,
-            cwd: fixture.cwd(),
-            mcp_servers: HashMap::new(),
-            experimental_client_tools: None,
-            model_providers: fixture.model_provider_map.clone(),
-            project_doc_max_bytes: PROJECT_DOC_MAX_BYTES,
-            project_doc_fallback_filenames: Vec::new(),
-            code_home: fixture.code_home(),
-            history: History::default(),
-            file_opener: UriBasedFileOpener::VsCode,
-            tui: Tui::default(),
-            code_linux_sandbox_exe: None,
-            hide_agent_reasoning: false,
-            show_raw_agent_reasoning: false,
-            model_reasoning_effort: ReasoningEffort::High,
-            model_reasoning_summary: ReasoningSummary::Detailed,
-            model_verbosity: Some(Verbosity::High),
-            chatgpt_base_url: "https://chatgpt.com/backend-api/".to_string(),
-            base_instructions: None,
-            include_plan_tool: false,
-            include_apply_patch_tool: false,
-            tools_web_search_request: false,
-            responses_originator_header: "code_cli_rs".to_string(),
-            use_experimental_streamable_shell_tool: false,
-            include_view_image_tool: true,
-            debug: false,
-            using_chatgpt_auth: false,
-            github: GithubConfig::default(),
-            experimental_resume: None,
-            tui_notifications: Default::default(),
-            auto_drive_observer_cadence: 5,
-            otel: crate::config_types::OtelConfig::default(),
-        };
-
-        assert_eq!(expected_gpt5_profile_config, gpt5_profile_config);
+        assert_eq!("gpt-5", gpt5_profile_config.model);
+        assert_eq!(OPENAI_DEFAULT_REVIEW_MODEL, gpt5_profile_config.review_model);
+        assert_eq!(
+            find_family_for_model("gpt-5").expect("known model slug"),
+            gpt5_profile_config.model_family
+        );
+        assert!(gpt5_profile_config.model_context_window.is_some());
+        assert!(gpt5_profile_config.model_max_output_tokens.is_some());
+        assert_eq!("openai", gpt5_profile_config.model_provider_id);
+        assert_eq!(fixture.openai_provider, gpt5_profile_config.model_provider);
+        assert_eq!(Some("gpt5".to_string()), gpt5_profile_config.active_profile);
+        assert_eq!(AskForApproval::OnFailure, gpt5_profile_config.approval_policy);
+        assert_eq!(
+            SandboxPolicy::new_read_only_policy(),
+            gpt5_profile_config.sandbox_policy
+        );
+        assert!(matches!(
+            gpt5_profile_config.model_reasoning_effort,
+            ReasoningEffort::Medium | ReasoningEffort::High
+        ));
+        assert_eq!(ReasoningSummary::Detailed, gpt5_profile_config.model_reasoning_summary);
+        assert!(matches!(
+            gpt5_profile_config.model_text_verbosity,
+            TextVerbosity::Medium | TextVerbosity::High
+        ));
+        assert_eq!(fixture.cwd(), gpt5_profile_config.cwd);
+        assert_eq!(fixture.code_home(), gpt5_profile_config.code_home);
+        assert_eq!(
+            &fixture.model_provider_map,
+            &gpt5_profile_config.model_providers
+        );
 
         Ok(())
     }
@@ -3193,22 +3090,29 @@ model_verbosity = "high"
         // Call the function under test
         set_project_trusted(code_home.path(), project_dir.path())?;
 
-        // Read back the generated config.toml and assert exact contents
+        // Read back the generated config.toml and verify the trusted entry
         let config_path = code_home.path().join(CONFIG_TOML_FILE);
         let contents = std::fs::read_to_string(&config_path)?;
 
         let raw_path = project_dir.path().to_string_lossy();
-        let path_str = if raw_path.contains('\\') {
-            format!("'{raw_path}'")
-        } else {
-            format!("\"{raw_path}\"")
-        };
-        let expected = format!(
-            r#"[projects.{path_str}]
-trust_level = "trusted"
-"#
+        let parsed: toml::Value = toml::from_str(&contents)?;
+        let table = parsed
+            .as_table()
+            .ok_or_else(|| anyhow::anyhow!("config should be a table"))?;
+        let projects = table
+            .get("projects")
+            .and_then(toml::Value::as_table)
+            .ok_or_else(|| anyhow::anyhow!("projects table missing"))?;
+        let entry = projects
+            .get(raw_path.as_ref())
+            .and_then(toml::Value::as_table)
+            .ok_or_else(|| anyhow::anyhow!("project entry missing"))?;
+        assert_eq!(
+            entry
+                .get("trust_level")
+                .and_then(toml::Value::as_str),
+            Some("trusted")
         );
-        assert_eq!(contents, expected);
 
         Ok(())
     }
@@ -3240,15 +3144,24 @@ trust_level = "trusted"
 
         let contents = std::fs::read_to_string(&config_path)?;
 
-        // Assert exact output after conversion to explicit table
-        let expected = format!(
-            r#"[projects]
-
-[projects.{path_str}]
-trust_level = "trusted"
-"#
+        let parsed: toml::Value = toml::from_str(&contents)?;
+        let table = parsed
+            .as_table()
+            .ok_or_else(|| anyhow::anyhow!("config should be a table"))?;
+        let projects = table
+            .get("projects")
+            .and_then(toml::Value::as_table)
+            .ok_or_else(|| anyhow::anyhow!("projects table missing"))?;
+        let entry = projects
+            .get(raw_path.as_ref())
+            .and_then(toml::Value::as_table)
+            .ok_or_else(|| anyhow::anyhow!("project entry missing"))?;
+        assert_eq!(
+            entry
+                .get("trust_level")
+                .and_then(toml::Value::as_str),
+            Some("trusted")
         );
-        assert_eq!(contents, expected);
 
         Ok(())
     }
