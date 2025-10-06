@@ -38,7 +38,7 @@ Compares codex-rs vs code-rs on a per-crate basis.
 - Summary report: `.github/auto/upstream-diffs/SUMMARY.md`
 
 **What it tracks:**
-- Line-by-line differences between matching crates
+- Line-by-line differences between matching crates (after normalizing branding like `code-*` → `codex-*` and ignoring `.DS_Store` noise)
 - Added/removed lines count
 - Files present in one tree but not the other
 
