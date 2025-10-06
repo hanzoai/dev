@@ -96,6 +96,8 @@ mod agent_install_helpers;
 // Internal vt100-based replay tests live as a separate source file to keep them
 // close to the widget code. Include them in unit tests.
 mod updates;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_backend;
 
 pub use cli::Cli;
 pub use self::markdown_render::render_markdown_text;
@@ -104,10 +106,66 @@ pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 #[cfg(feature = "test-helpers")]
 pub mod test_helpers {
     pub use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
+    #[cfg(test)]
+    pub use crate::test_backend::VT100Backend;
 
     use crate::app_event::AppEvent;
     use code_core::history::state::HistoryRecord;
     use std::time::Duration;
+
+    use std::io::Write;
+
+    /// Render successive frames of the chat widget into a VT100-backed terminal.
+    /// Each entry in `frames` specifies the `(width, height)` for that capture.
+    /// Returns a vector of screen dumps, one per frame.
+    pub fn render_chat_widget_frames_to_vt100(
+        harness: &mut ChatWidgetHarness,
+        frames: &[(u16, u16)],
+    ) -> Vec<String> {
+        use crate::test_backend::VT100Backend;
+
+        frames
+            .iter()
+            .map(|&(width, height)| {
+                harness.flush_into_widget();
+
+                let backend = VT100Backend::new(width, height);
+                let mut terminal = ratatui::Terminal::new(backend).expect("create terminal");
+
+                terminal
+                    .draw(|frame| {
+                        let area = frame.area();
+                        let chat_widget = harness.chat();
+                        frame.render_widget_ref(&*chat_widget, area);
+                    })
+                    .expect("draw");
+
+                terminal.backend_mut().flush().expect("flush");
+
+                let screen = terminal.backend().vt100().screen();
+                let (rows, cols) = screen.size();
+                let snapshot = screen
+                    .rows(0, cols)
+                    .take(rows.into())
+                    .map(|row| row.trim_end().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                snapshot
+            })
+            .collect()
+    }
+
+    /// Convenience helper to capture a single VT100 frame at the provided size.
+    pub fn render_chat_widget_to_vt100(
+        harness: &mut ChatWidgetHarness,
+        width: u16,
+        height: u16,
+    ) -> String {
+        render_chat_widget_frames_to_vt100(harness, &[(width, height)])
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+    }
 
     pub fn assert_has_terminal_chunk_containing(
         harness: &mut ChatWidgetHarness,
@@ -184,7 +242,7 @@ pub mod test_helpers {
         crate::chatwidget::smoke_helpers::assert_no_events(&events);
     }
 
-    pub fn history_records(harness: &ChatWidgetHarness) -> Vec<HistoryRecord> {
+    pub fn history_records(harness: &mut ChatWidgetHarness) -> Vec<HistoryRecord> {
         harness.history_records()
     }
 }

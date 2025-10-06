@@ -503,7 +503,7 @@ fn smoke_exec_command_stream() {
         }),
     });
 
-    let records = code_tui::test_helpers::history_records(&harness);
+    let records = code_tui::test_helpers::history_records(&mut harness);
     let exec_record = records
         .into_iter()
         .find_map(|record| match record {
@@ -548,7 +548,7 @@ fn smoke_approval_flow() {
         }),
     });
 
-    let records = code_tui::test_helpers::history_records(&harness);
+    let records = code_tui::test_helpers::history_records(&mut harness);
     let patch_record = records
         .into_iter()
         .find_map(|record| match record {
