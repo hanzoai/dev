@@ -1302,6 +1302,7 @@ mod tests {
                 history_log_id: 0,
                 history_entry_count: 0,
             }),
+            order: None,
         };
         let serialized = serde_json::to_string(&event).unwrap();
         assert_eq!(

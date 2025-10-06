@@ -72,7 +72,45 @@ struct Error {
 }
 
 fn try_parse_retry_after(err: &Error) -> Option<std::time::Duration> {
-    err.resets_in_seconds.map(std::time::Duration::from_secs)
+    if let Some(seconds) = err.resets_in_seconds {
+        return Some(std::time::Duration::from_secs(seconds));
+    }
+
+    let message = err.message.as_deref()?;
+    let needle = "Please try again in ";
+    let start = message.find(needle)? + needle.len();
+    let rest = &message[start..];
+
+    let mut value = String::new();
+    let mut unit = String::new();
+    for ch in rest.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            if unit.is_empty() {
+                value.push(ch);
+                continue;
+            }
+            break;
+        } else if ch.is_ascii_alphabetic() {
+            unit.push(ch);
+        } else if !value.is_empty() && !unit.is_empty() {
+            break;
+        } else if !value.is_empty() {
+            break;
+        }
+    }
+
+    if value.is_empty() {
+        return None;
+    }
+
+    match unit.as_str() {
+        "ms" => value
+            .parse::<f64>()
+            .ok()
+            .map(|ms| std::time::Duration::from_millis(ms as u64)),
+        "s" | "sec" | "secs" | "seconds" => value.parse::<f64>().ok().map(std::time::Duration::from_secs_f64),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]

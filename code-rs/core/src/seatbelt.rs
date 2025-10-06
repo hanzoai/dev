@@ -167,6 +167,7 @@ mod tests {
             network_access: false,
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: true,
+            allow_git_writes: false,
         };
 
         let args = create_seatbelt_command_args(
@@ -242,6 +243,7 @@ mod tests {
             network_access: false,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
+            allow_git_writes: false,
         };
 
         let args = create_seatbelt_command_args(
