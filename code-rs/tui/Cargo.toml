@@ -59,6 +59,7 @@ ratatui = { version = "0.29.0", features = [
     "unstable-rendered-line-info",
     "unstable-widget-ref",
     "underline-color",
+    "unstable-backend-writer",
 ] }
 ratatui-image = "8.0.0"
 regex-lite = "0.1"

@@ -7,6 +7,7 @@ use crate::tui::TerminalInfo;
 use code_core::history::state::HistoryRecord;
 use code_core::config::{Config, ConfigOverrides, ConfigToml};
 use code_core::protocol::Event;
+use std::collections::VecDeque;
 use once_cell::sync::Lazy;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -62,6 +63,55 @@ impl ChatWidgetHarness {
         self.chat.handle_code_event(event);
     }
 
+    pub(crate) fn flush_into_widget(&mut self) {
+        let mut queue: VecDeque<AppEvent> = self.drain_events().into();
+        if queue.is_empty() {
+            return;
+        }
+
+        let mut debug = Vec::new();
+        while let Some(event) = queue.pop_front() {
+            match event {
+                AppEvent::InsertHistory(lines) => {
+                    debug.push("InsertHistory");
+                    self.chat.insert_history_lines(lines);
+                }
+                AppEvent::InsertHistoryWithKind { id, kind, lines } => {
+                    debug.push("InsertHistoryWithKind");
+                    self.chat.insert_history_lines_with_kind(kind, id, lines);
+                }
+                AppEvent::InsertFinalAnswer { id, lines, source } => {
+                    debug.push("InsertFinalAnswer");
+                    self.chat.insert_final_answer_with_id(id, lines, source);
+                }
+                AppEvent::InsertBackgroundEvent { message, placement, order } => {
+                    debug.push("InsertBackgroundEvent");
+                    self.chat
+                        .insert_background_event_with_placement(message, placement, order);
+                }
+                AppEvent::CommitTick => {
+                    debug.push("CommitTick");
+                    self.chat.on_commit_tick();
+                    let newly_emitted = self.drain_events();
+                    if !newly_emitted.is_empty() {
+                        queue.extend(newly_emitted);
+                    }
+                }
+                AppEvent::StartCommitAnimation => {
+                    debug.push("StartCommitAnimation");
+                }
+                AppEvent::StopCommitAnimation => {
+                    debug.push("StopCommitAnimation");
+                }
+                // Other events are either no-ops for VT100 rendering or handled elsewhere.
+                _ => {}
+            }
+        }
+        if !debug.is_empty() {
+            println!("flush events: {debug:?}");
+        }
+    }
+
     pub(crate) fn drain_events(&self) -> Vec<AppEvent> {
         let mut out = Vec::new();
         while let Ok(ev) = self.events.try_recv() {
@@ -102,7 +152,8 @@ impl ChatWidgetHarness {
         collected
     }
 
-    pub(crate) fn history_records(&self) -> Vec<HistoryRecord> {
+    pub(crate) fn history_records(&mut self) -> Vec<HistoryRecord> {
+        self.flush_into_widget();
         self.chat.history_state.records.clone()
     }
 }
