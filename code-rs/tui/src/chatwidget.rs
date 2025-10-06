@@ -2147,6 +2147,66 @@ impl ChatWidget<'_> {
         }
     }
 
+    #[inline]
+    fn overall_task_status_for(agents: &[AgentInfo]) -> &'static str {
+        if agents.is_empty() {
+            "preparing"
+        } else if agents
+            .iter()
+            .any(|a| matches!(a.status, AgentStatus::Running))
+        {
+            "running"
+        } else if agents
+            .iter()
+            .all(|a| matches!(a.status, AgentStatus::Completed))
+        {
+            "complete"
+        } else if agents
+            .iter()
+            .any(|a| matches!(a.status, AgentStatus::Failed))
+        {
+            "failed"
+        } else if agents
+            .iter()
+            .any(|a| matches!(a.status, AgentStatus::Cancelled))
+        {
+            "cancelled"
+        } else {
+            "planning"
+        }
+    }
+
+    /// Mark all tracked agents as having reached a terminal state when a turn finishes.
+    fn finalize_agent_activity(&mut self) {
+        if self.active_agents.is_empty()
+            && self.agent_runtime.is_empty()
+            && self.agents_terminal.entries.is_empty()
+        {
+            self.agents_ready_to_start = false;
+            return;
+        }
+
+        for agent in self.active_agents.iter_mut() {
+            if matches!(agent.status, AgentStatus::Pending | AgentStatus::Running) {
+                agent.status = AgentStatus::Completed;
+            }
+        }
+
+        for entry in self.agents_terminal.entries.values_mut() {
+            if matches!(entry.status, AgentStatus::Pending | AgentStatus::Running) {
+                entry.status = AgentStatus::Completed;
+                entry.push_log(
+                    AgentLogKind::Status,
+                    format!("Status → {}", agent_status_label(AgentStatus::Completed)),
+                );
+            }
+        }
+
+        self.agents_ready_to_start = false;
+        let status = Self::overall_task_status_for(&self.active_agents);
+        self.overall_task_status = status.to_string();
+    }
+
 
     fn remove_background_completion_message(&mut self, call_id: &str) {
         if let Some(idx) = self.history_cells.iter().rposition(|cell| {
@@ -8542,6 +8602,7 @@ impl ChatWidget<'_> {
                 // observed the corresponding TaskComplete event. Clear the active marker now so
                 // the status spinner can hide promptly when nothing else is running.
                 self.active_task_ids.remove(&id);
+                self.finalize_agent_activity();
                 self.maybe_hide_spinner();
                 // Important: do not advance Auto Drive here. The StreamController will emit
                 // AppEvent::InsertFinalAnswer, and the App thread will finalize the assistant
@@ -8786,8 +8847,8 @@ impl ChatWidget<'_> {
                         self.auto_handle_post_turn_review(cfg);
                     }
                 }
-                // Defensive: clear transient agents-preparing state
-                self.agents_ready_to_start = false;
+                // Defensive: mark any lingering agent state as complete so the spinner can quiesce
+                self.finalize_agent_activity();
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
                 self.finalize_all_running_due_to_answer();
                 // Mark any running web searches as completed
@@ -9894,39 +9955,20 @@ impl ChatWidget<'_> {
                 }
 
                 // Update overall task status based on agent states
-                self.overall_task_status = if self.active_agents.is_empty() {
-                    "preparing".to_string()
-                } else if self
+                let status = Self::overall_task_status_for(&self.active_agents);
+                self.overall_task_status = status.to_string();
+
+                let agents_still_active = self
                     .active_agents
                     .iter()
-                    .any(|a| matches!(a.status, AgentStatus::Running))
-                {
-                    "running".to_string()
-                } else if self
-                    .active_agents
-                    .iter()
-                    .all(|a| matches!(a.status, AgentStatus::Completed))
-                {
-                    "complete".to_string()
-                } else if self
-                    .active_agents
-                    .iter()
-                    .any(|a| matches!(a.status, AgentStatus::Failed))
-                {
-                    "failed".to_string()
-                } else if self
-                    .active_agents
-                    .iter()
-                    .any(|a| matches!(a.status, AgentStatus::Cancelled))
-                {
-                    "cancelled".to_string()
-                } else {
-                    "planning".to_string()
-                };
+                    .any(|a| matches!(a.status, AgentStatus::Pending | AgentStatus::Running));
+                if agents_still_active {
+                    self.bottom_pane.set_task_running(true);
+                }
 
                 // Reflect concise agent status in the input border
                 let count = self.active_agents.len();
-                let msg = match self.overall_task_status.as_str() {
+                let msg = match status {
                     "preparing" => format!("agents: preparing ({} ready)", count),
                     "running" => format!("agents: running ({})", count),
                     "complete" => format!("agents: complete ({} ok)", count),
@@ -18925,6 +18967,8 @@ mod tests {
         TextTone,
     };
     use code_core::protocol::OrderMeta;
+    use code_core::protocol::{AgentMessageEvent, AgentStatusUpdateEvent, Event, EventMsg};
+    use code_core::protocol::AgentInfo as CoreAgentInfo;
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
     use ratatui::Terminal;
@@ -19031,6 +19075,156 @@ mod tests {
                 HistoryCellType::Assistant,
             ],
             "assistant output should appear after existing background cells",
+        );
+    }
+
+    #[test]
+    fn final_answer_clears_spinner_when_agent_never_reports_terminal_status() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        let turn_id = "turn-1".to_string();
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                agents: vec![CoreAgentInfo {
+                    id: "agent-1".to_string(),
+                    name: "Todo Agent".to_string(),
+                    status: "running".to_string(),
+                    batch_id: None,
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                }],
+                context: None,
+                task: None,
+            }),
+            order: None,
+        });
+
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "spinner should remain active while the agent reports running"
+        );
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 2,
+            msg: EventMsg::AgentMessage(AgentMessageEvent {
+                message: "Completed todo items.".to_string(),
+            }),
+            order: None,
+        });
+
+        assert!(
+            !chat.bottom_pane.is_task_running(),
+            "spinner should clear once the final answer arrives even without a terminal status update"
+        );
+
+        assert_eq!(chat.overall_task_status, "complete".to_string());
+
+        assert!(
+            chat
+                .agent_runtime
+                .values()
+                .all(|rt| rt.completed_at.is_none()),
+            "runtime should remain incomplete until backend reports a terminal status"
+        );
+
+        assert!(
+            chat
+                .active_agents
+                .iter()
+                .all(|agent| !matches!(agent.status, AgentStatus::Pending | AgentStatus::Running)),
+            "agents should be forced into a terminal status after the answer completes"
+        );
+    }
+
+    #[test]
+    fn spinner_rearms_when_late_agent_update_reports_running() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        let turn_id = "turn-1".to_string();
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 1,
+            msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                agents: vec![CoreAgentInfo {
+                    id: "agent-1".to_string(),
+                    name: "Todo Agent".to_string(),
+                    status: "running".to_string(),
+                    batch_id: None,
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                }],
+                context: None,
+                task: None,
+            }),
+            order: None,
+        });
+
+        assert!(chat.bottom_pane.is_task_running(), "spinner should be running initially");
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 2,
+            msg: EventMsg::AgentMessage(AgentMessageEvent {
+                message: "Completed todo items.".to_string(),
+            }),
+            order: None,
+        });
+
+        assert!(
+            !chat.bottom_pane.is_task_running(),
+            "final answer should clear the spinner when no terminal update arrives"
+        );
+
+        chat.handle_code_event(Event {
+            id: turn_id.clone(),
+            event_seq: 3,
+            msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+                agents: vec![CoreAgentInfo {
+                    id: "agent-1".to_string(),
+                    name: "Todo Agent".to_string(),
+                    status: "running".to_string(),
+                    batch_id: None,
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                }],
+                context: None,
+                task: None,
+            }),
+            order: None,
+        });
+
+        assert!(
+            chat.bottom_pane.is_task_running(),
+            "late running update should re-enable the spinner"
         );
     }
 
