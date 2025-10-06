@@ -61,6 +61,7 @@ use toml_edit::ArrayOfTables as TomlArrayOfTables;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
 use toml_edit::Table as TomlTable;
+use which::which;
 
 const OPENAI_DEFAULT_MODEL: &str = "gpt-5-codex";
 const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5-codex";
@@ -386,10 +387,27 @@ pub fn load_global_mcp_servers(
         return Ok(BTreeMap::new());
     };
 
-    servers_value
+    let servers: BTreeMap<String, McpServerConfig> = servers_value
         .clone()
         .try_into()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    for (name, cfg) in &servers {
+        if let McpServerTransportConfig::Stdio { command, .. } = &cfg.transport {
+            let command_looks_like_path = {
+                let path = Path::new(command);
+                path.components().count() > 1 || path.is_absolute()
+            };
+            if !command_looks_like_path && which(command).is_err() {
+                let msg = format!(
+                    "MCP server `{name}` command `{command}` not found on PATH. If the server is an npm package, set command = \"npx\" and keep the package name in args."
+                );
+                return Err(std::io::Error::new(ErrorKind::NotFound, msg));
+            }
+        }
+    }
+
+    Ok(servers)
 }
 
 pub fn write_global_mcp_servers(
@@ -2606,6 +2624,35 @@ exclude_slash_tmp = true
         write_global_mcp_servers(code_home.path(), &empty)?;
         let loaded = load_global_mcp_servers(code_home.path())?;
         assert!(loaded.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn load_global_mcp_servers_rejects_missing_command() -> anyhow::Result<()> {
+        let code_home = TempDir::new()?;
+        let config_path = code_home.path().join(CONFIG_TOML_FILE);
+
+        std::fs::write(
+            &config_path,
+            r#"[mcp_servers.context7-mcp]
+command = "nonexistent-cmd"
+args = ["-y", "@upstash/context7-mcp"]
+"#,
+        )?;
+
+        let err = load_global_mcp_servers(code_home.path())
+            .expect_err("missing executables should surface a readable error");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("context7-mcp"),
+            "expected server name in error, got: {msg}"
+        );
+        assert!(
+            msg.contains("command = \"npx\""),
+            "expected hint suggesting command = \"npx\", got: {msg}"
+        );
 
         Ok(())
     }
