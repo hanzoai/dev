@@ -103,6 +103,11 @@ impl ComposerInput {
         WidgetRef::render_ref(&self.inner, area, buf);
     }
 
+    /// Return the current text contents of the composer.
+    pub fn text(&self) -> &str {
+        self.inner.text()
+    }
+
     /// Return true if a paste-burst detection is currently active.
     pub fn is_in_paste_burst(&self) -> bool {
         self.inner.is_in_paste_burst()
