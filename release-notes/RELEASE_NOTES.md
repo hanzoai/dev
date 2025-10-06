@@ -1,14 +1,12 @@
-## @just-every/code v0.2.184
+## @just-every/code v0.2.187
 
-This update sharpens model selection and exec visibility while adding clearer server diagnostics.
+This release locks in reliable history playback and keeps session resumes steady for enterprise teams.
 
 ### Changes
 
-- Core: Record pid alongside port in server info to simplify local process debugging.
-- CLI: Support CODEX_API_KEY in `codex exec` so credentials can be set via environment.
-- TUI: Make the model switcher a two-stage flow to prevent accidental model swaps.
-- TUI: Surface live context window usage while tasks run to clarify token budgets.
-- TUI: Show a placeholder when commands produce no output to keep history legible.
+- TUI: Maintain strict streaming order and stable scrollback so history stays put while answers land.
+- CLI: Prefer rollout `.jsonl` transcripts when resuming sessions so `code resume` stays reliable after snapshots.
+- Core/Auth: Automatically use stored API keys for enterprise ChatGPT plans and honor retry hints from rate-limit errors.
 
 ### Install
 
@@ -17,4 +15,4 @@ npm install -g @just-every/code@latest
 code
 ```
 
-Compare: https://github.com/just-every/code/compare/v0.2.183...v0.2.184
+Compare: https://github.com/just-every/code/compare/v0.2.186...v0.2.187
