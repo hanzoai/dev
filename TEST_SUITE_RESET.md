@@ -427,7 +427,7 @@ To add new test helpers:
 - `MCPHarness` - Test harness for MCP server interactions (handshake, tool calls)
 - VT100 replay tests - Capture/replay terminal sequences for rendering regression tests
 
-See `docs/migration/tui-gap-report.md` for details on planned test automation.
+Document future automation plans inline here as they evolve; remove stale pointers when work completes.
 
 ---
 
