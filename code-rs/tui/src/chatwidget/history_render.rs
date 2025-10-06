@@ -37,6 +37,9 @@ pub(crate) struct HistoryRenderState {
     pub(crate) last_prefix_count: Cell<usize>,
     pub(crate) last_total_height: Cell<u16>,
     pub(crate) prefix_valid: Cell<bool>,
+    // Row intervals that correspond to inter-cell spacing so we can avoid
+    // landing the viewport on empty gaps when scrolling.
+    spacing_ranges: RefCell<Vec<(u16, u16)>>,
 }
 
 impl HistoryRenderState {
@@ -50,6 +53,7 @@ impl HistoryRenderState {
             last_prefix_count: Cell::new(0),
             last_total_height: Cell::new(0),
             prefix_valid: Cell::new(false),
+            spacing_ranges: RefCell::new(Vec::new()),
         }
     }
 
@@ -59,6 +63,7 @@ impl HistoryRenderState {
         self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
         self.prefix_valid.set(false);
+        self.spacing_ranges.borrow_mut().clear();
     }
 
     pub(crate) fn handle_width_change(&self, width: u16) {
@@ -73,6 +78,7 @@ impl HistoryRenderState {
             self.last_total_height.set(0);
             self.prefix_valid.set(false);
             self.height_cache_last_width.set(width);
+            self.spacing_ranges.borrow_mut().clear();
         }
     }
 
@@ -89,6 +95,7 @@ impl HistoryRenderState {
         self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
         self.prefix_valid.set(false);
+        self.spacing_ranges.borrow_mut().clear();
     }
 
     pub(crate) fn invalidate_all(&self) {
@@ -97,6 +104,7 @@ impl HistoryRenderState {
         self.prefix_sums.borrow_mut().clear();
         self.last_total_height.set(0);
         self.prefix_valid.set(false);
+        self.spacing_ranges.borrow_mut().clear();
     }
 
     pub(crate) fn should_rebuild_prefix(&self, width: u16, count: usize) -> bool {
@@ -127,6 +135,43 @@ impl HistoryRenderState {
         self.last_prefix_count.set(count);
         self.last_total_height.set(total_height);
         self.prefix_valid.set(true);
+    }
+
+    pub(crate) fn update_spacing_ranges(&self, ranges: Vec<(u16, u16)>) {
+        *self.spacing_ranges.borrow_mut() = ranges;
+    }
+
+    pub(crate) fn adjust_scroll_to_content(&self, mut scroll_pos: u16) -> u16 {
+        if scroll_pos == 0 {
+            return scroll_pos;
+        }
+        let ranges = self.spacing_ranges.borrow();
+        if ranges.is_empty() {
+            return scroll_pos;
+        }
+        // Walk backwards until we hit a true cell row or run out of history.
+        loop {
+            let mut adjusted = false;
+            for &(start, end) in ranges.iter() {
+                if start == 0 {
+                    continue;
+                }
+                if scroll_pos >= start && scroll_pos < end {
+                    scroll_pos = start.saturating_sub(1);
+                    adjusted = true;
+                    break;
+                }
+            }
+            if !adjusted || scroll_pos == 0 {
+                break;
+            }
+        }
+        scroll_pos
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spacing_ranges_for_test(&self) -> Vec<(u16, u16)> {
+        self.spacing_ranges.borrow().clone()
     }
 
     pub(crate) fn last_total_height(&self) -> u16 {

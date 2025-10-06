@@ -13,6 +13,7 @@ use code_core::history::state::{
     HistoryRecord,
     HistoryState,
     MessageMetadata,
+    PatchEventType,
 };
 use code_core::protocol::{
     AgentMessageDeltaEvent,
@@ -34,14 +35,7 @@ use code_core::protocol::{
     OrderMeta,
     TokenUsage,
 };
-use code_tui::app_event::AppEvent;
-use code_tui::chatwidget::smoke_helpers::{
-    assert_has_background_event_containing,
-    assert_has_codex_event,
-    assert_has_insert_history,
-    assert_has_terminal_chunk_containing,
-    ChatWidgetHarness,
-};
+use code_tui::test_helpers::ChatWidgetHarness;
 use code_tui::{Cli, ComposerAction, ComposerInput};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mcp_types::CallToolResult;
@@ -470,7 +464,11 @@ fn smoke_exec_command_stream() {
             cwd: PathBuf::from("/tmp"),
             parsed_cmd: Vec::new(),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
     });
 
     harness.handle_event(Event {
@@ -481,7 +479,11 @@ fn smoke_exec_command_stream() {
             stream: ExecOutputStream::Stdout,
             chunk: ByteBuf::from(vec![b'h', b'i', b'\n']),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(1),
+        }),
     });
 
     harness.handle_event(Event {
@@ -494,11 +496,29 @@ fn smoke_exec_command_stream() {
             exit_code: 0,
             duration: Duration::from_millis(20),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(2),
+        }),
     });
 
-    let events = harness.drain_events();
-    assert_has_terminal_chunk_containing(&events, "hi");
+    let records = code_tui::test_helpers::history_records(&harness);
+    let exec_record = records
+        .into_iter()
+        .find_map(|record| match record {
+            HistoryRecord::Exec(record) if record.call_id.as_deref() == Some(&call_id) => Some(record),
+            _ => None,
+        })
+        .expect("exec record present");
+
+    assert_eq!(exec_record.exit_code, Some(0), "exec exit code should be success");
+    let stdout = exec_record
+        .stdout_chunks
+        .iter()
+        .map(|chunk| chunk.content.as_str())
+        .collect::<String>();
+    assert_eq!(stdout, "hi\n", "stdout should include streamed content");
 }
 
 #[test]
@@ -521,11 +541,36 @@ fn smoke_approval_flow() {
             reason: Some("Apply change".into()),
             grant_root: None,
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        }),
     });
 
-    let events = harness.drain_events();
-    assert_has_background_event_containing(&events, "sample.txt");
+    let records = code_tui::test_helpers::history_records(&harness);
+    let patch_record = records
+        .into_iter()
+        .find_map(|record| match record {
+            HistoryRecord::Patch(record) => Some(record),
+            _ => None,
+        })
+        .expect("patch approval record present");
+
+    assert!(
+        matches!(patch_record.patch_type, PatchEventType::ApprovalRequest),
+        "expected approval request patch cell"
+    );
+    let change = patch_record
+        .changes
+        .get(&PathBuf::from("sample.txt"))
+        .expect("change for sample.txt present");
+    match change {
+        FileChange::Add { content } => {
+            assert_eq!(content, "Hello world", "patch change should include file contents");
+        }
+        other => panic!("expected FileChange::Add, got {other:?}"),
+    }
 }
 
 #[test]
@@ -539,7 +584,11 @@ fn smoke_custom_tool_call() {
             tool_name: "browser_navigate".into(),
             parameters: Some(json!({ "url": "https://example.com" })),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        }),
     });
 
     harness.handle_event(Event {
@@ -552,11 +601,14 @@ fn smoke_custom_tool_call() {
             duration: Duration::from_millis(40),
             result: Ok("ok".into()),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(1),
+        }),
     });
 
-    let events = harness.drain_events();
-    assert_has_codex_event(&events);
+    code_tui::test_helpers::assert_has_codex_event(&mut harness);
 }
 
 #[test]
@@ -575,7 +627,11 @@ fn smoke_mcp_tool_invocation() {
             call_id: "mcp-1".into(),
             invocation: invocation.clone(),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        }),
     });
 
     harness.handle_event(Event {
@@ -588,14 +644,17 @@ fn smoke_mcp_tool_invocation() {
             result: Ok(CallToolResult {
                 content: Vec::new(),
                 is_error: Some(false),
-                _meta: None,
+                structured_content: None,
             }),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(1),
+        }),
     });
 
-    let events = harness.drain_events();
-    assert_has_codex_event(&events);
+    code_tui::test_helpers::assert_has_codex_event(&mut harness);
 }
 
 #[test]
@@ -607,7 +666,11 @@ fn smoke_streaming_assistant_message() {
         msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
             delta: "Hello".into(),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        }),
     });
 
     harness.handle_event(Event {
@@ -616,7 +679,11 @@ fn smoke_streaming_assistant_message() {
         msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
             delta: " world".into(),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(1),
+        }),
     });
 
     harness.handle_event(Event {
@@ -625,9 +692,12 @@ fn smoke_streaming_assistant_message() {
         msg: EventMsg::AgentMessage(AgentMessageEvent {
             message: "Hello world".into(),
         }),
-        order: None,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(2),
+        }),
     });
 
-    let events = harness.drain_events();
-    assert_has_insert_history(&events);
+    code_tui::test_helpers::assert_has_insert_history(&mut harness);
 }
