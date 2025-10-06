@@ -1790,6 +1790,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn snapshot_and_restore_round_trip() {
         let mut state = HistoryState::new();
         let first_id = state.push(plain_message("first"));
