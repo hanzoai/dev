@@ -860,6 +860,25 @@ jobs:
           git push origin main
           git push origin --tags || true
 
+      - name: Align release notes header with version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="${{ steps.version.outputs.version }}"
+          notes="release-notes/RELEASE_NOTES.md"
+          if [ ! -f "$notes" ]; then
+            echo "Missing $notes" >&2
+            exit 1
+          fi
+          if grep -q '^## @just-every/code v' "$notes"; then
+            perl -0pi -e "s/^## @just-every\\/code v[^\\n]*/## @just-every\\/code v${ver}/" "$notes"
+          else
+            tmp=$(mktemp)
+            printf '## @just-every/code v%s\n\n' "$ver" > "$tmp"
+            cat "$notes" >> "$tmp"
+            mv "$tmp" "$notes"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
