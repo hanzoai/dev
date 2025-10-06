@@ -74,7 +74,7 @@ mod terminal_handlers;
 mod terminal;
 mod tools;
 mod running_tools;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod smoke_helpers;
 use self::agent_install::{
     start_agent_install_session,
@@ -5366,6 +5366,18 @@ impl ChatWidget<'_> {
         if !is_reasoning_cell {
             self.clear_reasoning_in_progress();
         }
+        let is_background_cell = matches!(cell.kind(), HistoryCellType::BackgroundEvent);
+        let mut key = key;
+        let mut key_bumped = false;
+        if !is_background_cell {
+            if let Some(last) = self.last_assigned_order {
+                if key <= last {
+                    key = Self::order_key_successor(last);
+                    key_bumped = true;
+                }
+            }
+        }
+
         // Determine insertion position across the entire history
         let mut pos = self.history_cells.len();
         for i in 0..self.history_cells.len() {
@@ -5521,6 +5533,15 @@ impl ChatWidget<'_> {
             );
         }
         self.cell_order_seq.insert(pos, key);
+        if key_bumped {
+            if let Some(stream) = self.history_cells[pos]
+                .as_any()
+                .downcast_ref::<crate::history_cell::StreamingContentCell>()
+            {
+                self.stream_order_seq
+                    .insert((StreamKind::Answer, stream.state().stream_id.clone()), key);
+            }
+        }
         self.last_assigned_order = Some(match self.last_assigned_order {
             Some(prev) => prev.max(key),
             None => key,
@@ -5571,7 +5592,7 @@ impl ChatWidget<'_> {
     fn history_insert_existing_record(
         &mut self,
         mut cell: Box<dyn HistoryCell>,
-        key: OrderKey,
+        mut key: OrderKey,
         tag: &'static str,
         id: HistoryId,
     ) -> usize {
@@ -5592,7 +5613,18 @@ impl ChatWidget<'_> {
             .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
             .is_some();
         if !is_reasoning_cell {
-            self.clear_reasoning_in_progress();
+                self.clear_reasoning_in_progress();
+        }
+
+        let is_background_cell = matches!(cell.kind(), HistoryCellType::BackgroundEvent);
+        let mut key_bumped = false;
+        if !is_background_cell {
+            if let Some(last) = self.last_assigned_order {
+                if key <= last {
+                    key = Self::order_key_successor(last);
+                    key_bumped = true;
+                }
+            }
         }
 
         let mut pos = self.history_cells.len();
@@ -5683,6 +5715,15 @@ impl ChatWidget<'_> {
             );
         }
         self.cell_order_seq.insert(pos, key);
+        if key_bumped {
+            if let Some(stream) = self.history_cells[pos]
+                .as_any()
+                .downcast_ref::<crate::history_cell::StreamingContentCell>()
+            {
+                self.stream_order_seq
+                    .insert((StreamKind::Answer, stream.state().stream_id.clone()), key);
+            }
+        }
         self.last_assigned_order = Some(match self.last_assigned_order {
             Some(prev) => prev.max(key),
             None => key,
@@ -15704,7 +15745,7 @@ fi\n\
             "final-answer: ordered insert new AssistantMarkdownCell id={:?}",
             id
         );
-        let key = match id.as_deref() {
+        let mut key = match id.as_deref() {
             Some(rid) => self
                 .try_stream_order_key(StreamKind::Answer, rid)
                 .unwrap_or_else(|| {
@@ -15719,6 +15760,18 @@ fi\n\
                 self.next_internal_key()
             }
         };
+        if let Some(last) = self.last_assigned_order {
+            if key <= last {
+                // Background notices anchor themselves at out = i32::MAX. If a final answer arrives
+                // after those notices we still want it to appear at the bottom, so bump the key
+                // just past the most-recently assigned slot.
+                key = Self::order_key_successor(last);
+                if let Some(ref want) = id {
+                    self.stream_order_seq
+                        .insert((StreamKind::Answer, want.clone()), key);
+                }
+            }
+        }
         tracing::info!(
             "[order] final Answer ordered insert id={:?} {}",
             id,
@@ -18852,6 +18905,445 @@ fi\n\
 
         placeholder_widget.render(area, buf);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
+    use crate::history_cell::HistoryCellType;
+    use code_core::history::state::{
+        AssistantStreamDelta,
+        AssistantStreamState,
+        InlineSpan,
+        MessageLine,
+        MessageLineKind,
+        PlainMessageKind,
+        PlainMessageRole,
+        PlainMessageState,
+        TextEmphasis,
+        TextTone,
+    };
+    use code_core::protocol::OrderMeta;
+    use ratatui::backend::TestBackend;
+    use ratatui::text::Line;
+    use ratatui::Terminal;
+    use std::time::SystemTime;
+
+    fn reset_history(chat: &mut ChatWidget<'_>) {
+        chat.history_cells.clear();
+        chat.history_cell_ids.clear();
+        chat.history_state = HistoryState::new();
+        chat.history_render.invalidate_all();
+        chat.cell_order_seq.clear();
+        chat.cell_order_dbg.clear();
+        chat.ui_background_seq_counters.clear();
+        chat.last_assigned_order = None;
+        chat.last_seen_request_index = 0;
+        chat.current_request_index = 0;
+        chat.internal_seq = 0;
+        chat.synthetic_system_req = None;
+        chat.layout.scroll_offset = 0;
+        chat.layout.last_max_scroll.set(0);
+        chat.layout.last_history_viewport_height.set(0);
+    }
+
+    fn insert_plain_cell(chat: &mut ChatWidget<'_>, lines: &[&str]) {
+        use code_core::history::state::{
+            InlineSpan,
+            MessageLine,
+            MessageLineKind,
+            PlainMessageKind,
+            PlainMessageRole,
+            PlainMessageState,
+            TextEmphasis,
+            TextTone,
+        };
+
+        let state = PlainMessageState {
+            id: HistoryId::ZERO,
+            role: PlainMessageRole::System,
+            kind: PlainMessageKind::Plain,
+            header: None,
+            lines: lines
+                .iter()
+                .map(|text| MessageLine {
+                    kind: MessageLineKind::Paragraph,
+                    spans: vec![InlineSpan {
+                        text: (*text).to_string(),
+                        tone: TextTone::Default,
+                        emphasis: TextEmphasis::default(),
+                        entity: None,
+                    }],
+                })
+                .collect(),
+            metadata: None,
+        };
+
+        let key = chat.next_internal_key();
+        let _ = chat.history_insert_plain_state_with_key(state, key, "test");
+    }
+
+    #[test]
+    fn ordering_keeps_new_answers_after_prior_backgrounds() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        chat.last_seen_request_index = 1;
+        chat.current_request_index = 1;
+        chat.internal_seq = 0;
+
+        chat.push_background_tail("background-one".to_string());
+        chat.push_background_tail("background-two".to_string());
+
+        assert_eq!(chat.history_cells.len(), 2, "expected two background cells");
+
+        let answer_id = "answer-turn-1";
+        let seeded_key = OrderKey {
+            req: 1,
+            out: 1,
+            seq: 0,
+        };
+        chat.seed_stream_order_key(StreamKind::Answer, answer_id, seeded_key);
+
+        let response_text = "assistant-response";
+        chat.insert_final_answer_with_id(
+            Some(answer_id.to_string()),
+            vec![Line::from(response_text)],
+            response_text.to_string(),
+        );
+
+        assert_eq!(chat.history_cells.len(), 3, "expected assistant cell to be added");
+
+        let tail_kinds: Vec<HistoryCellType> = chat
+            .history_cells
+            .iter()
+            .map(|cell| cell.kind())
+            .collect();
+
+        let len = tail_kinds.len();
+        assert_eq!(
+            &tail_kinds[len - 3..],
+            &[
+                HistoryCellType::BackgroundEvent,
+                HistoryCellType::BackgroundEvent,
+                HistoryCellType::Assistant,
+            ],
+            "assistant output should appear after existing background cells",
+        );
+    }
+
+    #[test]
+    fn scrollback_spacer_preserves_top_cell_bottom_line() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        insert_plain_cell(chat, &["old-1", "old-2"]);
+        insert_plain_cell(chat, &["mid-1", "mid-2"]);
+        insert_plain_cell(chat, &["new-1", "new-2"]);
+
+        let viewport_height = 6;
+        chat.layout.scroll_offset = 2;
+
+        let mut terminal = Terminal::new(TestBackend::new(40, viewport_height)).expect("terminal");
+        terminal
+            .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+            .expect("draw history");
+
+        let adjusted = chat.history_render.adjust_scroll_to_content(2);
+        assert_eq!(adjusted, 1, "scroll origin should step back from spacer row");
+
+        let prefix = chat.history_render.prefix_sums.borrow();
+        assert!(!prefix.is_empty(), "prefix sums populated after draw");
+        let start_idx = match prefix.binary_search(&adjusted) {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        assert_eq!(start_idx, 0, "expected first cell to be visible after adjustment");
+
+        let content_y = prefix[start_idx];
+        drop(prefix);
+        let skip_top = adjusted.saturating_sub(content_y);
+        assert_eq!(skip_top, 1, "should display the second line of the oldest cell");
+
+        let cell = &chat.history_cells[start_idx];
+        let lines = cell.display_lines_trimmed();
+        let line = lines
+            .get(skip_top as usize)
+            .expect("line available after scroll adjustment");
+        let text: String = line.spans.iter().map(|span| span.content.as_ref()).collect();
+        assert_eq!(text.trim(), "old-2");
+    }
+
+    #[test]
+    fn scrollback_spacer_exact_offset_adjusts_to_content() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        insert_plain_cell(chat, &["old-1", "old-2"]);
+        insert_plain_cell(chat, &["mid-1", "mid-2"]);
+        insert_plain_cell(chat, &["new-1", "new-2"]);
+
+        let viewport_height = 6;
+        chat.layout.scroll_offset = 2;
+
+        {
+            let mut terminal =
+                Terminal::new(TestBackend::new(40, viewport_height)).expect("terminal");
+            terminal
+                .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+                .expect("draw history");
+        }
+
+        let ranges = chat.history_render.spacing_ranges_for_test();
+        let (pos, _) = ranges
+            .first()
+            .copied()
+            .expect("expected a spacer-induced adjustment");
+        let adjusted = chat.history_render.adjust_scroll_to_content(pos);
+        assert!(
+            adjusted < pos,
+            "scroll adjustment should reduce the origin when landing on a spacer"
+        );
+    }
+
+    #[test]
+    fn scrollback_top_boundary_retains_oldest_content() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        insert_plain_cell(chat, &["old-1", "old-2"]);
+        insert_plain_cell(chat, &["mid-1", "mid-2"]);
+        insert_plain_cell(chat, &["new-1", "new-2"]);
+
+        {
+            let mut terminal = Terminal::new(TestBackend::new(40, 6)).expect("terminal");
+            terminal
+                .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+                .expect("draw history");
+        }
+
+        let max_scroll = chat.layout.last_max_scroll.get();
+        assert!(max_scroll > 0, "expected overflow to produce a positive max scroll");
+        chat.layout.scroll_offset = max_scroll;
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 6)).expect("terminal");
+        terminal
+            .draw(|frame| frame.render_widget_ref(&*chat, frame.area()))
+            .expect("draw history at top boundary");
+
+        let max_scroll = chat.layout.last_max_scroll.get();
+        let scroll_from_top = max_scroll.saturating_sub(chat.layout.scroll_offset);
+        let effective = chat.history_render.adjust_scroll_to_content(scroll_from_top);
+        let prefix = chat.history_render.prefix_sums.borrow();
+        let mut start_idx = match prefix.binary_search(&effective) {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        start_idx = start_idx.min(prefix.len().saturating_sub(1));
+        start_idx = start_idx.min(chat.history_cells.len().saturating_sub(1));
+        let content_y = prefix[start_idx];
+        drop(prefix);
+
+        let skip = effective.saturating_sub(content_y) as usize;
+        let cell = &chat.history_cells[start_idx];
+        let lines = cell.display_lines_trimmed();
+        let target_index = skip.min(lines.len().saturating_sub(1));
+        let visible = lines
+            .get(target_index)
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+
+        assert!(
+            visible.contains("old-1"),
+            "scrolling to the top should keep the oldest content visible"
+        );
+    }
+
+    #[test]
+    fn ordering_stream_delta_should_follow_existing_background_tail() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        chat.last_seen_request_index = 1;
+        chat.push_background_tail("background".to_string());
+
+        let stream_state = AssistantStreamState {
+            id: HistoryId::ZERO,
+            stream_id: "stream-1".into(),
+            preview_markdown: "partial".into(),
+            deltas: vec![AssistantStreamDelta {
+                delta: "partial".into(),
+                sequence: Some(0),
+                received_at: SystemTime::now(),
+            }],
+            citations: vec![],
+            metadata: None,
+            in_progress: true,
+            last_updated_at: SystemTime::now(),
+        };
+        let stream_cell = history_cell::new_streaming_content(stream_state, &chat.config);
+
+        chat.history_insert_with_key_global_tagged(
+            Box::new(stream_cell),
+            OrderKey {
+                req: 1,
+                out: 0,
+                seq: 0,
+            },
+            "stream",
+            None,
+        );
+
+        let kinds: Vec<HistoryCellType> = chat
+            .history_cells
+            .iter()
+            .map(|cell| cell.kind())
+            .collect();
+
+        assert_eq!(
+            kinds,
+            vec![HistoryCellType::BackgroundEvent, HistoryCellType::Assistant],
+            "streaming assistant output should append after the existing background tail cell",
+        );
+    }
+
+    #[test]
+    fn ordering_tool_reasoning_explore_should_preserve_arrival_sequence() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        chat.last_seen_request_index = 1;
+
+        let make_plain = |text: &str| PlainMessageState {
+            id: HistoryId::ZERO,
+            role: PlainMessageRole::System,
+            kind: PlainMessageKind::Plain,
+            header: None,
+            lines: vec![MessageLine {
+                kind: MessageLineKind::Paragraph,
+                spans: vec![InlineSpan {
+                    text: text.to_string(),
+                    tone: TextTone::Default,
+                    emphasis: TextEmphasis::default(),
+                    entity: None,
+                }],
+            }],
+            metadata: None,
+        };
+
+        // Reasoning arrives first with later output index.
+        let reasoning_key = ChatWidget::order_key_from_order_meta(&OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(2),
+            sequence_number: Some(0),
+        });
+        chat.history_insert_plain_state_with_key(make_plain("reasoning"), reasoning_key, "reasoning");
+
+        // Explore summary follows immediately afterwards.
+        let explore_key = ChatWidget::order_key_from_order_meta(&OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(3),
+            sequence_number: Some(0),
+        });
+        chat.history_insert_plain_state_with_key(make_plain("explore"), explore_key, "explore");
+
+        // Tool run summary arrives last but references an earlier output index.
+        let tool_key = ChatWidget::order_key_from_order_meta(&OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(0),
+        });
+        chat.history_insert_plain_state_with_key(make_plain("tool"), tool_key, "tool");
+
+        let labels: Vec<String> = chat
+            .history_cells
+            .iter()
+            .map(|cell| {
+                cell.display_lines_trimmed()
+                    .first()
+                    .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        assert_eq!(
+            labels,
+            vec!["reasoning".to_string(), "explore".to_string(), "tool".to_string()],
+            "later inserts with smaller output_index should not leapfrog visible reasoning/explore summaries",
+        );
+    }
+
+    #[test]
+    fn ordering_cross_request_pre_prompt_should_not_prepend_previous_turn() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        let make_plain = |text: &str| PlainMessageState {
+            id: HistoryId::ZERO,
+            role: PlainMessageRole::System,
+            kind: PlainMessageKind::Plain,
+            header: None,
+            lines: vec![MessageLine {
+                kind: MessageLineKind::Paragraph,
+                spans: vec![InlineSpan {
+                    text: text.to_string(),
+                    tone: TextTone::Default,
+                    emphasis: TextEmphasis::default(),
+                    entity: None,
+                }],
+            }],
+            metadata: None,
+        };
+
+        chat.history_insert_plain_state_with_key(
+            make_plain("req1"),
+            OrderKey {
+                req: 1,
+                out: 0,
+                seq: 0,
+            },
+            "req1",
+        );
+
+        chat.last_seen_request_index = 1;
+        chat.pending_user_prompts_for_next_turn = 0;
+
+        let key = chat.system_order_key(SystemPlacement::PrePromptInCurrent, None);
+        chat.history_insert_plain_state_with_key(make_plain("system"), key, "system");
+
+        let labels: Vec<String> = chat
+            .history_cells
+            .iter()
+            .map(|cell| {
+                cell.display_lines_trimmed()
+                    .first()
+                    .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        assert_eq!(
+            labels,
+            vec!["req1".to_string(), "system".to_string()],
+            "pre-prompt system notices for a new request should append after the prior turn rather than prepending it",
+        );
+    }
+
+
+
 }
 
 fn append_thought_ellipsis(text: &str) -> String {
@@ -23260,6 +23752,7 @@ impl WidgetRef for &ChatWidget<'_> {
             prefix.push(0);
             let mut acc = 0u16;
             let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+            let mut spacing_ranges: Vec<(u16, u16)> = Vec::new();
 
             for (idx, vis) in cells.iter().enumerate() {
                 let cell = vis.cell.expect("rendered cell missing source");
@@ -23303,7 +23796,10 @@ impl WidgetRef for &ChatWidget<'_> {
                     }
                 }
                 if should_add_spacing {
+                    let spacing_start = acc;
                     acc = acc.saturating_add(spacing);
+                    // Track the spacer interval so scroll adjustments can skip over it later.
+                    spacing_ranges.push((spacing_start, acc));
                 }
                 prefix.push(acc);
             }
@@ -23316,6 +23812,7 @@ impl WidgetRef for &ChatWidget<'_> {
             }
             self.history_render
                 .update_prefix_cache(content_area.width, prefix, total_height, cells.len());
+            self.history_render.update_spacing_ranges(spacing_ranges);
             rendered_cells_full = Some(cells);
         }
 
@@ -23362,7 +23859,13 @@ impl WidgetRef for &ChatWidget<'_> {
                 }
             }
 
-            (content_area.y, scroll_from_top)
+            // If our scroll origin landed on a spacer row between cells, nudge it up so
+            // the viewport starts with real content instead of an empty separator.
+            let adjusted_scroll_from_top = self
+                .history_render
+                .adjust_scroll_to_content(scroll_from_top);
+
+            (content_area.y, adjusted_scroll_from_top)
         };
 
         // Record current viewport height for the next frame
