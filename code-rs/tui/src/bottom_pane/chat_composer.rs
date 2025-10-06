@@ -1505,6 +1505,9 @@ impl ChatComposer {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => {
+                if self.handle_backslash_continuation() {
+                    return (InputResult::None, true);
+                }
                 let command_text = self.textarea.text().to_string();
                 let first_line = command_text.lines().next().unwrap_or("");
                 if let Some((name, rest)) = parse_slash_name(first_line)
@@ -1556,6 +1559,55 @@ impl ChatComposer {
             }
             input => self.handle_input_basic(input),
         }
+    }
+
+    fn handle_backslash_continuation(&mut self) -> bool {
+        let text = self.textarea.text();
+        if text.is_empty() {
+            return false;
+        }
+
+        let mut iter = text.char_indices().rev();
+        let Some((last_idx, last_char)) = iter.next() else {
+            return false;
+        };
+        if matches!(last_char, ' ' | '\t') {
+            return false;
+        }
+        if last_char != '\\' {
+            return false;
+        }
+
+        let trailing_backslashes = text[..last_idx]
+            .chars()
+            .rev()
+            .take_while(|c| *c == '\\')
+            .count()
+            + 1;
+        if trailing_backslashes % 2 == 0 {
+            return false;
+        }
+
+        let line_start = text[..last_idx].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+        let line_before = &text[line_start..last_idx];
+        let indentation: String = line_before
+            .chars()
+            .take_while(|c| matches!(*c, ' ' | '\t'))
+            .collect();
+        let replacement = if indentation.is_empty() {
+            String::from("\n")
+        } else {
+            format!("\n{indentation}")
+        };
+        let backslash_end = last_idx + '\\'.len_utf8();
+        self.textarea.replace_range(last_idx..backslash_end, &replacement);
+
+        self.history.reset_navigation();
+        self.post_paste_space_guard = None;
+        self.pending_pastes
+            .retain(|(placeholder, _)| self.textarea.text().contains(placeholder));
+        self.typed_anything = true;
+        true
     }
 
     /// Handle generic Input events that modify the textarea content.
