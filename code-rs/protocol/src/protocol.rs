@@ -1418,6 +1418,7 @@ mod tests {
 
         let expected = json!({
             "id": "1234",
+            "event_seq": 1,
             "msg": {
                 "type": "session_configured",
                 "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",

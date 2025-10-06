@@ -334,6 +334,10 @@ impl ChatComposer {
         });
     }
 
+    pub(crate) fn has_footer_hint_override(&self) -> bool {
+        self.footer_hint_override.is_some()
+    }
+
     /// Show a footer notice for a specific duration.
     pub fn flash_footer_notice_for(&mut self, text: String, dur: std::time::Duration) {
         let expiry = std::time::Instant::now() + dur;

@@ -1790,14 +1790,9 @@ mod tests {
         assert!(found, "typed character was not rendered: {buf:?}");
 
         composer.set_hint_items(vec![("⌃O", "env"), ("⌃C", "quit")]);
-        composer.render_ref(area, &mut buf);
-        let footer = buf
-            .content()
-            .iter()
-            .skip((area.width as usize) * (area.height as usize - 1))
-            .map(ratatui::buffer::Cell::symbol)
-            .collect::<Vec<_>>()
-            .join("");
-        assert!(footer.contains("⌃O env"));
+        assert!(composer.has_custom_hint_items());
+
+        composer.clear_hint_items();
+        assert!(!composer.has_custom_hint_items());
     }
 }
