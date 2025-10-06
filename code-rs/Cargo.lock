@@ -1037,7 +1037,9 @@ name = "code-apply-patch"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "pretty_assertions",
  "similar",
+ "tempfile",
  "thiserror 2.0.16",
  "tree-sitter",
  "tree-sitter-bash",
@@ -1299,7 +1301,12 @@ name = "code-execpolicy"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "clap",
  "codex-execpolicy",
+ "env_logger",
+ "serde",
+ "serde_json",
+ "starlark",
 ]
 
 [[package]]
