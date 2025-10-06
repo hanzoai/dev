@@ -4,7 +4,7 @@ use std::fs::File;
 use std::fs::{self};
 use std::io::BufWriter;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 use time::OffsetDateTime;
@@ -14,22 +14,68 @@ use time::macros::format_description;
 use uuid::Uuid;
 
 use crate::rollout::INTERACTIVE_SESSION_SOURCES;
-use crate::rollout::list::ConversationItem;
 use crate::rollout::list::ConversationsPage;
 use crate::rollout::list::Cursor;
 use crate::rollout::list::get_conversation;
 use crate::rollout::list::get_conversations;
 use code_protocol::ConversationId;
-use code_protocol::protocol::RecordedEvent;
-use code_protocol::protocol::RolloutItem;
-use code_protocol::protocol::RolloutLine;
-use code_protocol::protocol::SessionMeta;
-use code_protocol::protocol::SessionMetaLine;
-use code_protocol::protocol::SessionSource;
-use code_protocol::protocol::UserMessageEvent;
-use crate::protocol::EventMsg;
+use code_protocol::protocol::{
+    EventMsg as ProtoEventMsg,
+    RecordedEvent,
+    RolloutItem,
+    RolloutLine,
+    SessionMeta,
+    SessionMetaLine,
+    SessionSource,
+    UserMessageEvent,
+};
 
 const NO_SOURCE_FILTER: &[SessionSource] = &[];
+
+fn assert_page_summary(
+    page: &ConversationsPage,
+    expected_items: &[(PathBuf, &str)],
+    expected_cursor: Option<Cursor>,
+    expected_scanned_files: usize,
+) {
+    assert_eq!(page.items.len(), expected_items.len());
+    for (idx, (item, (expected_path, expected_ts))) in page
+        .items
+        .iter()
+        .zip(expected_items.iter())
+        .enumerate()
+    {
+        assert_eq!(item.path, *expected_path, "path mismatch for item {idx}");
+        assert_eq!(
+            item.created_at.as_deref(),
+            Some(*expected_ts),
+            "created_at mismatch for item {idx}"
+        );
+        assert_eq!(
+            item.updated_at.as_deref(),
+            Some(*expected_ts),
+            "updated_at mismatch for item {idx}"
+        );
+        assert!(
+            !item.head.is_empty(),
+            "expected non-empty head for item {idx}"
+        );
+        assert!(
+            !item.tail.is_empty(),
+            "expected non-empty tail for item {idx}"
+        );
+        let head_type = item
+            .head
+            .first()
+            .and_then(|value| value.get("type"))
+            .and_then(|v| v.as_str());
+        assert_eq!(head_type, Some("session_meta"));
+    }
+
+    assert_eq!(page.next_cursor, expected_cursor);
+    assert_eq!(page.num_scanned_files, expected_scanned_files);
+    assert!(!page.reached_scan_cap);
+}
 
 fn write_session_file(
     root: &Path,
@@ -80,7 +126,7 @@ fn write_session_file(
             id: format!("event-{i}"),
             event_seq: i as u64,
             order: None,
-            msg: EventMsg::UserMessage(UserMessageEvent {
+            msg: ProtoEventMsg::UserMessage(UserMessageEvent {
                 message: format!("Message {i}"),
                 kind: None,
                 images: None,
@@ -136,69 +182,40 @@ async fn test_list_conversations_latest_first() {
         .await
         .unwrap();
 
-    // Build expected objects
-    let p1 = home
-        .join("sessions")
-        .join("2025")
-        .join("01")
-        .join("03")
-        .join(format!("rollout-2025-01-03T12-00-00-{u3}.jsonl"));
-    let p2 = home
-        .join("sessions")
-        .join("2025")
-        .join("01")
-        .join("02")
-        .join(format!("rollout-2025-01-02T12-00-00-{u2}.jsonl"));
-    let p3 = home
-        .join("sessions")
-        .join("2025")
-        .join("01")
-        .join("01")
-        .join(format!("rollout-2025-01-01T12-00-00-{u1}.jsonl"));
-
-    let head_3 = vec![
-        serde_json::json!({"timestamp": "2025-01-03T12-00-00", "id": u3.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-        serde_json::json!({"record_type": "response", "index": 1}),
-        serde_json::json!({"record_type": "response", "index": 2}),
-    ];
-    let head_2 = vec![
-        serde_json::json!({"timestamp": "2025-01-02T12-00-00", "id": u2.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-        serde_json::json!({"record_type": "response", "index": 1}),
-        serde_json::json!({"record_type": "response", "index": 2}),
-    ];
-    let head_1 = vec![
-        serde_json::json!({"timestamp": "2025-01-01T12-00-00", "id": u1.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-        serde_json::json!({"record_type": "response", "index": 1}),
-        serde_json::json!({"record_type": "response", "index": 2}),
+    let expected_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("01")
+                .join("03")
+                .join(format!("rollout-2025-01-03T12-00-00-{u3}.jsonl")),
+            "2025-01-03T12-00-00",
+        ),
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("01")
+                .join("02")
+                .join(format!("rollout-2025-01-02T12-00-00-{u2}.jsonl")),
+            "2025-01-02T12-00-00",
+        ),
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("01")
+                .join("01")
+                .join(format!("rollout-2025-01-01T12-00-00-{u1}.jsonl")),
+            "2025-01-01T12-00-00",
+        ),
     ];
 
     let expected_cursor: Cursor =
         serde_json::from_str(&format!("\"2025-01-01T12-00-00|{u1}\"")).unwrap();
 
-    let expected = ConversationsPage {
-        items: vec![
-            ConversationItem {
-                path: p1,
-                head: head_3,
-            },
-            ConversationItem {
-                path: p2,
-                head: head_2,
-            },
-            ConversationItem {
-                path: p3,
-                head: head_1,
-            },
-        ],
-        next_cursor: Some(expected_cursor),
-        num_scanned_files: 3,
-        reached_scan_cap: false,
-    };
-
-    assert_eq!(page, expected);
+    assert_page_summary(&page, &expected_items, Some(expected_cursor), 3);
 }
 
 #[tokio::test]
@@ -258,44 +275,29 @@ async fn test_pagination_cursor() {
     let page1 = get_conversations(home, 2, None, INTERACTIVE_SESSION_SOURCES)
         .await
         .unwrap();
-    let p5 = home
-        .join("sessions")
-        .join("2025")
-        .join("03")
-        .join("05")
-        .join(format!("rollout-2025-03-05T09-00-00-{u5}.jsonl"));
-    let p4 = home
-        .join("sessions")
-        .join("2025")
-        .join("03")
-        .join("04")
-        .join(format!("rollout-2025-03-04T09-00-00-{u4}.jsonl"));
-    let head_5 = vec![
-        serde_json::json!({"timestamp": "2025-03-05T09-00-00", "id": u5.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-    ];
-    let head_4 = vec![
-        serde_json::json!({"timestamp": "2025-03-04T09-00-00", "id": u4.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
+    let expected_page1_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("03")
+                .join("05")
+                .join(format!("rollout-2025-03-05T09-00-00-{u5}.jsonl")),
+            "2025-03-05T09-00-00",
+        ),
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("03")
+                .join("04")
+                .join(format!("rollout-2025-03-04T09-00-00-{u4}.jsonl")),
+            "2025-03-04T09-00-00",
+        ),
     ];
     let expected_cursor1: Cursor =
         serde_json::from_str(&format!("\"2025-03-04T09-00-00|{u4}\"")).unwrap();
-    let expected_page1 = ConversationsPage {
-        items: vec![
-            ConversationItem {
-                path: p5,
-                head: head_5,
-            },
-            ConversationItem {
-                path: p4,
-                head: head_4,
-            },
-        ],
-        next_cursor: Some(expected_cursor1.clone()),
-        num_scanned_files: 3, // scanned 05, 04, and peeked at 03 before breaking
-        reached_scan_cap: false,
-    };
-    assert_eq!(page1, expected_page1);
+    assert_page_summary(&page1, &expected_page1_items, Some(expected_cursor1.clone()), 3);
 
     let page2 = get_conversations(
         home,
@@ -305,44 +307,29 @@ async fn test_pagination_cursor() {
     )
     .await
     .unwrap();
-    let p3 = home
-        .join("sessions")
-        .join("2025")
-        .join("03")
-        .join("03")
-        .join(format!("rollout-2025-03-03T09-00-00-{u3}.jsonl"));
-    let p2 = home
-        .join("sessions")
-        .join("2025")
-        .join("03")
-        .join("02")
-        .join(format!("rollout-2025-03-02T09-00-00-{u2}.jsonl"));
-    let head_3 = vec![
-        serde_json::json!({"timestamp": "2025-03-03T09-00-00", "id": u3.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-    ];
-    let head_2 = vec![
-        serde_json::json!({"timestamp": "2025-03-02T09-00-00", "id": u2.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
+    let expected_page2_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("03")
+                .join("03")
+                .join(format!("rollout-2025-03-03T09-00-00-{u3}.jsonl")),
+            "2025-03-03T09-00-00",
+        ),
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("03")
+                .join("02")
+                .join(format!("rollout-2025-03-02T09-00-00-{u2}.jsonl")),
+            "2025-03-02T09-00-00",
+        ),
     ];
     let expected_cursor2: Cursor =
         serde_json::from_str(&format!("\"2025-03-02T09-00-00|{u2}\"")).unwrap();
-    let expected_page2 = ConversationsPage {
-        items: vec![
-            ConversationItem {
-                path: p3,
-                head: head_3,
-            },
-            ConversationItem {
-                path: p2,
-                head: head_2,
-            },
-        ],
-        next_cursor: Some(expected_cursor2.clone()),
-        num_scanned_files: 5, // scanned 05, 04 (anchor), 03, 02, and peeked at 01
-        reached_scan_cap: false,
-    };
-    assert_eq!(page2, expected_page2);
+    assert_page_summary(&page2, &expected_page2_items, Some(expected_cursor2.clone()), 5);
 
     let page3 = get_conversations(
         home,
@@ -352,28 +339,20 @@ async fn test_pagination_cursor() {
     )
     .await
     .unwrap();
-    let p1 = home
-        .join("sessions")
-        .join("2025")
-        .join("03")
-        .join("01")
-        .join(format!("rollout-2025-03-01T09-00-00-{u1}.jsonl"));
-    let head_1 = vec![
-        serde_json::json!({"timestamp": "2025-03-01T09-00-00", "id": u1.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-    ];
     let expected_cursor3: Cursor =
         serde_json::from_str(&format!("\"2025-03-01T09-00-00|{u1}\"")).unwrap();
-    let expected_page3 = ConversationsPage {
-        items: vec![ConversationItem {
-            path: p1,
-            head: head_1,
-        }],
-        next_cursor: Some(expected_cursor3.clone()),
-        num_scanned_files: 5, // scanned 05, 04 (anchor), 03, 02 (anchor), 01
-        reached_scan_cap: false,
-    };
-    assert_eq!(page3, expected_page3);
+    let expected_page3_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("03")
+                .join("01")
+                .join(format!("rollout-2025-03-01T09-00-00-{u1}.jsonl")),
+            "2025-03-01T09-00-00",
+        ),
+    ];
+    assert_page_summary(&page3, &expected_page3_items, Some(expected_cursor3.clone()), 5);
 }
 
 #[tokio::test]
@@ -388,40 +367,32 @@ async fn test_get_conversation_contents() {
     let page = get_conversations(home, 1, None, INTERACTIVE_SESSION_SOURCES)
         .await
         .unwrap();
-    let path = &page.items[0].path;
-
-    let content = get_conversation(path).await.unwrap();
-
-    // Page equality (single item)
     let expected_path = home
         .join("sessions")
         .join("2025")
         .join("04")
         .join("01")
         .join(format!("rollout-2025-04-01T10-30-00-{uuid}.jsonl"));
-    let expected_head = vec![
-        serde_json::json!({"timestamp": ts, "id": uuid.to_string()}),
-        serde_json::json!({"record_type": "response", "index": 0}),
-        serde_json::json!({"record_type": "response", "index": 1}),
-    ];
+    let expected_items = vec![(expected_path.clone(), ts)];
     let expected_cursor: Cursor = serde_json::from_str(&format!("\"{ts}|{uuid}\"")).unwrap();
-    let expected_page = ConversationsPage {
-        items: vec![ConversationItem {
-            path: expected_path.clone(),
-            head: expected_head,
-        }],
-        next_cursor: Some(expected_cursor),
-        num_scanned_files: 1,
-        reached_scan_cap: false,
-    };
-    assert_eq!(page, expected_page);
+    assert_page_summary(&page, &expected_items, Some(expected_cursor), 1);
 
-    // Entire file contents equality
-    let meta = serde_json::json!({"timestamp": ts, "id": uuid.to_string()});
-    let rec0 = serde_json::json!({"record_type": "response", "index": 0});
-    let rec1 = serde_json::json!({"record_type": "response", "index": 1});
-    let expected_content = format!("{meta}\n{rec0}\n{rec1}\n");
-    assert_eq!(content, expected_content);
+    let content = get_conversation(&page.items[0].path).await.unwrap();
+    let lines: Vec<_> = content.lines().collect();
+    assert_eq!(lines.len(), 3);
+    let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    let first_type = first.get("type").and_then(|v| v.as_str());
+    assert_eq!(first_type, Some("session_meta"));
+    let payload_id = first
+        .get("payload")
+        .and_then(|payload| payload.get("id"))
+        .and_then(|v| v.as_str());
+    assert_eq!(payload_id, Some(uuid.to_string().as_str()));
+    for (idx, line) in lines.iter().enumerate().skip(1) {
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        let item_type = value.get("type").and_then(|v| v.as_str());
+        assert_eq!(item_type, Some("event"), "line {idx} should be event");
+    }
 }
 
 #[tokio::test]
@@ -434,46 +405,36 @@ async fn test_stable_ordering_same_second_pagination() {
     let u2 = Uuid::from_u128(2);
     let u3 = Uuid::from_u128(3);
 
-    write_session_file(home, ts, u1, 0, Some(SessionSource::VSCode)).unwrap();
-    write_session_file(home, ts, u2, 0, Some(SessionSource::VSCode)).unwrap();
-    write_session_file(home, ts, u3, 0, Some(SessionSource::VSCode)).unwrap();
+    write_session_file(home, ts, u1, 1, Some(SessionSource::VSCode)).unwrap();
+    write_session_file(home, ts, u2, 1, Some(SessionSource::VSCode)).unwrap();
+    write_session_file(home, ts, u3, 1, Some(SessionSource::VSCode)).unwrap();
 
     let page1 = get_conversations(home, 2, None, INTERACTIVE_SESSION_SOURCES)
         .await
         .unwrap();
 
-    let p3 = home
-        .join("sessions")
-        .join("2025")
-        .join("07")
-        .join("01")
-        .join(format!("rollout-2025-07-01T00-00-00-{u3}.jsonl"));
-    let p2 = home
-        .join("sessions")
-        .join("2025")
-        .join("07")
-        .join("01")
-        .join(format!("rollout-2025-07-01T00-00-00-{u2}.jsonl"));
-    let head = |u: Uuid| -> Vec<serde_json::Value> {
-        vec![serde_json::json!({"timestamp": ts, "id": u.to_string()})]
-    };
     let expected_cursor1: Cursor = serde_json::from_str(&format!("\"{ts}|{u2}\"")).unwrap();
-    let expected_page1 = ConversationsPage {
-        items: vec![
-            ConversationItem {
-                path: p3,
-                head: head(u3),
-            },
-            ConversationItem {
-                path: p2,
-                head: head(u2),
-            },
-        ],
-        next_cursor: Some(expected_cursor1.clone()),
-        num_scanned_files: 3, // scanned u3, u2, peeked u1
-        reached_scan_cap: false,
-    };
-    assert_eq!(page1, expected_page1);
+    let expected_page1_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("07")
+                .join("01")
+                .join(format!("rollout-2025-07-01T00-00-00-{u3}.jsonl")),
+            ts,
+        ),
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("07")
+                .join("01")
+                .join(format!("rollout-2025-07-01T00-00-00-{u2}.jsonl")),
+            ts,
+        ),
+    ];
+    assert_page_summary(&page1, &expected_page1_items, Some(expected_cursor1.clone()), 3);
 
     let page2 = get_conversations(
         home,
@@ -483,23 +444,19 @@ async fn test_stable_ordering_same_second_pagination() {
     )
     .await
     .unwrap();
-    let p1 = home
-        .join("sessions")
-        .join("2025")
-        .join("07")
-        .join("01")
-        .join(format!("rollout-2025-07-01T00-00-00-{u1}.jsonl"));
     let expected_cursor2: Cursor = serde_json::from_str(&format!("\"{ts}|{u1}\"")).unwrap();
-    let expected_page2 = ConversationsPage {
-        items: vec![ConversationItem {
-            path: p1,
-            head: head(u1),
-        }],
-        next_cursor: Some(expected_cursor2.clone()),
-        num_scanned_files: 3, // scanned u3, u2 (anchor), u1
-        reached_scan_cap: false,
-    };
-    assert_eq!(page2, expected_page2);
+    let expected_page2_items = vec![
+        (
+            home
+                .join("sessions")
+                .join("2025")
+                .join("07")
+                .join("01")
+                .join(format!("rollout-2025-07-01T00-00-00-{u1}.jsonl")),
+            ts,
+        ),
+    ];
+    assert_page_summary(&page2, &expected_page2_items, Some(expected_cursor2.clone()), 3);
 }
 
 #[tokio::test]
