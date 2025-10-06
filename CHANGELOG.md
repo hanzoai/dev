@@ -3,6 +3,11 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [0.2.188] - 2025-10-06
+
+- MCP: Validate stdio tool commands on PATH and surface clearer spawn errors during setup. (3a51d30)
+- Release: Guard release notes generation so headers always match the published version. (db38a24)
+
 ## [0.2.187] - 2025-10-06
 
 - TUI: Maintain strict streaming order and stable scrollback so history stays put while answers land. (554f2e6b)
