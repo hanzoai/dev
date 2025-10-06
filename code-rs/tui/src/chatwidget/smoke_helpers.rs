@@ -4,10 +4,12 @@ use super::ChatWidget;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::tui::TerminalInfo;
+use code_core::history::state::HistoryRecord;
 use code_core::config::{Config, ConfigOverrides, ConfigToml};
 use code_core::protocol::Event;
 use once_cell::sync::Lazy;
 use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 static TEST_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
@@ -60,7 +62,7 @@ impl ChatWidgetHarness {
         self.chat.handle_code_event(event);
     }
 
-    pub fn drain_events(&self) -> Vec<AppEvent> {
+    pub(crate) fn drain_events(&self) -> Vec<AppEvent> {
         let mut out = Vec::new();
         while let Ok(ev) = self.events.try_recv() {
             out.push(ev);
@@ -68,8 +70,40 @@ impl ChatWidgetHarness {
         out
     }
 
-    pub fn chat(&mut self) -> &mut ChatWidget<'static> {
+    pub(crate) fn chat(&mut self) -> &mut ChatWidget<'static> {
         &mut self.chat
+    }
+
+    pub(crate) fn poll_until<F>(&mut self, mut predicate: F, timeout: Duration) -> Vec<AppEvent>
+    where
+        F: FnMut(&[AppEvent]) -> bool,
+    {
+        let deadline = Instant::now() + timeout;
+        let mut collected = Vec::new();
+
+        loop {
+            while let Ok(event) = self.events.try_recv() {
+                if !matches!(event, AppEvent::RequestRedraw) {
+                    collected.push(event);
+                }
+            }
+
+            if predicate(&collected) {
+                break;
+            }
+
+            if Instant::now() >= deadline {
+                break;
+            }
+
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        collected
+    }
+
+    pub(crate) fn history_records(&self) -> Vec<HistoryRecord> {
+        self.chat.history_state.records.clone()
     }
 }
 

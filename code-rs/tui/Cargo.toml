@@ -18,6 +18,7 @@ debug-logs = []
 dev-faults = []
 # Fork-specific extensions layered on top of upstream history rendering.
 code-fork = []
+test-helpers = []
 
 [lints]
 workspace = true
