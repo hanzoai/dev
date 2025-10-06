@@ -858,6 +858,10 @@ pub(crate) struct ChatWidget<'a> {
     reasoning_index: HashMap<String, usize>,
     // Stable per-(kind, stream_id) ordering, derived from OrderMeta.
     stream_order_seq: HashMap<(StreamKind, String), OrderKey>,
+    // Resume-aware bias applied to provider request ordinals for restored sessions.
+    order_request_bias: u64,
+    resume_expected_next_request: Option<u64>,
+    resume_provider_baseline: Option<u64>,
     // Track last provider request_ordinal seen so internal messages can be
     // assigned request_index = last_seen + 1 (with out = -1).
     last_seen_request_index: u64,
@@ -1544,7 +1548,7 @@ impl ChatWidget<'_> {
     ) -> OrderKey {
         // If the provider supplied OrderMeta, honor it strictly.
         if let Some(om) = order {
-            return Self::order_key_from_order_meta(om);
+            return self.provider_order_key_from_order_meta(om);
         }
 
         // Derive a stable request bucket for system notices when OrderMeta is absent.
@@ -1825,13 +1829,34 @@ impl ChatWidget<'_> {
     }
     // Build an ordered key from model-provided OrderMeta. Callers must
     // guarantee presence by passing a concrete reference (compile-time guard).
-    fn order_key_from_order_meta(om: &code_core::protocol::OrderMeta) -> OrderKey {
+    fn raw_order_key_from_order_meta(om: &code_core::protocol::OrderMeta) -> OrderKey {
         // sequence_number can be None on some terminal events; treat as 0 for stable placement
         OrderKey {
             req: om.request_ordinal,
             out: om.output_index.map(|v| v as i32).unwrap_or(0),
             seq: om.sequence_number.unwrap_or(0),
         }
+    }
+
+    fn provider_order_key_from_order_meta(&mut self, om: &code_core::protocol::OrderMeta) -> OrderKey {
+        let mut key = Self::raw_order_key_from_order_meta(om);
+        key.req = self.apply_request_bias(key.req);
+        key
+    }
+
+    fn apply_request_bias(&mut self, provider_req: u64) -> u64 {
+        if self.resume_provider_baseline.is_none() {
+            if let Some(target) = self.resume_expected_next_request {
+                self.resume_provider_baseline = Some(provider_req);
+                if provider_req <= target {
+                    self.order_request_bias = target.saturating_sub(provider_req);
+                } else {
+                    self.order_request_bias = 0;
+                }
+                self.resume_expected_next_request = None;
+            }
+        }
+        provider_req.saturating_add(self.order_request_bias)
     }
 
     // Track latest request index observed from provider so internal inserts can anchor to it.
@@ -1842,7 +1867,8 @@ impl ChatWidget<'_> {
             if is_background_sentinel && is_initial_session {
                 return;
             }
-            self.last_seen_request_index = self.last_seen_request_index.max(om.request_ordinal);
+            let req = self.apply_request_bias(om.request_ordinal);
+            self.last_seen_request_index = self.last_seen_request_index.max(req);
         }
     }
 
@@ -1889,7 +1915,7 @@ impl ChatWidget<'_> {
     //     request (after headers/prompts) so provider output can follow.
     fn near_time_key(&mut self, order: Option<&code_core::protocol::OrderMeta>) -> OrderKey {
         if let Some(om) = order {
-            return Self::order_key_from_order_meta(om);
+            return self.provider_order_key_from_order_meta(om);
         }
 
         // If we just staged a user prompt for the next request, keep using the
@@ -1950,7 +1976,7 @@ impl ChatWidget<'_> {
         order: Option<&code_core::protocol::OrderMeta>,
     ) -> OrderKey {
         if let Some(om) = order {
-            return Self::order_key_from_order_meta(om);
+            return self.provider_order_key_from_order_meta(om);
         }
         let req = if self.last_seen_request_index > 0 {
             self.last_seen_request_index
@@ -3583,6 +3609,9 @@ impl ChatWidget<'_> {
             cell_order_dbg: vec![None; 1],
             reasoning_index: HashMap::new(),
             stream_order_seq: HashMap::new(),
+            order_request_bias: 0,
+            resume_expected_next_request: None,
+            resume_provider_baseline: None,
             last_seen_request_index: 0,
             current_request_index: 0,
             internal_seq: 0,
@@ -3863,6 +3892,9 @@ impl ChatWidget<'_> {
             cell_order_dbg: vec![None; 1],
             reasoning_index: HashMap::new(),
             stream_order_seq: HashMap::new(),
+            order_request_bias: 0,
+            resume_expected_next_request: None,
+            resume_provider_baseline: None,
             last_seen_request_index: 0,
             current_request_index: 0,
             internal_seq: 0,
@@ -8140,6 +8172,22 @@ impl ChatWidget<'_> {
         lines
     }
 
+    fn reset_resume_order_anchor(&mut self) {
+        if self.history_cells.is_empty() {
+            self.resume_expected_next_request = None;
+        } else {
+            let max_req = self
+                .cell_order_seq
+                .iter()
+                .map(|key| key.req)
+                .max()
+                .unwrap_or(0);
+            self.resume_expected_next_request = Some(max_req.saturating_add(1));
+        }
+        self.order_request_bias = 0;
+        self.resume_provider_baseline = None;
+    }
+
     pub(crate) fn restore_history_snapshot(&mut self, snapshot: &HistorySnapshot) {
         let perf_timer = self.perf_state.enabled.then(Instant::now);
         let preserved_system_entries: Vec<(String, HistoryId)> = self
@@ -8240,9 +8288,10 @@ impl ChatWidget<'_> {
         let max_seq = self.cell_order_seq.iter().map(|key| key.seq).max().unwrap_or(0);
 
         self.last_seen_request_index = max_req;
-       self.current_request_index = max_req;
-       self.internal_seq = max_seq;
-       self.last_assigned_order = self.cell_order_seq.iter().copied().max();
+        self.current_request_index = max_req;
+        self.internal_seq = max_seq;
+        self.last_assigned_order = self.cell_order_seq.iter().copied().max();
+        self.reset_resume_order_anchor();
 
         self.rebuild_ui_background_seq_counters();
 
@@ -8543,7 +8592,7 @@ impl ChatWidget<'_> {
             EventMsg::WebSearchBegin(ev) => {
                 // Enforce order presence (tool events should carry it)
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on WebSearchBegin; using synthetic key");
                         self.next_internal_key()
@@ -8565,7 +8614,7 @@ impl ChatWidget<'_> {
                 self.stream_state.seq_answer_final = Some(event.event_seq);
                 // Strict order for the stream id
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on AgentMessage; using synthetic key");
                         self.next_internal_key()
@@ -8642,12 +8691,15 @@ impl ChatWidget<'_> {
                     self.last_seen_request_index = self.last_seen_request_index.max(max_req);
                     self.current_request_index = self.last_seen_request_index;
                 }
+                if processed_snapshot || !items.is_empty() {
+                    self.reset_resume_order_anchor();
+                }
                 self.request_redraw();
                 self.replay_history_depth = self.replay_history_depth.saturating_sub(1);
             }
             EventMsg::WebSearchComplete(ev) => {
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on WebSearchComplete; using synthetic key");
                         self.next_internal_key()
@@ -8673,7 +8725,7 @@ impl ChatWidget<'_> {
                 }
                 // Seed/refresh order key for this Answer stream id (must have OrderMeta)
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!(
                             "missing OrderMeta on AgentMessageDelta; using synthetic key"
@@ -8715,7 +8767,7 @@ impl ChatWidget<'_> {
                 }
                 // Seed strict order key for this Reasoning stream
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on AgentReasoning; using synthetic key");
                         self.next_internal_key()
@@ -8769,7 +8821,7 @@ impl ChatWidget<'_> {
                 }
                 // Seed strict order key for this Reasoning stream
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!(
                             "missing OrderMeta on AgentReasoningDelta; using synthetic key"
@@ -8942,7 +8994,7 @@ impl ChatWidget<'_> {
                 }
                 // Seed strict order key for this reasoning stream id
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!(
                             "missing OrderMeta on Tools::PlanUpdate; using synthetic key"
@@ -8982,7 +9034,7 @@ impl ChatWidget<'_> {
                 }
                 // Seed strict order key now so upcoming insert uses the correct key.
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!(
                             "missing OrderMeta on Tools::ReasoningBegin; using synthetic key"
@@ -9294,7 +9346,7 @@ impl ChatWidget<'_> {
                 self.bottom_pane.set_diffs_hint(true);
                 // Strict order
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on ExecEnd flush; using synthetic key");
                         self.next_internal_key()
@@ -9358,7 +9410,7 @@ impl ChatWidget<'_> {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
                 let order_ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on McpBegin; using synthetic key");
                         self.next_internal_key()
@@ -9382,7 +9434,7 @@ impl ChatWidget<'_> {
                 let ev2 = ev.clone();
                 let seq = event.event_seq;
                 let order_ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!("missing OrderMeta on McpEnd; using synthetic key");
                         self.next_internal_key()
@@ -9481,7 +9533,7 @@ impl ChatWidget<'_> {
                 cell.state_mut().call_id = Some(call_id.clone());
                 // Enforce ordering for custom tool begin
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!(
                             "missing OrderMeta on CustomToolCallBegin; using synthetic key"
@@ -9524,7 +9576,7 @@ impl ChatWidget<'_> {
                 result,
             }) => {
                 let ok = match event.order.as_ref() {
-                    Some(om) => Self::order_key_from_order_meta(om),
+                    Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
                         tracing::warn!(
                             "missing OrderMeta on CustomToolCallEnd; using synthetic key"
@@ -18957,9 +19009,14 @@ mod tests {
     use code_core::history::state::{
         AssistantStreamDelta,
         AssistantStreamState,
+        HistoryId,
+        HistoryRecord,
+        HistorySnapshot,
+        HistoryState,
         InlineSpan,
         MessageLine,
         MessageLineKind,
+        OrderKeySnapshot,
         PlainMessageKind,
         PlainMessageRole,
         PlainMessageState,
@@ -18972,6 +19029,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
     use ratatui::Terminal;
+    use std::collections::HashMap;
     use std::time::SystemTime;
 
     fn reset_history(chat: &mut ChatWidget<'_>) {
@@ -18986,6 +19044,9 @@ mod tests {
         chat.last_seen_request_index = 0;
         chat.current_request_index = 0;
         chat.internal_seq = 0;
+        chat.order_request_bias = 0;
+        chat.resume_expected_next_request = None;
+        chat.resume_provider_baseline = None;
         chat.synthetic_system_req = None;
         chat.layout.scroll_offset = 0;
         chat.layout.last_max_scroll.set(0);
@@ -19438,7 +19499,7 @@ mod tests {
         };
 
         // Reasoning arrives first with later output index.
-        let reasoning_key = ChatWidget::order_key_from_order_meta(&OrderMeta {
+        let reasoning_key = ChatWidget::raw_order_key_from_order_meta(&OrderMeta {
             request_ordinal: 1,
             output_index: Some(2),
             sequence_number: Some(0),
@@ -19446,7 +19507,7 @@ mod tests {
         chat.history_insert_plain_state_with_key(make_plain("reasoning"), reasoning_key, "reasoning");
 
         // Explore summary follows immediately afterwards.
-        let explore_key = ChatWidget::order_key_from_order_meta(&OrderMeta {
+        let explore_key = ChatWidget::raw_order_key_from_order_meta(&OrderMeta {
             request_ordinal: 1,
             output_index: Some(3),
             sequence_number: Some(0),
@@ -19454,7 +19515,7 @@ mod tests {
         chat.history_insert_plain_state_with_key(make_plain("explore"), explore_key, "explore");
 
         // Tool run summary arrives last but references an earlier output index.
-        let tool_key = ChatWidget::order_key_from_order_meta(&OrderMeta {
+        let tool_key = ChatWidget::raw_order_key_from_order_meta(&OrderMeta {
             request_ordinal: 1,
             output_index: Some(1),
             sequence_number: Some(0),
@@ -19533,6 +19594,120 @@ mod tests {
             labels,
             vec!["req1".to_string(), "system".to_string()],
             "pre-prompt system notices for a new request should append after the prior turn rather than prepending it",
+        );
+    }
+
+    #[test]
+    fn resume_ordering_offsets_provider_ordinals() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        let make_plain = |id: u64,
+                           text: &str,
+                           role: PlainMessageRole,
+                           kind: PlainMessageKind| -> PlainMessageState {
+            PlainMessageState {
+                id: HistoryId(id),
+                role,
+                kind,
+                header: None,
+                lines: vec![MessageLine {
+                    kind: MessageLineKind::Paragraph,
+                    spans: vec![InlineSpan {
+                        text: text.to_string(),
+                        tone: TextTone::Default,
+                        emphasis: TextEmphasis::default(),
+                        entity: None,
+                    }],
+                }],
+                metadata: None,
+            }
+        };
+
+        let snapshot = HistorySnapshot {
+            records: vec![
+                HistoryRecord::PlainMessage(make_plain(
+                    1,
+                    "user-turn",
+                    PlainMessageRole::User,
+                    PlainMessageKind::User,
+                )),
+                HistoryRecord::PlainMessage(make_plain(
+                    2,
+                    "assistant-turn",
+                    PlainMessageRole::Assistant,
+                    PlainMessageKind::Assistant,
+                )),
+            ],
+            next_id: 3,
+            exec_call_lookup: HashMap::new(),
+            tool_call_lookup: HashMap::new(),
+            stream_lookup: HashMap::new(),
+            order: vec![
+                OrderKeySnapshot {
+                    req: 5,
+                    out: 0,
+                    seq: 0,
+                },
+                OrderKeySnapshot {
+                    req: 5,
+                    out: 1,
+                    seq: 0,
+                },
+            ],
+            order_debug: Vec::new(),
+        };
+
+        chat.restore_history_snapshot(&snapshot);
+
+        assert_eq!(
+            chat.last_seen_request_index, 5,
+            "restoring snapshot should set last_seen_request_index"
+        );
+
+        let order_meta = OrderMeta {
+            request_ordinal: 0,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        };
+        let key = chat.provider_order_key_from_order_meta(&order_meta);
+        assert_eq!(
+            key.req, 6,
+            "resume should bias provider ordinals so new output slots after restored history"
+        );
+
+        let new_state = PlainMessageState {
+            id: HistoryId::ZERO,
+            role: PlainMessageRole::Assistant,
+            kind: PlainMessageKind::Assistant,
+            header: None,
+            lines: vec![MessageLine {
+                kind: MessageLineKind::Paragraph,
+                spans: vec![InlineSpan {
+                    text: "new-assistant".to_string(),
+                    tone: TextTone::Default,
+                    emphasis: TextEmphasis::default(),
+                    entity: None,
+                }],
+            }],
+            metadata: None,
+        };
+
+        let pos = chat.history_insert_plain_state_with_key(new_state, key, "resume-order");
+        assert_eq!(pos, chat.history_cells.len().saturating_sub(1));
+
+        let inserted_key = chat.cell_order_seq[pos];
+        assert_eq!(inserted_key.req, 6);
+
+        let inserted_text: String = chat.history_cells[pos]
+            .display_lines_trimmed()
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect();
+        assert!(
+            inserted_text.contains("new-assistant"),
+            "resume insertion should surface the new assistant answer at the tail"
         );
     }
 
