@@ -101,6 +101,94 @@ pub use cli::Cli;
 pub use self::markdown_render::render_markdown_text;
 pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 
+#[cfg(feature = "test-helpers")]
+pub mod test_helpers {
+    pub use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
+
+    use crate::app_event::AppEvent;
+    use code_core::history::state::HistoryRecord;
+    use std::time::Duration;
+
+    pub fn assert_has_terminal_chunk_containing(
+        harness: &mut ChatWidgetHarness,
+        needle: &str,
+    ) {
+        let events = harness.poll_until(
+            |events| {
+                events.iter().any(|event| {
+                    match event {
+                        AppEvent::TerminalChunk { chunk, .. } => {
+                            String::from_utf8_lossy(chunk).contains(needle)
+                        }
+                        _ => false,
+                    }
+                })
+            },
+            Duration::from_millis(200),
+        );
+        crate::chatwidget::smoke_helpers::assert_has_terminal_chunk_containing(&events, needle);
+    }
+
+    pub fn assert_has_background_event_containing(
+        harness: &mut ChatWidgetHarness,
+        needle: &str,
+    ) {
+        let events = harness.poll_until(
+            |events| {
+                events.iter().any(|event| {
+                    match event {
+                        AppEvent::InsertBackgroundEvent { message, .. } => {
+                            message.contains(needle)
+                        }
+                        _ => false,
+                    }
+                })
+            },
+            Duration::from_millis(200),
+        );
+        crate::chatwidget::smoke_helpers::assert_has_background_event_containing(&events, needle);
+    }
+
+    pub fn assert_has_codex_event(harness: &mut ChatWidgetHarness) {
+        let events = harness.poll_until(
+            |events| events
+                .iter()
+                .any(|event| matches!(event, AppEvent::CodexEvent(_))),
+            Duration::from_millis(200),
+        );
+        crate::chatwidget::smoke_helpers::assert_has_codex_event(&events);
+    }
+
+    pub fn assert_has_insert_history(harness: &mut ChatWidgetHarness) {
+        let events = harness.poll_until(
+            |events| {
+                events.iter().any(|event| {
+                    matches!(
+                        event,
+                        AppEvent::InsertHistory(_)
+                            | AppEvent::InsertHistoryWithKind { .. }
+                            | AppEvent::InsertFinalAnswer { .. }
+                    )
+                })
+            },
+            Duration::from_millis(200),
+        );
+        crate::chatwidget::smoke_helpers::assert_has_insert_history(&events);
+    }
+
+    pub fn assert_no_events(harness: &mut ChatWidgetHarness) {
+        let events = harness.poll_until(
+            |events| !events.is_empty(),
+            Duration::from_millis(100),
+        );
+        crate::chatwidget::smoke_helpers::assert_no_events(&events);
+    }
+
+    pub fn history_records(harness: &ChatWidgetHarness) -> Vec<HistoryRecord> {
+        harness.history_records()
+    }
+}
+
 fn theme_configured_in_config_file(code_home: &std::path::Path) -> bool {
     let config_path = code_home.join("config.toml");
     let Ok(contents) = std::fs::read_to_string(&config_path) else {
