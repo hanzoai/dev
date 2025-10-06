@@ -245,6 +245,14 @@ pub mod test_helpers {
     pub fn history_records(harness: &mut ChatWidgetHarness) -> Vec<HistoryRecord> {
         harness.history_records()
     }
+
+    pub fn set_standard_terminal_mode(harness: &mut ChatWidgetHarness, enabled: bool) {
+        harness.set_standard_terminal_mode(enabled);
+    }
+
+    pub fn force_scroll_offset(harness: &mut ChatWidgetHarness, offset: u16) {
+        harness.force_scroll_offset(offset);
+    }
 }
 
 fn theme_configured_in_config_file(code_home: &std::path::Path) -> bool {

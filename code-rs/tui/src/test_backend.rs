@@ -120,12 +120,20 @@ impl Backend for VT100Backend {
     }
 
     fn size(&self) -> io::Result<Size> {
-        Ok(self.vt100().screen().size().into())
+        let (rows, cols) = self.vt100().screen().size();
+        Ok(Size {
+            width: cols,
+            height: rows,
+        })
     }
 
     fn window_size(&mut self) -> io::Result<WindowSize> {
+        let (rows, cols) = self.vt100().screen().size();
         Ok(WindowSize {
-            columns_rows: self.vt100().screen().size().into(),
+            columns_rows: Size {
+                width: cols,
+                height: rows,
+            },
             // Arbitrary size, we don't rely on this in testing.
             pixels: Size {
                 width: 640,
