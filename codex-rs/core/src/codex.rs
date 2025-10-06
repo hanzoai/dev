@@ -818,7 +818,7 @@ impl Session {
 
     async fn on_exec_command_begin(
         &self,
-        turn_diff_tracker: &mut TurnDiffTracker,
+        turn_diff_tracker: SharedTurnDiffTracker,
         exec_command_context: ExecCommandContext,
     ) {
         let ExecCommandContext {
@@ -834,7 +834,10 @@ impl Session {
                 user_explicitly_approved_this_action,
                 changes,
             }) => {
-                turn_diff_tracker.on_patch_begin(&changes);
+                {
+                    let mut tracker = turn_diff_tracker.lock().await;
+                    tracker.on_patch_begin(&changes);
+                }
 
                 EventMsg::PatchApplyBegin(PatchApplyBeginEvent {
                     call_id,
@@ -861,7 +864,7 @@ impl Session {
 
     async fn on_exec_command_end(
         &self,
-        turn_diff_tracker: &mut TurnDiffTracker,
+        turn_diff_tracker: SharedTurnDiffTracker,
         sub_id: &str,
         call_id: &str,
         output: &ExecToolCallOutput,
@@ -909,7 +912,10 @@ impl Session {
         // If this is an apply_patch, after we emit the end patch, emit a second event
         // with the full turn diff if there is one.
         if is_apply_patch {
-            let unified_diff = turn_diff_tracker.get_unified_diff();
+            let unified_diff = {
+                let mut tracker = turn_diff_tracker.lock().await;
+                tracker.get_unified_diff()
+            };
             if let Ok(Some(unified_diff)) = unified_diff {
                 let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
                 let event = Event {
@@ -1644,7 +1650,7 @@ pub(crate) async fn run_task(
     let mut last_agent_message: Option<String> = None;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
-    let mut turn_diff_tracker = TurnDiffTracker::new();
+    let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
     let mut auto_compact_recently_attempted = false;
 
     loop {
@@ -1692,9 +1698,9 @@ pub(crate) async fn run_task(
             })
             .collect();
         match run_turn(
-            &sess,
-            turn_context.as_ref(),
-            &mut turn_diff_tracker,
+            Arc::clone(&sess),
+            Arc::clone(&turn_context),
+            Arc::clone(&turn_diff_tracker),
             sub_id.clone(),
             turn_input,
         )
@@ -1917,15 +1923,20 @@ fn parse_review_output_event(text: &str) -> ReviewOutputEvent {
 }
 
 async fn run_turn(
-    sess: &Session,
-    turn_context: &TurnContext,
-    turn_diff_tracker: &mut TurnDiffTracker,
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    turn_diff_tracker: SharedTurnDiffTracker,
     sub_id: String,
     input: Vec<ResponseItem>,
 ) -> CodexResult<TurnRunResult> {
     let mcp_tools = sess.services.mcp_connection_manager.list_all_tools();
     let router = ToolRouter::from_config(&turn_context.tools_config, Some(mcp_tools));
 
+    let model_supports_parallel = turn_context
+        .client
+        .get_model_family()
+        .supports_parallel_tool_calls;
+    let parallel_tool_calls = model_supports_parallel;
     let prompt = Prompt {
         input,
         tools: router.specs().to_vec(),
@@ -1999,9 +2010,9 @@ async fn run_turn(
 /// "handled" such that it produces a `ResponseInputItem` that needs to be
 /// sent back to the model on the next turn.
 #[derive(Debug)]
-struct ProcessedResponseItem {
-    item: ResponseItem,
-    response: Option<ResponseInputItem>,
+pub(crate) struct ProcessedResponseItem {
+    pub(crate) item: ResponseItem,
+    pub(crate) response: Option<ResponseInputItem>,
 }
 
 #[derive(Debug)]
@@ -2085,24 +2096,34 @@ async fn try_run_turn(
     let mut stream = turn_context.client.clone().stream(&prompt).await?;
 
     let mut output = Vec::new();
+    let mut tool_runtime = ToolCallRuntime::new(
+        Arc::clone(&router),
+        Arc::clone(&sess),
+        Arc::clone(&turn_context),
+        Arc::clone(&turn_diff_tracker),
+        sub_id.to_string(),
+    );
 
     loop {
         // Poll the next item from the model stream. We must inspect *both* Ok and Err
         // cases so that transient stream failures (e.g., dropped SSE connection before
         // `response.completed`) bubble up and trigger the caller's retry logic.
         let event = stream.next().await;
-        let Some(event) = event else {
-            // Channel closed without yielding a final Completed event or explicit error.
-            // Treat as a disconnected stream so the caller can retry.
-            return Err(CodexErr::Stream(
-                "stream closed before response.completed".into(),
-                None,
-            ));
+        let event = match event {
+            Some(event) => event,
+            None => {
+                tool_runtime.abort_all();
+                return Err(CodexErr::Stream(
+                    "stream closed before response.completed".into(),
+                    None,
+                ));
+            }
         };
 
         let event = match event {
             Ok(ev) => ev,
             Err(e) => {
+                tool_runtime.abort_all();
                 // Propagate the underlying stream error to the caller (run_turn), which
                 // will apply the configured `stream_max_retries` policy.
                 return Err(e);
@@ -2141,10 +2162,15 @@ async fn try_run_turn(
                 response_id: _,
                 token_usage,
             } => {
-                sess.update_token_usage_info(sub_id, turn_context, token_usage.as_ref())
+                sess.update_token_usage_info(sub_id, turn_context.as_ref(), token_usage.as_ref())
                     .await;
 
-                let unified_diff = turn_diff_tracker.get_unified_diff();
+                tool_runtime.resolve_pending(output.as_mut_slice()).await?;
+
+                let unified_diff = {
+                    let mut tracker = turn_diff_tracker.lock().await;
+                    tracker.get_unified_diff()
+                };
                 if let Ok(Some(unified_diff)) = unified_diff {
                     let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
                     let event = Event {
@@ -2520,13 +2546,19 @@ mod tests {
 
         let out = format_exec_output_str(&exec);
 
+        // Strip truncation header if present for subsequent assertions
+        let body = out
+            .strip_prefix("Total output lines: ")
+            .and_then(|rest| rest.split_once("\n\n").map(|x| x.1))
+            .unwrap_or(out.as_str());
+
         // Expect elision marker with correct counts
         let omitted = 400 - MODEL_FORMAT_MAX_LINES; // 144
         let marker = format!("\n[... omitted {omitted} of 400 lines ...]\n\n");
         assert!(out.contains(&marker), "missing marker: {out}");
 
         // Validate head and tail
-        let parts: Vec<&str> = out.split(&marker).collect();
+        let parts: Vec<&str> = body.split(&marker).collect();
         assert_eq!(parts.len(), 2, "expected one marker split");
         let head = parts[0];
         let tail = parts[1];
@@ -2562,14 +2594,19 @@ mod tests {
         };
 
         let out = format_exec_output_str(&exec);
-        assert!(out.len() <= MODEL_FORMAT_MAX_BYTES, "exceeds byte budget");
+        // Keep strict budget on the truncated body (excluding header)
+        let body = out
+            .strip_prefix("Total output lines: ")
+            .and_then(|rest| rest.split_once("\n\n").map(|x| x.1))
+            .unwrap_or(out.as_str());
+        assert!(body.len() <= MODEL_FORMAT_MAX_BYTES, "exceeds byte budget");
         assert!(out.contains("omitted"), "should contain elision marker");
 
         // Ensure head and tail are drawn from the original
-        assert!(full.starts_with(out.chars().take(8).collect::<String>().as_str()));
+        assert!(full.starts_with(body.chars().take(8).collect::<String>().as_str()));
         assert!(
             full.ends_with(
-                out.chars()
+                body.chars()
                     .rev()
                     .take(8)
                     .collect::<String>()
@@ -3060,9 +3097,11 @@ mod tests {
         use crate::turn_diff_tracker::TurnDiffTracker;
         use std::collections::HashMap;
 
-        let (session, mut turn_context) = make_session_and_context();
+        let (session, mut turn_context_raw) = make_session_and_context();
         // Ensure policy is NOT OnRequest so the early rejection path triggers
-        turn_context.approval_policy = AskForApproval::OnFailure;
+        turn_context_raw.approval_policy = AskForApproval::OnFailure;
+        let session = Arc::new(session);
+        let mut turn_context = Arc::new(turn_context_raw);
 
         let params = ExecParams {
             command: if cfg!(windows) {
@@ -3090,7 +3129,7 @@ mod tests {
             ..params.clone()
         };
 
-        let mut turn_diff_tracker = TurnDiffTracker::new();
+        let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
 
         let tool_name = "shell";
         let sub_id = "test-sub".to_string();
@@ -3099,9 +3138,9 @@ mod tests {
         let resp = handle_container_exec_with_params(
             tool_name,
             params,
-            &session,
-            &turn_context,
-            &mut turn_diff_tracker,
+            Arc::clone(&session),
+            Arc::clone(&turn_context),
+            Arc::clone(&turn_diff_tracker),
             sub_id,
             call_id,
         )
@@ -3120,14 +3159,16 @@ mod tests {
 
         // Now retry the same command WITHOUT escalated permissions; should succeed.
         // Force DangerFullAccess to avoid platform sandbox dependencies in tests.
-        turn_context.sandbox_policy = SandboxPolicy::DangerFullAccess;
+        Arc::get_mut(&mut turn_context)
+            .expect("unique turn context Arc")
+            .sandbox_policy = SandboxPolicy::DangerFullAccess;
 
         let resp2 = handle_container_exec_with_params(
             tool_name,
             params2,
-            &session,
-            &turn_context,
-            &mut turn_diff_tracker,
+            Arc::clone(&session),
+            Arc::clone(&turn_context),
+            Arc::clone(&turn_diff_tracker),
             "test-sub".to_string(),
             "test-call-2".to_string(),
         )
