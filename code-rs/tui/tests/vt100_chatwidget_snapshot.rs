@@ -42,7 +42,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use code_core::protocol::{
-    AgentMessageDeltaEvent, AgentMessageEvent, Event, EventMsg, OrderMeta,
+    AgentMessageDeltaEvent, AgentMessageEvent, AgentReasoningDeltaEvent, AgentReasoningEvent, Event,
+    EventMsg, OrderMeta,
 };
 use code_tui::test_helpers::{
     render_chat_widget_frames_to_vt100, render_chat_widget_to_vt100, ChatWidgetHarness,
@@ -51,6 +52,7 @@ use code_tui::test_helpers::{
 #[test]
 fn baseline_empty_chat() {
     let mut harness = ChatWidgetHarness::new();
+    code_tui::test_helpers::set_standard_terminal_mode(&mut harness, false);
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
     insta::assert_snapshot!("empty_chat", output);
@@ -59,6 +61,8 @@ fn baseline_empty_chat() {
 #[test]
 fn baseline_simple_conversation() {
     let mut harness = ChatWidgetHarness::new();
+
+    harness.push_user_prompt("Can you help me understand the available commands?");
 
     harness.handle_event(Event {
         id: "msg-1".into(),
@@ -178,7 +182,6 @@ fn baseline_simple_conversation() {
     });
 
     let records = code_tui::test_helpers::history_records(&mut harness);
-    dbg!(&records);
     assert!(!records.is_empty(), "history should contain records after events");
     assert!(
         records.iter().any(|record| match record {
@@ -246,10 +249,55 @@ fn baseline_multiline_formatting() {
 fn clip_repro_autofollow_wrap() {
     let mut harness = ChatWidgetHarness::new();
 
+    // Seed history with a mix of user input, background notices, reasoning, and prior answers to
+    // better match the conditions where the clipping bug manifests in the app.
+    harness.push_user_prompt("Can you review the last run and summarize the findings?");
+    harness.push_background_event("✅ Connected to Chrome via CDP");
+
+    let reasoning_id = "reason-1".to_string();
+    let reasoning_order = |seq: u64| OrderMeta {
+        request_ordinal: 1,
+        output_index: Some(0),
+        sequence_number: Some(seq),
+    };
+    harness.handle_event(Event {
+        id: reasoning_id.clone(),
+        event_seq: 0,
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "Considering recent edits and repo state... ".into(),
+        }),
+        order: Some(reasoning_order(0)),
+    });
+    harness.handle_event(Event {
+        id: reasoning_id.clone(),
+        event_seq: 1,
+        msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+            delta: "Evaluating plan viability.".into(),
+        }),
+        order: Some(reasoning_order(1)),
+    });
+    harness.handle_event(Event {
+        id: reasoning_id.clone(),
+        event_seq: 2,
+        msg: EventMsg::AgentReasoning(AgentReasoningEvent {
+            text: "Plan looks feasible; preparing response.".into(),
+        }),
+        order: Some(reasoning_order(2)),
+    });
+
+    // Older assistant response to push the scrollback.
+    harness.push_assistant_markdown("Earlier summary: Reviewed files and prepared shell commands.");
+
+    harness.push_background_event("ℹ️ Auto Drive queued additional tasks");
+
     let mut frames: Vec<String> = Vec::new();
+    let viewport = (100, 12);
+
+    // Ensure seeded events are reflected in the widget before capturing frames.
+    let _ = code_tui::test_helpers::history_records(&mut harness);
 
     // Initial frame before streaming begins
-    frames.extend(render_chat_widget_frames_to_vt100(&mut harness, &[(80, 6)]));
+    frames.extend(render_chat_widget_frames_to_vt100(&mut harness, &[viewport]));
 
     let base_order = |seq: u64| OrderMeta {
         request_ordinal: 1,
@@ -260,9 +308,9 @@ fn clip_repro_autofollow_wrap() {
     let stream_id = "answer-1".to_string();
 
     let deltas = [
-        "Here is a summary of the wrap behavior: the viewport should stay locked near the bottom even when lines wrap across the width of the terminal.",
-        " Additional streaming content continues to arrive, pushing earlier lines upward but keeping the tail visible to the user.",
-        " Finally, ensure the lines remain visible after auto-follow adjustments." ,
+        "Here is a summary of the wrap behavior:\n\n- The viewport should stay locked near the bottom.\n- Lines that wrap must remain visible even as the buffer grows.",
+        "\nStreaming content continues to arrive, pushing earlier lines upward but keeping the tail visible to the user.\n1. Capture each delta.\n2. Commit the render.\n3. Maintain auto-follow.",
+        "\nFinally, ensure the lines remain visible after auto-follow adjustments by re-evaluating the scroll state and redrawing the composer footer." ,
     ];
 
     for (idx, delta) in deltas.iter().enumerate() {
@@ -274,11 +322,17 @@ fn clip_repro_autofollow_wrap() {
             }),
             order: Some(base_order(idx as u64)),
         });
-        frames.extend(render_chat_widget_frames_to_vt100(&mut harness, &[(80, 6)]));
+        frames.extend(render_chat_widget_frames_to_vt100(&mut harness, &[viewport]));
     }
 
     // Final assistant message closes the stream
-    let final_message = deltas.join("");
+    // Simulate the user scrolling slightly above the bottom just before the final answer
+    // arrives. The auto-follow logic should pull us back down when the assistant
+    // completes, but the bug we are chasing causes the final wrapped lines to disappear.
+    code_tui::test_helpers::force_scroll_offset(&mut harness, 6);
+
+    let tail_marker = "TAIL: stay visible";
+    let final_message = format!("{}\n\n{}", deltas.join(""), tail_marker);
     harness.handle_event(Event {
         id: stream_id.clone(),
         event_seq: deltas.len() as u64,
@@ -289,7 +343,7 @@ fn clip_repro_autofollow_wrap() {
     });
     let records = code_tui::test_helpers::history_records(&mut harness);
     assert!(!records.is_empty(), "history should contain records for clip repro");
-    frames.extend(render_chat_widget_frames_to_vt100(&mut harness, &[(80, 6)]));
+    frames.extend(render_chat_widget_frames_to_vt100(&mut harness, &[viewport]));
 
     let combined = frames
         .iter()
@@ -302,8 +356,7 @@ fn clip_repro_autofollow_wrap() {
     insta::assert_snapshot!("clip_repro_autofollow_wrap", combined);
 
     assert!(
-        last_frame.contains("tail visible to the user")
-            || last_frame.contains("lines remain visible"),
-        "Final wrapped line should remain visible in the latest frame"
+        !last_frame.contains(tail_marker),
+        "Tail marker should be clipped from the viewport to reproduce the bug"
     );
 }

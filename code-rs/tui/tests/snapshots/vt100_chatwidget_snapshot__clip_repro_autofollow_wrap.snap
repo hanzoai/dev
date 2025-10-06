@@ -3,36 +3,66 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: combined
 ---
 --- frame 0 ---
- ┌──┐
- │  │
- └──┘
-   cr
-   a
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+ › Can you review the last run and summarize the findings?
+
+   Earlier summary: Reviewed files and prepared shell commands.
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you this morning?                                                          │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                                                       Ctrl+H help
 
 --- frame 1 ---
- ┌──┐
- │  │
- └──┘
-   cr
-   a
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Earlier summary: Reviewed files and prepared shell commands.
+
+   Considering recent edits and repo state... Evaluating plan viability.…
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you this morning?                                                          │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                             Ctrl+R show reasoning  •  Ctrl+H help
 
 --- frame 2 ---
- ┌──┐
- │  │
- └──┘
-   cr
-   a
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Earlier summary: Reviewed files and prepared shell commands.
+
+   Considering recent edits and repo state... Evaluating plan viability.…
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you this morning?                                                          │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                             Ctrl+R show reasoning  •  Ctrl+H help
 
 --- frame 3 ---
- ┌──┐
- │  │
- └──┘
-   cr
-   a
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Earlier summary: Reviewed files and prepared shell commands.
+
+   Considering recent edits and repo state... Evaluating plan viability.…
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you this morning?                                                          │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                             Ctrl+R show reasoning  •  Ctrl+H help
 
 --- frame 4 ---
- ┌──┐
- │  │
- └──┘
-   ta
-   wi
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   - Lines that wrap must remain visible even as the buffer grows.
+   Streaming content continues to arrive, pushing earlier lines upward but keeping the tail visible
+   to the user.
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you this morning?                                                          │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                             Ctrl+R show reasoning  •  Ctrl+H help
