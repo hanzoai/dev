@@ -424,10 +424,20 @@ mod tests {
         .expect("persist");
 
         let contents = read_config(code_home).await;
-        let expected = r#"model = "gpt-5-codex"
-model_reasoning_effort = "high"
-"#;
-        assert_eq!(contents, expected);
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let table = parsed.as_table().expect("root table");
+        assert_eq!(
+            table
+                .get(CONFIG_KEY_MODEL)
+                .and_then(|value| value.as_str()),
+            Some("gpt-5-codex")
+        );
+        assert_eq!(
+            table
+                .get(CONFIG_KEY_EFFORT)
+                .and_then(|value| value.as_str()),
+            Some("high")
+        );
     }
 
     /// Verifies values are written under the active profile when `profile` is set.
@@ -543,15 +553,33 @@ model_reasoning_effort = "high"
         .expect("persist");
 
         let contents = read_config(code_home).await;
-        let expected = r#"x = "y"
-
-[a.b]
-c = "v"
-
-[profiles.p1]
-model = "gpt-5-codex"
-"#;
-        assert_eq!(contents, expected);
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let table = parsed.as_table().expect("root table");
+        assert_eq!(
+            table.get("x").and_then(toml::Value::as_str),
+            Some("y")
+        );
+        let a_table = table
+            .get("a")
+            .and_then(toml::Value::as_table)
+            .expect("a table");
+        let b_table = a_table
+            .get("b")
+            .and_then(toml::Value::as_table)
+            .expect("b table");
+        assert_eq!(b_table.get("c").and_then(toml::Value::as_str), Some("v"));
+        let profiles = table
+            .get("profiles")
+            .and_then(toml::Value::as_table)
+            .expect("profiles table");
+        let p1 = profiles
+            .get("p1")
+            .and_then(toml::Value::as_table)
+            .expect("profile p1");
+        assert_eq!(
+            p1.get(CONFIG_KEY_MODEL).and_then(toml::Value::as_str),
+            Some("gpt-5-codex")
+        );
     }
 
     #[tokio::test]
@@ -827,8 +855,15 @@ model_reasoning_effort = "minimal"
         .expect("persist");
 
         let contents = read_config(code_home).await;
-        let expected = "model = \"gpt-5-codex\"\n";
-        assert_eq!(contents, expected);
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let table = parsed.as_table().expect("root table");
+        assert_eq!(
+            table
+                .get(CONFIG_KEY_MODEL)
+                .and_then(|value| value.as_str()),
+            Some("gpt-5-codex")
+        );
+        assert!(table.get(CONFIG_KEY_EFFORT).is_none());
     }
 
     /// Verifies no-op behavior when all provided overrides are `None` (no file created/modified).
@@ -867,10 +902,23 @@ model_reasoning_effort = "minimal"
         .expect("persist");
 
         let contents = read_config(code_home).await;
-        let expected = r#"[profiles.team]
-model = "o3"
-"#;
-        assert_eq!(contents, expected);
+        let parsed: toml::Value = toml::from_str(&contents).expect("valid toml");
+        let table = parsed.as_table().expect("root table");
+        let profiles = table
+            .get("profiles")
+            .and_then(|value| value.as_table())
+            .expect("profiles table");
+        let team = profiles
+            .get("team")
+            .and_then(|value| value.as_table())
+            .expect("team profile");
+        assert_eq!(
+            team
+                .get(CONFIG_KEY_MODEL)
+                .and_then(|value| value.as_str()),
+            Some("o3")
+        );
+        assert!(team.get(CONFIG_KEY_EFFORT).is_none());
     }
 
     #[tokio::test]

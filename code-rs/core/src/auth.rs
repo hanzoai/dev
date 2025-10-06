@@ -18,7 +18,8 @@ use std::time::Duration;
 use code_app_server_protocol::AuthMode;
 
 use crate::token_data::TokenData;
-use crate::token_data::parse_id_token;
+use crate::token_data::{parse_id_token, PlanType};
+use crate::token_data::KnownPlan;
 use crate::config::resolve_code_path_for_read;
 
 #[derive(Debug, Clone)]
@@ -324,6 +325,15 @@ fn load_auth(
 
     // If the auth.json has an API key, decide whether to use it.
     if let Some(api_key) = &auth_json_api_key {
+        let plan_requires_api_key = tokens
+            .as_ref()
+            .and_then(|t| t.id_token.chatgpt_plan_type.as_ref())
+            .is_some_and(|plan| matches!(plan, PlanType::Known(KnownPlan::Enterprise)));
+
+        if plan_requires_api_key {
+            return Ok(Some(CodexAuth::from_api_key_with_client(api_key, client)));
+        }
+
         // Should any of these be AuthMode::ChatGPT with the api_key set?
         // Does AuthMode::ChatGPT indicate that there is an auth.json that is
         // "refreshable" even if we are using the API key for auth?

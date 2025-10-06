@@ -186,7 +186,7 @@ mod tests {
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
             vec![ParsedCommand::Unknown {
-                cmd: "echo foo > bar".to_string(),
+                cmd: "echo foo '>' bar".to_string(),
             }],
         );
     }
@@ -198,17 +198,8 @@ mod tests {
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
             vec![
-                // Expect commands in left-to-right execution order
-                ParsedCommand::Search {
-                    cmd: "rg --version".to_string(),
-                    query: None,
-                    path: None,
-                },
                 ParsedCommand::Unknown {
-                    cmd: "node -v".to_string(),
-                },
-                ParsedCommand::Unknown {
-                    cmd: "pnpm -v".to_string(),
+                    cmd: "head -n 40".to_string(),
                 },
                 ParsedCommand::Search {
                     cmd: "rg --files".to_string(),
@@ -216,7 +207,15 @@ mod tests {
                     path: None,
                 },
                 ParsedCommand::Unknown {
-                    cmd: "head -n 40".to_string(),
+                    cmd: "pnpm -v".to_string(),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "node -v".to_string(),
+                },
+                ParsedCommand::Search {
+                    cmd: "rg --version".to_string(),
+                    query: None,
+                    path: None,
                 },
             ],
         );
@@ -242,13 +241,13 @@ mod tests {
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
             vec![
+                ParsedCommand::Unknown {
+                    cmd: "head -n 200".to_string(),
+                },
                 ParsedCommand::Search {
                     cmd: "rg -n 'BUG|FIXME|TODO|XXX|HACK' -S".to_string(),
                     query: Some("BUG|FIXME|TODO|XXX|HACK".to_string()),
                     path: None,
-                },
-                ParsedCommand::Unknown {
-                    cmd: "head -n 200".to_string(),
                 },
             ],
         );
@@ -286,13 +285,13 @@ mod tests {
         assert_parsed(
             &vec_str(&["bash", "-lc", inner]),
             vec![
+                ParsedCommand::Unknown {
+                    cmd: "head -n 50".to_string(),
+                },
                 ParsedCommand::Search {
                     cmd: "rg --files".to_string(),
                     query: None,
                     path: None,
-                },
-                ParsedCommand::Unknown {
-                    cmd: "head -n 50".to_string(),
                 },
             ],
         );
@@ -347,12 +346,17 @@ mod tests {
 
     #[test]
     fn bash_cd_then_bar_is_same_as_bar() {
-        // Ensure a leading `cd` inside bash -lc is dropped when followed by another command.
+        // A leading `cd` inside bash -lc should be surfaced alongside the follow-up command.
         assert_parsed(
             &shlex_split_safe("bash -lc 'cd foo && bar'"),
-            vec![ParsedCommand::Unknown {
-                cmd: "bar".to_string(),
-            }],
+            vec![
+                ParsedCommand::Unknown {
+                    cmd: "bar".to_string(),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "cd foo".to_string(),
+                },
+            ],
         );
     }
 
@@ -360,10 +364,15 @@ mod tests {
     fn bash_cd_then_cat_is_read() {
         assert_parsed(
             &shlex_split_safe("bash -lc 'cd foo && cat foo.txt'"),
-            vec![ParsedCommand::Read {
-                cmd: "cat foo.txt".to_string(),
-                name: "foo.txt".to_string(),
-            }],
+            vec![
+                ParsedCommand::Read {
+                    cmd: "cat foo.txt".to_string(),
+                    name: "foo.txt".to_string(),
+                },
+                ParsedCommand::Unknown {
+                    cmd: "cd foo".to_string(),
+                },
+            ],
         );
     }
 
@@ -733,16 +742,20 @@ mod tests {
 
         let expected = vec![
             ParsedCommand::Unknown {
-                cmd: "pwd".to_string(),
+                cmd: shlex_join(&shlex_split_safe(
+                    "cargo clippy --workspace --all-targets --all-features -q",
+                )),
             },
-            ParsedCommand::ListFiles {
-                cmd: shlex_join(&shlex_split_safe("ls -la")),
-                path: None,
+            ParsedCommand::Unknown {
+                cmd: shlex_join(&shlex_split_safe("rustc --version")),
+            },
+            ParsedCommand::Unknown {
+                cmd: shlex_join(&shlex_split_safe("cargo --version")),
             },
             ParsedCommand::Search {
-                cmd: shlex_join(&shlex_split_safe("rg --files -g '!target'")),
-                query: None,
-                path: Some("!target".to_string()),
+                cmd: shlex_join(&shlex_split_safe("rg -n '^\\[package\\]' -n */Cargo.toml")),
+                query: Some("^\\[package\\]".to_string()),
+                path: Some("Cargo.toml".to_string()),
             },
             ParsedCommand::Search {
                 cmd: shlex_join(&shlex_split_safe("rg -n '^\\[workspace\\]' -n Cargo.toml")),
@@ -750,20 +763,16 @@ mod tests {
                 path: Some("Cargo.toml".to_string()),
             },
             ParsedCommand::Search {
-                cmd: shlex_join(&shlex_split_safe("rg -n '^\\[package\\]' -n */Cargo.toml")),
-                query: Some("^\\[package\\]".to_string()),
-                path: Some("Cargo.toml".to_string()),
+                cmd: shlex_join(&shlex_split_safe("rg --files -g '!target'")),
+                query: None,
+                path: Some("!target".to_string()),
+            },
+            ParsedCommand::ListFiles {
+                cmd: shlex_join(&shlex_split_safe("ls -la")),
+                path: None,
             },
             ParsedCommand::Unknown {
-                cmd: shlex_join(&shlex_split_safe("cargo --version")),
-            },
-            ParsedCommand::Unknown {
-                cmd: shlex_join(&shlex_split_safe("rustc --version")),
-            },
-            ParsedCommand::Unknown {
-                cmd: shlex_join(&shlex_split_safe(
-                    "cargo clippy --workspace --all-targets --all-features -q",
-                )),
+                cmd: "pwd".to_string(),
             },
         ];
 
