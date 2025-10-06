@@ -218,6 +218,7 @@ impl McpConnectionManager {
             let use_rmcp_client_flag = use_rmcp_client;
             join_set.spawn(async move {
                 let McpServerConfig { transport, .. } = cfg;
+                let server_name_for_error = server_name.clone();
                 let params = mcp_types::InitializeRequestParams {
                     capabilities: ClientCapabilities {
                         experimental: None,
@@ -241,6 +242,8 @@ impl McpConnectionManager {
 
                 let client = match transport {
                     McpServerTransportConfig::Stdio { command, args, env } => {
+                        let command_for_error = command.clone();
+                        let args_for_error = args.clone();
                         let command_os: OsString = command.into();
                         let args_os: Vec<OsString> = args.into_iter().map(Into::into).collect();
                         McpClientAdapter::new_stdio_client(
@@ -252,6 +255,19 @@ impl McpConnectionManager {
                             startup_timeout,
                         )
                         .await
+                        .with_context(|| {
+                            if args_for_error.is_empty() {
+                                format!(
+                                    "failed to spawn MCP server `{}` using command `{}`",
+                                    server_name_for_error, command_for_error
+                                )
+                            } else {
+                                format!(
+                                    "failed to spawn MCP server `{}` using command `{}` with args {:?}",
+                                    server_name_for_error, command_for_error, args_for_error
+                                )
+                            }
+                        })
                     }
                     McpServerTransportConfig::StreamableHttp { url, bearer_token } => {
                         McpClientAdapter::new_streamable_http_client(
@@ -496,6 +512,38 @@ mod tests {
         assert_eq!(
             keys[1],
             "my_server__yet_another_e1c3987bd9c50b826cbe1687966f79f0c602d19ca"
+        );
+    }
+
+    #[tokio::test]
+    async fn stdio_spawn_error_mentions_server_and_command() {
+        let mut servers = HashMap::new();
+        servers.insert(
+            "context7-mcp".to_string(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: "nonexistent-cmd".to_string(),
+                    args: Vec::new(),
+                    env: None,
+                },
+                startup_timeout_sec: None,
+                tool_timeout_sec: None,
+            },
+        );
+
+        let (_manager, errors) = McpConnectionManager::new(servers, false, HashSet::new())
+            .await
+            .expect("manager creation should succeed even when servers fail");
+
+        let err = errors
+            .get("context7-mcp")
+            .expect("missing executable should be reported under server name");
+        let msg = format!("{err:#}");
+
+        assert!(msg.contains("context7-mcp"), "error should mention the server name");
+        assert!(
+            msg.contains("nonexistent-cmd"),
+            "error should include the missing command, got: {msg}"
         );
     }
 }
