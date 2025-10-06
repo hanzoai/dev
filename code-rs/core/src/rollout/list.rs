@@ -406,9 +406,10 @@ pub async fn find_conversation_path_by_id_str(
     if !root.exists() {
         return Ok(None);
     }
-    // This is safe because we know the values are valid.
+    // Retrieve enough matches to prefer rollout `.jsonl` files when multiple results are returned
+    // for the same UUID (e.g., accompanying `.snapshot.json` snapshots).
     #[allow(clippy::unwrap_used)]
-    let limit = NonZero::new(1).unwrap();
+    let limit = NonZero::new(8).unwrap();
     // This is safe because we know the values are valid.
     #[allow(clippy::unwrap_used)]
     let threads = NonZero::new(2).unwrap();
@@ -427,9 +428,88 @@ pub async fn find_conversation_path_by_id_str(
     )
     .map_err(|e| io::Error::other(format!("file search failed: {e}")))?;
 
-    Ok(results
-        .matches
-        .into_iter()
-        .next()
-        .map(|m| root.join(m.path)))
+    let mut fallback: Option<PathBuf> = None;
+    for file_match in results.matches {
+        let candidate = root.join(Path::new(&file_match.path));
+
+        if candidate
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
+        {
+            return Ok(Some(candidate));
+        }
+
+        if let Some(jsonl_candidate) = snapshot_to_rollout_path(&candidate) {
+            if jsonl_candidate.exists() {
+                return Ok(Some(jsonl_candidate));
+            }
+            fallback = fallback.or(Some(candidate));
+            continue;
+        }
+
+        if fallback.is_none() {
+            fallback = Some(candidate);
+        }
+    }
+
+    Ok(fallback)
+}
+
+fn snapshot_to_rollout_path(path: &Path) -> Option<PathBuf> {
+    let file_name = path.file_name()?.to_str()?;
+    let base = file_name.strip_suffix(".snapshot.json")?;
+    let mut candidate = path.to_path_buf();
+    candidate.set_file_name(format!("{base}.jsonl"));
+    Some(candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_conversation_path_by_id_str;
+    use super::snapshot_to_rollout_path;
+    use super::SESSIONS_SUBDIR;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn prefers_rollout_jsonl_when_snapshot_present() -> anyhow::Result<()> {
+        let temp = tempdir()?;
+        let code_home = temp.path();
+        let uuid = Uuid::new_v4();
+        let uuid_str = uuid.to_string();
+
+        let sessions_dir = code_home
+            .join(SESSIONS_SUBDIR)
+            .join("2025")
+            .join("10")
+            .join("06");
+        fs::create_dir_all(&sessions_dir)?;
+
+        let base = format!("rollout-2025-10-06T12-00-00-{uuid_str}");
+        let rollout_path = sessions_dir.join(format!("{base}.jsonl"));
+        let snapshot_path = sessions_dir.join(format!("{base}.snapshot.json"));
+
+        fs::write(&rollout_path, "{\"item\":\"dummy\"}\n")?;
+        fs::write(&snapshot_path, "{}")?;
+
+        let resolved = find_conversation_path_by_id_str(code_home, &uuid_str).await?;
+        assert_eq!(resolved, Some(rollout_path));
+
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_conversion_rewrites_extension() {
+        let snapshot = PathBuf::from(
+            "/tmp/rollout-2025-10-06T12-00-00-12345678-1234-1234-1234-123456789abc.snapshot.json",
+        );
+        let expected = PathBuf::from(
+            "/tmp/rollout-2025-10-06T12-00-00-12345678-1234-1234-1234-123456789abc.jsonl",
+        );
+        let converted = snapshot_to_rollout_path(&snapshot);
+        assert_eq!(converted, Some(expected));
+    }
 }
