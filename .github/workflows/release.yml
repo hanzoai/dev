@@ -75,7 +75,7 @@ jobs:
         shell: bash
         run: |
           cd code-rs
-          cargo nextest run --no-fail-fast --cargo-args "--profile dev-fast --locked"
+          cargo nextest run --no-fail-fast --locked
 
       - name: Free disk after tests
         if: always()
