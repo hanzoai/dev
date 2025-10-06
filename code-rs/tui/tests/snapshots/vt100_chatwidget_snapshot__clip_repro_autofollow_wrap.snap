@@ -1,0 +1,38 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: combined
+---
+--- frame 0 ---
+ ┌──┐
+ │  │
+ └──┘
+   cr
+   a
+
+--- frame 1 ---
+ ┌──┐
+ │  │
+ └──┘
+   cr
+   a
+
+--- frame 2 ---
+ ┌──┐
+ │  │
+ └──┘
+   cr
+   a
+
+--- frame 3 ---
+ ┌──┐
+ │  │
+ └──┘
+   cr
+   a
+
+--- frame 4 ---
+ ┌──┐
+ │  │
+ └──┘
+   ta
+   wi
