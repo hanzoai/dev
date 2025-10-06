@@ -1545,6 +1545,7 @@ dependencies = [
  "code-mcp-types",
  "code-ollama",
  "code-protocol",
+ "code-tui",
  "code-version",
  "color-eyre",
  "crossterm",

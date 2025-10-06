@@ -225,7 +225,31 @@ mod tests {
 
     /// Initializes a repository with consistent settings for cross-platform tests.
     fn init_test_repo(repo: &Path) {
-        run_git_in(repo, &["init", "--initial-branch=main"]);
+        let init_status = Command::new("git")
+            .current_dir(repo)
+            .args(["init", "--initial-branch=main"])
+            .output()
+            .expect("git command");
+
+        if !init_status.status.success() {
+            let fallback = Command::new("git")
+                .current_dir(repo)
+                .arg("init")
+                .status()
+                .expect("git command");
+            assert!(fallback.success(), "git init failed without --initial-branch");
+
+            let set_head = Command::new("git")
+                .current_dir(repo)
+                .args(["symbolic-ref", "HEAD", "refs/heads/main"])
+                .status()
+                .expect("git command");
+            assert!(
+                set_head.success(),
+                "git symbolic-ref HEAD refs/heads/main failed"
+            );
+        }
+
         run_git_in(repo, &["config", "core.autocrlf", "false"]);
     }
 

@@ -2,15 +2,18 @@
 set -euo pipefail
 
 echo "[ci-tests] Running curated integration tests..."
-pushd code-rs >/dev/null
+if [[ "${SKIP_CARGO_TESTS:-0}" != "1" ]]; then
+  pushd code-rs >/dev/null
 
-cargo test -p code-login --tests -q
-cargo test -p code-chatgpt --tests -q
-cargo test -p code-apply-patch --tests -q
-cargo test -p code-execpolicy --tests -q
-cargo test -p mcp-types --tests -q
+  cargo test -p code-login --tests -q
+  cargo test -p code-chatgpt --tests -q
+  cargo test -p code-apply-patch --tests -q
+  cargo test -p code-execpolicy --tests -q
+  cargo test -p mcp-types --tests -q
 
-popd >/dev/null
+  popd >/dev/null
+fi
+
 
 echo "[ci-tests] CLI smokes with host binary..."
 BIN=./code-rs/target/dev-fast/code

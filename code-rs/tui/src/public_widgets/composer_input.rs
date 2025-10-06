@@ -83,6 +83,11 @@ impl ComposerInput {
         self.inner.set_footer_hint_override(None);
     }
 
+    /// Returns true if custom hint items are currently active.
+    pub fn has_custom_hint_items(&self) -> bool {
+        self.inner.has_footer_hint_override()
+    }
+
     /// Desired height (in rows) for a given width.
     pub fn desired_height(&self, width: u16) -> u16 {
         self.inner.desired_height(width)

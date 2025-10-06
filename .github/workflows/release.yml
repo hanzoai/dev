@@ -54,9 +54,22 @@ jobs:
         shell: bash
         run: ./build-fast.sh
 
-      - name: Curated tests + CLI smokes
+      - name: CLI smokes (skip duplicated cargo tests)
         shell: bash
+        env:
+          SKIP_CARGO_TESTS: "1"
         run: bash scripts/ci-tests.sh
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Workspace tests (nextest)
+        shell: bash
+        run: |
+          cd code-rs
+          cargo nextest run --no-fail-fast
 
   determine-version:
     name: Determine Version
