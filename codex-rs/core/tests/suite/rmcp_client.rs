@@ -346,10 +346,7 @@ async fn streamable_http_with_oauth_round_trip() -> anyhow::Result<()> {
         &server,
         any(),
         responses::sse(vec![
-            serde_json::json!({
-                "type": "response.created",
-                "response": {"id": "resp-1"}
-            }),
+            responses::ev_response_created("resp-1"),
             responses::ev_function_call(call_id, &tool_name, "{\"message\":\"ping\"}"),
             responses::ev_completed("resp-1"),
         ]),

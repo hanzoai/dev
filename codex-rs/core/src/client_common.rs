@@ -33,6 +33,9 @@ pub struct Prompt {
     /// external MCP servers.
     pub(crate) tools: Vec<ToolSpec>,
 
+    /// Whether parallel tool calls are permitted for this prompt.
+    pub(crate) parallel_tool_calls: bool,
+
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
 
@@ -297,6 +300,17 @@ pub(crate) mod tools {
         WebSearch {},
         #[serde(rename = "custom")]
         Freeform(FreeformTool),
+    }
+
+    impl ToolSpec {
+        pub(crate) fn name(&self) -> &str {
+            match self {
+                ToolSpec::Function(tool) => tool.name.as_str(),
+                ToolSpec::LocalShell {} => "local_shell",
+                ToolSpec::WebSearch {} => "web_search",
+                ToolSpec::Freeform(tool) => tool.name.as_str(),
+            }
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

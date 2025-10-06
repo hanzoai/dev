@@ -11,9 +11,6 @@ use regex_lite::Regex;
 #[cfg(target_os = "linux")]
 use assert_cmd::cargo::cargo_bin;
 
-#[cfg(target_os = "linux")]
-use assert_cmd::cargo::cargo_bin;
-
 pub mod responses;
 pub mod test_codex;
 pub mod test_codex_exec;
