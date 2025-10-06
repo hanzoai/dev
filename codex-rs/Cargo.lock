@@ -871,6 +871,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "assert_matches",
  "pretty_assertions",
  "similar",
  "tempfile",
@@ -933,6 +934,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "assert_matches",
  "clap",
  "clap_complete",
  "codex-app-server",
@@ -1022,6 +1024,7 @@ dependencies = [
  "anyhow",
  "askama",
  "assert_cmd",
+ "assert_matches",
  "async-channel",
  "async-trait",
  "base64",
@@ -1162,6 +1165,7 @@ dependencies = [
 name = "codex-git-tooling"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "pretty_assertions",
  "tempfile",
  "thiserror 2.0.16",
@@ -1249,6 +1253,7 @@ dependencies = [
 name = "codex-ollama"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "async-stream",
  "bytes",
  "codex-core",
@@ -1367,6 +1372,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "assert_matches",
  "async-stream",
  "base64",
  "chrono",
@@ -1432,6 +1438,7 @@ dependencies = [
 name = "codex-utils-readiness"
 version = "0.0.0"
 dependencies = [
+ "assert_matches",
  "async-trait",
  "thiserror 2.0.16",
  "time",
@@ -1562,6 +1569,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "codex-core",
+ "regex-lite",
  "serde_json",
  "tempfile",
  "tokio",
@@ -3315,6 +3323,16 @@ name = "libredox"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4488594b9328dee448adb906d8b126d9b7deb7cf5c22161ee591610bb1be83c0"
+dependencies = [
+ "bitflags 2.9.1",
+ "libc",
+]
+
+[[package]]
+name = "linux-keyutils"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "761e49ec5fd8a5a463f9b84e877c373d888935b71c6be78f3767fe2ae6bed18e"
 dependencies = [
  "bitflags 2.9.1",
  "libc",
