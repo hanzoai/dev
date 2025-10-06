@@ -614,7 +614,7 @@ pub(super) fn handle_exec_begin_now(
         }
 
         if agg_idx.is_none() {
-            let key = ChatWidget::order_key_from_order_meta(order);
+            let key = chat.provider_order_key_from_order_meta(order);
             let record = ExploreRecord {
                 id: HistoryId::ZERO,
                 entries: Vec::new(),
@@ -686,7 +686,7 @@ pub(super) fn handle_exec_begin_now(
     }
 
     let exec_record = exec_record_from_begin(&ev);
-    let key = ChatWidget::order_key_from_order_meta(order);
+    let key = chat.provider_order_key_from_order_meta(order);
     let cell = history_cell::ExecCell::from_record(exec_record.clone());
     let idx = chat.history_insert_with_key_global_tagged(
         Box::new(cell),
@@ -991,7 +991,7 @@ pub(super) fn handle_exec_end_now(
 
         if !replaced {
             if let Some(c) = completed_opt.take() {
-                let key = ChatWidget::order_key_from_order_meta(order);
+                let key = chat.provider_order_key_from_order_meta(order);
                 let idx = chat.history_insert_with_key_global(Box::new(c), key);
                 crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
             }
