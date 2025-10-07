@@ -7,6 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use code_protocol::ConversationId;
+use code_protocol::models::{ContentItem, ResponseItem};
+use code_protocol::protocol::EventMsg as ProtoEventMsg;
 use code_protocol::protocol::SessionSource;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,7 +38,6 @@ use code_protocol::protocol::RolloutItem;
 use code_protocol::protocol::RolloutLine;
 use code_protocol::protocol::SessionMeta;
 use code_protocol::protocol::SessionMetaLine;
-use code_protocol::models::ResponseItem;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SessionStateSnapshot {}
@@ -325,7 +326,28 @@ impl RolloutRecorder {
                         items.push(RolloutItem::ResponseItem(item));
                     }
                     RolloutItem::Event(ev) => {
-                        items.push(RolloutItem::Event(ev));
+                        match &ev.msg {
+                            ProtoEventMsg::UserMessage(user_msg) => {
+                                let mut content = Vec::new();
+                                content.push(ContentItem::InputText {
+                                    text: user_msg.message.clone(),
+                                });
+                                if let Some(images) = &user_msg.images {
+                                    for image_url in images {
+                                        content.push(ContentItem::InputImage {
+                                            image_url: image_url.clone(),
+                                        });
+                                    }
+                                }
+                                items.push(RolloutItem::ResponseItem(ResponseItem::Message {
+                                    id: Some(ev.id.clone()),
+                                    role: "user".to_string(),
+                                    content,
+                                }));
+                            }
+                            ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
+                            _ => items.push(RolloutItem::Event(ev)),
+                        }
                     }
                     RolloutItem::Compacted(compacted) => {
                         items.push(RolloutItem::Compacted(compacted));
