@@ -73,6 +73,8 @@ mod streaming;
 mod terminal_handlers;
 mod terminal;
 mod tools;
+mod browser_sessions;
+mod agent_runs;
 mod running_tools;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod smoke_helpers;
@@ -3764,6 +3766,16 @@ impl ChatWidget<'_> {
                 running_web_search: HashMap::new(),
                 running_wait_tools: HashMap::new(),
                 running_kill_tools: HashMap::new(),
+                browser_sessions: HashMap::new(),
+                browser_session_by_call: HashMap::new(),
+                browser_session_by_order: HashMap::new(),
+                browser_last_key: None,
+                agent_runs: HashMap::new(),
+                agent_run_by_call: HashMap::new(),
+                agent_run_by_order: HashMap::new(),
+                agent_run_by_batch: HashMap::new(),
+                agent_run_by_agent: HashMap::new(),
+                agent_last_key: None,
             },
             live_builder: RowBuilder::new(usize::MAX),
             header_wave: {
@@ -9465,7 +9477,34 @@ impl ChatWidget<'_> {
                 // Flush any queued interrupts when streaming ends
                 self.flush_interrupt_queue();
                 // Show an active entry immediately for all custom tools so the user sees progress
-                let params_string = parameters.map(|p| p.to_string());
+                let params_json = parameters.clone();
+                let params_string = params_json.clone().map(|p| p.to_string());
+                if agent_runs::is_agent_tool(&tool_name) {
+                    if agent_runs::handle_custom_tool_begin(
+                        self,
+                        event.order.as_ref(),
+                        &call_id,
+                        &tool_name,
+                        params_json.clone(),
+                    ) {
+                        self.bottom_pane
+                            .update_status_text("agents coordinating".to_string());
+                        return;
+                    }
+                }
+                if tool_name.starts_with("browser_") {
+                    if browser_sessions::handle_custom_tool_begin(
+                        self,
+                        event.order.as_ref(),
+                        &call_id,
+                        &tool_name,
+                        params_json.clone(),
+                    ) {
+                        self.bottom_pane
+                            .update_status_text("using browser".to_string());
+                        return;
+                    }
+                }
                 if tool_name == "wait" {
                     if let Some(exec_call_id) =
                         wait_exec_call_id_from_params(params_string.as_ref())
@@ -9524,6 +9563,11 @@ impl ChatWidget<'_> {
                         tool_name.clone(),
                         params_string.clone(),
                     )
+                } else if tool_name.starts_with("agent_") {
+                    history_cell::new_running_custom_tool_call(
+                        tool_name.clone(),
+                        params_string.clone(),
+                    )
                 } else {
                     history_cell::new_running_custom_tool_call(
                         tool_name.clone(),
@@ -9560,7 +9604,7 @@ impl ChatWidget<'_> {
                 if tool_name.starts_with("browser_") {
                     self.bottom_pane
                         .update_status_text("using browser".to_string());
-                } else if tool_name.starts_with("agent_") {
+                } else if agent_runs::is_agent_tool(&tool_name) {
                     self.bottom_pane
                         .update_status_text("agents coordinating".to_string());
                 } else {
@@ -9575,6 +9619,42 @@ impl ChatWidget<'_> {
                 duration,
                 result,
             }) => {
+                let params_json = parameters.clone();
+                if agent_runs::is_agent_tool(&tool_name) {
+                    if agent_runs::handle_custom_tool_end(
+                        self,
+                        event.order.as_ref(),
+                        &call_id,
+                        &tool_name,
+                        params_json.clone(),
+                        duration,
+                        &result,
+                    ) {
+                        self.bottom_pane
+                            .update_status_text("responding".to_string());
+                        return;
+                    }
+                }
+                if tool_name.starts_with("browser_") {
+                    if browser_sessions::handle_custom_tool_end(
+                        self,
+                        event.order.as_ref(),
+                        &call_id,
+                        &tool_name,
+                        params_json.clone(),
+                        duration,
+                        &result,
+                    ) {
+                        if tool_name == "browser_close" {
+                            self.bottom_pane
+                                .update_status_text("responding".to_string());
+                        } else {
+                            self.bottom_pane
+                                .update_status_text("using browser".to_string());
+                        }
+                        return;
+                    }
+                }
                 let ok = match event.order.as_ref() {
                     Some(om) => self.provider_order_key_from_order_meta(om),
                     None => {
@@ -9591,7 +9671,7 @@ impl ChatWidget<'_> {
                     event.event_seq
                 );
                 // Convert parameters to String if present
-                let params_string = parameters.map(|p| p.to_string());
+                let params_string = params_json.map(|p| p.to_string());
                 // Determine success and content from Result
                 let (success, content) = match result {
                     Ok(content) => (true, content),
@@ -9900,6 +9980,13 @@ impl ChatWidget<'_> {
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
+                if browser_sessions::handle_background_event(
+                    self,
+                    event.order.as_ref(),
+                    &message,
+                ) {
+                    return;
+                }
                 self.clear_resume_placeholder();
                 // Route through unified system notice helper. If the core ties the
                 // event to a turn (order present), prefer placing it before the next
@@ -9938,7 +10025,9 @@ impl ChatWidget<'_> {
                     self.recent_agent_hint = Some(message);
                 }
             }
-            EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent { agents, context, task }) => {
+            EventMsg::AgentStatusUpdate(event) => {
+                agent_runs::handle_status_update(self, &event);
+                let AgentStatusUpdateEvent { agents, context, task } = event;
                 // Update the active agents list from the event and track timing
                 self.active_agents.clear();
                 let now = Instant::now();
@@ -10041,11 +10130,17 @@ impl ChatWidget<'_> {
                 self.maybe_hide_spinner();
                 self.request_redraw();
             }
-            EventMsg::BrowserScreenshotUpdate(event) => {
+            EventMsg::BrowserScreenshotUpdate(payload) => {
                 #[cfg(feature = "code-fork")]
-                handle_browser_screenshot(&event, &self.app_event_tx);
+                handle_browser_screenshot(&payload, &self.app_event_tx);
 
-                let BrowserScreenshotUpdateEvent { screenshot_path, url } = event;
+                let BrowserScreenshotUpdateEvent { screenshot_path, url } = payload;
+                let grouped = browser_sessions::handle_screenshot_update(
+                    self,
+                    event.order.as_ref(),
+                    &screenshot_path,
+                    &url,
+                );
                 tracing::info!(
                     "Received browser screenshot update: {} at URL: {}",
                     screenshot_path.display(),
@@ -10070,6 +10165,11 @@ impl ChatWidget<'_> {
 
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
+
+                if grouped {
+                    self.bottom_pane
+                        .update_status_text("using browser".to_string());
+                }
             }
             // Newer protocol variants we currently ignore in the TUI
             EventMsg::UserMessage(_) => {}
@@ -25689,6 +25789,16 @@ struct ToolState {
     running_web_search: HashMap<ToolCallId, (usize, Option<String>)>,
     running_wait_tools: HashMap<ToolCallId, ExecCallId>,
     running_kill_tools: HashMap<ToolCallId, ExecCallId>,
+    browser_sessions: HashMap<String, browser_sessions::BrowserSessionTracker>,
+    browser_session_by_call: HashMap<String, String>,
+    browser_session_by_order: HashMap<u64, String>,
+    browser_last_key: Option<String>,
+    agent_runs: HashMap<String, agent_runs::AgentRunTracker>,
+    agent_run_by_call: HashMap<String, String>,
+    agent_run_by_order: HashMap<u64, String>,
+    agent_run_by_batch: HashMap<String, String>,
+    agent_run_by_agent: HashMap<String, String>,
+    agent_last_key: Option<String>,
 }
 #[derive(Default)]
 struct StreamState {
