@@ -129,6 +129,10 @@ fi
 
 # Resolve repository paths relative to this script so absolute invocation works
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+if [ "${CHECK_RELEASE_NOTES_VERSION_RUN:-0}" = "0" ]; then
+  export CHECK_RELEASE_NOTES_VERSION_RUN=1
+  "${SCRIPT_DIR}/scripts/check-release-notes-version.sh"
+fi
 CALLER_CWD="$(pwd)"
 
 case "$WORKSPACE_CHOICE" in
