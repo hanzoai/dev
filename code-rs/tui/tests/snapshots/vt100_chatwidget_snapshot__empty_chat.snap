@@ -1,0 +1,27 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: output
+---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+
+
+
+ ★ Popular commands:
+   /agents - create and configure agents
+   /model - choose model & reasoning effort NEW with GPT-5-Codex!
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+   /branch - work in an isolated /branch then /merge when done (great for
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you today?                                             │
+ └────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                                   Ctrl+H help
