@@ -345,15 +345,7 @@ impl RolloutRecorder {
                                     content,
                                 }));
                             }
-                            ProtoEventMsg::AgentMessage(agent_msg) => {
-                                items.push(RolloutItem::ResponseItem(ResponseItem::Message {
-                                    id: Some(ev.id.clone()),
-                                    role: "assistant".to_string(),
-                                    content: vec![ContentItem::OutputText {
-                                        text: agent_msg.message.clone(),
-                                    }],
-                                }));
-                            }
+                            ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
                             _ => items.push(RolloutItem::Event(ev)),
                         }
                     }
