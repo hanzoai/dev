@@ -25,6 +25,7 @@ use code_ollama::DEFAULT_OSS_MODEL;
 use code_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -287,7 +288,23 @@ pub struct ExitSummary {
     pub session_id: Option<Uuid>,
 }
 
-pub const RESUME_COMMAND_NAME: &str = "code";
+pub fn resume_command_name() -> &'static str {
+    static COMMAND: OnceLock<&'static str> = OnceLock::new();
+    COMMAND.get_or_init(|| {
+        let arg0 = std::env::args().next();
+        let invoked = arg0
+            .as_ref()
+            .and_then(|value| std::path::Path::new(value).file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+
+        if invoked.eq_ignore_ascii_case("coder") {
+            "coder"
+        } else {
+            "code"
+        }
+    })
+}
 
 pub async fn run_main(
     mut cli: Cli,
