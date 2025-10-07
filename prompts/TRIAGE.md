@@ -1,4 +1,4 @@
-Please use gh to review each issue in https://github.com/just-every/code
+Please use gh to review this issue in https://github.com/just-every/code/issues/{issue_number}
 
 1. Please assess if the issue is genuine and needs addressing
 2. If it does, work on a solution;
