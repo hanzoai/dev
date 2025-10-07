@@ -25,7 +25,7 @@ use code_exec::Cli as ExecCli;
 use code_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use code_tui::Cli as TuiCli;
 use code_tui::ExitSummary;
-use code_tui::RESUME_COMMAND_NAME;
+use code_tui::resume_command_name;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -299,8 +299,8 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             }
             if let Some(session_id) = session_id {
                 println!(
-                    "To continue this session, run {} resume {}.",
-                    RESUME_COMMAND_NAME,
+                    "To continue this session, run {} resume {}",
+                    resume_command_name(),
                     session_id
                 );
             }
@@ -348,8 +348,8 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
             }
             if let Some(session_id) = session_id {
                 println!(
-                    "To continue this session, run {} resume {}.",
-                    RESUME_COMMAND_NAME,
+                    "To continue this session, run {} resume {}",
+                    resume_command_name(),
                     session_id
                 );
             }
