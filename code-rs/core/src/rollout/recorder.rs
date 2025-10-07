@@ -7,6 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use code_protocol::ConversationId;
+use code_protocol::models::{ContentItem, ResponseItem};
+use code_protocol::protocol::EventMsg as ProtoEventMsg;
 use code_protocol::protocol::SessionSource;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -325,7 +327,27 @@ impl RolloutRecorder {
                         items.push(RolloutItem::ResponseItem(item));
                     }
                     RolloutItem::Event(ev) => {
-                        items.push(RolloutItem::Event(ev));
+                        match &ev.msg {
+                            ProtoEventMsg::UserMessage(user_msg) => {
+                                items.push(RolloutItem::ResponseItem(ResponseItem::Message {
+                                    id: Some(ev.id.clone()),
+                                    role: "user".to_string(),
+                                    content: vec![ContentItem::InputText {
+                                        text: user_msg.message.clone(),
+                                    }],
+                                }));
+                            }
+                            ProtoEventMsg::AgentMessage(agent_msg) => {
+                                items.push(RolloutItem::ResponseItem(ResponseItem::Message {
+                                    id: Some(ev.id.clone()),
+                                    role: "assistant".to_string(),
+                                    content: vec![ContentItem::OutputText {
+                                        text: agent_msg.message.clone(),
+                                    }],
+                                }));
+                            }
+                            _ => items.push(RolloutItem::Event(ev)),
+                        }
                     }
                     RolloutItem::Compacted(compacted) => {
                         items.push(RolloutItem::Compacted(compacted));

@@ -263,6 +263,9 @@ fn parse_rollout_candidate(path: &Path, target_cwd: &Path) -> Option<ResumeCandi
                     if let Some(snippet) = extract_user_snippet_from_event(&event) {
                         last_user_snippet = Some(snippet);
                     }
+                    if matches!(event, EventMsg::UserMessage(_)) {
+                        message_count = message_count.saturating_add(1);
+                    }
                 }
             }
             RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) => {}
