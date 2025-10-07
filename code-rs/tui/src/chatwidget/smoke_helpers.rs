@@ -30,8 +30,19 @@ pub struct ChatWidgetHarness {
     helper_seq: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutMetrics {
+    pub scroll_offset: u16,
+    pub last_viewport_height: u16,
+    pub last_max_scroll: u16,
+}
+
 impl ChatWidgetHarness {
     pub fn new() -> Self {
+        // Stabilize time-of-day dependent greeting so VT100 snapshots remain deterministic.
+        // Safe: tests run single-threaded by design.
+        unsafe { std::env::set_var("CODEX_TUI_FAKE_HOUR", "12"); }
+
         let cfg = Config::load_from_base_config_with_overrides(
             ConfigToml::default(),
             ConfigOverrides::default(),
@@ -140,6 +151,14 @@ impl ChatWidgetHarness {
 
     pub(crate) fn chat(&mut self) -> &mut ChatWidget<'static> {
         &mut self.chat
+    }
+
+    pub(crate) fn layout_metrics(&self) -> LayoutMetrics {
+        LayoutMetrics {
+            scroll_offset: self.chat.layout.scroll_offset,
+            last_viewport_height: self.chat.layout.last_history_viewport_height.get(),
+            last_max_scroll: self.chat.layout.last_max_scroll.get(),
+        }
     }
 
     pub fn push_user_prompt(&mut self, message: impl Into<String>) {
