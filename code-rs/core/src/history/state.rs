@@ -2,7 +2,7 @@ use crate::plan_tool::StepStatus;
 use crate::parse_command::ParsedCommand;
 use crate::protocol::{FileChange, RateLimitSnapshotEvent, TokenUsage};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
@@ -953,6 +953,28 @@ impl HistoryState {
             .cloned()
             .or_else(|| metadata.as_ref().and_then(|meta| meta.token_usage.clone()));
 
+        // When we cannot associate this final with a live stream id, avoid
+        // duplicating an identical assistant message that was already inserted
+        // earlier (e.g. during streaming). Instead, refresh the existing record
+        // in place so snapshots remain deduplicated.
+        if let Some(stream_id) = stream_id {
+            if let Some(idx) = self.records.iter().rposition(|record| match record {
+                HistoryRecord::AssistantMessage(state) => {
+                    state.stream_id.as_deref() == Some(stream_id)
+                }
+                _ => false,
+            }) {
+                if let HistoryRecord::AssistantMessage(existing) = &mut self.records[idx] {
+                    existing.markdown = markdown;
+                    existing.citations = citations.clone();
+                    existing.metadata = metadata.clone();
+                    existing.token_usage = token_usage.clone();
+                    existing.created_at = SystemTime::now();
+                    return existing.clone();
+                }
+            }
+        }
+
         let mut state = AssistantMessageState {
             id: HistoryId::ZERO,
             stream_id: stream_id.map(|s| s.to_string()),
@@ -1026,7 +1048,24 @@ impl HistoryState {
     }
 
     pub fn restore(&mut self, snapshot: &HistorySnapshot) {
-        self.records = snapshot.records.clone();
+        let mut records = snapshot.records.clone();
+
+        // Older snapshots may contain duplicate assistant messages with the same stream id
+        // (e.g. streaming and final insertion of the same answer). Deduplicate by stream id
+        // while preserving distinct messages that lack a stream id but share markdown text.
+        let mut seen_streams: HashSet<String> = HashSet::new();
+        records.retain(|record| match record {
+            HistoryRecord::AssistantMessage(state) => {
+                if let Some(stream_id) = &state.stream_id {
+                    seen_streams.insert(stream_id.clone())
+                } else {
+                    true
+                }
+            }
+            _ => true,
+        });
+
+        self.records = records;
         self.next_id = snapshot.next_id;
         self.exec_call_lookup = snapshot.exec_call_lookup.clone();
         self.tool_call_lookup = snapshot.tool_call_lookup.clone();
@@ -1755,6 +1794,127 @@ mod tests {
             }
             other => panic!("expected exec record, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn finalize_assistant_updates_existing_records() {
+        let mut state = HistoryState::new();
+
+        // First finalize with a stream id to simulate the live streaming path.
+        let first = state.finalize_assistant_stream_state(
+            Some("stream-1"),
+            "Hello world".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(first.stream_id.as_deref(), Some("stream-1"));
+
+        // When updated content arrives with the same stream id, we update the existing
+        // record in place.
+        let updated = state.finalize_assistant_stream_state(
+            Some("stream-1"),
+            "Hello world!".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(updated.id, first.id);
+        assert_eq!(updated.markdown, "Hello world!");
+
+        // When the same content later arrives without a stream id (e.g. via replayed
+        // response items), a new assistant message should be recorded.
+        let second = state.finalize_assistant_stream_state(
+            None,
+            "Hello world!".to_string(),
+            None,
+            None,
+        );
+
+        assert_eq!(state.records.len(), 2);
+        assert_ne!(second.id, first.id);
+        assert_eq!(second.markdown, "Hello world!");
+    }
+
+    #[test]
+    fn restore_deduplicates_assistant_messages() {
+        let assistant = |id: u64| HistoryRecord::AssistantMessage(AssistantMessageState {
+            id: HistoryId(id),
+            stream_id: Some("stream-dup".to_string()),
+            markdown: "Hello again".to_string(),
+            citations: Vec::new(),
+            metadata: None,
+            token_usage: None,
+            created_at: SystemTime::UNIX_EPOCH,
+        });
+
+        let snapshot = HistorySnapshot {
+            records: vec![
+                assistant(1),
+                assistant(2),
+                plain_message("keep me"),
+            ],
+            next_id: 3,
+            exec_call_lookup: HashMap::new(),
+            tool_call_lookup: HashMap::new(),
+            stream_lookup: HashMap::new(),
+            order: Vec::new(),
+            order_debug: Vec::new(),
+        };
+
+        let mut state = HistoryState::new();
+        state.restore(&snapshot);
+
+        let assistant_count = state
+            .records
+            .iter()
+            .filter(|record| matches!(record, HistoryRecord::AssistantMessage(_)))
+            .count();
+        assert_eq!(assistant_count, 1, "duplicate assistant messages should be removed");
+
+        let remaining = state
+            .records
+            .iter()
+            .find_map(|record| match record {
+                HistoryRecord::AssistantMessage(state) => Some(state.clone()),
+                _ => None,
+            })
+            .expect("assistant record");
+        assert_eq!(remaining.id, HistoryId(1));
+        assert_eq!(remaining.stream_id.as_deref(), Some("stream-dup"));
+    }
+
+    #[test]
+    fn restore_preserves_distinct_messages_without_stream_id() {
+        let assistant = |id: u64, text: &str| HistoryRecord::AssistantMessage(AssistantMessageState {
+            id: HistoryId(id),
+            stream_id: None,
+            markdown: text.to_string(),
+            citations: Vec::new(),
+            metadata: None,
+            token_usage: None,
+            created_at: SystemTime::UNIX_EPOCH,
+        });
+
+        let snapshot = HistorySnapshot {
+            records: vec![assistant(1, "Done."), assistant(2, "Done."), plain_message("next")],
+            next_id: 3,
+            exec_call_lookup: HashMap::new(),
+            tool_call_lookup: HashMap::new(),
+            stream_lookup: HashMap::new(),
+            order: Vec::new(),
+            order_debug: Vec::new(),
+        };
+
+        let mut state = HistoryState::new();
+        state.restore(&snapshot);
+
+        let assistant_count = state
+            .records
+            .iter()
+            .filter(|record| matches!(record, HistoryRecord::AssistantMessage(_)))
+            .count();
+        assert_eq!(assistant_count, 2);
     }
 
     #[test]
