@@ -210,13 +210,27 @@ fn merge_turn_descriptor(
     descriptor: Option<TurnDescriptor>,
     legacy: Option<TurnConfig>,
 ) -> (Option<TurnDescriptor>, Option<TurnConfig>) {
-    if descriptor.is_some() && legacy.is_some() {
-        tracing::warn!(
-            "coordinator returned both turn_descriptor and turn_config; preferring turn_descriptor"
-        );
-    }
     match (descriptor, legacy) {
-        (Some(desc), _) => {
+        (Some(mut desc), Some(legacy_cfg)) => {
+            tracing::warn!(
+                "coordinator returned both turn_descriptor and turn_config; merging legacy hints"
+            );
+
+            if legacy_cfg.read_only {
+                desc.read_only = true;
+            }
+            if desc.complexity.is_none() {
+                desc.complexity = legacy_cfg.complexity;
+            }
+
+            let merged_cfg = TurnConfig {
+                read_only: desc.read_only,
+                complexity: desc.complexity.or(legacy_cfg.complexity),
+            };
+
+            (Some(desc), Some(merged_cfg))
+        }
+        (Some(desc), None) => {
             let legacy = desc.to_legacy();
             (Some(desc), Some(legacy))
         }
@@ -272,10 +286,37 @@ mod tests {
         let merged_descriptor = merged_descriptor.expect("descriptor expected");
         assert_eq!(merged_descriptor.mode, TurnMode::Review);
         assert_eq!(merged_descriptor.review_strategy.unwrap().timing, ReviewTiming::Immediate);
+        assert!(merged_descriptor.read_only, "legacy read_only should merge into descriptor");
 
         let merged_legacy = merged_legacy.expect("legacy expected");
-        assert_eq!(merged_legacy.read_only, descriptor.read_only);
+        assert!(merged_legacy.read_only, "legacy read_only should remain true");
         assert_eq!(merged_legacy.complexity, descriptor.complexity);
+    }
+
+    #[test]
+    fn merge_turn_descriptor_falls_back_to_legacy_hints() {
+        let descriptor = TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: None,
+            agent_preferences: None,
+            review_strategy: None,
+        };
+        let legacy = TurnConfig {
+            read_only: true,
+            complexity: Some(TurnComplexity::High),
+        };
+
+        let (merged_descriptor, merged_legacy) =
+            merge_turn_descriptor(Some(descriptor), Some(legacy));
+
+        let merged_descriptor = merged_descriptor.expect("descriptor expected");
+        assert!(merged_descriptor.read_only, "read_only should inherit from legacy");
+        assert_eq!(merged_descriptor.complexity, Some(TurnComplexity::High));
+
+        let merged_legacy = merged_legacy.expect("legacy expected");
+        assert!(merged_legacy.read_only);
+        assert_eq!(merged_legacy.complexity, Some(TurnComplexity::High));
     }
 
     #[test]
