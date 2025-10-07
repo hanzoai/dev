@@ -8901,13 +8901,15 @@ impl ChatWidget<'_> {
                     self.auto_resolve_on_task_complete(last_agent_message.clone());
                 }
                 // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
-                if let Some(cfg) = self.pending_auto_turn_config.take() {
-                    self.pending_turn_descriptor.take();
-                    if self.auto_state.active
-                        && self.auto_state.review_enabled
-                        && !self.is_review_flow_active()
-                    {
-                        self.auto_handle_post_turn_review(cfg);
+                if !self.auto_state.waiting_for_review {
+                    if let Some(cfg) = self.pending_auto_turn_config.take() {
+                        self.pending_turn_descriptor.take();
+                        if self.auto_state.active
+                            && self.auto_state.review_enabled
+                            && !self.is_review_flow_active()
+                        {
+                            self.auto_handle_post_turn_review(cfg);
+                        }
                     }
                 }
                 // Defensive: mark any lingering agent state as complete so the spinner can quiesce
@@ -19124,7 +19126,13 @@ mod tests {
         TextTone,
     };
     use code_core::protocol::OrderMeta;
-    use code_core::protocol::{AgentMessageEvent, AgentStatusUpdateEvent, Event, EventMsg};
+    use code_core::protocol::{
+        AgentMessageEvent,
+        AgentStatusUpdateEvent,
+        Event,
+        EventMsg,
+        TaskCompleteEvent,
+    };
     use code_core::protocol::AgentInfo as CoreAgentInfo;
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
@@ -19523,6 +19531,64 @@ mod tests {
         let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
         assert_eq!(stored_config.read_only, descriptor.read_only);
         assert_eq!(stored_config.complexity, descriptor.complexity);
+    }
+
+    #[test]
+    fn review_task_complete_preserves_pending_config() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.review_enabled = true;
+        chat.config.tui.review_auto_resolve = false;
+
+        let descriptor = TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            agent_preferences: None,
+            review_strategy: Some(ReviewStrategy {
+                timing: ReviewTiming::PreWrite,
+                custom_prompt: Some("Strategy review".to_string()),
+                scope_hint: Some("workspace".to_string()),
+            }),
+        };
+
+        chat.auto_handle_decision(
+            AutoCoordinatorStatus::Continue,
+            None,
+            None,
+            None,
+            Some("prompt".to_string()),
+            Vec::new(),
+            Some(descriptor.clone()),
+            Some(TurnConfig {
+                read_only: descriptor.read_only,
+                complexity: descriptor.complexity,
+            }),
+        );
+
+        assert!(chat.auto_state.waiting_for_review);
+
+        chat.handle_code_event(Event {
+            id: "review-turn".to_string(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        chat.handle_code_event(Event {
+            id: "review-turn".to_string(),
+            event_seq: 1,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+
+        assert!(chat.auto_state.waiting_for_review);
+        assert!(chat.pending_turn_descriptor.is_some());
+        assert!(chat.pending_auto_turn_config.is_some());
     }
 
     #[test]
