@@ -38,7 +38,6 @@ use code_protocol::protocol::RolloutItem;
 use code_protocol::protocol::RolloutLine;
 use code_protocol::protocol::SessionMeta;
 use code_protocol::protocol::SessionMetaLine;
-use code_protocol::models::ResponseItem;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SessionStateSnapshot {}
@@ -329,12 +328,21 @@ impl RolloutRecorder {
                     RolloutItem::Event(ev) => {
                         match &ev.msg {
                             ProtoEventMsg::UserMessage(user_msg) => {
+                                let mut content = Vec::new();
+                                content.push(ContentItem::InputText {
+                                    text: user_msg.message.clone(),
+                                });
+                                if let Some(images) = &user_msg.images {
+                                    for image_url in images {
+                                        content.push(ContentItem::InputImage {
+                                            image_url: image_url.clone(),
+                                        });
+                                    }
+                                }
                                 items.push(RolloutItem::ResponseItem(ResponseItem::Message {
                                     id: Some(ev.id.clone()),
                                     role: "user".to_string(),
-                                    content: vec![ContentItem::InputText {
-                                        text: user_msg.message.clone(),
-                                    }],
+                                    content,
                                 }));
                             }
                             ProtoEventMsg::AgentMessage(agent_msg) => {
