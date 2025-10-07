@@ -94,6 +94,246 @@ pub(crate) struct TurnConfig {
     pub complexity: Option<TurnComplexity>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TurnMode {
+    Normal,
+    SubAgentWrite,
+    SubAgentReadOnly,
+    Review,
+}
+
+impl Default for TurnMode {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize, Default)]
+pub(crate) struct AgentPreferences {
+    #[serde(default)]
+    pub prefer_research: bool,
+    #[serde(default)]
+    pub prefer_planning: bool,
+    #[serde(default)]
+    pub requested_models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReviewTiming {
+    PostTurn,
+    PreWrite,
+    Immediate,
+}
+
+impl Default for ReviewTiming {
+    fn default() -> Self {
+        Self::PostTurn
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ReviewStrategy {
+    #[serde(default)]
+    pub timing: ReviewTiming,
+    #[serde(default)]
+    pub custom_prompt: Option<String>,
+    #[serde(default)]
+    pub scope_hint: Option<String>,
+}
+
+impl Default for ReviewStrategy {
+    fn default() -> Self {
+        Self {
+            timing: ReviewTiming::PostTurn,
+            custom_prompt: None,
+            scope_hint: None,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct TurnDescriptor {
+    #[serde(default)]
+    pub mode: TurnMode,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub complexity: Option<TurnComplexity>,
+    #[serde(default)]
+    pub agent_preferences: Option<AgentPreferences>,
+    #[serde(default)]
+    pub review_strategy: Option<ReviewStrategy>,
+}
+
+impl Default for TurnDescriptor {
+    fn default() -> Self {
+        Self {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: None,
+            agent_preferences: None,
+            review_strategy: None,
+        }
+    }
+}
+
+impl TurnDescriptor {
+    pub(crate) fn from_legacy(config: TurnConfig) -> Self {
+        let mode = if config.read_only {
+            TurnMode::SubAgentReadOnly
+        } else {
+            TurnMode::Normal
+        };
+        Self {
+            mode,
+            read_only: config.read_only,
+            complexity: config.complexity,
+            agent_preferences: None,
+            review_strategy: None,
+        }
+    }
+
+    fn to_legacy(&self) -> TurnConfig {
+        TurnConfig {
+            read_only: self.read_only,
+            complexity: self.complexity,
+        }
+    }
+}
+
+fn merge_turn_descriptor(
+    descriptor: Option<TurnDescriptor>,
+    legacy: Option<TurnConfig>,
+) -> (Option<TurnDescriptor>, Option<TurnConfig>) {
+    if descriptor.is_some() && legacy.is_some() {
+        tracing::warn!(
+            "coordinator returned both turn_descriptor and turn_config; preferring turn_descriptor"
+        );
+    }
+    match (descriptor, legacy) {
+        (Some(desc), _) => {
+            let legacy = desc.to_legacy();
+            (Some(desc), Some(legacy))
+        }
+        (None, Some(cfg)) => {
+            let desc = TurnDescriptor::from_legacy(cfg.clone());
+            (Some(desc), Some(cfg))
+        }
+        (None, None) => (None, None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn turn_descriptor_defaults_to_normal_mode() {
+        let value = json!({});
+        let descriptor: TurnDescriptor = serde_json::from_value(value).unwrap();
+        assert_eq!(descriptor.mode, TurnMode::Normal);
+        assert!(!descriptor.read_only);
+        assert!(descriptor.complexity.is_none());
+        assert!(descriptor.agent_preferences.is_none());
+        assert!(descriptor.review_strategy.is_none());
+    }
+
+    #[test]
+    fn merge_turn_descriptor_prefers_new_descriptor() {
+        let descriptor = TurnDescriptor {
+            mode: TurnMode::Review,
+            read_only: false,
+            complexity: Some(TurnComplexity::Medium),
+            agent_preferences: Some(AgentPreferences {
+                prefer_research: true,
+                prefer_planning: false,
+                requested_models: vec!["claude".to_string()],
+            }),
+            review_strategy: Some(ReviewStrategy {
+                timing: ReviewTiming::Immediate,
+                custom_prompt: Some("Check workspace".to_string()),
+                scope_hint: Some("workspace".to_string()),
+            }),
+        };
+        let legacy = TurnConfig {
+            read_only: true,
+            complexity: Some(TurnComplexity::Low),
+        };
+
+        let (merged_descriptor, merged_legacy) =
+            merge_turn_descriptor(Some(descriptor.clone()), Some(legacy));
+
+        let merged_descriptor = merged_descriptor.expect("descriptor expected");
+        assert_eq!(merged_descriptor.mode, TurnMode::Review);
+        assert_eq!(merged_descriptor.review_strategy.unwrap().timing, ReviewTiming::Immediate);
+
+        let merged_legacy = merged_legacy.expect("legacy expected");
+        assert_eq!(merged_legacy.read_only, descriptor.read_only);
+        assert_eq!(merged_legacy.complexity, descriptor.complexity);
+    }
+
+    #[test]
+    fn merge_turn_descriptor_builds_from_legacy() {
+        let legacy = TurnConfig {
+            read_only: true,
+            complexity: Some(TurnComplexity::High),
+        };
+
+        let (merged_descriptor, merged_legacy) = merge_turn_descriptor(None, Some(legacy.clone()));
+
+        let merged_descriptor = merged_descriptor.expect("descriptor expected");
+        assert_eq!(merged_descriptor.mode, TurnMode::SubAgentReadOnly);
+        assert!(merged_descriptor.review_strategy.is_none());
+
+        let merged_legacy = merged_legacy.expect("legacy expected");
+        assert_eq!(merged_legacy.read_only, legacy.read_only);
+        assert_eq!(merged_legacy.complexity, legacy.complexity);
+    }
+
+    #[test]
+    fn schema_exposes_turn_descriptor_property() {
+        let schema = build_schema();
+        let properties = schema
+            .get("properties")
+            .and_then(|props| props.as_object())
+            .expect("schema properties");
+        assert!(properties.contains_key("turn_descriptor"));
+    }
+
+    #[test]
+    fn parse_decision_prefers_turn_descriptor() {
+        let raw = r#"{
+            "finish_status": "continue",
+            "progress_past": null,
+            "progress_current": null,
+            "cli_context": null,
+            "cli_prompt": "Review latest changes",
+            "turn_descriptor": {
+                "mode": "review",
+                "read_only": false,
+                "complexity": "medium"
+            }
+        }"#;
+
+        let (decision, _value) = parse_decision(raw).expect("parse descriptor-only decision");
+        let (descriptor, legacy) = merge_turn_descriptor(decision.turn_descriptor, decision.turn_config);
+
+        let descriptor = descriptor.expect("descriptor expected");
+        assert_eq!(descriptor.mode, TurnMode::Review);
+        assert_eq!(descriptor.complexity, Some(TurnComplexity::Medium));
+
+        let legacy = legacy.expect("legacy expected");
+        assert_eq!(legacy.read_only, descriptor.read_only);
+        assert_eq!(legacy.complexity, descriptor.complexity);
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct CoordinatorDecision {
     finish_status: String,
@@ -106,6 +346,9 @@ struct CoordinatorDecision {
     #[serde(default)]
     cli_prompt: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
+    turn_descriptor: Option<TurnDescriptor>,
+    #[serde(default)]
     turn_config: Option<TurnConfig>,
 }
 
@@ -116,6 +359,7 @@ struct ParsedCoordinatorDecision {
     cli_context: Option<String>,
     cli_prompt: Option<String>,
     response_items: Vec<ResponseItem>,
+    turn_descriptor: Option<TurnDescriptor>,
     turn_config: Option<TurnConfig>,
 }
 
@@ -283,6 +527,7 @@ fn run_auto_loop(
                     cli_context,
                     cli_prompt,
                     response_items,
+                    turn_descriptor,
                     turn_config,
                 }) => {
                     if matches!(status, AutoCoordinatorStatus::Continue) {
@@ -313,6 +558,7 @@ fn run_auto_loop(
                             cli_context: cli_context.clone(),
                             cli_prompt,
                             transcript: response_items,
+                            turn_descriptor: turn_descriptor.clone(),
                             turn_config: turn_config.clone(),
                         };
                         app_event_tx.send(event);
@@ -374,6 +620,7 @@ fn run_auto_loop(
                         cli_context,
                         cli_prompt,
                         transcript: response_items,
+                        turn_descriptor: turn_descriptor.clone(),
                         turn_config: turn_config.clone(),
                     };
                     app_event_tx.send(event);
@@ -392,6 +639,7 @@ fn run_auto_loop(
                         cli_context: None,
                         cli_prompt: None,
                         transcript: Vec::new(),
+                        turn_descriptor: None,
                         turn_config: None,
                     };
                     app_event_tx.send(event);
@@ -500,6 +748,23 @@ fn build_developer_message(goal_text: &str, environment_details: &str) -> (Strin
 - `progress_current`: A short phrase (<= 100 characters) describing what happens when the CLI runs `cli_prompt`. Use present tense.
 - `cli_context`: Generally only should be used at the start of a session if the auto session was started with a lot of background information.
 - `cli_prompt`: The exact prompt to send to the Code CLI process when `finish_status` is `continue`. Prefer 1-2 concise sentences focused on the next instruction.
+- `turn_descriptor`: Preferred configuration object describing the upcoming turn. Include this whenever possible. Fields:
+  * `mode`: `normal`, `sub_agent_write`, `sub_agent_read_only`, or `review`.
+  * `read_only`: Legacy safety flag indicating whether the turn should avoid writes.
+  * `complexity`: `low`, `medium`, or `high`.
+  * `agent_preferences`: Optional hints (`prefer_research`, `prefer_planning`, `requested_models`).
+  * `review_strategy`: Optional review guidance (`timing`, `custom_prompt`, `scope_hint`).
+- `turn_config`: Legacy fallback containing only `read_only` and `complexity`. Provide this **only** when the client is known to lack `turn_descriptor` support.
+
+Example `turn_descriptor` snippet:
+```json
+\"turn_descriptor\": {{
+  \"mode\": \"sub_agent_read_only\",
+  \"read_only\": true,
+  \"complexity\": \"medium\",
+  \"agent_preferences\": {{ \"prefer_research\": true }}
+}}
+```
 
 **Rules**
 - You set direction, not implementation. Keep the CLI on track, but let it do all the thinking and implementation. You do not have the context the CLI has.
@@ -590,13 +855,60 @@ fn build_schema() -> Value {
                 "minLength": 1,
                 "description": "This is the prompt sent to the CLI. It should be 1-2 sentences. Shorter commands are preferred - e.g. ('What do you think the solution is?', 'Please fix this') let the CLI do the work. You just direct it! Ignored unless finish_status is 'continue'"
             },
+            "turn_descriptor": {
+                "type": ["object", "null"],
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["normal", "sub_agent_write", "sub_agent_read_only", "review"],
+                        "description": "Execution mode for the upcoming turn",
+                        "default": "normal"
+                    },
+                    "read_only": {
+                        "type": "boolean",
+                        "description": "Legacy safety flag signalling the turn should not modify files.",
+                        "default": false
+                    },
+                    "complexity": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
+                        "description": "Complexity estimate for this turn."
+                    },
+                    "agent_preferences": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "prefer_research": { "type": "boolean", "default": false },
+                            "prefer_planning": { "type": "boolean", "default": false },
+                            "requested_models": {
+                                "type": ["array", "null"],
+                                "items": { "type": "string" },
+                                "description": "Preferred agent models (e.g., claude, gemini)."
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "review_strategy": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "timing": {
+                                "type": "string",
+                                "enum": ["post_turn", "pre_write", "immediate"],
+                                "default": "post_turn"
+                            },
+                            "custom_prompt": { "type": ["string", "null"] },
+                            "scope_hint": { "type": ["string", "null"] }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "additionalProperties": false
+            },
             "turn_config": {
                 "type": ["object", "null"],
                 "properties": {
                     "read_only": { "type": "boolean", "description": "If true, this turn should not modify files." },
                     "complexity": { "type": "string", "enum": ["low","medium","high"], "description": "Complexity estimate for this turn." }
                 },
-                "required": ["read_only", "complexity"],
                 "additionalProperties": false
             }
         },
@@ -605,8 +917,7 @@ fn build_schema() -> Value {
             "progress_past",
             "progress_current",
             "cli_context",
-            "cli_prompt",
-            "turn_config"
+            "cli_prompt"
         ],
         "additionalProperties": false
     })
@@ -687,6 +998,9 @@ fn request_coordinator_decision(
         _ => None,
     };
 
+    let (turn_descriptor, turn_config) =
+        merge_turn_descriptor(decision.turn_descriptor, decision.turn_config);
+
     Ok(ParsedCoordinatorDecision {
         status,
         progress_past,
@@ -694,7 +1008,8 @@ fn request_coordinator_decision(
         cli_context,
         cli_prompt,
         response_items,
-        turn_config: decision.turn_config,
+        turn_descriptor,
+        turn_config,
     })
 }
 

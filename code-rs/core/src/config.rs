@@ -53,7 +53,6 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use tempfile::NamedTempFile;
 use toml::Value as TomlValue;
 use toml_edit::Array as TomlArray;
@@ -2385,7 +2384,7 @@ fn legacy_code_home_dir() -> Option<PathBuf> {
 
     #[cfg(not(test))]
     {
-        static LEGACY: OnceLock<Option<PathBuf>> = OnceLock::new();
+        static LEGACY: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
         LEGACY
             .get_or_init(compute_legacy_code_home_dir)
             .clone()
