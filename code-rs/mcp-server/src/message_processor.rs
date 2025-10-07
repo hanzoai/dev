@@ -178,7 +178,7 @@ impl MessageProcessor {
             return;
         }
 
-        if request.method == acp::AGENT_METHOD_NAMES.model_select {
+        if request.method == acp::AGENT_METHOD_NAMES.session_set_model {
             tracing::info!("handling session/set_model via ACP shim");
             if let Some(params) = request.params.clone() {
                 match serde_json::from_value::<acp::SetSessionModelRequest>(params) {
@@ -547,7 +547,7 @@ impl MessageProcessor {
             _ if name == acp::AGENT_METHOD_NAMES.session_prompt => {
                 self.handle_tool_call_acp_prompt(id, arguments).await
             }
-            _ if name == acp::AGENT_METHOD_NAMES.model_select => {
+            _ if name == acp::AGENT_METHOD_NAMES.session_set_model => {
                 self.handle_tool_call_acp_set_model(id, arguments).await
             }
             _ => {
