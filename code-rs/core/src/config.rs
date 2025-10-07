@@ -2483,8 +2483,12 @@ mod tests {
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             match &self.original {
-                Some(val) => std::env::set_var(self.key, val),
-                None => std::env::remove_var(self.key),
+                Some(val) => unsafe {
+                    std::env::set_var(self.key, val)
+                },
+                None => unsafe {
+                    std::env::remove_var(self.key)
+                },
             }
         }
     }
@@ -2562,9 +2566,11 @@ persistence = "none"
         let _code_home_guard = EnvVarGuard::new("CODE_HOME");
         let _codex_home_guard = EnvVarGuard::new("CODEX_HOME");
 
-        std::env::set_var("HOME", legacy_home.path());
-        std::env::remove_var("CODE_HOME");
-        std::env::remove_var("CODEX_HOME");
+        unsafe {
+            std::env::set_var("HOME", legacy_home.path());
+            std::env::remove_var("CODE_HOME");
+            std::env::remove_var("CODEX_HOME");
+        }
 
         let loaded = Config::load_instructions(Some(code_home.path()));
 
