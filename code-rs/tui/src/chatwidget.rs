@@ -12518,6 +12518,7 @@ fi\n\
         self.auto_state.placeholder_phrase = None;
         self.auto_state.thinking_prefix_stripped = false;
 
+        let auto_resolve_blocking = self.auto_resolve_should_block_auto_resume();
         let review_pending = self.is_review_flow_active()
             || (self.auto_state.review_enabled
                 && self
@@ -12525,14 +12526,14 @@ fi\n\
                     .as_ref()
                     .is_some_and(|cfg| !cfg.read_only));
 
-        self.auto_state.waiting_for_review = review_pending;
+        self.auto_state.waiting_for_review = review_pending || auto_resolve_blocking;
 
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.rebuild_auto_history();
 
-        if review_pending {
+        if self.auto_state.waiting_for_review {
             return;
         }
 
@@ -19087,6 +19088,37 @@ mod tests {
 
         let key = chat.next_internal_key();
         let _ = chat.history_insert_plain_state_with_key(state, key, "test");
+    }
+
+    fn make_pending_fix_state(review: ReviewOutputEvent) -> AutoResolveState {
+        AutoResolveState {
+            prompt: "prompt".to_string(),
+            hint: "hint".to_string(),
+            metadata: None,
+            attempt: 0,
+            max_attempts: AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
+            phase: AutoResolvePhase::PendingFix { review },
+            last_review: None,
+            last_fix_message: None,
+        }
+    }
+
+    #[test]
+    fn auto_drive_stays_paused_while_auto_resolve_pending_fix() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.review_enabled = true;
+        chat.auto_state.waiting_for_review = false;
+        chat.pending_auto_turn_config = None;
+        chat.auto_resolve_state = Some(make_pending_fix_state(ReviewOutputEvent::default()));
+
+        chat.auto_on_assistant_final();
+
+        assert!(chat.auto_state.waiting_for_review);
+        assert!(!chat.auto_state.waiting_for_response);
     }
 
     #[test]
