@@ -2437,6 +2437,17 @@ impl Session {
                         &compacted.message,
                     );
                 }
+                RolloutItem::Event(recorded_event) => {
+                    if let code_protocol::protocol::EventMsg::UserMessage(user_msg_event) = &recorded_event.msg {
+                        history.push(ResponseItem::Message {
+                            id: Some(recorded_event.id.clone()),
+                            role: "user".to_string(),
+                            content: vec![ContentItem::InputText {
+                                text: user_msg_event.message.clone(),
+                            }],
+                        });
+                    }
+                }
                 _ => {}
             }
         }
