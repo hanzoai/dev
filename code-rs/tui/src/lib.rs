@@ -253,6 +253,10 @@ pub mod test_helpers {
     pub fn force_scroll_offset(harness: &mut ChatWidgetHarness, offset: u16) {
         harness.force_scroll_offset(offset);
     }
+
+    pub fn scroll_offset(harness: &ChatWidgetHarness) -> u16 {
+        harness.scroll_offset()
+    }
 }
 
 fn theme_configured_in_config_file(code_home: &std::path::Path) -> bool {

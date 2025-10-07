@@ -110,6 +110,7 @@ libc = "0.2"
 
 [dev-dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+indoc = "2.0"
 insta = "1.43.1"
 pretty_assertions = "1"
 rand = "0.9"

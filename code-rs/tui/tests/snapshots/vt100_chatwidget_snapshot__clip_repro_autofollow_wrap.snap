@@ -58,9 +58,22 @@ expression: combined
  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
  │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
  └────────────────────────────────────────────────────────────────────────────────────────────────┘
-   - Lines that wrap must remain visible even as the buffer grows.
-   Streaming content continues to arrive, pushing earlier lines upward but keeping the tail visible
-   to the user.
+   Earlier summary: Reviewed files and prepared shell commands.
+
+   Considering recent edits and repo state... Evaluating plan viability.…
+
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you this morning?                                                          │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                             Ctrl+R show reasoning  •  Ctrl+H help
+
+--- frame 5 ---
+ ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251006-101336/code-rs/tui   │
+ └────────────────────────────────────────────────────────────────────────────────────────────────┘
+   scroll state and redrawing the composer footer.
+   TAIL: stay visible
+
 
  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you this morning?                                                          │

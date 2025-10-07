@@ -181,6 +181,10 @@ impl ChatWidgetHarness {
         self.chat.layout.scroll_offset = offset;
     }
 
+    pub(crate) fn scroll_offset(&self) -> u16 {
+        self.chat.layout.scroll_offset
+    }
+
     pub(crate) fn poll_until<F>(&mut self, mut predicate: F, timeout: Duration) -> Vec<AppEvent>
     where
         F: FnMut(&[AppEvent]) -> bool,

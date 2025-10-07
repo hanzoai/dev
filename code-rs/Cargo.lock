@@ -1553,6 +1553,7 @@ dependencies = [
  "fs2",
  "futures",
  "image 0.25.8",
+ "indoc",
  "insta",
  "lazy_static",
  "libc",
