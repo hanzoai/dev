@@ -56,6 +56,74 @@ fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
     None
 }
 
+fn update_explore_entry_status(
+    chat: &mut ChatWidget<'_>,
+    preferred_index: Option<usize>,
+    entry_idx: usize,
+    status: history_cell::ExploreEntryStatus,
+) -> Option<usize> {
+    fn try_update_at(
+        chat: &mut ChatWidget<'_>,
+        idx: usize,
+        entry_idx: usize,
+        status: &history_cell::ExploreEntryStatus,
+    ) -> Option<usize> {
+        if idx >= chat.history_cells.len() {
+            return None;
+        }
+        let cell = chat.history_cells[idx]
+            .as_any()
+            .downcast_ref::<history_cell::ExploreAggregationCell>()?;
+        if entry_idx >= cell.record().entries.len() {
+            return None;
+        }
+        let mut record = cell.record().clone();
+        history_cell::explore_record_update_status(&mut record, entry_idx, status.clone());
+        let replacement = history_cell::ExploreAggregationCell::from_record(record.clone());
+        chat.history_replace_with_record(
+            idx,
+            Box::new(replacement),
+            HistoryDomainRecord::Explore(record),
+        );
+        chat.autoscroll_if_near_bottom();
+        Some(idx)
+    }
+
+    if let Some(idx) = preferred_index.and_then(|i| try_update_at(chat, i, entry_idx, &status)) {
+        return Some(idx);
+    }
+    if let Some(idx) = chat
+        .exec
+        .running_explore_agg_index
+        .and_then(|i| try_update_at(chat, i, entry_idx, &status))
+    {
+        return Some(idx);
+    }
+    for i in (0..chat.history_cells.len()).rev() {
+        let Some(cell) = chat.history_cells[i]
+            .as_any()
+            .downcast_ref::<history_cell::ExploreAggregationCell>()
+        else {
+            continue;
+        };
+        if entry_idx >= cell.record().entries.len() {
+            continue;
+        }
+        if !matches!(
+            cell.record().entries[entry_idx].status,
+            history_cell::ExploreEntryStatus::Running
+                | history_cell::ExploreEntryStatus::Error { .. }
+                | history_cell::ExploreEntryStatus::NotFound
+        ) {
+            continue;
+        }
+        if let Some(idx) = try_update_at(chat, i, entry_idx, &status) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
 fn exec_record_from_begin(ev: &ExecCommandBeginEvent) -> ExecRecord {
     let action = history_cell::action_enum_from_parsed(&ev.parsed_cmd);
     ExecRecord {
@@ -344,27 +412,14 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
         }
 
         if let Some((agg_idx, entry_idx)) = explore_entry {
-            if *agg_idx < chat.history_cells.len() {
-                if let Some(existing) = chat.history_cells[*agg_idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::ExploreAggregationCell>()
-                {
-                    let mut record = existing.record().clone();
-                    history_cell::explore_record_update_status(
-                        &mut record,
-                        *entry_idx,
-                        history_cell::ExploreEntryStatus::Success,
-                    );
-                    let cell = history_cell::ExploreAggregationCell::from_record(record.clone());
-                    chat.history_replace_with_record(
-                        *agg_idx,
-                        Box::new(cell),
-                        HistoryDomainRecord::Explore(record),
-                    );
-                    chat.autoscroll_if_near_bottom();
-                    agg_was_updated = true;
-                }
-            }
+            let updated = update_explore_entry_status(
+                chat,
+                Some(*agg_idx),
+                *entry_idx,
+                history_cell::ExploreEntryStatus::Success,
+            )
+            .is_some();
+            agg_was_updated |= updated;
         }
 
         remove_after_finalize.push(call_id.clone());
@@ -748,14 +803,19 @@ pub(super) fn handle_exec_end_now(
     order: &OrderMeta,
 ) {
     let call_id = super::ExecCallId(ev.call_id.clone());
-    if chat.exec.should_suppress_exec_end(&call_id) {
+    let suppressing = chat.exec.should_suppress_exec_end(&call_id);
+    if suppressing {
         chat.exec.unsuppress_exec_end(&call_id);
-        chat.ended_call_ids.insert(call_id);
-        chat.maybe_hide_spinner();
-        chat.refresh_auto_drive_visuals();
-        return;
+        if !chat.exec.running_commands.contains_key(&call_id) {
+            chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
+            chat.maybe_hide_spinner();
+            chat.refresh_auto_drive_visuals();
+            return;
+        }
     }
-    chat.ended_call_ids.insert(super::ExecCallId(ev.call_id.clone()));
+    chat
+        .ended_call_ids
+        .insert(super::ExecCallId(ev.call_id.clone()));
     // If this call was already marked as cancelled, drop the End to avoid
     // inserting a duplicate completed cell after the user interrupt.
     if chat
@@ -836,20 +896,7 @@ pub(super) fn handle_exec_end_now(
                 exit_code: Some(exit_code),
             },
         };
-        if let Some(mut record) = chat.history_cells.get(agg_idx).and_then(|cell| {
-            cell.as_any()
-                .downcast_ref::<history_cell::ExploreAggregationCell>()
-                .map(|existing| existing.record().clone())
-        }) {
-            history_cell::explore_record_update_status(&mut record, entry_idx, status.clone());
-            let cell = history_cell::ExploreAggregationCell::from_record(record.clone());
-            chat.history_replace_with_record(
-                agg_idx,
-                Box::new(cell),
-                HistoryDomainRecord::Explore(record),
-            );
-            chat.autoscroll_if_near_bottom();
-        }
+        let updated_index = update_explore_entry_status(chat, Some(agg_idx), entry_idx, status.clone());
         if !chat
             .exec
             .running_commands
@@ -857,6 +904,8 @@ pub(super) fn handle_exec_end_now(
             .any(|rc| rc.explore_entry.is_some())
         {
             chat.exec.running_explore_agg_index = None;
+        } else if let Some(actual_idx) = updated_index {
+            chat.exec.running_explore_agg_index = Some(actual_idx);
         }
         let status_text = match status {
             history_cell::ExploreEntryStatus::Success => match action {
