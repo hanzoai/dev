@@ -12047,12 +12047,15 @@ fi\n\
         let review_requested = review_descriptor
             .as_ref()
             .is_some_and(|descriptor| matches!(descriptor.mode, TurnMode::Review));
-        let immediate_requested = review_descriptor
+        let prewrite_or_immediate_requested = review_descriptor
             .as_ref()
             .and_then(|descriptor| descriptor.review_strategy.as_ref())
-            .is_some_and(|strategy| strategy.timing == ReviewTiming::Immediate);
+            .is_some_and(|strategy| {
+                matches!(strategy.timing, ReviewTiming::Immediate | ReviewTiming::PreWrite)
+            });
 
-        if matches!(status, AutoCoordinatorStatus::Continue) && (review_requested || immediate_requested)
+        if matches!(status, AutoCoordinatorStatus::Continue)
+            && (review_requested || prewrite_or_immediate_requested)
         {
             self.auto_state.current_cli_prompt = None;
             self.dispatch_review_turn(review_descriptor.as_ref());
@@ -19467,6 +19470,54 @@ mod tests {
         assert_eq!(
             stored_descriptor.review_strategy.as_ref().unwrap().timing,
             ReviewTiming::Immediate
+        );
+
+        let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
+        assert_eq!(stored_config.read_only, descriptor.read_only);
+        assert_eq!(stored_config.complexity, descriptor.complexity);
+    }
+
+    #[test]
+    fn prewrite_review_strategy_triggers_review() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.config.tui.review_auto_resolve = false;
+
+        let descriptor = TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            agent_preferences: None,
+            review_strategy: Some(ReviewStrategy {
+                timing: ReviewTiming::PreWrite,
+                custom_prompt: Some("Strategy review".to_string()),
+                scope_hint: Some("workspace".to_string()),
+            }),
+        };
+
+        chat.auto_handle_decision(
+            AutoCoordinatorStatus::Continue,
+            None,
+            None,
+            None,
+            Some("prompt".to_string()),
+            Vec::new(),
+            Some(descriptor.clone()),
+            Some(TurnConfig {
+                read_only: descriptor.read_only,
+                complexity: descriptor.complexity,
+            }),
+        );
+
+        assert!(chat.auto_state.waiting_for_review);
+
+        let stored_descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
+        assert_eq!(stored_descriptor.mode, TurnMode::Normal);
+        assert_eq!(
+            stored_descriptor.review_strategy.as_ref().unwrap().timing,
+            ReviewTiming::PreWrite
         );
 
         let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
