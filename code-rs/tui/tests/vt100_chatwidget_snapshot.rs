@@ -8,9 +8,71 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use code_core::protocol::{
-    AgentMessageDeltaEvent, AgentMessageEvent, Event, EventMsg, OrderMeta,
+    AgentInfo,
+    AgentMessageDeltaEvent,
+    AgentMessageEvent,
+    AgentStatusUpdateEvent,
+    BackgroundEventEvent,
+    BrowserScreenshotUpdateEvent,
+    CustomToolCallBeginEvent,
+    CustomToolCallEndEvent,
+    Event,
+    EventMsg,
+    OrderMeta,
+    WebSearchBeginEvent,
+    WebSearchCompleteEvent,
 };
 use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use serde_json::json;
+use std::path::PathBuf;
+use std::time::Duration;
+
+fn normalize_output(text: String) -> String {
+    text
+        .replace('✧', "✶")
+        .replace('◇', "✶")
+        .replace('✦', "✶")
+        .replace('◆', "✶")
+        .replace('✨', "✶")
+}
+
+fn push_ordered_event(
+    harness: &mut ChatWidgetHarness,
+    event_seq: &mut u64,
+    order_seq: &mut u64,
+    msg: EventMsg,
+) {
+    let seq = *event_seq;
+    let ord = *order_seq;
+    let event = Event {
+        id: "turn-1".into(),
+        event_seq: seq,
+        msg,
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(ord),
+        }),
+    };
+    harness.handle_event(event);
+    *event_seq = seq.saturating_add(1);
+    *order_seq = ord.saturating_add(1);
+}
+
+fn push_unordered_event(
+    harness: &mut ChatWidgetHarness,
+    event_seq: &mut u64,
+    msg: EventMsg,
+) {
+    let seq = *event_seq;
+    harness.handle_event(Event {
+        id: format!("unordered-{seq}"),
+        event_seq: seq,
+        msg,
+        order: None,
+    });
+    *event_seq = seq.saturating_add(1);
+}
 
 #[test]
 fn baseline_empty_chat() {
@@ -186,4 +248,521 @@ fn baseline_multiline_formatting() {
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
     insta::assert_snapshot!("multiline_formatting", output);
+}
+
+#[test]
+fn tool_activity_showcase() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.push_user_prompt("Can you gather details from the latest docs update?");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    // Completed web search call
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: "search-complete".into(),
+            query: Some("ratatui widget patterns".into()),
+        }),
+    );
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::WebSearchComplete(WebSearchCompleteEvent {
+            call_id: "search-complete".into(),
+            query: Some("ratatui widget patterns".into()),
+        }),
+    );
+
+    // Running web search call
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::WebSearchBegin(WebSearchBeginEvent {
+            call_id: "search-running".into(),
+            query: Some("async rust tui example".into()),
+        }),
+    );
+    harness.override_running_tool_elapsed("search-running", Duration::from_secs(75));
+
+    // Browser tool: completed click
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "browser-finished".into(),
+            tool_name: "browser_click".into(),
+            parameters: Some(json!({
+                "type": "double",
+                "x": 512,
+                "y": 284,
+                "selector": "#login-button"
+            })),
+        }),
+    );
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "browser-finished".into(),
+            tool_name: "browser_click".into(),
+            parameters: Some(json!({
+                "type": "double",
+                "x": 512,
+                "y": 284,
+                "selector": "#login-button"
+            })),
+            duration: Duration::from_secs(8),
+            result: Ok("{\n  \"status\": \"ok\",\n  \"notes\": \"Login button clicked\"\n}".into()),
+        }),
+    );
+
+    // Browser tool: active scroll
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "browser-running".into(),
+            tool_name: "browser_scroll".into(),
+            parameters: Some(json!({
+                "dx": 0,
+                "dy": 640,
+                "speed": "smooth"
+            })),
+        }),
+    );
+    harness.override_running_tool_elapsed("browser-running", Duration::from_secs(95));
+
+    // Agent tool: completed run
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-done".into(),
+            tool_name: "agent_run".into(),
+            parameters: Some(json!({
+                "agent_id": "qa-bot",
+                "task": "Run targeted regression suite",
+                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+            })),
+        }),
+    );
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-done".into(),
+            tool_name: "agent_run".into(),
+            parameters: Some(json!({
+                "agent_id": "qa-bot",
+                "task": "Run targeted regression suite",
+                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+            })),
+            duration: Duration::from_secs(94),
+            result: Ok("Regression sweep complete\n- 58 tests passed\n- 0 failures".into()),
+        }),
+    );
+
+    // Agent tool: active wait
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-pending".into(),
+            tool_name: "agent_wait".into(),
+            parameters: Some(json!({
+                "agent_id": "deploy-helper",
+                "status_url": "https://status.example.com/run/42",
+                "timeout_seconds": 600
+            })),
+        }),
+    );
+    harness.override_running_tool_elapsed("agent-pending", Duration::from_secs(185));
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    insta::assert_snapshot!("tool_activity_showcase", output);
+}
+
+#[test]
+fn browser_session_grouped_desired_layout() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Open docs and find login button");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    // Browser open -> sets initial URL
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "browser-session".into(),
+            tool_name: "browser_open".into(),
+            parameters: Some(json!({
+                "url": "https://example.com/docs"
+            })),
+        }),
+    );
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "browser-session".into(),
+            tool_name: "browser_open".into(),
+            parameters: Some(json!({
+                "url": "https://example.com/docs"
+            })),
+            duration: Duration::from_secs(5),
+            result: Ok("{\n  \"status\": \"ok\"\n}".into()),
+        }),
+    );
+
+    // Additional browser interactions
+    let actions = [
+        (
+            "browser_click",
+            json!({
+                "selector": "#sign-in",
+                "description": "Sign in button"
+            }),
+            Duration::from_secs(13),
+        ),
+        (
+            "browser_scroll",
+            json!({
+                "dx": 0,
+                "dy": 640
+            }),
+            Duration::from_secs(14),
+        ),
+        (
+            "browser_type",
+            json!({
+                "text": "docs search"
+            }),
+            Duration::from_secs(33),
+        ),
+    ];
+
+    for (tool, params, dur) in actions {
+        push_ordered_event(
+            &mut harness,
+            &mut event_seq,
+            &mut order_seq,
+            EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+                call_id: format!("browser-session-{tool}"),
+                tool_name: tool.into(),
+                parameters: Some(params.clone()),
+            }),
+        );
+        push_ordered_event(
+            &mut harness,
+            &mut event_seq,
+            &mut order_seq,
+            EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+                call_id: format!("browser-session-{tool}"),
+                tool_name: tool.into(),
+                parameters: Some(params),
+                duration: dur,
+                result: Ok("{\n  \"status\": \"ok\"\n}".into()),
+            }),
+        );
+    }
+
+    // Capture console warning (represented as background event)
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::BackgroundEvent(BackgroundEventEvent {
+            message: "cdp warning: Refused to load script from cdn.example.com".into(),
+        }),
+    );
+
+    // Screenshot update for active tab
+    harness.handle_event(Event {
+        id: "browser-shot".into(),
+        event_seq,
+        msg: EventMsg::BrowserScreenshotUpdate(BrowserScreenshotUpdateEvent {
+            screenshot_path: PathBuf::from("/tmp/browser_session.png"),
+            url: "https://example.com/docs".into(),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(order_seq),
+        }),
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    insta::assert_snapshot!("browser_session_grouped_desired_layout", output);
+}
+
+#[test]
+fn browser_session_grouped_with_unordered_actions() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Handle captcha gracefully");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "browser-session-open".into(),
+            tool_name: "browser_open".into(),
+            parameters: Some(json!({ "url": "https://example.com" })),
+        }),
+    );
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "browser-session-open".into(),
+            tool_name: "browser_open".into(),
+            parameters: Some(json!({ "url": "https://example.com" })),
+            duration: Duration::from_secs(3),
+            result: Ok("{ \"status\": \"ok\" }".into()),
+        }),
+    );
+
+    push_unordered_event(
+        &mut harness,
+        &mut event_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "browser-session-type".into(),
+            tool_name: "browser_type".into(),
+            parameters: Some(json!({ "text": "pizza" })),
+        }),
+    );
+    push_unordered_event(
+        &mut harness,
+        &mut event_seq,
+        EventMsg::BackgroundEvent(BackgroundEventEvent {
+            message: "Encountering captcha block".into(),
+        }),
+    );
+    push_unordered_event(
+        &mut harness,
+        &mut event_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "browser-session-type".into(),
+            tool_name: "browser_type".into(),
+            parameters: Some(json!({ "text": "pizza" })),
+            duration: Duration::from_secs(2),
+            result: Ok("{ \"status\": \"typed\" }".into()),
+        }),
+    );
+
+    push_unordered_event(
+        &mut harness,
+        &mut event_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "browser-session-key".into(),
+            tool_name: "browser_key".into(),
+            parameters: Some(json!({ "key": "Enter" })),
+        }),
+    );
+    push_unordered_event(
+        &mut harness,
+        &mut event_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "browser-session-key".into(),
+            tool_name: "browser_key".into(),
+            parameters: Some(json!({ "key": "Enter" })),
+            duration: Duration::from_secs(1),
+            result: Ok("{ \"status\": \"ok\" }".into()),
+        }),
+    );
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    let output = normalize_output(output);
+    insta::assert_snapshot!(
+        "browser_session_grouped_with_unordered_actions",
+        output
+    );
+}
+
+#[test]
+fn agent_run_grouped_desired_layout() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Kick off QA bot regression run");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    // Agent run begins
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-run".into(),
+            tool_name: "agent_run".into(),
+            parameters: Some(json!({
+                "agent_id": "qa-bot",
+                "task": "Run targeted regression suite",
+                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+            })),
+        }),
+    );
+
+    // Status update with multiple agents
+    harness.handle_event(Event {
+        id: "agent-status".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "qa-bot".into(),
+                    name: "QA Bot".into(),
+                    status: "running tests".into(),
+                    batch_id: None,
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                },
+                AgentInfo {
+                    id: "doc-writer".into(),
+                    name: "Doc Writer".into(),
+                    status: "planning".into(),
+                    batch_id: None,
+                    model: None,
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                },
+            ],
+            context: Some("regression sweep".into()),
+            task: Some("Ship bugfix patch".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    // Agent result
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-run".into(),
+            tool_name: "agent_run".into(),
+            parameters: Some(json!({
+                "agent_id": "qa-bot",
+                "task": "Run targeted regression suite",
+                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+            })),
+            duration: Duration::from_secs(94),
+            result: Ok("Regression sweep complete\n- 58 tests passed\n- 0 failures".into()),
+        }),
+    );
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    let output = normalize_output(output);
+    insta::assert_snapshot!(
+        "agent_run_grouped_desired_layout",
+        &output,
+        @"agent_run_grouped_desired_layout"
+    );
+}
+
+#[test]
+fn agent_run_grouped_plain_tool_name() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Kick off QA bot regression run");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-run-plain".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "run",
+                "batch_id": "batch-001",
+                "agent_id": "qa-bot",
+                "task": "Run targeted regression suite",
+                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+            })),
+        }),
+    );
+
+    harness.handle_event(Event {
+        id: "agent-status".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "qa-bot".into(),
+                    name: "QA Bot".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-001".into()),
+                    model: Some("claude".into()),
+                    last_progress: Some("Executing smoke tests".into()),
+                    result: None,
+                    error: None,
+                },
+            ],
+            context: Some("regression sweep".into()),
+            task: Some("Ship bugfix patch".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-run-plain".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "run",
+                "batch_id": "batch-001",
+                "agent_id": "qa-bot",
+                "task": "Run targeted regression suite",
+                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+            })),
+            duration: Duration::from_secs(104),
+            result: Ok("Regression sweep complete\n- 58 tests passed\n- 0 failures".into()),
+        }),
+    );
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    let output = normalize_output(output);
+    insta::assert_snapshot!("agent_run_grouped_plain_tool_name", output);
 }
