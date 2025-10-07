@@ -1,0 +1,35 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: output
+---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+ ┌ Browser ───────────────────────────────────────────────────────────────────┐
+ │ • https://example.com/docs                                   Ctrl+B expand │
+ └────────────────────────────────────────────────────────────────────────────┘
+   /cloud - browse, apply, and create cloud tasks NEW
+
+ › Open docs and find login button
+
+ ⚙ ┌───────────────────────────────────────────────────────────────────────────
+   │ Browser Session • https://example.com/docs                          1m05s│
+   └───────────────────────────────────────────────────────────────────────────
+     Active URL: https://example.com/docs
+     Title: (pending)
+
+     Actions
+       00:00  Open URL https://example.com/docs
+       00:05  Click Sign in button (#sign-in)
+       00:18  Scroll by dy=640
+       00:32  Type “docs search”
+
+     Console
+       ⚠️   cdp warning: Refused to load script from cdn.example.com
+
+     Screenshot
+
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ What can I code for you today?                                             │
+ └────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                                   Ctrl+H help

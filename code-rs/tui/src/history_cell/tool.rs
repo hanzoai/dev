@@ -141,6 +141,16 @@ impl RunningToolCallCell {
         &mut self.state
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub(crate) fn override_elapsed_for_testing(&mut self, duration: Duration) {
+        if let Some(adjusted) = SystemTime::now().checked_sub(duration) {
+            self.state.started_at = adjusted;
+        } else {
+            self.state.started_at = SystemTime::UNIX_EPOCH;
+        }
+        self.start_clock = Instant::now();
+    }
+
     fn strip_zero_seconds_suffix(mut duration: String) -> String {
         if duration.ends_with(" 00s") {
             duration.truncate(duration.len().saturating_sub(4));
