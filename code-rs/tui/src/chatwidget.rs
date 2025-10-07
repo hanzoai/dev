@@ -19005,7 +19005,7 @@ fi\n\
 mod tests {
     use super::*;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
-    use crate::history_cell::HistoryCellType;
+    use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use code_core::history::state::{
         AssistantStreamDelta,
         AssistantStreamState,
@@ -19023,8 +19023,15 @@ mod tests {
         TextEmphasis,
         TextTone,
     };
+    use code_core::parse_command::ParsedCommand;
     use code_core::protocol::OrderMeta;
-    use code_core::protocol::{AgentMessageEvent, AgentStatusUpdateEvent, Event, EventMsg};
+    use code_core::protocol::{
+        AgentMessageEvent,
+        AgentStatusUpdateEvent,
+        Event,
+        EventMsg,
+        ExecCommandBeginEvent,
+    };
     use code_core::protocol::AgentInfo as CoreAgentInfo;
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
@@ -19087,6 +19094,69 @@ mod tests {
 
         let key = chat.next_internal_key();
         let _ = chat.history_insert_plain_state_with_key(state, key, "test");
+    }
+
+    #[test]
+    fn finalize_explore_updates_even_with_stale_index() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+        reset_history(chat);
+
+        let call_id = "call-explore".to_string();
+        let order = OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(0),
+        };
+
+        chat.handle_code_event(Event {
+            id: call_id.clone(),
+            event_seq: 0,
+            msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+                call_id: call_id.clone(),
+                command: vec!["bash".into(), "-lc".into(), "cat foo.txt".into()],
+                cwd: std::env::temp_dir(),
+                parsed_cmd: vec![ParsedCommand::Read {
+                    cmd: "cat foo.txt".to_string(),
+                    name: "foo.txt".to_string(),
+                }],
+            }),
+            order: Some(order.clone()),
+        });
+
+        let exec_call_id = ExecCallId(call_id.clone());
+        let running = chat
+            .exec
+            .running_commands
+            .get_mut(&exec_call_id)
+            .expect("explore command should be tracked");
+        let (agg_idx, entry_idx) = running
+            .explore_entry
+            .expect("read command should register an explore entry");
+
+        // Simulate an out-of-date index so finalize must recover by searching.
+        running.explore_entry = Some((usize::MAX, entry_idx));
+        chat.exec.running_explore_agg_index = Some(usize::MAX);
+
+        chat.finalize_all_running_due_to_answer();
+
+        let cell = chat.history_cells[agg_idx]
+            .as_any()
+            .downcast_ref::<ExploreAggregationCell>()
+            .expect("explore aggregation cell should remain present");
+        let entry = cell
+            .record()
+            .entries
+            .get(entry_idx)
+            .expect("entry index should still be valid");
+        assert!(
+            matches!(entry.status, history_cell::ExploreEntryStatus::Success),
+            "explore entry should be marked successful instead of remaining running"
+        );
+        assert!(
+            !chat.exec.running_commands.contains_key(&exec_call_id),
+            "finalization should clear the running command"
+        );
     }
 
     #[test]
