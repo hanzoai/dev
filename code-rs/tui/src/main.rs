@@ -4,7 +4,7 @@ use code_common::CliConfigOverrides;
 use code_tui::Cli;
 use code_tui::ExitSummary;
 use code_tui::run_main;
-use code_tui::RESUME_COMMAND_NAME;
+use code_tui::resume_command_name;
 
 #[derive(Parser, Debug)]
 struct TopCli {
@@ -36,8 +36,8 @@ fn main() -> anyhow::Result<()> {
         }
         if let Some(session_id) = session_id {
             println!(
-                "To continue this session, run {} resume {}.",
-                RESUME_COMMAND_NAME,
+                "To continue this session, run {} resume {}",
+                resume_command_name(),
                 session_id
             );
         }

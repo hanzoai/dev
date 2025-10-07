@@ -15798,40 +15798,37 @@ fi\n\
                 .is_some()
         }) {
             // Replace the tail finalized assistant cell if the new content is identical OR
-            // a superset revision of the previous content (common provider behavior where
-            // a later final slightly extends the earlier one). Otherwise append a new
-            // assistant message so distinct messages remain separate.
-            let (should_replace, _prev_len, _new_len) = self.history_cells[idx]
+            // a small revision that merely adds leading/trailing context. Otherwise append a
+            // new assistant message so distinct replies remain separate.
+            let should_replace = self.history_cells[idx]
                 .as_any()
                 .downcast_ref::<history_cell::AssistantMarkdownCell>()
                 .map(|amc| {
                     let prev = Self::normalize_text(amc.markdown());
                     let newn = Self::normalize_text(&source);
                     let identical = prev == newn;
-                    let is_superset = !identical && newn.contains(&prev);
-                    // Heuristic: treat as revision when previous is reasonably long to
-                    // avoid collapsing very short replies unintentionally.
-                    let long_enough = prev.len() >= 80;
-                    (
-                        identical || (is_superset && long_enough),
-                        prev.len(),
-                        newn.len(),
-                    )
+                    if identical || prev.is_empty() {
+                        return identical;
+                    }
+                    let is_prefix_expansion = newn.starts_with(&prev);
+                    let is_suffix_expansion = newn.ends_with(&prev);
+                    let is_large_superset = prev.len() >= 80 && newn.contains(&prev);
+                    identical || is_prefix_expansion || is_suffix_expansion || is_large_superset
                 })
-                .unwrap_or((false, 0, 0));
+                .unwrap_or(false);
             if should_replace {
                 tracing::debug!(
-                    "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/superset"
+                    "final-answer: replacing tail AssistantMarkdownCell via heuristic identical/expansion"
                 );
-            let state =
-                self.finalize_answer_stream_state(id.as_deref(), &final_source);
-            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
-            self.history_replace_at(idx, Box::new(cell));
-            self.autoscroll_if_near_bottom();
-            // Final assistant content revised; advance Auto Drive now.
-            self.auto_on_assistant_final();
-            return;
-        }
+                let state =
+                    self.finalize_answer_stream_state(id.as_deref(), &final_source);
+                let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
+                self.history_replace_at(idx, Box::new(cell));
+                self.autoscroll_if_near_bottom();
+                // Final assistant content revised; advance Auto Drive now.
+                self.auto_on_assistant_final();
+                return;
+            }
         }
 
         // Fallback: no prior assistant cell found; insert at stable sequence position.
