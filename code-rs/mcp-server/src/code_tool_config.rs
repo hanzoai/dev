@@ -194,8 +194,8 @@ pub(crate) fn create_tool_for_acp_set_model() -> Tool {
     };
 
     Tool {
-        name: acp::AGENT_METHOD_NAMES.model_select.to_string(),
-        title: Some(acp::AGENT_METHOD_NAMES.model_select.to_string()),
+        name: acp::AGENT_METHOD_NAMES.session_set_model.to_string(),
+        title: Some(acp::AGENT_METHOD_NAMES.session_set_model.to_string()),
         input_schema,
         output_schema: None,
         description: Some("Select a model for an existing ACP Codex session.".to_string()),
