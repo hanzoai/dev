@@ -106,6 +106,7 @@ pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 #[cfg(feature = "test-helpers")]
 pub mod test_helpers {
     pub use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
+    pub use crate::chatwidget::smoke_helpers::LayoutMetrics;
     #[cfg(test)]
     pub use crate::test_backend::VT100Backend;
 
@@ -215,6 +216,10 @@ pub mod test_helpers {
             Duration::from_millis(200),
         );
         crate::chatwidget::smoke_helpers::assert_has_codex_event(&events);
+    }
+
+    pub fn layout_metrics(harness: &ChatWidgetHarness) -> LayoutMetrics {
+        harness.layout_metrics()
     }
 
     pub fn assert_has_insert_history(harness: &mut ChatWidgetHarness) {
