@@ -5,29 +5,37 @@ expression: output
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+      Title: (pending)
+      Elapsed: 08s
+      ─────────────────────────────────────────────────────────────────────────
+      ACTIONS
+      • 00:00  Click #login-button
+      ─────────────────────────────────────────────────────────────────────────
+      CONSOLE
+      (no console messages)
+      ─────────────────────────────────────────────────────────────────────────
+      SCREENSHOT
+      (no screenshot yet)
 
-     Plan
-       • Init workspace
-       • Nextest smoke
-       • Summarize
-
-     Status
-       (no status updates yet)
-
-     Latest result
-       Regression sweep complete
-       - 58 tests passed
-       - 0 failures
-
- ⚙ ┌───────────────────────────────────────────────────────────────────────────
-   │ Agent Run • agent-pending                                        Running │
-   └───────────────────────────────────────────────────────────────────────────
-
-     Plan
-       (no plan provided)
-
-     Status
-       (no status updates yet)
+ ✔ ⚙  Agent Run • deploy-helper · 1m34s                              Completed
+      Task: Run targeted regression suite
+      ─────────────────────────────────────────────────────────────────────────
+      PLAN
+      • Init workspace
+      • Nextest smoke
+      • Summarize
+      ─────────────────────────────────────────────────────────────────────────
+      STATUS
+      (no status updates yet)
+      ─────────────────────────────────────────────────────────────────────────
+      LATEST
+      • Regression sweep complete
+      • - 58 tests passed
+      • - 0 failures
+      ─────────────────────────────────────────────────────────────────────────
+      ACTIONS
+      • Started agent run for qa-bot
+      • Agent run completed in 1m34s
 
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you today?                                             │
