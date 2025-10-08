@@ -1582,8 +1582,15 @@ fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
             serde_json::from_str(&json_blob).context("parsing JSON from model output")?
         }
     };
-    let decision: CoordinatorDecision = serde_json::from_value(value.clone())
-        .context("decoding coordinator decision")?;
+    let decision: CoordinatorDecision = serde_json::from_value(value.clone()).map_err(|err| {
+        let payload = serde_json::to_string(&value).unwrap_or_else(|_| "<unprintable json>".to_string());
+        let snippet = if payload.len() > 2000 {
+            format!("{}…", &payload[..2000])
+        } else {
+            payload
+        };
+        anyhow!("decoding coordinator decision failed: {err}; payload_snippet={snippet}")
+    })?;
     Ok((decision, value))
 }
 
