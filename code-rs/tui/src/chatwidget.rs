@@ -9916,8 +9916,8 @@ impl ChatWidget<'_> {
                     self.request_redraw();
                     return;
                 }
-                // Special-case web_fetch to render returned markdown nicely.
-                if tool_name == "web_fetch" {
+                // Special-case browser/web fetch to render returned markdown nicely.
+                if tool_name == "web_fetch" || tool_name == "browser_fetch" {
                     let completed = history_cell::new_completed_web_fetch_tool_call(
                         &self.config,
                         params_string,
@@ -12527,7 +12527,7 @@ fi\n\
             self.prepare_agents();
         }
 
-        // Build hidden preface with explicit agent_run guidance
+        // Build hidden preface with explicit agent create guidance
         let preface = self.build_auto_turn_preface(&prompt);
 
         if self.auto_state.review_enabled {
@@ -12628,7 +12628,7 @@ fi\n\
             TurnComplexity::Medium => {
                 if self.auto_state.subagents_enabled {
                     parts.push(format!(
-                        "This turn is likely medium complexity, so you should use at least 2 agents using `agent_run` and read_only: {}.",
+                        "This turn is likely medium complexity, so you should launch at least two agents via `agent {{\"action\":\"create\",\"models\":[\"claude\",\"gemini\"],\"read_only\":{}}}`.",
                         ro_str
                     ));
                 } else {
@@ -12638,7 +12638,7 @@ fi\n\
             TurnComplexity::High => {
                 if self.auto_state.subagents_enabled {
                     parts.push(format!(
-                        "This turn is likely high complexity, you should use `agent_run` with all models [\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"] and read_only: {}.",
+                        "This turn is likely high complexity; launch the full agent fleet via `agent {{\"action\":\"create\",\"models\":[\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"],\"read_only\":{}}}`.",
                         ro_str
                     ));
                 } else {
@@ -12651,9 +12651,9 @@ fi\n\
             && matches!(complexity, TurnComplexity::Medium | TurnComplexity::High)
         {
             if cfg.read_only {
-                parts.push("Use `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete automatically. Once they complete you should collate their output into your final output.".to_string());
+                parts.push("Use `agent {\"action\":\"wait\",\"batch_id\":\"<batch_id>\",\"return_all\":true}` to wait for all agents to complete automatically. Once they finish, collate their output into your final answer.".to_string());
             } else {
-                parts.push("Use `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete automatically. Once they complete inspect each worktree using git and merge in the best solution (or the best parts from each agent). Test to ensure the changes are valid.".to_string());
+                parts.push("Use `agent {\"action\":\"wait\",\"batch_id\":\"<batch_id>\",\"return_all\":true}` to wait for all agents to complete. Afterwards inspect each worktree and merge the best solution (or the best parts from each agent), then test to ensure the changes are valid.".to_string());
             }
         }
 
@@ -24378,7 +24378,7 @@ impl ChatWidget<'_> {
                 if let Some(ref batch) = agent.batch_id {
                     if rendered_batches.insert(batch.clone()) {
                         let batch_line = format!(
-                            "Batch {} — use agent_wait {{\"batch_id\":\"{}\"}}",
+                            "Batch {} — use agent {{\"action\":\"wait\",\"batch_id\":\"{}\"}}",
                             short_id(batch),
                             batch
                         );

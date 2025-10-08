@@ -4224,9 +4224,9 @@ fn custom_tool_running_title(tool_name: &str) -> String {
     if tool_name == "wait" {
         return "Waiting".to_string();
     }
-    if tool_name.starts_with("agent_") {
+    if tool_name.starts_with("agent_") || tool_name == "agent" {
         // Reuse agent title and append ellipsis
-        format!("{}...", agent_tool_title(tool_name))
+        format!("{}...", agent_tool_title(tool_name, None))
     } else if tool_name.starts_with("browser_") {
         browser_running_title(tool_name).to_string()
     } else {
@@ -4363,8 +4363,8 @@ pub(crate) fn new_completed_custom_tool_call(
     if tool_name.starts_with("browser_") {
         return new_completed_browser_tool_call(tool_name, args, duration, success, result);
     }
-    // Special rendering for agent_* tools
-    if tool_name.starts_with("agent_") {
+    // Special rendering for agent tools
+    if tool_name.starts_with("agent_") || tool_name == "agent" {
         return new_completed_agent_tool_call(tool_name, args, duration, success, result);
     }
     let status = if success {
@@ -5035,16 +5035,26 @@ fn new_completed_browser_tool_call(
 }
 
 // Map `agent_*` tool names to friendly titles
-fn agent_tool_title(tool_name: &str) -> String {
-    match tool_name {
-        "agent_run" => "Agent Run".to_string(),
-        "agent_check" => "Agent Check".to_string(),
-        "agent_result" => "Agent Result".to_string(),
-        "agent_cancel" => "Agent Cancel".to_string(),
-        "agent_wait" => "Agent Wait".to_string(),
-        "agent_list" => "Agent List".to_string(),
+fn agent_tool_title(tool_name: &str, action: Option<&str>) -> String {
+    let key = action.unwrap_or_else(|| match tool_name {
+        "agent_run" => "create",
+        "agent_wait" => "wait",
+        "agent_result" => "result",
+        "agent_cancel" => "cancel",
+        "agent_check" => "status",
+        "agent_list" => "list",
+        "agent" => "create",
+        other => other,
+    });
+
+    match key {
+        "create" | "agent" => "Agent Run".to_string(),
+        "wait" | "agent_wait" => "Agent Wait".to_string(),
+        "result" | "agent_result" => "Agent Result".to_string(),
+        "cancel" | "agent_cancel" => "Agent Cancel".to_string(),
+        "status" | "agent_check" | "agent_status" => "Agent Status".to_string(),
+        "list" | "agent_list" => "Agent List".to_string(),
         other => {
-            // Fallback: pretty-print unknown agent_* tools as "Agent <TitleCase>"
             if let Some(rest) = other.strip_prefix("agent_") {
                 let title = rest
                     .split('_')
@@ -5079,8 +5089,12 @@ fn new_completed_agent_tool_call(
         HistoryToolStatus::Failed
     };
     let mut arguments: Vec<ToolArgument> = Vec::new();
+    let mut action: Option<String> = None;
     if let Some(args_str) = args {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&args_str) {
+            if let Some(act) = json.get("action").and_then(|v| v.as_str()) {
+                action = Some(act.to_string());
+            }
             let mut kv = arguments_from_json(&json);
             arguments.append(&mut kv);
         } else if !args_str.is_empty() {
@@ -5109,7 +5123,7 @@ fn new_completed_agent_tool_call(
         id: HistoryId::ZERO,
         call_id: None,
         status,
-        title: agent_tool_title(&tool_name),
+        title: agent_tool_title(&tool_name, action.as_deref()),
         duration: Some(duration),
         arguments,
         result_preview,
