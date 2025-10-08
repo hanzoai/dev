@@ -349,8 +349,9 @@ fn tool_activity_showcase() {
         &mut order_seq,
         EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
             call_id: "agent-done".into(),
-            tool_name: "agent_run".into(),
+            tool_name: "agent".into(),
             parameters: Some(json!({
+                "action": "create",
                 "agent_id": "qa-bot",
                 "task": "Run targeted regression suite",
                 "plan": ["Init workspace", "Nextest smoke", "Summarize"]
@@ -363,8 +364,9 @@ fn tool_activity_showcase() {
         &mut order_seq,
         EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
             call_id: "agent-done".into(),
-            tool_name: "agent_run".into(),
+            tool_name: "agent".into(),
             parameters: Some(json!({
+                "action": "create",
                 "agent_id": "qa-bot",
                 "task": "Run targeted regression suite",
                 "plan": ["Init workspace", "Nextest smoke", "Summarize"]
@@ -381,8 +383,9 @@ fn tool_activity_showcase() {
         &mut order_seq,
         EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
             call_id: "agent-pending".into(),
-            tool_name: "agent_wait".into(),
+            tool_name: "agent".into(),
             parameters: Some(json!({
+                "action": "wait",
                 "agent_id": "deploy-helper",
                 "status_url": "https://status.example.com/run/42",
                 "timeout_seconds": 600
@@ -615,8 +618,9 @@ fn agent_run_grouped_desired_layout() {
         &mut order_seq,
         EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
             call_id: "agent-run".into(),
-            tool_name: "agent_run".into(),
+            tool_name: "agent".into(),
             parameters: Some(json!({
+                "action": "create",
                 "agent_id": "qa-bot",
                 "task": "Run targeted regression suite",
                 "plan": ["Init workspace", "Nextest smoke", "Summarize"]
@@ -670,8 +674,9 @@ fn agent_run_grouped_desired_layout() {
         &mut order_seq,
         EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
             call_id: "agent-run".into(),
-            tool_name: "agent_run".into(),
+            tool_name: "agent".into(),
             parameters: Some(json!({
+                "action": "create",
                 "agent_id": "qa-bot",
                 "task": "Run targeted regression suite",
                 "plan": ["Init workspace", "Nextest smoke", "Summarize"]
@@ -706,7 +711,7 @@ fn agent_run_grouped_plain_tool_name() {
             call_id: "agent-run-plain".into(),
             tool_name: "agent".into(),
             parameters: Some(json!({
-                "action": "run",
+                "action": "create",
                 "batch_id": "batch-001",
                 "agent_id": "qa-bot",
                 "task": "Run targeted regression suite",
