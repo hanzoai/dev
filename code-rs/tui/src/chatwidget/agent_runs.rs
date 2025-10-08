@@ -44,29 +44,50 @@ fn begin_action_for(tool_name: &str, metadata: &InvocationMetadata) -> Option<St
         .clone()
         .or_else(|| metadata.agent_ids.clone().into_iter().next())
         .unwrap_or_else(|| "agent".to_string());
-    match tool_name {
-        "agent" | "agent_run" => Some(format!("Started agent run for {}", label)),
-        "agent_wait" => metadata
+    let action = metadata.action.as_deref().unwrap_or_else(|| match tool_name {
+        "agent" | "agent_run" => "create",
+        "agent_wait" => "wait",
+        "agent_result" => "result",
+        "agent_cancel" => "cancel",
+        "agent_check" => "status",
+        "agent_list" => "list",
+        other => other,
+    });
+
+    match action {
+        "create" => Some(format!("Started agent run for {}", label)),
+        "wait" => metadata
             .batch_id
             .as_ref()
             .map(|batch| format!("Waiting for agents in batch {}", batch)),
-        "agent_result" => Some(format!("Requested results for {}", label)),
-        "agent_cancel" => Some(format!("Cancelling agent batch for {}", label)),
-        "agent_check" => Some(format!("Checking agent status for {}", label)),
-        "agent_list" => Some("Listing available agents".to_string()),
+        "result" => Some(format!("Requested results for {}", label)),
+        "cancel" => Some(format!("Cancelling agent batch for {}", label)),
+        "status" => Some(format!("Checking agent status for {}", label)),
+        "list" => Some("Listing available agents".to_string()),
         _ => None,
     }
 }
 
 fn end_action_for(
     tool_name: &str,
+    metadata: &InvocationMetadata,
     duration: Duration,
     success: bool,
     message: Option<&str>,
 ) -> Option<String> {
     let elapsed = format_elapsed_short(duration);
-    match tool_name {
-        "agent" | "agent_run" => {
+    let action = metadata.action.as_deref().unwrap_or_else(|| match tool_name {
+        "agent" | "agent_run" => "create",
+        "agent_wait" => "wait",
+        "agent_result" => "result",
+        "agent_cancel" => "cancel",
+        "agent_check" => "status",
+        "agent_list" => "list",
+        other => other,
+    });
+
+    match action {
+        "create" => {
             if success {
                 Some(format!("Agent run completed in {}", elapsed))
             } else {
@@ -74,7 +95,7 @@ fn end_action_for(
                 Some(format!("Agent run failed in {} — {}", elapsed, detail))
             }
         }
-        "agent_wait" => {
+        "wait" => {
             if success {
                 Some(format!("Finished waiting in {}", elapsed))
             } else {
@@ -82,7 +103,7 @@ fn end_action_for(
                 Some(format!("Wait failed in {} — {}", elapsed, detail))
             }
         }
-        "agent_result" => {
+        "result" => {
             if success {
                 Some(format!("Fetched agent results in {}", elapsed))
             } else {
@@ -90,9 +111,9 @@ fn end_action_for(
                 Some(format!("Result fetch failed in {} — {}", elapsed, detail))
             }
         }
-        "agent_cancel" => Some(format!("Cancel request completed in {}", elapsed)),
-        "agent_check" => Some(format!("Status check finished in {}", elapsed)),
-        "agent_list" => Some("Listed agents".to_string()),
+        "cancel" => Some(format!("Cancel request completed in {}", elapsed)),
+        "status" => Some(format!("Status check finished in {}", elapsed)),
+        "list" => Some("Listed agents".to_string()),
         _ => None,
     }
 }
@@ -157,12 +178,16 @@ struct InvocationMetadata {
     task: Option<String>,
     plan: Vec<String>,
     label: Option<String>,
+    action: Option<String>,
 }
 
 impl InvocationMetadata {
     fn from(tool_name: &str, params: Option<&Value>) -> Self {
         let mut meta = InvocationMetadata::default();
         if let Some(Value::Object(map)) = params {
+            if let Some(action) = map.get("action").and_then(|v| v.as_str()) {
+                meta.action = Some(action.to_string());
+            }
             if let Some(batch) = map.get("batch_id").and_then(|v| v.as_str()) {
                 meta.batch_id = Some(batch.to_string());
             }
@@ -368,14 +393,14 @@ pub(super) fn handle_custom_tool_end(
             }
             tracker.cell.set_status_label("Completed");
             tracker.cell.mark_completed();
-            if let Some(action) = end_action_for(tool_name, duration, true, Some(text.as_str())) {
+            if let Some(action) = end_action_for(tool_name, &metadata, duration, true, Some(text.as_str())) {
                 tracker.cell.record_action(action);
             }
         }
         Err(err) => {
             tracker.cell.set_latest_result(vec![err.clone()]);
             tracker.cell.mark_failed();
-            if let Some(action) = end_action_for(tool_name, duration, false, Some(err.as_str())) {
+            if let Some(action) = end_action_for(tool_name, &metadata, duration, false, Some(err.as_str())) {
                 tracker.cell.record_action(action);
             }
         }

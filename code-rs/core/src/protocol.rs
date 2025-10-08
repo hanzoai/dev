@@ -1047,7 +1047,7 @@ impl McpToolCallEndEvent {
 pub struct CustomToolCallBeginEvent {
     /// Identifier so this can be paired with the CustomToolCallEnd event.
     pub call_id: String,
-    /// Name of the tool (e.g., "browser_navigate", "agent_run")
+    /// Name of the tool (e.g., "browser_navigate", "agent")
     pub tool_name: String,
     /// Parameters passed to the tool as JSON
     pub parameters: Option<serde_json::Value>,
@@ -1218,7 +1218,7 @@ pub struct AgentInfo {
     pub name: String,
     /// Current status of the agent
     pub status: String,
-    /// Optional batch identifier when the agent was launched via agent_run
+    /// Optional batch identifier when the agent was launched via `agent` action "create"
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub batch_id: Option<String>,

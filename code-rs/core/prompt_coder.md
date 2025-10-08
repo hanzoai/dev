@@ -37,22 +37,23 @@ The browser will either be an internal headless browser, or a CPD connection to 
 
 ## Web tools
 
-Use `web.run` when you need multi-step browsing—search, opens, clicks, screenshots, or specialized lookups. Use `web_fetch` when you already know the URL and just need its Markdown content in a single fetch.
+Use `web.run` when you need multi-step browsing—search, opens, clicks, screenshots, or specialized lookups. Use `browser {"action":"fetch","url":"https://example.com"}` (legacy alias: `web_fetch`) when you already know the URL and just need its Markdown content in a single fetch.
 
 ## Agent tools
 
 Your agents are like having a team of expert peers at your disposal at any time. Use them for non-trivial work.
 
 Example;
-agent_run {
+agent {
+  "action": "create",
   "task": "Implement JWT middleware (RS256) with key rotation and unit/integration tests. Preserve existing OAuth flows. Provide README usage snippet.",
   "context": "Service: services/api (Rust Axum). Secrets via env. CI: `cargo test --all`.",
   "files": ["services/api", "services/api/src", "services/api/Cargo.toml"],
-  "model": ["claude","gemini","code"],
+  "models": ["claude","gemini","code"],
   "output": "Middleware + passing tests + README snippet",
   "read_only": false // Allow changes - will launch every agent in a separate worktree
 }
-agent_wait {"batch_id":"<batch_id>","return_all":true,"timeout_seconds": 600 } // Long timeout or you can do separate work and check back later.
+agent {"action":"wait","batch_id":"<batch_id>","return_all":true,"timeout_seconds":600 } // Long timeout or you can do separate work and check back later.
 
 
 # WARNING (using git)
