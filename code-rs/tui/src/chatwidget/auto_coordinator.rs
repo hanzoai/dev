@@ -981,7 +981,7 @@ fn build_schema() -> Value {
             "cli_context",
             "cli_prompt",
             "turn_descriptor",
-            "turn_descriptor"
+            "turn_config"
         ],
         "additionalProperties": false
     })
