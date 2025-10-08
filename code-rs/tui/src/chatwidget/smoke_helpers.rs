@@ -257,6 +257,19 @@ impl ChatWidgetHarness {
         self.chat.history_state.records.clone()
     }
 
+    pub fn count_agent_run_cells(&mut self) -> usize {
+        self.flush_into_widget();
+        self.chat
+            .history_cells
+            .iter()
+            .filter(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::AgentRunCell>()
+                    .is_some()
+            })
+            .count()
+    }
+
     fn next_helper_seq(&mut self) -> u64 {
         let next = self.helper_seq;
         self.helper_seq = self.helper_seq.saturating_add(1);
