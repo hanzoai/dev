@@ -8914,13 +8914,13 @@ impl ChatWidget<'_> {
                 }
                 // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
                 if !self.auto_state.waiting_for_review {
-                    if let Some(cfg) = self.pending_auto_turn_config.take() {
-                        self.pending_turn_descriptor.take();
+                    if let Some(cfg) = self.pending_auto_turn_config.clone() {
                         if self.auto_state.active
                             && self.auto_state.review_enabled
                             && !self.is_review_flow_active()
                         {
-                            self.auto_handle_post_turn_review(cfg);
+                            let descriptor = self.pending_turn_descriptor.clone();
+                            self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
                         }
                     }
                 }
@@ -12359,7 +12359,11 @@ fi\n\
         self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
-    fn auto_handle_post_turn_review(&mut self, cfg: TurnConfig) {
+    fn auto_handle_post_turn_review(
+        &mut self,
+        cfg: TurnConfig,
+        descriptor: Option<&TurnDescriptor>,
+    ) {
         if !self.auto_state.review_enabled {
             self.auto_turn_review_state = None;
             return;
@@ -12375,11 +12379,11 @@ fi\n\
             }
             AutoReviewOutcome::Workspace => {
                 self.auto_turn_review_state = None;
-                self.auto_start_post_turn_review(None);
+                self.auto_start_post_turn_review(None, descriptor);
             }
             AutoReviewOutcome::Commit(scope) => {
                 self.auto_turn_review_state = None;
-                self.auto_start_post_turn_review(Some(scope));
+                self.auto_start_post_turn_review(Some(scope), descriptor);
             }
         }
     }
@@ -12735,11 +12739,16 @@ fi\n\
         self.auto_send_conversation();
     }
 
-    fn auto_start_post_turn_review(&mut self, scope: Option<AutoReviewCommitScope>) {
+    fn auto_start_post_turn_review(
+        &mut self,
+        scope: Option<AutoReviewCommitScope>,
+        descriptor: Option<&TurnDescriptor>,
+    ) {
         if !self.auto_state.review_enabled {
             return;
         }
-        let (prompt, hint, auto_metadata, review_metadata, preparation) = match scope {
+        let strategy = descriptor.and_then(|d| d.review_strategy.as_ref());
+        let (mut prompt, mut hint, mut auto_metadata, mut review_metadata, preparation) = match scope {
             Some(scope) => {
                 let commit_id = scope.commit;
                 let commit_for_prompt = commit_id.clone();
@@ -12774,9 +12783,63 @@ fi\n\
                     ..Default::default()
                 });
                 let preparation = "Preparing code review request...".to_string();
-                (prompt, hint, review_metadata.clone(), review_metadata, preparation)
+                (
+                    prompt,
+                    hint,
+                    review_metadata.clone(),
+                    review_metadata,
+                    preparation,
+                )
             }
         };
+
+        if let Some(strategy) = strategy {
+            if let Some(custom_prompt) = strategy
+                .custom_prompt
+                .as_ref()
+                .and_then(|text| {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+            {
+                prompt = custom_prompt.to_string();
+            }
+
+            if let Some(scope_hint) = strategy
+                .scope_hint
+                .as_ref()
+                .and_then(|text| {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+            {
+                hint = scope_hint.to_string();
+
+                let apply_scope = |meta: &mut ReviewContextMetadata| {
+                    meta.scope = Some(scope_hint.to_string());
+                };
+
+                match review_metadata.as_mut() {
+                    Some(meta) => apply_scope(meta),
+                    None => {
+                        review_metadata = Some(ReviewContextMetadata {
+                            scope: Some(scope_hint.to_string()),
+                            ..Default::default()
+                        });
+                    }
+                }
+
+                match auto_metadata.as_mut() {
+                    Some(meta) => apply_scope(meta),
+                    None => {
+                        auto_metadata = Some(ReviewContextMetadata {
+                            scope: Some(scope_hint.to_string()),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+        }
 
         if self.config.tui.review_auto_resolve {
             self.auto_resolve_state = Some(AutoResolveState::new(
@@ -19688,6 +19751,76 @@ mod tests {
         assert!(chat.auto_state.waiting_for_review);
         assert!(chat.pending_turn_descriptor.is_some());
         assert!(chat.pending_auto_turn_config.is_some());
+    }
+
+    #[test]
+    fn post_turn_review_uses_descriptor_prompt_and_hint() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.review_enabled = true;
+        chat.config.tui.review_auto_resolve = true;
+
+        let descriptor = TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            agent_preferences: None,
+            review_strategy: Some(ReviewStrategy {
+                timing: ReviewTiming::PostTurn,
+                custom_prompt: Some("Descriptor prompt".to_string()),
+                scope_hint: Some("Descriptor scope".to_string()),
+            }),
+        };
+
+        chat.auto_handle_decision(
+            AutoCoordinatorStatus::Continue,
+            None,
+            None,
+            None,
+            Some("prompt".to_string()),
+            Vec::new(),
+            Some(descriptor.clone()),
+            Some(TurnConfig {
+                read_only: descriptor.read_only,
+                complexity: descriptor.complexity,
+            }),
+        );
+
+        assert!(!chat.auto_state.waiting_for_review);
+
+        chat.handle_code_event(Event {
+            id: "turn".to_string(),
+            event_seq: 0,
+            msg: EventMsg::TaskStarted,
+            order: None,
+        });
+
+        chat.handle_code_event(Event {
+            id: "turn".to_string(),
+            event_seq: 1,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+
+        assert!(chat.auto_state.waiting_for_review);
+
+        let state = chat
+            .auto_resolve_state
+            .as_ref()
+            .expect("auto resolve state should be seeded");
+        assert_eq!(state.prompt, "Descriptor prompt");
+        assert_eq!(state.hint, "Descriptor scope");
+        assert_eq!(
+            state
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.scope.as_deref()),
+            Some("Descriptor scope")
+        );
     }
 
     #[test]
