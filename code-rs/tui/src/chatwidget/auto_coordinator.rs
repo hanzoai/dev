@@ -926,6 +926,11 @@ fn build_schema() -> Value {
                                 "description": "Preferred agent models (e.g., claude, gemini)."
                             }
                         },
+                        "required": [ // NB: OpenAI requires ALL properties to be listed as required
+                            "prefer_research",
+                            "prefer_planning",
+                            "requested_models",
+                        ],
                         "additionalProperties": false
                     },
                     "review_strategy": {
@@ -939,9 +944,21 @@ fn build_schema() -> Value {
                             "custom_prompt": { "type": ["string", "null"] },
                             "scope_hint": { "type": ["string", "null"] }
                         },
+                        "required": [ // NB: OpenAI requires ALL properties to be listed as required
+                            "timing",
+                            "custom_prompt",
+                            "scope_hint",
+                        ],
                         "additionalProperties": false
                     }
                 },
+                "required": [ // NB: OpenAI requires ALL properties to be listed as required
+                    "mode",
+                    "read_only",
+                    "complexity",
+                    "agent_preferences",
+                    "review_strategy",
+                ],
                 "additionalProperties": false
             },
             "turn_config": {
@@ -950,15 +967,21 @@ fn build_schema() -> Value {
                     "read_only": { "type": "boolean", "description": "If true, this turn should not modify files." },
                     "complexity": { "type": "string", "enum": ["low","medium","high"], "description": "Complexity estimate for this turn." }
                 },
+                "required": [ // NB: OpenAI requires ALL properties to be listed as required
+                    "read_only",
+                    "complexity",
+                ],
                 "additionalProperties": false
             }
         },
-        "required": [
+        "required": [ // NB: OpenAI requires ALL properties to be listed as required
             "finish_status",
             "progress_past",
             "progress_current",
             "cli_context",
-            "cli_prompt"
+            "cli_prompt",
+            "turn_descriptor",
+            "turn_descriptor"
         ],
         "additionalProperties": false
     })
