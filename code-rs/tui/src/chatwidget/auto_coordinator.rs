@@ -117,7 +117,7 @@ pub(crate) struct AgentPreferences {
     #[serde(default)]
     pub prefer_planning: bool,
     #[serde(default)]
-    pub requested_models: Vec<String>,
+    pub requested_models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -267,7 +267,7 @@ mod tests {
             agent_preferences: Some(AgentPreferences {
                 prefer_research: true,
                 prefer_planning: false,
-                requested_models: vec!["claude".to_string()],
+                requested_models: Some(vec!["claude".to_string()]),
             }),
             review_strategy: Some(ReviewStrategy {
                 timing: ReviewTiming::Immediate,

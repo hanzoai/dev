@@ -19394,7 +19394,7 @@ mod tests {
             agent_preferences: Some(AgentPreferences {
                 prefer_research: true,
                 prefer_planning: false,
-                requested_models: vec!["claude".to_string()],
+                requested_models: Some(vec!["claude".to_string()]),
             }),
             review_strategy: None,
         };
