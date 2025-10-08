@@ -83,10 +83,30 @@ pub(super) fn rehydrate(chat: &mut ChatWidget<'_>) {
     let super::ToolState {
         running_wait_tools,
         running_kill_tools,
+        browser_sessions,
+        browser_session_by_call,
+        browser_session_by_order,
+        browser_last_key,
+        agent_runs,
+        agent_run_by_call,
+        agent_run_by_order,
+        agent_run_by_batch,
+        agent_run_by_agent,
+        agent_last_key,
         ..
     } = old_state;
     new_state.running_wait_tools = running_wait_tools;
     new_state.running_kill_tools = running_kill_tools;
+    new_state.browser_sessions = browser_sessions;
+    new_state.browser_session_by_call = browser_session_by_call;
+    new_state.browser_session_by_order = browser_session_by_order;
+    new_state.browser_last_key = browser_last_key;
+    new_state.agent_runs = agent_runs;
+    new_state.agent_run_by_call = agent_run_by_call;
+    new_state.agent_run_by_order = agent_run_by_order;
+    new_state.agent_run_by_batch = agent_run_by_batch;
+    new_state.agent_run_by_agent = agent_run_by_agent;
+    new_state.agent_last_key = agent_last_key;
     chat.tools_state = new_state;
 
     chat.history_debug(format!(

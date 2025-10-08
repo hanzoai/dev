@@ -161,6 +161,26 @@ impl ChatWidgetHarness {
         }
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn override_running_tool_elapsed(
+        &mut self,
+        call_id: &str,
+        duration: Duration,
+    ) {
+        self.flush_into_widget();
+        for cell in &mut self.chat.history_cells {
+            if let Some(running) = cell
+                .as_any_mut()
+                .downcast_mut::<history_cell::RunningToolCallCell>()
+            {
+                if running.state().call_id.as_deref() == Some(call_id) {
+                    running.override_elapsed_for_testing(duration);
+                    break;
+                }
+            }
+        }
+    }
+
     pub fn push_user_prompt(&mut self, message: impl Into<String>) {
         let state = history_cell::new_user_prompt(message.into());
         self.chat.history_push_plain_state(state);
