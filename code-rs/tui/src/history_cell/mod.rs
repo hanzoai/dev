@@ -80,6 +80,8 @@ mod image;
 mod loading;
 mod reasoning;
 mod tool;
+mod browser;
+mod agent;
 mod wait_status;
 mod plan_update;
 mod rate_limits;
@@ -109,6 +111,8 @@ pub(crate) use diff::{
     new_diff_cell_from_string,
     DiffCell,
 };
+pub(crate) use browser::BrowserSessionCell;
+pub(crate) use agent::AgentRunCell;
 pub(crate) use explore::{
     explore_lines_from_record,
     explore_lines_from_record_with_force,

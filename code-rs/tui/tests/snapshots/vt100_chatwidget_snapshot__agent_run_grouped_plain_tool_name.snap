@@ -1,0 +1,36 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 663
+expression: output
+---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+ ┌ Agents ────────────────────────────────────────────────────────────────────┐
+ │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
+ └────────────────────────────────────────────────────────────────────────────┘
+     Task: Run targeted regression suite
+     Duration: 1m44s
+
+     Plan
+       • Init workspace
+       • Nextest smoke
+       • Summarize
+
+     Status
+       QA Bot       running — Executing smoke tests
+
+     Latest result
+       Regression sweep complete
+       - 58 tests passed
+       - 0 failures
+
+     Actions
+       Started agent run for qa-bot
+       Status update — QA Bot: running — Executing smoke tests
+       Agent run completed in 1m44s
+
+ ┌───────────────────────────── ✶ Responding... ──────────────────────────────┐
+ │ What can I code for you today?                                             │
+ └────────────────────────────────────────────────────────────────────────────┘
+   Read Only  (Shift+Tab change)                                   Ctrl+H help
