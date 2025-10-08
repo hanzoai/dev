@@ -499,6 +499,10 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
                 }
             }
 
+            if let Some(model) = agent.model.as_ref() {
+                status_text = format!("{} (model: {})", status_text, model);
+            }
+
             rows.push((agent.name.clone(), status_text.clone()));
             tracker.agent_ids.insert(agent.id.clone());
             if let Some(batch_id) = agent.batch_id.as_ref() {
