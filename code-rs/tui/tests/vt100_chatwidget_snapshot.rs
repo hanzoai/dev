@@ -394,7 +394,7 @@ fn tool_activity_showcase() {
     );
     harness.override_running_tool_elapsed("agent-pending", Duration::from_secs(185));
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 40);
     insta::assert_snapshot!("tool_activity_showcase", output);
 }
 
@@ -770,4 +770,74 @@ fn agent_run_grouped_plain_tool_name() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
     let output = normalize_output(output);
     insta::assert_snapshot!("agent_run_grouped_plain_tool_name", output);
+}
+
+#[test]
+fn plan_agent_keeps_single_aggregate_block() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("/plan deduplicate agent aggregates");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    // Planner agent begins with an ordered event so the tracker stores a request-scoped key.
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "plan-call".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-plan",
+                "agent_id": "planner",
+                "task": "Draft implementation plan",
+                "plan": ["Outline work", "Validate approach", "Summarize"]
+            })),
+        }),
+    );
+
+    // Status update arrives without ordering metadata; this rewrites the tracker key
+    // to the batch form while leaving agent_run_by_order pointing at the old key.
+    harness.handle_event(Event {
+        id: "agent-status".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![AgentInfo {
+                id: "planner".into(),
+                name: "Planner".into(),
+                status: "running".into(),
+                batch_id: Some("batch-plan".into()),
+                model: Some("gpt-4o".into()),
+                last_progress: Some("refining steps".into()),
+                result: None,
+                error: None,
+            }],
+            context: Some("/plan coordination".into()),
+            task: Some("Draft implementation plan".into()),
+        }),
+        order: None,
+    });
+    event_seq += 1;
+
+    // A follow-up agent action arrives with ordering metadata. Because the status update above
+    // rewired the tracker to a batch-scoped key without updating the order map, this ordered
+    // begin cannot find the existing tracker and inserts a second aggregate block.
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "plan-result".into(),
+            tool_name: "agent_result".into(),
+            parameters: Some(json!({
+                "action": "result"
+            })),
+        }),
+    );
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 40);
+    let agent_blocks = harness.count_agent_run_cells();
+    assert_eq!(agent_blocks, 1, "expected a single aggregate agent block, saw {}\n{}", agent_blocks, output);
 }
