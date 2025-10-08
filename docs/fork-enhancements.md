@@ -4,16 +4,16 @@ This fork extends upstream `openai/codex` in several areas. These bullets are a 
 
 - Browser Integration (code-rs/browser, TUI + core wiring)
   - Internal CDP browser manager with global access and /browser command.
-  - Tool family: `browser_*` (open, status, click, move, type, key, javascript, scroll, history, inspect, console, cleanup, cdp).
+  - Unified `browser` tool with actions (open, status, close, click, move, type, key, javascript, scroll, history, inspect, console, cleanup, cdp, fetch).
   - Screenshot capture with segmentation, cursor overlay, asset storage, and per‑turn injection/queueing; TUI rendering with friendly titles.
   - External Chrome attach via `/chrome` and headless profile management.
 
 - Multi‑Agent Orchestration (core/agent_tool.rs, TUI panel)
-  - Tool family: `agent_*` (run, check, result, cancel, wait, list) with persisted outputs under `.code/agents/<id>` and TUI agent panel.
+  - Unified `agent` tool with actions (create, status, result, cancel, wait, list) and persisted outputs under `.code/agents/<id>` plus the TUI agent panel.
   - Batch and per‑agent status updates; file emission (result/error/status logs).
 
 - Tooling Extensions and Policy Integration
-  - `web_fetch` custom tool with markdown‑aware TUI rendering and UA override.
+  - `browser` action `fetch` (formerly `web_fetch`) with markdown‑aware TUI rendering and UA override.
   - `view_image` tool to attach local images.
   - Local shell + sandbox policy with escalation request (`with_escalated_permissions`, `justification`) and WorkspaceWrite flags (network access, allow_git_writes, tmpdir controls).
   - Streamable exec tool support kept off by default; preserved compatibility with classic shell tool.
@@ -26,7 +26,7 @@ This fork extends upstream `openai/codex` in several areas. These bullets are a 
 - TUI Enhancements
   - Strict streaming ordering invariants (request_ordinal, output_index, sequence_number) and delta rendering.
   - Markdown renderer improvements and code-block snapshots; theme selection view; bottom pane chrome selection.
-  - History cells with richer tool-specific titles and previews (browser_*, web_fetch, agents).
+  - History cells with richer tool-specific titles and previews (browser actions, fetch, agent actions).
   - Fully state-driven history refactor: `HistoryState` + `HistoryDomainEvent`, shared renderer cache, and serialized snapshots. See `docs/tui-chatwidget-refactor.md`, `docs/history_state_schema.md`, and `docs/history_render_cache_bridge.md`.
 
 - Version and User‑Agent Handling

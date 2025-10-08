@@ -33,7 +33,7 @@ pub(super) fn handle_custom_tool_begin(
     tool_name: &str,
     params: Option<Value>,
 ) -> bool {
-    if !tool_name.starts_with("browser_") {
+    if !tool_name.starts_with("browser_") || tool_name == "browser_fetch" {
         return false;
     }
 
@@ -85,7 +85,7 @@ pub(super) fn handle_custom_tool_end(
     duration: Duration,
     result: &Result<String, String>,
 ) -> bool {
-    if !tool_name.starts_with("browser_") {
+    if !tool_name.starts_with("browser_") || tool_name == "browser_fetch" {
         return false;
     }
 
@@ -257,6 +257,19 @@ fn select_session_key(
     call_id: &str,
     tool_name: &str,
 ) -> String {
+    if let Some(meta) = order {
+        if let Some(existing) = chat
+            .tools_state
+            .browser_session_by_order
+            .get(&meta.request_ordinal)
+            .cloned()
+        {
+            if chat.tools_state.browser_sessions.contains_key(&existing) {
+                return existing;
+            }
+        }
+    }
+
     let mut key = browser_key(order, call_id);
 
     if order.is_none() && tool_name != "browser_open" {
