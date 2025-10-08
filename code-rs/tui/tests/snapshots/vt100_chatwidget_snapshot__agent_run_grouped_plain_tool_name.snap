@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 663
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
@@ -9,26 +8,26 @@ expression: output
  ┌ Agents ────────────────────────────────────────────────────────────────────┐
  │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
  └────────────────────────────────────────────────────────────────────────────┘
-     Task: Run targeted regression suite
-     Duration: 1m44s
+ › Kick off QA bot regression run
 
-     Plan
-       • Init workspace
-       • Nextest smoke
-       • Summarize
-
-     Status
-       QA Bot       running — Executing smoke tests
-
-     Latest result
-       Regression sweep complete
-       - 58 tests passed
-       - 0 failures
-
-     Actions
-       Started agent run for qa-bot
-       Status update — QA Bot: running — Executing smoke tests
-       Agent run completed in 1m44s
+ ✔ ⚙  Agent Run • qa-bot · 1m44s                                     Completed
+      Task: Run targeted regression suite
+      ─────────────────────────────────────────────────────────────────────────
+      PLAN
+      • Init workspace
+      • Nextest smoke
+      • Summarize
+      ─────────────────────────────────────────────────────────────────────────
+      STATUS
+      • QA Bot — running — Executing smoke tests (model: claude)
+      ─────────────────────────────────────────────────────────────────────────
+      LATEST
+      • Regression sweep complete
+      • - 58 tests passed
+      • - 0 failures
+      ─────────────────────────────────────────────────────────────────────────
+      ACTIONS
+      • Started agent run for qa-bot
 
  ┌───────────────────────────── ✶ Responding... ──────────────────────────────┐
  │ What can I code for you today?                                             │
