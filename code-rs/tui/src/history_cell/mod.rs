@@ -4891,6 +4891,7 @@ fn browser_tool_title(tool_name: &str) -> &'static str {
         "browser_scroll" => "Browser Scroll",
         "browser_open" => "Browser Open",
         "browser_close" => "Browser Close",
+        "browser_fetch" => "Browser Fetch",
         "browser_status" => "Browser Status",
         "browser_history" => "Browser History",
         "browser_inspect" => "Browser Inspect",
@@ -4950,6 +4951,14 @@ fn format_browser_args_humanized(
             };
             let msg = format!("└ {ty} at {}", fmt_xy(x, y));
             Some(vec![Line::from(text(msg))])
+        }
+        ("browser_fetch", Value::Object(map)) => {
+            if let Some(url) = map.get("url").and_then(|v| v.as_str()) {
+                let msg = format!("└ fetch {}", url);
+                Some(vec![Line::from(text(msg))])
+            } else {
+                None
+            }
         }
         ("browser_move", Value::Object(map)) => {
             // Prefer absolute x/y → "to (x, y)"; otherwise relative dx/dy → "by (dx, dy)".

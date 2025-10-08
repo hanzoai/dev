@@ -33,7 +33,7 @@ pub(super) fn handle_custom_tool_begin(
     tool_name: &str,
     params: Option<Value>,
 ) -> bool {
-    if !tool_name.starts_with("browser_") {
+    if !tool_name.starts_with("browser_") || tool_name == "browser_fetch" {
         return false;
     }
 
@@ -85,7 +85,7 @@ pub(super) fn handle_custom_tool_end(
     duration: Duration,
     result: &Result<String, String>,
 ) -> bool {
-    if !tool_name.starts_with("browser_") {
+    if !tool_name.starts_with("browser_") || tool_name == "browser_fetch" {
         return false;
     }
 
