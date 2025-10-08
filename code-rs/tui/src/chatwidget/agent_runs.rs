@@ -229,13 +229,64 @@ pub(super) fn handle_custom_tool_begin(
 
     let metadata = InvocationMetadata::from(tool_name, params.as_ref());
     let (order_key, ordinal) = order_key_and_ordinal(chat, order);
-    let mut key = agent_key(order, call_id, tool_name, &metadata);
 
-    let mut tracker = chat
-        .tools_state
-        .agent_runs
-        .remove(&key)
-        .unwrap_or_else(|| AgentRunTracker::new(order_key));
+    let mut reuse_key: Option<String> = None;
+
+    if let Some(ord) = ordinal {
+        if let Some(existing) = chat
+            .tools_state
+            .agent_run_by_order
+            .get(&ord)
+            .cloned()
+        {
+            reuse_key = Some(existing);
+        }
+    }
+
+    if reuse_key.is_none() {
+        if let Some(batch) = metadata.batch_id.as_ref() {
+            if let Some(existing) = chat
+                .tools_state
+                .agent_run_by_batch
+                .get(batch)
+                .cloned()
+            {
+                reuse_key = Some(existing);
+            }
+        }
+    }
+
+    if reuse_key.is_none() {
+        for agent_id in &metadata.agent_ids {
+            if let Some(existing) = chat
+                .tools_state
+                .agent_run_by_agent
+                .get(agent_id)
+                .cloned()
+            {
+                reuse_key = Some(existing);
+                break;
+            }
+        }
+    }
+
+    if reuse_key.is_none() {
+        reuse_key = chat.tools_state.agent_last_key.clone();
+    }
+
+    let mut key = reuse_key.unwrap_or_else(|| agent_key(order, call_id, tool_name, &metadata));
+
+    let mut tracker = match chat.tools_state.agent_runs.remove(&key) {
+        Some(existing) => existing,
+        None => {
+            key = agent_key(order, call_id, tool_name, &metadata);
+            chat
+                .tools_state
+                .agent_runs
+                .remove(&key)
+                .unwrap_or_else(|| AgentRunTracker::new(order_key))
+        }
+    };
     tracker.order_key = order_key;
 
     ensure_agent_cell(chat, &mut tracker);
