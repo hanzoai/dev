@@ -1622,6 +1622,7 @@ impl App<'_> {
                     cli_context,
                     cli_prompt,
                     transcript,
+                    turn_descriptor,
                     turn_config,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1632,6 +1633,7 @@ impl App<'_> {
                             cli_context,
                             cli_prompt,
                             transcript,
+                            turn_descriptor,
                             turn_config,
                         );
                     }
