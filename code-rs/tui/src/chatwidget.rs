@@ -2726,7 +2726,14 @@ impl ChatWidget<'_> {
                 let mut reasoning_indices: Vec<usize> = Vec::new();
                 let mut j = idx + 1;
                 while j < len {
-                    if self.history_cells[j]
+                    let cell = &self.history_cells[j];
+
+                    if cell.should_remove() {
+                        j += 1;
+                        continue;
+                    }
+
+                    if cell
                         .as_any()
                         .downcast_ref::<history_cell::CollapsibleReasoningCell>()
                         .is_some()
@@ -2735,6 +2742,30 @@ impl ChatWidget<'_> {
                         j += 1;
                         continue;
                     }
+
+                    match cell.kind() {
+                        history_cell::HistoryCellType::PlanUpdate
+                        | history_cell::HistoryCellType::Loading => {
+                            j += 1;
+                            continue;
+                        }
+                        _ => {}
+                    }
+
+                    if cell
+                        .as_any()
+                        .downcast_ref::<history_cell::WaitStatusCell>()
+                        .is_some()
+                    {
+                        j += 1;
+                        continue;
+                    }
+
+                    if cell.display_lines_trimmed().is_empty() {
+                        j += 1;
+                        continue;
+                    }
+
                     break;
                 }
                 if reasoning_indices.len() > 1 {
@@ -24875,6 +24906,7 @@ impl WidgetRef for &ChatWidget<'_> {
                 kind,
                 config: &self.config,
             });
+
         }
 
         // Calculate total content height using prefix sums; build if needed
@@ -24936,25 +24968,37 @@ impl WidgetRef for &ChatWidget<'_> {
 
                 let mut should_add_spacing = idx < cells.len().saturating_sub(1) && line_count > 0;
                 if should_add_spacing {
-                    let this_collapsed = cell
-                        .as_any()
-                        .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
-                        .map(|rc| rc.is_collapsed())
-                        .unwrap_or(false);
-                    let next_height = cells.get(idx + 1).map(|next| next.height).unwrap_or(0);
-                    if next_height == 0 {
+                    let prev_visible_idx = (0..idx).rev().find(|j| cells[*j].height > 0);
+                    let next_visible_idx = ((idx + 1)..cells.len()).find(|j| cells[*j].height > 0);
+
+                    if next_visible_idx.is_none() {
                         should_add_spacing = false;
-                    }
-                    if this_collapsed {
-                        if let Some(next_cell) = cells
-                            .get(idx + 1)
-                            .and_then(|next| next.cell)
-                            .and_then(|c| {
-                                c.as_any()
-                                    .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
-                            })
-                        {
-                            if next_cell.is_collapsed() {
+                    } else {
+                        let this_collapsed = cell
+                            .as_any()
+                            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                            .map(|rc| rc.is_collapsed())
+                            .unwrap_or(false);
+                        if this_collapsed {
+                            let prev_collapsed = prev_visible_idx
+                                .and_then(|j| cells[j]
+                                    .cell
+                                    .and_then(|c| {
+                                        c.as_any()
+                                            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                                            .map(|rc| rc.is_collapsed())
+                                    }))
+                                .unwrap_or(false);
+                            let next_collapsed = next_visible_idx
+                                .and_then(|j| cells[j]
+                                    .cell
+                                    .and_then(|c| {
+                                        c.as_any()
+                                            .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                                            .map(|rc| rc.is_collapsed())
+                                    }))
+                                .unwrap_or(false);
+                            if prev_collapsed && next_collapsed {
                                 should_add_spacing = false;
                             }
                         }
@@ -24982,7 +25026,6 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         let total_height = self.history_render.last_total_height();
-
         // Calculate scroll position and vertical alignment
         // Stabilize viewport when input area height changes while scrolled up.
         let prev_viewport_h = self.layout.last_history_viewport_height.get();
@@ -25145,6 +25188,7 @@ impl WidgetRef for &ChatWidget<'_> {
             // Calculate how much height is available for this item
             let available_height = (content_area.y + content_area.height).saturating_sub(screen_y);
             let visible_height = item_height.saturating_sub(skip_top).min(available_height);
+
 
             if visible_height > 0 {
                 // Define gutter width (2 chars: symbol + space)
@@ -25451,6 +25495,15 @@ impl WidgetRef for &ChatWidget<'_> {
                     .map(|rc| rc.is_collapsed())
                     .unwrap_or(false);
                 if this_is_collapsed_reasoning {
+                    let prev_is_collapsed_reasoning = render_requests
+                        .get(idx.saturating_sub(1))
+                        .and_then(|req| req.cell)
+                        .and_then(|c| {
+                            c.as_any()
+                                .downcast_ref::<crate::history_cell::CollapsibleReasoningCell>()
+                                .map(|rc| rc.is_collapsed())
+                        })
+                        .unwrap_or(false);
                     let next_is_collapsed_reasoning = render_requests
                         .get(idx + 1)
                         .and_then(|req| req.cell)
@@ -25460,15 +25513,34 @@ impl WidgetRef for &ChatWidget<'_> {
                                 .map(|rc| rc.is_collapsed())
                         })
                         .unwrap_or(false);
-                    if next_is_collapsed_reasoning {
+                    if prev_is_collapsed_reasoning && next_is_collapsed_reasoning {
                         should_add_spacing = false;
                     }
                 }
             }
-            if should_add_spacing {
-                if screen_y < content_area.y + content_area.height {
-                    screen_y += spacing
-                        .min((content_area.y + content_area.height).saturating_sub(screen_y));
+                if should_add_spacing {
+                    let bottom = content_area.y + content_area.height;
+                    let remaining_height = if idx + 1 < ps.len() {
+                        total_height.saturating_sub(ps[idx + 1])
+                    } else {
+                        0
+                    };
+                    // When an "Exploring…" block is followed by several collapsed reasoning
+                    // entries (often the case after reads merge and the aggregator rewrites the
+                    // explore record), we still want exactly one blank row between the explore
+                    // output and the first reasoning heading. Earlier versions suppressed that
+                    // spacer whenever the *next* collapsed reasoning cell existed, which meant the
+                    // first heading in the group started flush with the explore block and appeared
+                    // to "disappear" until further content arrived. By accounting for the
+                    // remaining rendered height we only skip the spacer when there truly isn’t room
+                    // in the current frame, keeping the leading gap deterministic while still
+                    // compacting the interior of the reasoning bundle.
+                    if screen_y
+                        .saturating_add(spacing)
+                        .saturating_add(remaining_height)
+                        <= bottom
+                    {
+                    screen_y += spacing;
                 }
             }
         }
