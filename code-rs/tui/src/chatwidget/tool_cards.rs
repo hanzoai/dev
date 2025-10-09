@@ -7,6 +7,7 @@ pub(super) struct ToolCardSlot {
     pub history_id: Option<HistoryId>,
     pub cell_index: Option<usize>,
     pub cell_key: Option<String>,
+    previous_key: Option<String>,
     signature: Option<String>,
 }
 
@@ -17,6 +18,7 @@ impl ToolCardSlot {
             history_id: None,
             cell_index: None,
             cell_key: None,
+            previous_key: None,
             signature: None,
         }
     }
@@ -26,11 +28,16 @@ impl ToolCardSlot {
     }
 
     pub fn set_key(&mut self, key: Option<String>) {
+        self.previous_key = self.cell_key.clone();
         self.cell_key = key;
     }
 
     pub fn key(&self) -> Option<&str> {
         self.cell_key.as_deref()
+    }
+
+    pub fn previous_key(&self) -> Option<&str> {
+        self.previous_key.as_deref()
     }
 
     pub fn set_signature(&mut self, signature: Option<String>) {
@@ -72,12 +79,7 @@ pub(super) fn ensure_tool_card<C: ToolCardCell>(
     }
     if let Some(id) = slot.history_id {
         if let Some(idx) = chat.cell_index_for_history_id(id) {
-            if chat
-                .history_cells
-                .get(idx)
-                .and_then(|cell| cell.as_any().downcast_ref::<C>())
-                .is_some()
-            {
+            if cell_matches::<C>(chat, idx, slot, signature.as_deref()) {
                 slot.cell_index = Some(idx);
                 return idx;
             }
@@ -86,17 +88,13 @@ pub(super) fn ensure_tool_card<C: ToolCardCell>(
 
     if let Some(idx) = slot.cell_index {
         if idx < chat.history_cells.len()
-            && chat
-                .history_cells
-                .get(idx)
-                .and_then(|cell| cell.as_any().downcast_ref::<C>())
-                .is_some()
+            && cell_matches::<C>(chat, idx, slot, signature.as_deref())
         {
             return idx;
         }
     }
 
-    if let Some(idx) = find_card_index::<C>(chat, slot.key(), signature.as_deref()) {
+    if let Some(idx) = find_card_index::<C>(chat, slot, signature.as_deref()) {
         slot.cell_index = Some(idx);
         slot.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
         return idx;
@@ -145,19 +143,12 @@ fn prune_tool_card_duplicates<C: ToolCardCell>(
             (None, Some(_)) => false,
         };
 
-        let order_match = chat
-            .cell_order_seq
-            .get(idx)
-            .copied()
-            .map(|order| order == slot.order_key)
-            .unwrap_or(false);
-
         let signature_match = match (signature, typed.dedupe_signature().as_deref()) {
             (Some(lhs), Some(rhs)) => lhs == rhs,
             _ => false,
         };
 
-        if key_match || order_match || signature_match {
+        if key_match || signature_match {
             removals.push(idx);
         }
     }
@@ -171,7 +162,7 @@ fn prune_tool_card_duplicates<C: ToolCardCell>(
         chat.history_remove_at(idx);
     }
 
-    if let Some(new_idx) = find_card_index::<C>(chat, key, signature) {
+    if let Some(new_idx) = find_card_index::<C>(chat, slot, signature) {
         slot.cell_index = Some(new_idx);
         slot.history_id = chat.history_cell_ids.get(new_idx).and_then(|slot| *slot);
     } else {
@@ -182,12 +173,12 @@ fn prune_tool_card_duplicates<C: ToolCardCell>(
 
 fn find_card_index<C: ToolCardCell>(
     chat: &ChatWidget<'_>,
-    key: Option<&str>,
+    slot: &ToolCardSlot,
     signature: Option<&str>,
 ) -> Option<usize> {
     chat.history_cells.iter().enumerate().find_map(|(idx, cell)| {
         let typed = cell.as_any().downcast_ref::<C>()?;
-        if identity_matches(typed, key, signature) {
+        if identity_matches(typed, slot, signature) {
             Some(idx)
         } else {
             None
@@ -195,12 +186,32 @@ fn find_card_index<C: ToolCardCell>(
     })
 }
 
-fn identity_matches<C: ToolCardCell>(typed: &C, key: Option<&str>, signature: Option<&str>) -> bool {
-    let key_match = match (key, typed.tool_card_key()) {
-       (Some(expected), Some(actual)) => actual == expected,
-       (Some(_), None) => false,
-       (None, _) => true,
+fn cell_matches<C: ToolCardCell>(
+    chat: &ChatWidget<'_>,
+    idx: usize,
+    slot: &ToolCardSlot,
+    signature: Option<&str>,
+) -> bool {
+    chat
+        .history_cells
+        .get(idx)
+        .and_then(|cell| cell.as_any().downcast_ref::<C>())
+        .map(|typed| identity_matches(typed, slot, signature))
+        .unwrap_or(false)
+}
+
+fn identity_matches<C: ToolCardCell>(typed: &C, slot: &ToolCardSlot, signature: Option<&str>) -> bool {
+    let mut key_match = match (slot.key(), typed.tool_card_key()) {
+        (Some(expected), Some(actual)) => actual == expected,
+        (Some(_), None) => false,
+        (None, _) => true,
     };
+
+    if !key_match {
+        if let (Some(previous), Some(actual)) = (slot.previous_key(), typed.tool_card_key()) {
+            key_match = actual == previous;
+        }
+    }
     let signature_match = match (signature, typed.dedupe_signature().as_deref()) {
         (Some(lhs), Some(rhs)) => lhs == rhs,
         _ => false,

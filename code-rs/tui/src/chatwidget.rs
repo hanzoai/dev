@@ -25767,29 +25767,15 @@ impl WidgetRef for &ChatWidget<'_> {
                     }
                 }
             }
-                if should_add_spacing {
-                    let bottom = content_area.y + content_area.height;
-                    let remaining_height = if idx + 1 < ps.len() {
-                        total_height.saturating_sub(ps[idx + 1])
-                    } else {
-                        0
-                    };
-                    // When an "Exploring…" block is followed by several collapsed reasoning
-                    // entries (often the case after reads merge and the aggregator rewrites the
-                    // explore record), we still want exactly one blank row between the explore
-                    // output and the first reasoning heading. Earlier versions suppressed that
-                    // spacer whenever the *next* collapsed reasoning cell existed, which meant the
-                    // first heading in the group started flush with the explore block and appeared
-                    // to "disappear" until further content arrived. By accounting for the
-                    // remaining rendered height we only skip the spacer when there truly isn’t room
-                    // in the current frame, keeping the leading gap deterministic while still
-                    // compacting the interior of the reasoning bundle.
-                    if screen_y
-                        .saturating_add(spacing)
-                        .saturating_add(remaining_height)
-                        <= bottom
-                    {
-                    screen_y += spacing;
+            if should_add_spacing {
+                let bottom = content_area.y + content_area.height;
+                if screen_y < bottom {
+                    // Maintain the single-row spacer between cells (critical for explore →
+                    // reasoning bundles) while respecting the visible viewport height. This keeps
+                    // the rendered gaps consistent with the cached prefix sums even after scroll
+                    // adjustments.
+                    let spacing_rows = spacing.min(bottom.saturating_sub(screen_y));
+                    screen_y = screen_y.saturating_add(spacing_rows);
                 }
             }
         }
