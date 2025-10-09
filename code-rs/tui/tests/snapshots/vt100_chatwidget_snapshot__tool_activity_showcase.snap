@@ -5,37 +5,37 @@ expression: output
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-      Title: (pending)
-      Elapsed: 08s
-      ─────────────────────────────────────────────────────────────────────────
-      ACTIONS
-      • 00:00  Click #login-button
-      ─────────────────────────────────────────────────────────────────────────
-      CONSOLE
-      (no console messages)
-      ─────────────────────────────────────────────────────────────────────────
-      SCREENSHOT
-      (no screenshot yet)
+   /cloud - browse, apply, and create cloud tasks NEW
+ › Can you gather details from the latest docs update?
 
- ✔ ⚙  Agent Run • deploy-helper · 1m34s                              Completed
-      Task: Run targeted regression suite
-      ─────────────────────────────────────────────────────────────────────────
-      PLAN
-      • Init workspace
-      • Nextest smoke
-      • Summarize
-      ─────────────────────────────────────────────────────────────────────────
-      STATUS
-      (no status updates yet)
-      ─────────────────────────────────────────────────────────────────────────
-      LATEST
-      • Regression sweep complete
-      • - 58 tests passed
-      • - 0 failures
-      ─────────────────────────────────────────────────────────────────────────
-      ACTIONS
-      • Started agent run for qa-bot
-      • Agent run completed in 1m34s
+ ✔ Web Search, duration: 0ms
+   └ query: ratatui widget patterns
+
+ ⚙ Web Search... (1m 15s)
+   └ query: async rust tui example
+
+ ⚙ ╭─ BROWSER (headless): Browser Session · 1 action · 8.0s
+   │
+   │  #  ACTION                     TARGET        VALUE      RESULT       t
+   │   1 Click                      #login-button —          ok            8.0s
+   │
+   ╰─ [Ctrl+B] Expand · [Esc] Stop
+
+ ✔ ╭─ AGENTS · “Run targeted regression suite” · 0 agents · COMPLETED 01:34
+   │
+   │   TASK Run targeted regression suite
+   │
+   │   PLAN
+   │   1. Init workspace
+   │   2. Nextest smoke
+   │   3. Summarize
+   │
+   │   SUMMARY
+   │  Regression sweep complete
+   │  - 58 tests passed
+   │  - 0 failures
+   │
+   ╰─ [Ctrl+B] Expand · [Esc] Stop
 
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you today?                                             │
