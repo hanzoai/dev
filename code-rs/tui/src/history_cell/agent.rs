@@ -40,6 +40,7 @@ pub(crate) struct AgentRunCell {
     latest_result: Vec<String>,
     completed: bool,
     actions: Vec<String>,
+    cell_key: Option<String>,
 }
 
 impl AgentRunCell {
@@ -99,6 +100,14 @@ impl AgentRunCell {
             let overflow = self.actions.len() - MAX_ACTIONS_BUFFER;
             self.actions.drain(0..overflow);
         }
+    }
+
+    pub(crate) fn set_cell_key(&mut self, key: Option<String>) {
+        self.cell_key = key;
+    }
+
+    pub(crate) fn cell_key(&self) -> Option<&str> {
+        self.cell_key.as_deref()
     }
 
     fn build_card_rows(&self, width: u16, style: &CardStyle) -> Vec<CardRow> {
@@ -454,6 +463,16 @@ fn format_duration(duration: Duration) -> String {
     let minutes = secs / 60;
     let seconds = secs % 60;
     format!("{}m{:02}s", minutes, seconds)
+}
+
+impl crate::chatwidget::tool_cards::ToolCardCell for AgentRunCell {
+    fn tool_card_key(&self) -> Option<&str> {
+        self.cell_key()
+    }
+
+    fn set_tool_card_key(&mut self, key: Option<String>) {
+        self.set_cell_key(key);
+    }
 }
 
 fn pill_text_width(text: &str) -> usize {

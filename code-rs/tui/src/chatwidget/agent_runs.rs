@@ -1,5 +1,5 @@
-use super::{ChatWidget, OrderKey};
-use crate::history::state::HistoryId;
+use super::{tool_cards, ChatWidget, OrderKey};
+use super::tool_cards::ToolCardSlot;
 use crate::history_cell::AgentRunCell;
 use code_core::protocol::{AgentStatusUpdateEvent, OrderMeta};
 use serde_json::Value;
@@ -119,9 +119,7 @@ fn end_action_for(
 }
 
 pub(super) struct AgentRunTracker {
-    pub order_key: OrderKey,
-    pub cell_index: Option<usize>,
-    pub history_id: Option<HistoryId>,
+    pub slot: ToolCardSlot,
     pub cell: AgentRunCell,
     pub batch_id: Option<String>,
     agent_ids: HashSet<String>,
@@ -133,9 +131,7 @@ pub(super) struct AgentRunTracker {
 impl AgentRunTracker {
     pub fn new(order_key: OrderKey) -> Self {
         Self {
-            order_key,
-            cell_index: None,
-            history_id: None,
+            slot: ToolCardSlot::new(order_key),
             cell: AgentRunCell::new("(pending)".to_string()),
             batch_id: None,
             agent_ids: HashSet::new(),
@@ -312,9 +308,7 @@ pub(super) fn handle_custom_tool_begin(
                 .unwrap_or_else(|| AgentRunTracker::new(order_key))
         }
     };
-    tracker.order_key = order_key;
-
-    ensure_agent_cell(chat, &mut tracker);
+    tracker.slot.set_order_key(order_key);
 
     if let Some(batch) = metadata.batch_id.clone() {
         tracker.batch_id.get_or_insert(batch);
@@ -331,8 +325,6 @@ pub(super) fn handle_custom_tool_begin(
         tracker.cell.record_action(action);
     }
 
-    replace_agent_cell(chat, &mut tracker);
-
     key = update_mappings(
         chat,
         key,
@@ -342,6 +334,8 @@ pub(super) fn handle_custom_tool_begin(
         tool_name,
         &mut tracker,
     );
+    tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    tool_cards::replace_tool_card::<AgentRunCell>(chat, &mut tracker.slot, &tracker.cell);
     chat.tools_state.agent_last_key = Some(key.clone());
     chat.tools_state.agent_runs.insert(key, tracker);
 
@@ -370,8 +364,6 @@ pub(super) fn handle_custom_tool_end(
         Some(existing) => existing,
         None => return false,
     };
-
-    ensure_agent_cell(chat, &mut tracker);
 
     if let Some(batch) = metadata.batch_id.clone() {
         tracker.batch_id.get_or_insert(batch);
@@ -406,8 +398,6 @@ pub(super) fn handle_custom_tool_end(
         }
     }
 
-    replace_agent_cell(chat, &mut tracker);
-
     key = update_mappings(
         chat,
         key,
@@ -417,6 +407,8 @@ pub(super) fn handle_custom_tool_end(
         tool_name,
         &mut tracker,
     );
+    tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    tool_cards::replace_tool_card::<AgentRunCell>(chat, &mut tracker.slot, &tracker.cell);
     chat.tools_state.agent_last_key = Some(key.clone());
     chat.tools_state.agent_runs.insert(key, tracker);
 
@@ -468,8 +460,6 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
         };
 
         let mut current_key = key;
-
-        ensure_agent_cell(chat, &mut tracker);
 
         if let Some(task) = event.task.clone() {
             tracker.set_task(Some(task));
@@ -540,7 +530,6 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
                 .record_action(format!("Status update — {}", summary));
         }
 
-        replace_agent_cell(chat, &mut tracker);
         current_key = update_mappings(
             chat,
             current_key,
@@ -550,38 +539,10 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
             "agent_status",
             &mut tracker,
         );
+        tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(current_key.clone()));
+        tool_cards::replace_tool_card::<AgentRunCell>(chat, &mut tracker.slot, &tracker.cell);
         chat.tools_state.agent_last_key = Some(current_key.clone());
         chat.tools_state.agent_runs.insert(current_key, tracker);
-    }
-}
-
-fn ensure_agent_cell(chat: &mut ChatWidget<'_>, tracker: &mut AgentRunTracker) -> Option<usize> {
-    if let Some(id) = tracker.history_id {
-        if let Some(idx) = chat.cell_index_for_history_id(id) {
-            tracker.cell_index = Some(idx);
-            return Some(idx);
-        }
-    }
-
-    if let Some(idx) = tracker
-        .cell_index
-        .and_then(|idx| if idx < chat.history_cells.len() { Some(idx) } else { None })
-    {
-        return Some(idx);
-    }
-
-    let idx = chat.history_insert_with_key_global(Box::new(tracker.cell.clone()), tracker.order_key);
-    tracker.cell_index = Some(idx);
-    tracker.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
-    Some(idx)
-}
-
-fn replace_agent_cell(chat: &mut ChatWidget<'_>, tracker: &mut AgentRunTracker) {
-    if let Some(idx) = ensure_agent_cell(chat, tracker) {
-        chat.history_replace_at(idx, Box::new(tracker.cell.clone()));
-        if let Some(id) = chat.history_cell_ids.get(idx).and_then(|slot| *slot) {
-            tracker.history_id = Some(id);
-        }
     }
 }
 
