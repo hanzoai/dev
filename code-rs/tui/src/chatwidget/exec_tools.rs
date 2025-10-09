@@ -552,13 +552,20 @@ fn try_upgrade_fallback_exec_cell(
             .as_any()
             .downcast_ref::<history_cell::ExecCell>()
         {
-            let looks_like_fallback = exec.output.is_some()
-                && exec.parsed.is_empty()
-                && exec.command.len() == 1
+            let command_matches_call = exec.command.len() == 1
                 && exec.command
                     .first()
                     .map(|cmd| cmd == &ev.call_id)
                     .unwrap_or(false);
+            let record_matches_call = exec
+                .record
+                .call_id
+                .as_deref()
+                .map(|cid| cid == ev.call_id)
+                .unwrap_or(false);
+            let looks_like_fallback = exec.output.is_some()
+                && exec.parsed.is_empty()
+                && (command_matches_call || record_matches_call);
             if looks_like_fallback {
                 let mut upgraded = false;
                 if let Some(HistoryRecord::Exec(mut exec_record)) =
@@ -618,6 +625,161 @@ fn try_upgrade_fallback_exec_cell(
     false
 }
 
+fn hydrate_exec_record_from_begin(
+    record: &mut ExecRecord,
+    ev: &ExecCommandBeginEvent,
+) -> bool {
+    let mut changed = false;
+    if record.command != ev.command {
+        record.command = ev.command.clone();
+        changed = true;
+    }
+    if record.parsed != ev.parsed_cmd {
+        record.parsed = ev.parsed_cmd.clone();
+        changed = true;
+    }
+    let new_action = history_cell::action_enum_from_parsed(&record.parsed);
+    if record.action != new_action {
+        record.action = new_action;
+        changed = true;
+    }
+    if record.call_id.as_deref() != Some(ev.call_id.as_str()) {
+        record.call_id = Some(ev.call_id.clone());
+        changed = true;
+    }
+    if record.working_dir.is_none() {
+        record.working_dir = Some(ev.cwd.clone());
+        changed = true;
+    }
+    changed
+}
+
+fn apply_exec_begin_metadata_to_finished_call(
+    chat: &mut ChatWidget<'_>,
+    ev: &ExecCommandBeginEvent,
+) -> bool {
+    let history_id = match chat
+        .history_state
+        .history_id_for_exec_call(&ev.call_id)
+    {
+        Some(id) => id,
+        None => return false,
+    };
+    let index = match chat.history_state.index_of(history_id) {
+        Some(idx) => idx,
+        None => return false,
+    };
+    let record = match chat.history_state.record(history_id).cloned() {
+        Some(record) => record,
+        None => return false,
+    };
+    match record {
+        HistoryRecord::Exec(mut exec_record) => {
+            if !hydrate_exec_record_from_begin(&mut exec_record, ev) {
+                return false;
+            }
+
+            let mutation = chat
+                .history_state
+                .apply_domain_event(HistoryDomainEvent::Replace {
+                    index,
+                    record: HistoryDomainRecord::Exec(exec_record.clone()),
+                });
+
+            if let HistoryMutation::Replaced {
+                id,
+                record: HistoryRecord::Exec(updated_record),
+                ..
+            } = mutation
+            {
+                chat.update_cell_from_record(id, HistoryRecord::Exec(updated_record.clone()));
+                if let Some(idx) = chat.cell_index_for_history_id(id) {
+                    crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+                }
+                chat.invalidate_height_cache();
+                chat.request_redraw();
+                return true;
+            }
+
+            if let Some(idx) = chat.cell_index_for_history_id(history_id) {
+                let cell = history_cell::ExecCell::from_record(exec_record.clone());
+                chat.history_replace_with_record(
+                    idx,
+                    Box::new(cell),
+                    HistoryDomainRecord::Exec(exec_record),
+                );
+                return true;
+            }
+
+            false
+        }
+        HistoryRecord::MergedExec(mut merged_record) => {
+            let mut segment_found = false;
+            for segment in merged_record.segments.iter_mut() {
+                let matches_call = segment
+                    .call_id
+                    .as_deref()
+                    .map(|cid| cid == ev.call_id)
+                    .unwrap_or(false);
+                let fallback_matches = segment.call_id.is_none()
+                    && segment.command.len() == 1
+                    && segment
+                        .command
+                        .first()
+                        .map(|cmd| cmd.contains(&ev.call_id))
+                        .unwrap_or(false);
+                if matches_call || fallback_matches {
+                    if hydrate_exec_record_from_begin(segment, ev) {
+                        segment_found = true;
+                    }
+                    break;
+                }
+            }
+
+            if !segment_found {
+                return false;
+            }
+
+            let new_action = history_cell::action_enum_from_parsed(&ev.parsed_cmd);
+            if merged_record.action != new_action {
+                merged_record.action = new_action;
+            }
+
+            let mutation = chat
+                .history_state
+                .apply_domain_event(HistoryDomainEvent::Replace {
+                    index,
+                    record: HistoryDomainRecord::MergedExec(merged_record.clone()),
+                });
+
+            if let HistoryMutation::Replaced {
+                id,
+                record: HistoryRecord::MergedExec(updated_record),
+                ..
+            } = mutation
+            {
+                chat.update_cell_from_record(id, HistoryRecord::MergedExec(updated_record));
+                chat.invalidate_height_cache();
+                chat.request_redraw();
+                return true;
+            }
+
+            if let Some(idx) = chat.cell_index_for_history_id(history_id) {
+                let cell = history_cell::MergedExecCell::from_state(merged_record.clone());
+                chat.history_replace_with_record(
+                    idx,
+                    Box::new(cell),
+                    HistoryDomainRecord::MergedExec(merged_record),
+                );
+                return true;
+            }
+
+            false
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn handle_exec_begin_now(
     chat: &mut ChatWidget<'_>,
     ev: ExecCommandBeginEvent,
@@ -628,6 +790,9 @@ pub(super) fn handle_exec_begin_now(
         .contains(&super::ExecCallId(ev.call_id.clone()))
     {
         if try_upgrade_fallback_exec_cell(chat, &ev) {
+            return;
+        }
+        if apply_exec_begin_metadata_to_finished_call(chat, &ev) {
             return;
         }
         return;
@@ -874,7 +1039,7 @@ pub(super) fn handle_exec_end_now(
             streamed_stderr,
         ),
         None => (
-            vec![call_id.clone()],
+            vec![format!("Command running ({call_id})")],
             vec![],
             None,
             None,
@@ -988,6 +1153,9 @@ pub(super) fn handle_exec_end_now(
             cell.set_wait_notes(&wait_notes_pairs);
             cell.set_waiting(false);
             cell.set_run_duration(Some(duration));
+            if cell.record.call_id.as_deref().is_none() {
+                cell.record.call_id = Some(call_id.clone());
+            }
         }
 
         let mut replaced = false;
