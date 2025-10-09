@@ -90,12 +90,19 @@ impl AgentManager {
 
     async fn send_agent_status_update(&self) {
         if let Some(ref sender) = self.event_sender {
+            let now = Utc::now();
             let agents: Vec<AgentInfo> = self
                 .agents
                 .values()
                 .map(|agent| {
                     // Just show the model name - status provides the useful info
                     let name = agent.model.clone();
+                    let start = agent.started_at.unwrap_or(agent.created_at);
+                    let end = agent.completed_at.unwrap_or(now);
+                    let elapsed_ms = match end.signed_duration_since(start).num_milliseconds() {
+                        value if value >= 0 => Some(value as u64),
+                        _ => None,
+                    };
 
                     AgentInfo {
                         id: agent.id.clone(),
@@ -106,6 +113,8 @@ impl AgentManager {
                         last_progress: agent.progress.last().cloned(),
                         result: agent.result.clone(),
                         error: agent.error.clone(),
+                        elapsed_ms,
+                        token_count: None,
                     }
                 })
                 .collect();

@@ -6,15 +6,11 @@ use crate::colors;
 
 #[derive(Clone, Copy)]
 pub(crate) struct CardStyle {
-    pub accent_bg: Color,
     pub accent_fg: Color,
     pub background_top: Color,
     pub background_bottom: Color,
-    pub header_bg: Color,
-    pub header_fg: Color,
     pub text_primary: Color,
     pub text_secondary: Color,
-    pub divider: Color,
 }
 
 #[derive(Clone, Debug)]
@@ -73,23 +69,16 @@ pub(crate) fn agent_card_style() -> CardStyle {
     let info = colors::info();
     let accent = colors::mix_toward(info, bg, 0.15);
     let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.40);
-    let header_bg = colors::mix_toward(bg, info, 0.12);
-    let header_fg = colors::mix_toward(colors::text_bright(), colors::text(), 0.25);
     let secondary = colors::text_dim();
-    let divider = colors::mix_toward(bg, info, 0.18);
     let background_bottom = colors::mix_toward(bg, info, 0.10);
     let background_top = colors::mix_toward(bg, info, 0.05);
 
     CardStyle {
-        accent_bg: accent,
         accent_fg,
         background_top,
         background_bottom,
-        header_bg,
-        header_fg,
         text_primary: colors::text(),
         text_secondary: secondary,
-        divider,
     }
 }
 
@@ -98,23 +87,16 @@ pub(crate) fn browser_card_style() -> CardStyle {
     let primary = colors::primary();
     let accent = colors::mix_toward(primary, bg, 0.20);
     let accent_fg = colors::mix_toward(colors::text_bright(), accent, 0.35);
-    let header_bg = colors::mix_toward(bg, primary, 0.12);
-    let header_fg = colors::mix_toward(colors::text_bright(), colors::text(), 0.20);
     let secondary = colors::text_mid();
-    let divider = colors::mix_toward(bg, primary, 0.17);
     let background_bottom = colors::mix_toward(bg, primary, 0.09);
     let background_top = colors::mix_toward(bg, primary, 0.04);
 
     CardStyle {
-        accent_bg: accent,
         accent_fg,
         background_top,
         background_bottom,
-        header_bg,
-        header_fg,
         text_primary: colors::text(),
         text_secondary: secondary,
-        divider,
     }
 }
 
@@ -206,15 +188,22 @@ pub(crate) fn rows_to_lines(rows: &[CardRow], style: &CardStyle, total_width: u1
     if total_width == 0 {
         return Vec::new();
     }
-    let accent_width = CARD_ACCENT_WIDTH.min(total_width as usize);
+    let has_accent = rows.iter().any(|row| !row.accent.trim().is_empty());
+    let accent_width = if has_accent {
+        CARD_ACCENT_WIDTH.min(total_width as usize)
+    } else {
+        0
+    };
     let body_width = total_width.saturating_sub(accent_width as u16) as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
     let total_rows = rows.len();
     for (idx, row) in rows.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
-        let accent_text = pad_icon(row.accent.as_str(), accent_width);
-        let accent_span = Span::styled(accent_text, row.accent_style);
-        spans.push(accent_span);
+        if accent_width > 0 {
+            let accent_text = pad_icon(row.accent.as_str(), accent_width);
+            let accent_span = Span::styled(accent_text, row.accent_style);
+            spans.push(accent_span);
+        }
 
         let row_bg = row
             .body_bg
@@ -244,23 +233,6 @@ pub(crate) fn primary_text_style(style: &CardStyle) -> Style {
 
 pub(crate) fn secondary_text_style(style: &CardStyle) -> Style {
     Style::default().fg(style.text_secondary)
-}
-
-pub(crate) fn section_title_style(style: &CardStyle) -> Style {
-    Style::default()
-        .fg(colors::mix_toward(style.text_primary, colors::info(), 0.25))
-        .add_modifier(Modifier::BOLD)
-}
-
-pub(crate) fn divider_style(style: &CardStyle) -> Style {
-    Style::default().fg(style.divider)
-}
-
-pub(crate) fn header_text_style(style: &CardStyle) -> Style {
-    Style::default()
-        .fg(style.header_fg)
-        .bg(style.header_bg)
-        .add_modifier(Modifier::BOLD)
 }
 
 pub(crate) fn status_chip_style(base: Color, style: &CardStyle) -> Style {
