@@ -662,6 +662,9 @@ pub(super) type GitDiffNameOnlyBetweenStub =
 pub(super) static GIT_DIFF_NAME_ONLY_BETWEEN_STUB: Lazy<Mutex<Option<GitDiffNameOnlyBetweenStub>>> =
     Lazy::new(|| Mutex::new(None));
 
+#[cfg(test)]
+pub(super) static AUTO_STUB_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
 #[derive(Clone)]
 struct AutoResolveState {
     prompt: String,
@@ -12427,9 +12430,6 @@ fi\n\
                 self.auto_turn_review_state = None;
                 if self.auto_state.waiting_for_review {
                     self.maybe_resume_auto_after_review();
-                    if self.auto_state.waiting_for_review {
-                        self.auto_state.waiting_for_review = false;
-                    }
                 }
             }
             AutoReviewOutcome::Workspace => {
@@ -19382,7 +19382,10 @@ mod tests {
                 + Sync
                 + 'static,
         {
-            let mut slot = CAPTURE_AUTO_TURN_COMMIT_STUB.lock().unwrap();
+            let mut slot = match CAPTURE_AUTO_TURN_COMMIT_STUB.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
             assert!(slot.is_none(), "capture stub already installed");
             *slot = Some(Box::new(stub));
             Self
@@ -19391,7 +19394,13 @@ mod tests {
 
     impl Drop for CaptureCommitStubGuard {
         fn drop(&mut self) {
-            *CAPTURE_AUTO_TURN_COMMIT_STUB.lock().unwrap() = None;
+            match CAPTURE_AUTO_TURN_COMMIT_STUB.lock() {
+                Ok(mut slot) => *slot = None,
+                Err(poisoned) => {
+                    let mut slot = poisoned.into_inner();
+                    *slot = None;
+                }
+            }
         }
     }
 
@@ -19402,7 +19411,10 @@ mod tests {
         where
             F: Fn(String, String) -> Result<Vec<String>, String> + Send + Sync + 'static,
         {
-            let mut slot = GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock().unwrap();
+            let mut slot = match GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
             assert!(slot.is_none(), "git diff stub already installed");
             *slot = Some(Box::new(stub));
             Self
@@ -19411,7 +19423,13 @@ mod tests {
 
     impl Drop for GitDiffStubGuard {
         fn drop(&mut self) {
-            *GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock().unwrap() = None;
+            match GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock() {
+                Ok(mut slot) => *slot = None,
+                Err(poisoned) => {
+                    let mut slot = poisoned.into_inner();
+                    *slot = None;
+                }
+            }
         }
     }
 
@@ -19527,6 +19545,8 @@ mod tests {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
 
+        let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
+
         chat.auto_state.active = true;
         chat.auto_state.review_enabled = true;
         chat.auto_state.waiting_for_response = true;
@@ -19596,6 +19616,72 @@ mod tests {
             chat.auto_state.waiting_for_response
                 || final_history_len > initial_history_len,
             "auto drive should resume conversation after skipped review"
+        );
+    }
+
+    #[test]
+    fn auto_review_skip_stays_blocked_when_auto_resolve_pending() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
+
+        chat.auto_state.active = true;
+        chat.auto_state.review_enabled = true;
+        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.waiting_for_review = false;
+
+        let turn_config = TurnConfig {
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+        };
+        chat.pending_auto_turn_config = Some(turn_config.clone());
+        chat.pending_turn_descriptor = Some(TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            agent_preferences: None,
+            review_strategy: None,
+        });
+
+        let base_id = "base-commit".to_string();
+        let final_id = "final-commit".to_string();
+
+        chat.auto_turn_review_state = Some(AutoTurnReviewState {
+            base_commit: Some(GhostCommit::new(base_id.clone(), None)),
+        });
+
+        chat.auto_resolve_state = Some(make_pending_fix_state(ReviewOutputEvent::default()));
+
+        let base_for_capture = base_id.clone();
+        let final_for_capture = final_id.clone();
+        let _capture_guard = CaptureCommitStubGuard::install(move |message, parent| {
+            assert_eq!(message, "auto turn change snapshot");
+            assert_eq!(parent.as_deref(), Some(base_for_capture.as_str()));
+            Ok(GhostCommit::new(final_for_capture.clone(), parent))
+        });
+
+        let base_for_diff = base_id.clone();
+        let final_for_diff = final_id.clone();
+        let _diff_guard = GitDiffStubGuard::install(move |base, head| {
+            assert_eq!(base, base_for_diff);
+            assert_eq!(head, final_for_diff);
+            Ok(Vec::new())
+        });
+
+        chat.auto_on_assistant_final();
+        assert!(chat.auto_state.waiting_for_review, "auto-resolve should block resume before skip");
+
+        let descriptor_snapshot = chat.pending_turn_descriptor.clone();
+        chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
+
+        assert!(
+            chat.auto_state.waiting_for_review,
+            "auto drive should remain waiting when auto-resolve blocks"
+        );
+        assert!(
+            !chat.auto_state.waiting_for_response,
+            "skip should not resume coordinator when auto-resolve blocks"
         );
     }
 
