@@ -75,6 +75,7 @@ mod terminal;
 mod tools;
 mod browser_sessions;
 mod agent_runs;
+pub(crate) mod tool_cards;
 mod running_tools;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod smoke_helpers;

@@ -1,15 +1,13 @@
-use super::{ChatWidget, OrderKey};
+use super::{tool_cards, ChatWidget, OrderKey};
+use super::tool_cards::ToolCardSlot;
 use crate::history_cell::BrowserSessionCell;
-use crate::history::state::HistoryId;
 use code_core::protocol::OrderMeta;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 
 pub(super) struct BrowserSessionTracker {
-    pub order_key: OrderKey,
-    pub cell_index: Option<usize>,
-    pub history_id: Option<HistoryId>,
+    pub slot: ToolCardSlot,
     pub cell: BrowserSessionCell,
     pub elapsed: Duration,
 }
@@ -17,9 +15,7 @@ pub(super) struct BrowserSessionTracker {
 impl BrowserSessionTracker {
     fn new(order_key: OrderKey) -> Self {
         Self {
-            order_key,
-            cell_index: None,
-            history_id: None,
+            slot: ToolCardSlot::new(order_key),
             cell: BrowserSessionCell::new(),
             elapsed: Duration::default(),
         }
@@ -44,9 +40,7 @@ pub(super) fn handle_custom_tool_begin(
         .browser_sessions
         .remove(&key)
         .unwrap_or_else(|| BrowserSessionTracker::new(order_key));
-    tracker.order_key = order_key;
-
-    ensure_session_cell(chat, &mut tracker);
+    tracker.slot.set_order_key(order_key);
 
     if let Some(Value::Object(json)) = params.as_ref() {
         if tool_name == "browser_open" {
@@ -55,6 +49,9 @@ pub(super) fn handle_custom_tool_begin(
             }
         }
     }
+
+    tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    tool_cards::ensure_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
     chat
         .tools_state
@@ -101,8 +98,6 @@ pub(super) fn handle_custom_tool_end(
         None => return false,
     };
 
-    ensure_session_cell(chat, &mut tracker);
-
     let params_to_use = params.as_ref();
     if tool_name == "browser_open" {
         if let Some(Value::Object(json)) = params_to_use {
@@ -119,7 +114,8 @@ pub(super) fn handle_custom_tool_end(
         .record_action(timestamp, duration, summary);
     tracker.elapsed = tracker.elapsed.saturating_add(duration);
 
-    replace_session_cell(chat, &mut tracker);
+    tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
     if let Some(ord) = order.map(|m| m.request_ordinal) {
         chat
@@ -152,8 +148,6 @@ pub(super) fn handle_background_event(
         None => return false,
     };
 
-    ensure_session_cell(chat, &mut tracker);
-
     let console_line = if message.starts_with("⚠️") {
         message.to_string()
     } else {
@@ -161,7 +155,8 @@ pub(super) fn handle_background_event(
     };
     tracker.cell.add_console_message(console_line);
 
-    replace_session_cell(chat, &mut tracker);
+    tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
     chat
         .tools_state
@@ -189,11 +184,11 @@ pub(super) fn handle_screenshot_update(
         None => return false,
     };
 
-    ensure_session_cell(chat, &mut tracker);
     tracker.cell.set_url(url.to_string());
     tracker.cell.set_screenshot(screenshot_path.clone());
 
-    replace_session_cell(chat, &mut tracker);
+    tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
     chat
         .tools_state
@@ -201,39 +196,6 @@ pub(super) fn handle_screenshot_update(
         .insert(key, tracker);
 
     true
-}
-
-fn ensure_session_cell(
-    chat: &mut ChatWidget<'_>,
-    tracker: &mut BrowserSessionTracker,
-) -> Option<usize> {
-    if let Some(id) = tracker.history_id {
-        if let Some(idx) = chat.cell_index_for_history_id(id) {
-            tracker.cell_index = Some(idx);
-            return Some(idx);
-        }
-    }
-
-    if let Some(idx) = tracker
-        .cell_index
-        .and_then(|idx| if idx < chat.history_cells.len() { Some(idx) } else { None })
-    {
-        return Some(idx);
-    }
-
-    let idx = chat.history_insert_with_key_global(Box::new(tracker.cell.clone()), tracker.order_key);
-    tracker.cell_index = Some(idx);
-    tracker.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
-    Some(idx)
-}
-
-fn replace_session_cell(chat: &mut ChatWidget<'_>, tracker: &mut BrowserSessionTracker) {
-    if let Some(idx) = ensure_session_cell(chat, tracker) {
-        chat.history_replace_at(idx, Box::new(tracker.cell.clone()));
-        if let Some(id) = chat.history_cell_ids.get(idx).and_then(|slot| *slot) {
-            tracker.history_id = Some(id);
-        }
-    }
 }
 
 fn order_key_and_ordinal(chat: &mut ChatWidget<'_>, order: Option<&OrderMeta>) -> (OrderKey, Option<u64>) {
@@ -266,6 +228,11 @@ fn select_session_key(
         {
             if chat.tools_state.browser_sessions.contains_key(&existing) {
                 return existing;
+            }
+        }
+        if let Some(last) = chat.tools_state.browser_last_key.clone() {
+            if chat.tools_state.browser_sessions.contains_key(&last) {
+                return last;
             }
         }
     }

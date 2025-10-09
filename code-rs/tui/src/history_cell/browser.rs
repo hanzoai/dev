@@ -39,6 +39,7 @@ pub(crate) struct BrowserSessionCell {
     screenshot_path: Option<String>,
     total_duration: Duration,
     completed: bool,
+    cell_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -94,6 +95,14 @@ impl BrowserSessionCell {
 
     pub(crate) fn set_screenshot(&mut self, path: PathBuf) {
         self.screenshot_path = Some(path.display().to_string());
+    }
+
+    pub(crate) fn set_cell_key(&mut self, key: Option<String>) {
+        self.cell_key = key;
+    }
+
+    pub(crate) fn cell_key(&self) -> Option<&str> {
+        self.cell_key.as_deref()
     }
 
     fn build_card_rows(&self, width: u16, style: &CardStyle) -> Vec<CardRow> {
@@ -430,4 +439,14 @@ fn format_timestamp(duration: Duration) -> String {
     let minutes = secs / 60;
     let seconds = secs % 60;
     format!("{:02}:{:02}", minutes, seconds)
+}
+
+impl crate::chatwidget::tool_cards::ToolCardCell for BrowserSessionCell {
+    fn tool_card_key(&self) -> Option<&str> {
+        self.cell_key()
+    }
+
+    fn set_tool_card_key(&mut self, key: Option<String>) {
+        self.set_cell_key(key);
+    }
 }
