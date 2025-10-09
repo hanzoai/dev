@@ -22,7 +22,12 @@ use code_core::protocol::{
     WebSearchBeginEvent,
     WebSearchCompleteEvent,
 };
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use code_tui::test_helpers::{
+    force_scroll_offset as harness_force_scroll_offset,
+    layout_metrics as harness_layout_metrics,
+    render_chat_widget_to_vt100,
+    ChatWidgetHarness,
+};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -34,6 +39,36 @@ fn normalize_output(text: String) -> String {
         .replace('✦', "✶")
         .replace('◆', "✶")
         .replace('✨', "✶")
+}
+
+fn is_history_header(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    matches!(trimmed.chars().next(), Some(ch) if matches!(ch, '›' | '•' | '⋮' | '⚙' | '✔' | '✖' | '✶'))
+}
+
+fn count_collapsed_boundaries(output: &str) -> usize {
+    let mut collapsed = 0usize;
+    let mut saw_header = false;
+    let mut blank_since_last_header = false;
+
+    for line in output.lines() {
+        if line.trim_end().is_empty() {
+            if saw_header {
+                blank_since_last_header = true;
+            }
+            continue;
+        }
+
+        if is_history_header(line) {
+            if saw_header && !blank_since_last_header {
+                collapsed = collapsed.saturating_add(1);
+            }
+            saw_header = true;
+            blank_since_last_header = false;
+        }
+    }
+
+    collapsed
 }
 
 fn push_ordered_event(
@@ -203,6 +238,43 @@ fn baseline_simple_conversation() {
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
     insta::assert_snapshot!("simple_conversation", output);
+}
+
+#[test]
+fn scroll_spacing_remains_when_scrolled_up() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.push_user_prompt("First user message about scrolling behaviour.");
+    harness.push_assistant_markdown("Assistant reply number one with enough text to wrap the layout and ensure spacing stays visible while at the bottom of the viewport.");
+    harness.push_user_prompt("Second user follow-up that also contributes to the total height so we can scroll.");
+    harness.push_assistant_markdown("Assistant reply number two with multiple paragraphs.\n\nHere is another paragraph to expand height.\n\nYet another paragraph for good measure.");
+    harness.push_user_prompt("Third user prompt to push history further.");
+    harness.push_assistant_markdown("Assistant reply number three, still going strong.\n\n- Bullet one\n- Bullet two\n- Bullet three");
+    harness.push_user_prompt("Fourth user prompt to guarantee overflow beyond the viewport height.");
+    harness.push_assistant_markdown("Assistant reply number four with extra padding to pad out the history list even more.\n\nFinal paragraph to top it off.");
+
+    let _bottom = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
+    let metrics = harness_layout_metrics(&harness);
+    assert!(
+        metrics.last_max_scroll > 0,
+        "scenario must overflow the history viewport to exercise scrolling"
+    );
+
+    let offset = metrics.last_max_scroll.min(5).max(1);
+    harness_force_scroll_offset(&mut harness, offset);
+    let scrolled = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
+
+    let collapsed_boundaries = count_collapsed_boundaries(&scrolled);
+    assert_eq!(
+        0,
+        collapsed_boundaries,
+        "Spacing collapsed unexpectedly when scrolled; investigate history layout spacing"
+    );
+
+    insta::assert_snapshot!(
+        "scroll_spacing_scrolled_intact",
+        scrolled
+    );
 }
 
 #[test]
