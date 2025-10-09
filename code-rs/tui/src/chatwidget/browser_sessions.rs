@@ -12,6 +12,15 @@ pub(super) struct BrowserSessionTracker {
     pub elapsed: Duration,
 }
 
+struct BrowserActionSummary {
+    action: String,
+    target: Option<String>,
+    value: Option<String>,
+    outcome: Option<String>,
+    status_code: Option<String>,
+    headless: Option<bool>,
+}
+
 impl BrowserSessionTracker {
     fn new(order_key: OrderKey) -> Self {
         Self {
@@ -46,6 +55,9 @@ pub(super) fn handle_custom_tool_begin(
         if tool_name == "browser_open" {
             if let Some(url) = json.get("url").and_then(|v| v.as_str()) {
                 tracker.cell.set_url(url.to_string());
+            }
+            if let Some(headless) = json.get("headless").and_then(|v| v.as_bool()) {
+                tracker.cell.set_headless(Some(headless));
             }
         }
     }
@@ -109,9 +121,20 @@ pub(super) fn handle_custom_tool_end(
 
     let summary = summarize_action(tool_name, params_to_use, result);
     let timestamp = tracker.elapsed;
-    tracker
-        .cell
-        .record_action(timestamp, duration, summary);
+    tracker.cell.record_action(
+        timestamp,
+        duration,
+        summary.action.clone(),
+        summary.target.clone(),
+        summary.value.clone(),
+        summary.outcome.clone(),
+    );
+    if let Some(code) = summary.status_code {
+        tracker.cell.set_status_code(Some(code));
+    }
+    if let Some(headless) = summary.headless {
+        tracker.cell.set_headless(Some(headless));
+    }
     tracker.elapsed = tracker.elapsed.saturating_add(duration);
 
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
@@ -271,58 +294,243 @@ fn summarize_action(
     tool_name: &str,
     params: Option<&Value>,
     result: &Result<String, String>,
-) -> String {
+) -> BrowserActionSummary {
+    let mut summary = BrowserActionSummary {
+        action: summarize_action_label(tool_name),
+        target: None,
+        value: None,
+        outcome: None,
+        status_code: None,
+        headless: None,
+    };
+
+    let params = params.and_then(|value| value.as_object());
+
     match tool_name {
-        "browser_open" => params
-            .and_then(|value| value.get("url"))
-            .and_then(|value| value.as_str())
-            .map(|url| format!("Open URL {}", url))
-            .unwrap_or_else(|| "Open page".to_string()),
+        "browser_open" => {
+            if let Some(url) = params.and_then(|value| value.get("url")).and_then(Value::as_str) {
+                summary.target = Some(url.to_string());
+            }
+            if let Some(headless) = params
+                .and_then(|value| value.get("headless"))
+                .and_then(Value::as_bool)
+            {
+                summary.headless = Some(headless);
+            }
+        }
         "browser_click" => {
             let description = params
                 .and_then(|value| value.get("description"))
-                .and_then(|value| value.as_str())
+                .and_then(Value::as_str)
                 .map(|s| s.to_string());
             let selector = params
                 .and_then(|value| value.get("selector"))
-                .and_then(|value| value.as_str())
+                .and_then(Value::as_str)
                 .map(|s| s.to_string());
-            match (description, selector) {
-                (Some(desc), Some(sel)) => format!("Click {} ({})", desc, sel),
-                (Some(desc), None) => format!("Click {}", desc),
-                (None, Some(sel)) => format!("Click {}", sel),
-                _ => "Click".to_string(),
+            summary.target = description.clone().or_else(|| selector.clone());
+            if let (Some(_), Some(sel)) = (description.as_ref(), selector.as_ref()) {
+                summary.value = Some(sel.clone());
+            }
+            if summary.target.is_none() {
+                summary.target = params
+                    .and_then(|value| value.get("x"))
+                    .and_then(Value::as_f64)
+                    .zip(params.and_then(|value| value.get("y")).and_then(Value::as_f64))
+                    .map(|(x, y)| format!("({:.0}, {:.0})", x, y));
             }
         }
         "browser_scroll" => {
             let dx = params
                 .and_then(|value| value.get("dx"))
-                .and_then(|value| value.as_i64())
+                .and_then(Value::as_i64)
                 .unwrap_or(0);
             let dy = params
                 .and_then(|value| value.get("dy"))
-                .and_then(|value| value.as_i64())
+                .and_then(Value::as_i64)
                 .unwrap_or(0);
-            if dx == 0 {
-                format!("Scroll by dy={}", dy)
+            let label = if dx == 0 {
+                format!("dy={}", dy)
             } else {
-                format!("Scroll by dx={} dy={}", dx, dy)
+                format!("dx={} dy={}", dx, dy)
+            };
+            if !(dx == 0 && dy == 0) {
+                summary.value = Some(label);
             }
         }
         "browser_type" => {
-            let text = params
+            if let Some(text) = params
                 .and_then(|value| value.get("text"))
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            let open = '\u{201c}';
-            let close = '\u{201d}';
-            format!("Type {}{}{}", open, text, close)
+                .and_then(Value::as_str)
+            {
+                summary.value = Some(truncate(text, 48));
+            }
+            if let Some(selector) = params
+                .and_then(|value| value.get("selector"))
+                .and_then(Value::as_str)
+            {
+                summary.target = Some(selector.to_string());
+            }
         }
-        "browser_close" => match result {
-            Ok(_) => "Close browser".to_string(),
-            Err(err) => format!("Close browser (error: {}...)", truncate(err, 24)),
-        },
-        other => other.replace('_', " "),
+        "browser_key" => {
+            if let Some(key) = params
+                .and_then(|value| value.get("key"))
+                .and_then(Value::as_str)
+            {
+                summary.value = Some(key.to_string());
+            }
+        }
+        "browser_history" => {
+            if let Some(direction) = params
+                .and_then(|value| value.get("direction"))
+                .and_then(Value::as_str)
+            {
+                summary.value = Some(direction.to_string());
+            }
+        }
+        "browser_move" => {
+            let absolute = params
+                .and_then(|value| value.get("x"))
+                .and_then(Value::as_f64)
+                .zip(params.and_then(|value| value.get("y")).and_then(Value::as_f64))
+                .map(|(x, y)| format!("to ({:.0}, {:.0})", x, y));
+            let relative = params
+                .and_then(|value| value.get("dx"))
+                .and_then(Value::as_f64)
+                .zip(params.and_then(|value| value.get("dy")).and_then(Value::as_f64))
+                .map(|(dx, dy)| format!("by ({:.0}, {:.0})", dx, dy));
+            summary.value = absolute.or(relative);
+        }
+        "browser_console" => {
+            if let Some(lines) = params
+                .and_then(|value| value.get("lines"))
+                .and_then(Value::as_u64)
+            {
+                summary.value = Some(format!("last {}", lines));
+            }
+        }
+        "browser_javascript" => {
+            if let Some(code) = params
+                .and_then(|value| value.get("code"))
+                .and_then(Value::as_str)
+            {
+                summary.value = Some(truncate(code, 48));
+            }
+        }
+        "browser_cdp" => {
+            if let Some(method) = params
+                .and_then(|value| value.get("method"))
+                .and_then(Value::as_str)
+            {
+                summary.target = Some(method.to_string());
+            }
+        }
+        "browser_inspect" => {
+            summary.target = params
+                .and_then(|value| value.get("selector"))
+                .and_then(Value::as_str)
+                .map(|s| s.to_string());
+        }
+        "browser_close" => {
+            summary.action = "Close".to_string();
+        }
+        _ => {
+            summary.target = params
+                .and_then(|value| value.get("target"))
+                .and_then(Value::as_str)
+                .map(|s| s.to_string());
+            summary.value = params
+                .and_then(|value| value.get("value"))
+                .and_then(Value::as_str)
+                .map(|s| s.to_string());
+        }
+    }
+
+    let (outcome, status_code) = summarize_action_result(result);
+    summary.outcome = outcome;
+    summary.status_code = status_code;
+
+    summary
+}
+
+fn summarize_action_label(tool_name: &str) -> String {
+    match tool_name {
+        "browser_open" => "Nav".to_string(),
+        "browser_click" => "Click".to_string(),
+        "browser_scroll" => "Scroll".to_string(),
+        "browser_type" => "Type".to_string(),
+        "browser_key" => "Key".to_string(),
+        "browser_move" => "Move".to_string(),
+        "browser_history" => "History".to_string(),
+        "browser_console" => "Console".to_string(),
+        "browser_javascript" => "Script".to_string(),
+        "browser_cdp" => "CDP".to_string(),
+        "browser_status" => "Status".to_string(),
+        "browser_inspect" => "Inspect".to_string(),
+        "browser_cleanup" => "Cleanup".to_string(),
+        "browser_close" => "Close".to_string(),
+        other => other
+            .trim_start_matches("browser_")
+            .split('_')
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+fn summarize_action_result(result: &Result<String, String>) -> (Option<String>, Option<String>) {
+    match result {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return (None, None);
+            }
+
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed) {
+                let status = map
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+                let message = map
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+                let summary_text = status.or(message).unwrap_or_else(|| truncate(trimmed, 64));
+
+                let status_code = map
+                    .get("status_code")
+                    .and_then(|value| match value {
+                        Value::Number(num) => num.as_u64().map(|n| n.to_string()),
+                        Value::String(s) => Some(s.to_string()),
+                        _ => None,
+                    });
+
+                return (Some(summary_text), status_code);
+            }
+
+            (Some(truncate(trimmed, 64)), extract_leading_status_code(trimmed))
+        }
+        Err(err) => {
+            let text = format!("error: {}", truncate(err, 48));
+            (Some(text), None)
+        }
+    }
+}
+
+fn extract_leading_status_code(text: &str) -> Option<String> {
+    let digits: String = text
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    if digits.len() == 3 {
+        Some(digits)
+    } else {
+        None
     }
 }
 

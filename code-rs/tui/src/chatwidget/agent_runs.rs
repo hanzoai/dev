@@ -1,10 +1,16 @@
 use super::{tool_cards, ChatWidget, OrderKey};
 use super::tool_cards::ToolCardSlot;
-use crate::history_cell::AgentRunCell;
+use crate::history_cell::{
+    AgentDetail,
+    AgentRunCell,
+    AgentStatusKind,
+    AgentStatusPreview,
+    StepProgress,
+};
 use code_core::protocol::{AgentStatusUpdateEvent, OrderMeta};
 use serde_json::Value;
-use std::collections::HashSet;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 const AGENT_TOOL_NAMES: &[&str] = &[
     "agent",
@@ -126,6 +132,9 @@ pub(super) struct AgentRunTracker {
     task: Option<String>,
     has_custom_name: bool,
     call_ids: HashSet<String>,
+    agent_started_at: HashMap<String, Instant>,
+    agent_elapsed: HashMap<String, Duration>,
+    agent_token_counts: HashMap<String, u64>,
 }
 
 impl AgentRunTracker {
@@ -138,6 +147,9 @@ impl AgentRunTracker {
             task: None,
             has_custom_name: false,
             call_ids: HashSet::new(),
+            agent_started_at: HashMap::new(),
+            agent_elapsed: HashMap::new(),
+            agent_token_counts: HashMap::new(),
         }
     }
 
@@ -313,6 +325,8 @@ pub(super) fn handle_custom_tool_begin(
     if let Some(batch) = metadata.batch_id.clone() {
         tracker.batch_id.get_or_insert(batch);
     }
+    tracker.cell.set_batch_label(tracker.batch_id.clone());
+    tracker.cell.set_batch_label(tracker.batch_id.clone());
     tracker.merge_agent_ids(metadata.agent_ids.clone());
 
     tracker.set_agent_name(metadata.label.clone(), true);
@@ -467,62 +481,133 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
             tracker.set_task(tracker.task.clone());
         }
 
-        let mut rows: Vec<(String, String)> = Vec::new();
+        let mut previews: Vec<AgentStatusPreview> = Vec::new();
         let mut status_collect = StatusSummary::default();
-        let mut latest_lines: Option<Vec<String>> = None;
+        let mut summary_lines: Option<Vec<String>> = None;
 
         for agent in &event.agents {
-            let mut status_text = agent.status.clone();
-            if let Some(progress) = agent.last_progress.as_ref() {
-                if !progress.trim().is_empty() {
-                    status_text = format!("{} — {}", status_text, progress);
-                }
-            }
-            if let Some(result) = agent.result.as_ref() {
-                if !result.trim().is_empty() {
-                    status_text = format!("{} (result)", status_text);
-                }
-            }
-            if let Some(error) = agent.error.as_ref() {
-                if !error.trim().is_empty() {
-                    status_text = format!("{} (error)", status_text);
-                }
-            }
-
-            if let Some(model) = agent.model.as_ref() {
-                status_text = format!("{} (model: {})", status_text, model);
-            }
-
-            rows.push((agent.name.clone(), status_text.clone()));
             tracker.agent_ids.insert(agent.id.clone());
             if let Some(batch_id) = agent.batch_id.as_ref() {
                 tracker.batch_id.get_or_insert(batch_id.clone());
             }
 
             let phase = classify_status(&agent.status, agent.result.is_some(), agent.error.is_some());
-            status_collect.observe(phase);
+
+            let mut details: Vec<AgentDetail> = Vec::new();
 
             if let Some(result) = agent.result.as_ref() {
-                latest_lines = Some(lines_from(result));
-            } else if let Some(error) = agent.error.as_ref() {
-                latest_lines = Some(lines_from(error));
+                let mut lines = lines_from(result);
+                if lines.is_empty() {
+                    lines.push(result.clone());
+                }
+                let mut collected: Vec<String> = Vec::new();
+                for line in lines {
+                    if !line.trim().is_empty() {
+                        collected.push(line.clone());
+                        details.push(AgentDetail::Result(line));
+                    }
+                }
+                if !collected.is_empty() {
+                    summary_lines = Some(collected);
+                }
             }
+
+            if details.is_empty() {
+                if let Some(error) = agent.error.as_ref() {
+                    let mut lines = lines_from(error);
+                    if lines.is_empty() {
+                        lines.push(error.clone());
+                    }
+                    let mut collected: Vec<String> = Vec::new();
+                    for line in lines {
+                        if !line.trim().is_empty() {
+                            collected.push(line.clone());
+                            details.push(AgentDetail::Error(line));
+                        }
+                    }
+                    if !collected.is_empty() {
+                        summary_lines = Some(collected);
+                    }
+                }
+            }
+
+            let step_progress = agent
+                .last_progress
+                .as_deref()
+                .and_then(parse_progress);
+
+            if details.is_empty() {
+                if let Some(progress) = agent.last_progress.as_ref() {
+                    let mut lines = lines_from(progress);
+                    if lines.is_empty() {
+                        lines.push(progress.clone());
+                    }
+                    for line in lines {
+                        if !line.trim().is_empty() {
+                            details.push(AgentDetail::Progress(line));
+                        }
+                    }
+                }
+            }
+
+            if details.is_empty() {
+                details.push(AgentDetail::Info(agent.status.clone()));
+            }
+
+            let last_update = details
+                .last()
+                .map(|detail| match detail {
+                    AgentDetail::Progress(text)
+                    | AgentDetail::Result(text)
+                    | AgentDetail::Error(text)
+                    | AgentDetail::Info(text) => text.clone(),
+                });
+
+            let elapsed = compute_agent_elapsed(
+                &mut tracker,
+                agent.id.as_str(),
+                agent.elapsed_ms,
+                phase,
+            );
+            let token_count = resolve_agent_token_count(
+                &mut tracker,
+                agent.id.as_str(),
+                agent.token_count,
+                &details,
+            );
+
+            let preview = AgentStatusPreview {
+                name: agent.name.clone(),
+                status: agent.status.clone(),
+                model: agent.model.clone(),
+                details,
+                status_kind: phase_to_status_kind(phase),
+                step_progress,
+                elapsed,
+                token_count,
+                last_update,
+            };
+            previews.push(preview);
+
+            status_collect.observe(phase);
+
             tracker.set_agent_name(Some(agent.name.clone()), false);
         }
 
-        if let Some(lines) = latest_lines {
-            if !lines.is_empty() {
-                tracker.cell.set_latest_result(lines);
-            }
-        }
-
-        tracker.cell.set_status_rows(rows.clone());
+        tracker.cell.set_agent_overview(previews.clone());
+        tracker.cell.set_batch_label(tracker.batch_id.clone());
         status_collect.apply(&mut tracker.cell);
 
-        if !rows.is_empty() {
-            let summary = rows
+        if let Some(lines) = summary_lines {
+            tracker.cell.set_latest_result(lines);
+        } else {
+            tracker.cell.set_latest_result(Vec::new());
+        }
+
+        if !previews.is_empty() {
+            let summary = previews
                 .iter()
-                .map(|(name, status)| format!("{}: {}", name, status))
+                .map(|preview| format!("{}: {}", preview.name, preview.status))
                 .collect::<Vec<_>>()
                 .join("; ");
             tracker
@@ -756,6 +841,174 @@ fn classify_status(status: &str, has_result: bool, has_error: bool) -> AgentPhas
         "pending" | "queued" | "waiting" | "starting" => AgentPhase::Pending,
         _ => AgentPhase::Running,
     }
+}
+
+fn phase_to_status_kind(phase: AgentPhase) -> AgentStatusKind {
+    match phase {
+        AgentPhase::Completed => AgentStatusKind::Completed,
+        AgentPhase::Failed => AgentStatusKind::Failed,
+        AgentPhase::Cancelled => AgentStatusKind::Cancelled,
+        AgentPhase::Pending => AgentStatusKind::Pending,
+        AgentPhase::Running => AgentStatusKind::Running,
+    }
+}
+
+fn compute_agent_elapsed(
+    tracker: &mut AgentRunTracker,
+    agent_id: &str,
+    elapsed_ms: Option<u64>,
+    phase: AgentPhase,
+) -> Option<Duration> {
+    if let Some(ms) = elapsed_ms {
+        let duration = Duration::from_millis(ms);
+        tracker
+            .agent_elapsed
+            .insert(agent_id.to_string(), duration);
+        if matches!(phase, AgentPhase::Completed | AgentPhase::Failed | AgentPhase::Cancelled) {
+            tracker.agent_started_at.remove(agent_id);
+        }
+        return Some(duration);
+    }
+
+    let start_entry = tracker
+        .agent_started_at
+        .entry(agent_id.to_string())
+        .or_insert_with(Instant::now);
+    let duration = start_entry.elapsed();
+
+    let entry = tracker
+        .agent_elapsed
+        .entry(agent_id.to_string())
+        .or_insert(duration);
+    if duration > *entry {
+        *entry = duration;
+    }
+
+    if matches!(phase, AgentPhase::Completed | AgentPhase::Failed | AgentPhase::Cancelled) {
+        tracker.agent_started_at.remove(agent_id);
+    }
+
+    tracker.agent_elapsed.get(agent_id).copied()
+}
+
+fn resolve_agent_token_count(
+    tracker: &mut AgentRunTracker,
+    agent_id: &str,
+    explicit: Option<u64>,
+    details: &[AgentDetail],
+) -> Option<u64> {
+    if let Some(value) = explicit {
+        tracker
+            .agent_token_counts
+            .insert(agent_id.to_string(), value);
+        return Some(value);
+    }
+
+    let inferred = details.iter().rev().find_map(|detail| match detail {
+        AgentDetail::Progress(text)
+        | AgentDetail::Result(text)
+        | AgentDetail::Error(text)
+        | AgentDetail::Info(text) => extract_token_count_from_text(text),
+    });
+
+    if let Some(value) = inferred {
+        tracker
+            .agent_token_counts
+            .insert(agent_id.to_string(), value);
+        return Some(value);
+    }
+
+    tracker.agent_token_counts.get(agent_id).copied()
+}
+
+fn extract_token_count_from_text(text: &str) -> Option<u64> {
+    let lower = text.to_ascii_lowercase();
+    if !lower.contains("token") && !lower.contains("tok") {
+        return None;
+    }
+
+    let mut candidate = None;
+    let mut fragment = String::new();
+
+    for ch in text.chars() {
+        if ch.is_ascii_digit()
+            || matches!(ch, '.' | ',' | '_' | 'k' | 'K' | 'm' | 'M')
+        {
+            fragment.push(ch);
+        } else {
+            if let Some(value) = parse_token_fragment(&fragment) {
+                candidate = Some(value);
+            }
+            fragment.clear();
+        }
+    }
+
+    if let Some(value) = parse_token_fragment(&fragment) {
+        candidate = Some(value);
+    }
+
+    candidate
+}
+
+fn parse_token_fragment(fragment: &str) -> Option<u64> {
+    let trimmed = fragment.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut multiplier = 1f64;
+    let mut base = trimmed;
+    if let Some(last) = trimmed.chars().last() {
+        match last {
+            'k' | 'K' => {
+                multiplier = 1_000f64;
+                base = trimmed[..trimmed.len().saturating_sub(1)].trim();
+            }
+            'm' | 'M' => {
+                multiplier = 1_000_000f64;
+                base = trimmed[..trimmed.len().saturating_sub(1)].trim();
+            }
+            _ => {}
+        }
+    }
+
+    let normalized = base.replace(',', "").replace('_', "");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if normalized.chars().all(|c| c.is_ascii_digit()) {
+        let value: u64 = normalized.parse().ok()?;
+        let computed = (value as f64 * multiplier).round();
+        if computed > 0.0 {
+            return Some(computed as u64);
+        }
+        return None;
+    }
+
+    if normalized.contains('.') {
+        let value: f64 = normalized.parse().ok()?;
+        let computed = (value * multiplier).round();
+        if computed > 0.0 {
+            return Some(computed as u64);
+        }
+        return None;
+    }
+
+    None
+}
+
+fn parse_progress(progress: &str) -> Option<StepProgress> {
+    for token in progress.split_whitespace() {
+        if let Some((done, total)) = token.split_once('/') {
+            let completed = done.trim().parse::<u32>().ok()?;
+            let total = total.trim().parse::<u32>().ok()?;
+            if total > 0 {
+                return Some(StepProgress { completed: completed.min(total), total });
+            }
+        }
+    }
+    None
 }
 
 fn lines_from(input: &str) -> Vec<String> {

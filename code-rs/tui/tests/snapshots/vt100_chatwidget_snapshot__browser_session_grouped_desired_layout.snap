@@ -8,26 +8,26 @@ expression: output
  ┌ Browser ───────────────────────────────────────────────────────────────────┐
  │ • https://example.com/docs                                   Ctrl+B expand │
  └────────────────────────────────────────────────────────────────────────────┘
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
  › Open docs and find login button
 
- ⚙ 🌐 Browser Session • https://example.com/docs                       Running
-      URL: https://example.com/docs
-      Title: (pending)
-      Elapsed: 1m05s
-      ─────────────────────────────────────────────────────────────────────────
-      ACTIONS
-      • 00:00  Open URL https://example.com/docs
-      • 00:05  Click Sign in button (#sign-in)
-      • 00:18  Scroll by dy=640
-      • 00:32  Type “docs search”
-      ─────────────────────────────────────────────────────────────────────────
-      CONSOLE
-      • ⚠️   cdp warning: Refused to load script from cdn.example.com
-      ─────────────────────────────────────────────────────────────────────────
-      SCREENSHOT
-      • Path: /tmp/browser_session.png
+ ⚙ ╭─ BROWSER (headless): example.com · 4 actions · 65.0s
+   │
+   │  #  ACTION       TARGET                   VALUE         RESULT       t
+   │   1 Nav          https://example.com/docs —             ok            5.0s
+   │   2 Click        Sign in button           "#sign-in"    ok           13.0s
+   │   3 Scroll       —                        "dy=640"      ok           14.0s
+   │   4 Type         —                        "docs search" ok           33.0s
+   │
+   │  Console: ⚠️   cdp warning: Refused to load script from cdn.example.com
+   │
+   │  Screenshot: /tmp/browser_session.png
+   │
+   ╰─ [Ctrl+B] Expand · [Esc] Stop
 
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you today?                                             │

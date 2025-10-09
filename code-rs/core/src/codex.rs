@@ -9020,23 +9020,35 @@ async fn send_agent_status_update(sess: &Session) {
     let manager = AGENT_MANAGER.read().await;
 
     // Collect all agents; include completed/failed so HUD can show final messages
+    let now = Utc::now();
     let agents: Vec<crate::protocol::AgentInfo> = manager
         .get_all_agents()
-        .map(|agent| crate::protocol::AgentInfo {
-            id: agent.id.clone(),
-            name: agent.model.clone(), // Use model name as the display name
-            status: match agent.status {
-                AgentStatus::Pending => "pending".to_string(),
-                AgentStatus::Running => "running".to_string(),
-                AgentStatus::Completed => "completed".to_string(),
-                AgentStatus::Failed => "failed".to_string(),
-                AgentStatus::Cancelled => "cancelled".to_string(),
-            },
-            batch_id: agent.batch_id.clone(),
-            model: Some(agent.model.clone()),
-            last_progress: agent.progress.last().cloned(),
-            result: agent.result.clone(),
-            error: agent.error.clone(),
+        .map(|agent| {
+            let start = agent.started_at.unwrap_or(agent.created_at);
+            let end = agent.completed_at.unwrap_or(now);
+            let elapsed_ms = match end.signed_duration_since(start).num_milliseconds() {
+                value if value >= 0 => Some(value as u64),
+                _ => None,
+            };
+
+            crate::protocol::AgentInfo {
+                id: agent.id.clone(),
+                name: agent.model.clone(), // Use model name as the display name
+                status: match agent.status {
+                    AgentStatus::Pending => "pending".to_string(),
+                    AgentStatus::Running => "running".to_string(),
+                    AgentStatus::Completed => "completed".to_string(),
+                    AgentStatus::Failed => "failed".to_string(),
+                    AgentStatus::Cancelled => "cancelled".to_string(),
+                },
+                batch_id: agent.batch_id.clone(),
+                model: Some(agent.model.clone()),
+                last_progress: agent.progress.last().cloned(),
+                result: agent.result.clone(),
+                error: agent.error.clone(),
+                elapsed_ms,
+                token_count: None,
+            }
         })
         .collect();
 

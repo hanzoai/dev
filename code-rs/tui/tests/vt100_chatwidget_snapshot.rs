@@ -269,6 +269,7 @@ fn tool_activity_showcase() {
             query: Some("ratatui widget patterns".into()),
         }),
     );
+    harness.override_running_tool_elapsed("search-complete", Duration::from_millis(0));
     push_ordered_event(
         &mut harness,
         &mut event_seq,
@@ -643,6 +644,8 @@ fn agent_run_grouped_desired_layout() {
                     last_progress: None,
                     result: None,
                     error: None,
+                    elapsed_ms: Some(29_000),
+                    token_count: Some(12_400),
                 },
                 AgentInfo {
                     id: "doc-writer".into(),
@@ -653,6 +656,8 @@ fn agent_run_grouped_desired_layout() {
                     last_progress: None,
                     result: None,
                     error: None,
+                    elapsed_ms: Some(4_500),
+                    token_count: None,
                 },
             ],
             context: Some("regression sweep".into()),
@@ -734,6 +739,8 @@ fn agent_run_grouped_plain_tool_name() {
                     last_progress: Some("Executing smoke tests".into()),
                     result: None,
                     error: None,
+                    elapsed_ms: Some(18_750),
+                    token_count: Some(8_900),
                 },
             ],
             context: Some("regression sweep".into()),
@@ -813,6 +820,8 @@ fn plan_agent_keeps_single_aggregate_block() {
                 last_progress: Some("refining steps".into()),
                 result: None,
                 error: None,
+                elapsed_ms: Some(12_300),
+                token_count: Some(6_100),
             }],
             context: Some("/plan coordination".into()),
             task: Some("Draft implementation plan".into()),

@@ -1236,6 +1236,14 @@ pub struct AgentInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub error: Option<String>,
+    /// Total elapsed time in milliseconds (if available)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub elapsed_ms: Option<u64>,
+    /// Approximate token count consumed by the agent (if reported)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub token_count: Option<u64>,
 }
 
 /// User's decision in response to an ExecApprovalRequest.

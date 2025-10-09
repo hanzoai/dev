@@ -5,6 +5,11 @@ expression: output
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /model - choose model & reasoning effort NEW with GPT-5-Codex!
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -13,21 +18,16 @@ expression: output
 
  › Handle captcha gracefully
 
- ⚙ 🌐 Browser Session • https://example.com                            Running
-      URL: https://example.com
-      Title: (pending)
-      Elapsed: 06s
-      ─────────────────────────────────────────────────────────────────────────
-      ACTIONS
-      • 00:00  Open URL https://example.com
-      • 00:03  Type “pizza”
-      • 00:05  browser key
-      ─────────────────────────────────────────────────────────────────────────
-      CONSOLE
-      • ⚠️   Encountering captcha block
-      ─────────────────────────────────────────────────────────────────────────
-      SCREENSHOT
-      (no screenshot yet)
+ ⚙ ╭─ BROWSER (headless): example.com · 3 actions · 6.0s
+   │
+   │  #  ACTION               TARGET              VALUE      RESULT       t
+   │   1 Nav                  https://example.com —          ok            3.0s
+   │   2 Type                 —                   "pizza"    typed         2.0s
+   │   3 Key                  —                   "Enter"    ok            1.0s
+   │
+   │  Console: ⚠️   Encountering captcha block
+   │
+   ╰─ [Ctrl+B] Expand · [Esc] Stop
 
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ What can I code for you today?                                             │

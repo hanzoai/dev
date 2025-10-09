@@ -113,7 +113,7 @@ pub(crate) use diff::{
     DiffCell,
 };
 pub(crate) use browser::BrowserSessionCell;
-pub(crate) use agent::AgentRunCell;
+pub(crate) use agent::{AgentDetail, AgentRunCell, AgentStatusKind, AgentStatusPreview, StepProgress};
 pub(crate) use explore::{
     explore_lines_from_record,
     explore_lines_from_record_with_force,
