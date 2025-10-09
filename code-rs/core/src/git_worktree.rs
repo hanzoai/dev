@@ -1,13 +1,17 @@
 use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs as stdfs;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
 use tokio::task;
+use toml::Value as TomlValue;
+
+use crate::config::find_code_home;
 
 /// Sanitize a string to be used as a single git refname component.
 ///
@@ -70,6 +74,199 @@ fn branch_copy_cache_dirs_enabled() -> bool {
     false
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CacheMode {
+    Auto,
+    Manual,
+    Off,
+}
+
+#[derive(Clone, Debug)]
+struct CacheSettings {
+    mode: CacheMode,
+    explicit_paths: Vec<PathBuf>,
+}
+
+impl Default for CacheSettings {
+    fn default() -> Self {
+        Self {
+            mode: CacheMode::Auto,
+            explicit_paths: Vec::new(),
+        }
+    }
+}
+
+fn cache_settings() -> CacheSettings {
+    static SETTINGS: OnceLock<CacheSettings> = OnceLock::new();
+    SETTINGS.get_or_init(CacheSettings::from_config).clone()
+}
+
+impl CacheSettings {
+    fn from_config() -> Self {
+        let mut settings = CacheSettings::default();
+
+        let codex_home = match find_code_home() {
+            Ok(path) => path,
+            Err(_) => return settings,
+        };
+
+        let config_path = codex_home.join("config.toml");
+        let contents = match stdfs::read_to_string(config_path) {
+            Ok(value) => value,
+            Err(_) => return settings,
+        };
+
+        let root: TomlValue = match contents.parse() {
+            Ok(value) => value,
+            Err(_) => return settings,
+        };
+
+        let table = match root.get("build_cache") {
+            Some(TomlValue::Table(table)) => table,
+            Some(_) | None => return settings,
+        };
+
+        if let Some(mode_str) = table.get("mode").and_then(|value| value.as_str()) {
+            match mode_str.trim().to_ascii_lowercase().as_str() {
+                "off" | "disabled" | "disable" => settings.mode = CacheMode::Off,
+                "manual" | "custom" => settings.mode = CacheMode::Manual,
+                "auto" | "automatic" | "default" => settings.mode = CacheMode::Auto,
+                _ => {}
+            }
+        }
+
+        if let Some(paths_value) = table.get("paths") {
+            let mut collected = Vec::new();
+            match paths_value {
+                TomlValue::Array(arr) => {
+                    for entry in arr {
+                        if let Some(path_str) = entry.as_str() {
+                            if !path_str.trim().is_empty() {
+                                collected.push(PathBuf::from(path_str));
+                            }
+                        }
+                    }
+                }
+                TomlValue::String(value) => {
+                    if !value.trim().is_empty() {
+                        collected.push(PathBuf::from(value));
+                    }
+                }
+                _ => {}
+            }
+            settings.explicit_paths = collected;
+        }
+
+        if matches!(settings.mode, CacheMode::Manual) && settings.explicit_paths.is_empty() {
+            settings.mode = CacheMode::Off;
+        }
+
+        settings
+    }
+}
+
+fn auto_cache_candidates(worktree_path: &Path) -> Vec<PathBuf> {
+    const MAX_DEPTH: usize = 3;
+    const SKIP_DIR_NAMES: &[&str] = &[
+        ".git",
+        ".code",
+        "target",
+        "node_modules",
+        "tmp",
+        "temp",
+        "__pycache__",
+        "venv",
+        ".venv",
+    ];
+
+    let mut out: HashSet<PathBuf> = HashSet::new();
+    let mut queue: VecDeque<(PathBuf, usize)> = VecDeque::new();
+    queue.push_back((worktree_path.to_path_buf(), 0));
+
+    while let Some((dir, depth)) = queue.pop_front() {
+        let cargo_toml = dir.join("Cargo.toml");
+        if cargo_toml.is_file() {
+            let target_dir = dir.join("target");
+            if let Some(rel) = relative_to_worktree(&target_dir, worktree_path) {
+                out.insert(rel);
+            }
+        }
+
+        let package_json = dir.join("package.json");
+        if package_json.is_file() {
+            let node_modules = dir.join("node_modules");
+            if let Some(rel) = relative_to_worktree(&node_modules, worktree_path) {
+                out.insert(rel);
+            }
+
+            for default in DEFAULT_BRANCH_CACHE_DIRS {
+                let candidate = dir.join(default);
+                if let Some(rel) = relative_to_worktree(&candidate, worktree_path) {
+                    out.insert(rel);
+                }
+            }
+        }
+
+        if depth >= MAX_DEPTH {
+            continue;
+        }
+
+        let entries = match stdfs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else { continue };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            if let Some(name_str) = name.to_str() {
+                if SKIP_DIR_NAMES.contains(&name_str) {
+                    continue;
+                }
+            }
+            queue.push_back((entry.path(), depth + 1));
+        }
+    }
+
+    let mut collected: Vec<PathBuf> = out.into_iter().collect();
+    collected.sort();
+    collected
+}
+
+fn relative_to_worktree(path: &Path, worktree_path: &Path) -> Option<PathBuf> {
+    path
+        .strip_prefix(worktree_path)
+        .ok()
+        .map(normalize_relative)
+}
+
+fn normalize_relative(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(seg) => normalized.push(seg),
+            Component::Prefix(_) | Component::RootDir => {}
+        }
+    }
+    normalized
+}
+
+fn resolve_repo_root(worktree_path: &Path) -> Option<PathBuf> {
+    let mut ancestors = worktree_path.ancestors();
+    while let Some(candidate) = ancestors.next() {
+        if candidate.ends_with("branches") {
+            return candidate.parent().map(Path::to_path_buf);
+        }
+    }
+    worktree_path.parent().map(Path::to_path_buf)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BranchMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,6 +322,13 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
         // of removing and re-adding a worktree. This makes repeated agent runs
         // start much faster.
         record_worktree_in_session(git_root, &worktree_path).await;
+        if let Err(err) = seed_branch_targets(&worktree_path).await {
+            tracing::warn!(
+                target = %worktree_path.display(),
+                error = %err,
+                "failed to seed cached build artifacts for existing worktree"
+            );
+        }
         return Ok((worktree_path, effective_branch));
     }
 
@@ -173,6 +377,14 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
     // Record created worktree for this process; best-effort.
     record_worktree_in_session(git_root, &worktree_path).await;
 
+    if let Err(err) = seed_branch_targets(&worktree_path).await {
+        tracing::warn!(
+            target = %worktree_path.display(),
+            error = %err,
+            "failed to seed cached build artifacts for new worktree"
+        );
+    }
+
     Ok((worktree_path, effective_branch))
 }
 
@@ -189,6 +401,270 @@ async fn record_worktree_in_session(git_root: &Path, worktree_path: &Path) {
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&file).await {
         let line = format!("{}\t{}\n", git_root.display(), worktree_path.display());
         let _ = tokio::io::AsyncWriteExt::write_all(&mut f, line.as_bytes()).await;
+    }
+}
+
+async fn seed_branch_targets(worktree_path: &Path) -> Result<(), String> {
+    const DISABLE_ENV: &str = "CODEX_DISABLE_TARGET_SEED";
+    if std::env::var(DISABLE_ENV)
+        .map(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "True"))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let settings = cache_settings();
+    if matches!(settings.mode, CacheMode::Off) {
+        return Ok(());
+    }
+
+    let Some(repo_root) = resolve_repo_root(worktree_path) else {
+        return Ok(());
+    };
+    let Some(repo_name) = repo_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|value| value.to_string())
+    else {
+        return Ok(());
+    };
+
+    let cache_base = find_code_home()
+        .map(|mut home| {
+            home.push("working");
+            home.push("_target-cache");
+            home
+        })
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".code")
+                .join("working")
+                .join("_target-cache")
+        });
+    let cache_root = cache_base.join(&repo_name);
+
+    let mut candidates: Vec<PathBuf> = match settings.mode {
+        CacheMode::Manual => settings
+            .explicit_paths
+            .iter()
+            .filter_map(|path| {
+                if path.is_absolute() {
+                    tracing::warn!(
+                        target = %path.display(),
+                        "build_cache.paths entries must be relative to the worktree; skipping absolute entry"
+                    );
+                    None
+                } else {
+                    Some(normalize_relative(path))
+                }
+            })
+            .collect(),
+        CacheMode::Auto => auto_cache_candidates(worktree_path),
+        CacheMode::Off => Vec::new(),
+    };
+
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    candidates.sort();
+    candidates.dedup();
+
+    for rel_path in candidates {
+        if rel_path.as_os_str().is_empty() {
+            continue;
+        }
+
+        let branch_target = worktree_path.join(&rel_path);
+        if branch_target.exists() {
+            continue;
+        }
+
+        let cache_target = cache_root.join(&rel_path);
+        if !cache_target.is_dir() {
+            continue;
+        }
+
+        if let Some(parent) = branch_target.parent() {
+            if let Err(err) = tokio::fs::create_dir_all(parent).await {
+                tracing::warn!(
+                    parent = %parent.display(),
+                    error = %err,
+                    "failed to create parent directory for cached build artifacts"
+                );
+                continue;
+            }
+        }
+
+        if let Err(err) = clone_target_from_cache(&cache_target, &branch_target).await {
+            tracing::warn!(
+                cache = %cache_target.display(),
+                target = %branch_target.display(),
+                error = %err,
+                "failed to seed cached build artifacts"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn clone_target_from_cache(cache_target: &Path, branch_target: &Path) -> Result<(), String> {
+    tokio::fs::create_dir_all(branch_target)
+        .await
+        .map_err(|e| format!("failed to create target directory {}: {e}", branch_target.display()))?;
+
+    let err_copy_clone = match run_rsync(cache_target, branch_target, true).await {
+        Ok(()) => return Ok(()),
+        Err(err) => err,
+    };
+    let _ = tokio::fs::remove_dir_all(branch_target).await;
+
+    tokio::fs::create_dir_all(branch_target)
+        .await
+        .map_err(|e| format!("failed to recreate target directory {}: {e}", branch_target.display()))?;
+    let err_cp_clone = match run_cp(cache_target, branch_target, true).await {
+        Ok(()) => return Ok(()),
+        Err(err) => err,
+    };
+    let _ = tokio::fs::remove_dir_all(branch_target).await;
+
+    tokio::fs::create_dir_all(branch_target)
+        .await
+        .map_err(|e| format!("failed to recreate target directory {}: {e}", branch_target.display()))?;
+    let err_cp_plain = match run_cp(cache_target, branch_target, false).await {
+        Ok(()) => return Ok(()),
+        Err(err) => err,
+    };
+    let _ = tokio::fs::remove_dir_all(branch_target).await;
+
+    Err(format!(
+        "rsync --copy-as=clone failed: {err_copy_clone}; \"cp -cR\" failed: {err_cp_clone}; \"cp\" fallback failed: {err_cp_plain}"
+    ))
+}
+
+async fn run_rsync(
+    cache_target: &Path,
+    branch_target: &Path,
+    copy_as_clone: bool,
+) -> Result<(), String> {
+    if copy_as_clone && !rsync_supports_copy_as_clone() {
+        return Err("rsync --copy-as=clone not supported on this platform".to_string());
+    }
+
+    let mut cmd = Command::new("rsync");
+    cmd.arg("-a");
+    cmd.arg("--delete");
+    if copy_as_clone {
+        cmd.arg("--copy-as=clone");
+    }
+
+    let mut src_arg = cache_target.to_string_lossy().to_string();
+    if !src_arg.ends_with('/') {
+        src_arg.push('/');
+    }
+    let mut dst_arg = branch_target.to_string_lossy().to_string();
+    if !dst_arg.ends_with('/') {
+        dst_arg.push('/');
+    }
+
+    cmd.arg(src_arg);
+    cmd.arg(dst_arg);
+
+    let status = cmd
+        .status()
+        .await
+        .map_err(|e| format!("failed to launch rsync: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("rsync exited with status {status}"))
+    }
+}
+
+fn rsync_supports_copy_as_clone() -> bool {
+    use std::sync::OnceLock;
+
+    static SUPPORT: OnceLock<bool> = OnceLock::new();
+    *SUPPORT.get_or_init(|| {
+        let Ok(output) = std::process::Command::new("rsync")
+            .arg("--help")
+            .output()
+        else {
+            return false;
+        };
+        let mut text = String::new();
+        text.push_str(&String::from_utf8_lossy(&output.stdout));
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        text.contains("--copy-as=clone")
+    })
+}
+
+async fn run_cp(cache_target: &Path, branch_target: &Path, prefer_clone: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = Command::new("cp");
+        if prefer_clone {
+            cmd.arg("-cR");
+        } else {
+            cmd.arg("-R");
+        }
+        cmd.arg(cache_target.join("."));
+        cmd.arg(branch_target);
+
+        let status = cmd
+            .status()
+            .await
+            .map_err(|e| format!("failed to launch cp: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else if prefer_clone {
+            Err(format!("cp -cR exited with status {status}"))
+        } else {
+            Err(format!("cp exited with status {status}"))
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        if prefer_clone {
+            let mut clone_cmd = Command::new("cp");
+            clone_cmd.arg("-a");
+            clone_cmd.arg("--reflink=auto");
+            clone_cmd.arg(cache_target.join("."));
+            clone_cmd.arg(branch_target);
+
+            match clone_cmd.status().await {
+                Ok(status) if status.success() => {
+                    return Ok(());
+                }
+                Ok(status) => {
+                    tracing::debug!(
+                        status = %status,
+                        "cp --reflink fallback failed; retrying with full copy"
+                    );
+                }
+                Err(err) => {
+                    tracing::debug!(error = %err, "cp --reflink invocation failed; retrying with full copy");
+                }
+            }
+        }
+
+        let mut cmd = Command::new("cp");
+        cmd.arg("-a");
+        cmd.arg(cache_target.join("."));
+        cmd.arg(branch_target);
+
+        let status = cmd
+            .status()
+            .await
+            .map_err(|e| format!("failed to launch cp: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("cp exited with status {status}"))
+        }
     }
 }
 
