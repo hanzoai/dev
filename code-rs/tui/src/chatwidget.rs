@@ -645,6 +645,23 @@ enum AutoReviewOutcome {
     Commit(AutoReviewCommitScope),
 }
 
+#[cfg(test)]
+pub(super) type CaptureAutoTurnCommitStub = Box<
+    dyn Fn(&'static str, Option<String>) -> Result<GhostCommit, GitToolingError> + Send + Sync,
+>;
+
+#[cfg(test)]
+pub(super) static CAPTURE_AUTO_TURN_COMMIT_STUB: Lazy<Mutex<Option<CaptureAutoTurnCommitStub>>> =
+    Lazy::new(|| Mutex::new(None));
+
+#[cfg(test)]
+pub(super) type GitDiffNameOnlyBetweenStub =
+    Box<dyn Fn(String, String) -> Result<Vec<String>, String> + Send + Sync>;
+
+#[cfg(test)]
+pub(super) static GIT_DIFF_NAME_ONLY_BETWEEN_STUB: Lazy<Mutex<Option<GitDiffNameOnlyBetweenStub>>> =
+    Lazy::new(|| Mutex::new(None));
+
 #[derive(Clone)]
 struct AutoResolveState {
     prompt: String,
@@ -12408,6 +12425,12 @@ fi\n\
         match self.auto_prepare_commit_scope() {
             AutoReviewOutcome::Skip => {
                 self.auto_turn_review_state = None;
+                if self.auto_state.waiting_for_review {
+                    self.maybe_resume_auto_after_review();
+                    if self.auto_state.waiting_for_review {
+                        self.auto_state.waiting_for_review = false;
+                    }
+                }
             }
             AutoReviewOutcome::Workspace => {
                 self.auto_turn_review_state = None;
@@ -12491,6 +12514,11 @@ fi\n\
         message: &'static str,
         parent: Option<&GhostCommit>,
     ) -> Result<GhostCommit, GitToolingError> {
+        #[cfg(test)]
+        if let Some(stub) = CAPTURE_AUTO_TURN_COMMIT_STUB.lock().unwrap().as_ref() {
+            let parent_id = parent.map(|commit| commit.id().to_string());
+            return stub(message, parent_id);
+        }
         let mut options = CreateGhostCommitOptions::new(self.config.cwd.as_path()).message(message);
         if let Some(parent_commit) = parent {
             options = options.parent(parent_commit.id());
@@ -12503,6 +12531,10 @@ fi\n\
         base_commit: &str,
         head_commit: &str,
     ) -> Result<Vec<String>, String> {
+        #[cfg(test)]
+        if let Some(stub) = GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock().unwrap().as_ref() {
+            return stub(base_commit.to_string(), head_commit.to_string());
+        }
         self.run_git_command(
             ["diff", "--name-only", base_commit, head_commit],
             |stdout| {
@@ -19292,6 +19324,10 @@ fi\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::{
+        CAPTURE_AUTO_TURN_COMMIT_STUB,
+        GIT_DIFF_NAME_ONLY_BETWEEN_STUB,
+    };
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use crate::chatwidget::auto_coordinator::{
@@ -19335,6 +19371,49 @@ mod tests {
     use std::time::SystemTime;
     use std::path::PathBuf;
     use code_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
+
+    struct CaptureCommitStubGuard;
+
+    impl CaptureCommitStubGuard {
+        fn install<F>(stub: F) -> Self
+        where
+            F: Fn(&'static str, Option<String>) -> Result<GhostCommit, GitToolingError>
+                + Send
+                + Sync
+                + 'static,
+        {
+            let mut slot = CAPTURE_AUTO_TURN_COMMIT_STUB.lock().unwrap();
+            assert!(slot.is_none(), "capture stub already installed");
+            *slot = Some(Box::new(stub));
+            Self
+        }
+    }
+
+    impl Drop for CaptureCommitStubGuard {
+        fn drop(&mut self) {
+            *CAPTURE_AUTO_TURN_COMMIT_STUB.lock().unwrap() = None;
+        }
+    }
+
+    struct GitDiffStubGuard;
+
+    impl GitDiffStubGuard {
+        fn install<F>(stub: F) -> Self
+        where
+            F: Fn(String, String) -> Result<Vec<String>, String> + Send + Sync + 'static,
+        {
+            let mut slot = GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock().unwrap();
+            assert!(slot.is_none(), "git diff stub already installed");
+            *slot = Some(Box::new(stub));
+            Self
+        }
+    }
+
+    impl Drop for GitDiffStubGuard {
+        fn drop(&mut self) {
+            *GIT_DIFF_NAME_ONLY_BETWEEN_STUB.lock().unwrap() = None;
+        }
+    }
 
     fn reset_history(chat: &mut ChatWidget<'_>) {
         chat.history_cells.clear();
@@ -19441,6 +19520,83 @@ mod tests {
 
         assert!(chat.auto_state.waiting_for_review);
         assert!(!chat.auto_state.waiting_for_response);
+    }
+
+    #[test]
+    fn auto_review_skip_resumes_auto_drive() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.review_enabled = true;
+        chat.auto_state.waiting_for_response = true;
+        chat.auto_state.waiting_for_review = false;
+
+        let turn_config = TurnConfig {
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+        };
+        chat.pending_auto_turn_config = Some(turn_config.clone());
+        chat.pending_turn_descriptor = Some(TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            agent_preferences: None,
+            review_strategy: None,
+        });
+
+        let base_id = "base-commit".to_string();
+        let final_id = "final-commit".to_string();
+
+        chat.auto_turn_review_state = Some(AutoTurnReviewState {
+            base_commit: Some(GhostCommit::new(base_id.clone(), None)),
+        });
+
+        let base_for_capture = base_id.clone();
+        let final_for_capture = final_id.clone();
+        let _capture_guard = CaptureCommitStubGuard::install(move |message, parent| {
+            assert_eq!(message, "auto turn change snapshot");
+            assert_eq!(parent.as_deref(), Some(base_for_capture.as_str()));
+            Ok(GhostCommit::new(final_for_capture.clone(), parent))
+        });
+
+        let base_for_diff = base_id.clone();
+        let final_for_diff = final_id.clone();
+        let _diff_guard = GitDiffStubGuard::install(move |base, head| {
+            assert_eq!(base, base_for_diff);
+            assert_eq!(head, final_for_diff);
+            Ok(Vec::new())
+        });
+
+        let initial_history_len = chat.auto_history.raw_snapshot().len();
+
+        chat.auto_on_assistant_final();
+        assert!(chat.auto_state.waiting_for_review, "post-turn review should be pending");
+
+        let descriptor_snapshot = chat.pending_turn_descriptor.clone();
+        chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
+
+        assert!(
+            !chat.auto_state.waiting_for_review,
+            "auto drive should clear waiting flag after skipped review"
+        );
+
+        let skip_banner = "Auto review skipped: no file changes detected this turn.";
+        let skip_present = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains(skip_banner))
+            })
+        });
+        assert!(skip_present, "skip banner should appear in history");
+
+        let final_history_len = chat.auto_history.raw_snapshot().len();
+        assert!(
+            chat.auto_state.waiting_for_response
+                || final_history_len > initial_history_len,
+            "auto drive should resume conversation after skipped review"
+        );
     }
 
     #[test]
