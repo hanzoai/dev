@@ -70,6 +70,63 @@ resolve_bin_path() {
   fi
 }
 
+sync_target_cache_impl() {
+  if [ -z "${CARGO_TARGET_DIR:-}" ] || [ ! -d "${CARGO_TARGET_DIR:-}" ]; then
+    return 0
+  fi
+  mkdir -p "${TARGET_CACHE_DIR}" || return 0
+  if command -v rsync >/dev/null 2>&1; then
+    local -a args
+    args=(-a --delete)
+    if rsync --help 2>&1 | grep -q -- '--copy-as=clone'; then
+      args+=(--copy-as=clone)
+    fi
+    args+=("${CARGO_TARGET_DIR%/}/" "${TARGET_CACHE_DIR%/}/")
+    if ! rsync "${args[@]}"; then
+      echo "⚠️  Warning: failed to rsync target cache" >&2
+      return 0
+    fi
+    return 0
+  fi
+  if [ "$(uname -s)" = "Darwin" ]; then
+    rm -rf "${TARGET_CACHE_DIR:?}/"* 2>/dev/null || true
+    if ! cp -cR "${CARGO_TARGET_DIR%/}/." "${TARGET_CACHE_DIR}"; then
+      echo "⚠️  Warning: failed to clone target cache with cp" >&2
+      return 0
+    fi
+  else
+    rm -rf "${TARGET_CACHE_DIR:?}/"* 2>/dev/null || true
+    if ! cp -a "${CARGO_TARGET_DIR%/}/." "${TARGET_CACHE_DIR}"; then
+      echo "⚠️  Warning: failed to copy target cache" >&2
+      return 0
+    fi
+  fi
+  return 0
+}
+
+update_target_cache() {
+  if [ "${CODE_SKIP_TARGET_CACHE_UPDATE:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ -z "${CARGO_TARGET_DIR:-}" ] || [ ! -d "${CARGO_TARGET_DIR}" ]; then
+    return 0
+  fi
+  mkdir -p "${TARGET_CACHE_BASE}" || return 0
+  if command -v flock >/dev/null 2>&1; then
+    (
+      exec 9>"${TARGET_CACHE_BASE}/.cache.lock"
+      if flock -w 30 9; then
+        sync_target_cache_impl
+      else
+        echo "⚠️  Warning: skipping target cache update (lock unavailable)" >&2
+        true
+      fi
+    )
+  else
+    sync_target_cache_impl
+  fi
+}
+
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
 esac
@@ -135,6 +192,23 @@ if [ "${CHECK_RELEASE_NOTES_VERSION_RUN:-0}" = "0" ]; then
 fi
 CALLER_CWD="$(pwd)"
 
+if [[ "${SCRIPT_DIR}" == */.code/working/*/branches/* ]]; then
+  WORKTREE_PARENT="${SCRIPT_DIR%/branches/*}"
+  REPO_NAME="$(basename "${WORKTREE_PARENT}")"
+else
+  REPO_NAME="$(basename "${SCRIPT_DIR}")"
+fi
+
+if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
+  CACHE_HOME="${CODE_HOME}"
+elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
+  CACHE_HOME="${CODEX_HOME}"
+else
+  CACHE_HOME="${HOME}/.code"
+fi
+CACHE_HOME="${CACHE_HOME%/}"
+TARGET_CACHE_ROOT="${CACHE_HOME}/working/_target-cache/${REPO_NAME}"
+
 case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
     WORKSPACE_DIR="codex-rs"
@@ -155,6 +229,9 @@ if [ ! -d "$WORKSPACE_PATH" ]; then
   echo "Error: Workspace directory '${WORKSPACE_PATH}' not found." >&2
   exit 1
 fi
+
+TARGET_CACHE_BASE="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
+TARGET_CACHE_DIR="${TARGET_CACHE_BASE}/target"
 
 # Change to the selected Rust workspace root regardless of caller CWD
 cd "${WORKSPACE_PATH}"
@@ -598,6 +675,8 @@ if [ $? -eq 0 ]; then
     else
       echo "Binary artifact not found at ${ABS_BIN_PATH}"
     fi
+
+    update_target_cache || true
 
     if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
       if [ ! -x "${ABS_BIN_PATH}" ]; then
