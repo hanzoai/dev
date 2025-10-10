@@ -12000,6 +12000,7 @@ fi\n\
             show_composer: true,
             awaiting_submission: false,
             waiting_for_response: false,
+            waiting_for_review: false,
             countdown: None,
             button: None,
             manual_hint: None,
@@ -12188,6 +12189,12 @@ fi\n\
         if self.auto_state.continue_mode != continue_mode {
             self.auto_state.continue_mode = continue_mode;
             self.auto_state.reset_countdown();
+            if self.auto_state.awaiting_submission && !self.auto_state.paused_for_manual_edit {
+                let countdown = self.auto_state.countdown_seconds();
+                self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+                self.auto_state.seconds_remaining = countdown.unwrap_or(0);
+                self.auto_start_countdown(self.auto_state.countdown_id, countdown);
+            }
             changed = true;
         }
 
@@ -13245,6 +13252,7 @@ fi\n\
                     show_composer: true,
                     awaiting_submission: false,
                     waiting_for_response: false,
+                    waiting_for_review: false,
                     countdown: None,
                     button: None,
                     manual_hint: None,
@@ -13428,6 +13436,7 @@ fi\n\
             cli_prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
+            waiting_for_review: self.auto_state.waiting_for_review,
             countdown,
             button,
             manual_hint,

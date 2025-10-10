@@ -26,6 +26,7 @@ use code_tui::test_helpers::{
     force_scroll_offset as harness_force_scroll_offset,
     layout_metrics as harness_layout_metrics,
     render_chat_widget_to_vt100,
+    AutoContinueModeFixture,
     ChatWidgetHarness,
 };
 use serde_json::json;
@@ -116,6 +117,191 @@ fn baseline_empty_chat() {
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
     insta::assert_snapshot!("empty_chat", output);
+}
+
+#[test]
+fn auto_drive_continue_mode_transitions() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Expand Auto Drive validation",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "cargo nextest run --no-fail-fast",
+        "Auto Drive ready to run cargo nextest",
+        Some("Proposed action: run focused tests before continuing.".to_string()),
+    );
+    harness.auto_drive_override_countdown(9);
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_continue_mode(AutoContinueModeFixture::Manual);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_continue_mode(AutoContinueModeFixture::Immediate);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_continue_mode_transitions",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_action_transitions() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Diagnose Auto Drive regressions",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_response(
+        "Analyzing workspace changes",
+        Some("Comparing diffs against last run.".to_string()),
+        Some("Completed git status check.".to_string()),
+    );
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_awaiting_submission(
+        "cargo test --workspace",
+        "Ready: run cargo test --workspace",
+        Some("Suggested step: confirm tests before resuming.".to_string()),
+    );
+    harness.auto_drive_override_countdown(6);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_waiting_for_review(Some(
+        "Waiting for code review to complete.".to_string(),
+    ));
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_waiting_for_response(
+        "Resuming automated investigation",
+        Some("Queued new command for execution.".to_string()),
+        None,
+    );
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_action_transitions",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_countdown_auto_submit() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Handle countdown exhaustion",
+        true,
+        false,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "cargo fmt --check",
+        "Auto Drive queued cargo fmt --check",
+        Some("Will run formatter unless cancelled.".to_string()),
+    );
+    harness.auto_drive_override_countdown(3);
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_advance_countdown(1);
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_advance_countdown(0);
+    harness.auto_drive_set_waiting_for_response(
+        "Auto Drive executing formatter",
+        Some("Running cargo fmt --check.".to_string()),
+        None,
+    );
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_countdown_auto_submit",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
+fn auto_drive_review_footer_persists() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Verify review footer",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_review(Some(
+        "Waiting for code review to complete.".to_string(),
+    ));
+
+    let frame = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18));
+
+    insta::assert_snapshot!("auto_drive_review_footer_persists", frame);
+}
+
+#[test]
+fn auto_drive_manual_mode_waits() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Manual mode requires explicit continue",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "justfile run manual",
+        "Auto Drive prepared to run justfile target",
+        Some("User confirmation required before continuing.".to_string()),
+    );
+    harness.auto_drive_set_continue_mode(AutoContinueModeFixture::Manual);
+
+    let frame = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18));
+
+    insta::assert_snapshot!("auto_drive_manual_mode_waits", frame);
+}
+
+#[test]
+fn auto_drive_review_resume_returns_to_running() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Resume after review",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_review(Some(
+        "Waiting for reviewer feedback.".to_string(),
+    ));
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    harness.auto_drive_set_waiting_for_response(
+        "Review complete — resuming tasks",
+        Some("Coordinator resumed the workflow.".to_string()),
+        Some("Review cleared open issues.".to_string()),
+    );
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 18)));
+
+    insta::assert_snapshot!(
+        "auto_drive_review_resume_returns_to_running",
+        frames.join("\n---FRAME---\n"),
+    );
 }
 
 #[test]

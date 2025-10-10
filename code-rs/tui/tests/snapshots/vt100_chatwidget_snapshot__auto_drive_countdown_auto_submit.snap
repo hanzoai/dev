@@ -1,0 +1,61 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 230
+expression: "frames.join(\"\\n---FRAME---\\n\")"
+---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+ ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
+ │ cargo fmt --check                                                          │
+ │ ┌─────────────────────────────────────────────────────────────────────────┐│
+ │ │ What can I code for you today?                                          ││
+ │ └─────────────────────────────────────────────────────────────────────────┘│
+ │ ╭───────────────╮                                                          │
+ │ │ Continue (3s) │   Esc to cancel                                          │
+ │ ╰───────────────╯                                                          │
+ │ Awaiting input (0s, 0 turns)  •  Agents Disabled  •  Review Enabled        │
+ └────────────────────────────────────────────────────────────────────────────┘
+---FRAME---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+ ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
+ │ cargo fmt --check                                                          │
+ │ ┌─────────────────────────────────────────────────────────────────────────┐│
+ │ │ What can I code for you today?                                          ││
+ │ └─────────────────────────────────────────────────────────────────────────┘│
+ │ ╭───────────────╮                                                          │
+ │ │ Continue (1s) │   Esc to cancel                                          │
+ │ ╰───────────────╯                                                          │
+ │ Awaiting input (0s, 0 turns)  •  Agents Disabled  •  Review Enabled        │
+ └────────────────────────────────────────────────────────────────────────────┘
+---FRAME---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+
+ › cargo fmt --check
+ ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
+ │ Running cargo fmt --check.                                                 │
+ │ Auto Drive executing formatter…                                            │
+ │ ┌─────────────────────────────────────────────────────────────────────────┐│
+ │ │ What can I code for you today?                                          ││
+ │ └─────────────────────────────────────────────────────────────────────────┘│
+ │ Running (0s, 0 turns)  •  Agents Disabled  •  Review Enabled               │
+ └────────────────────────────────────────────────────────────────────────────┘

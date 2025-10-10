@@ -1,0 +1,61 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 148
+expression: "frames.join(\"\\n---FRAME---\\n\")"
+---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+ ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
+ │ cargo nextest run --no-fail-fast                                           │
+ │ ┌─────────────────────────────────────────────────────────────────────────┐│
+ │ │ What can I code for you today?                                          ││
+ │ └─────────────────────────────────────────────────────────────────────────┘│
+ │ ╭───────────────╮                                                          │
+ │ │ Continue (9s) │   Esc to cancel                                          │
+ │ ╰───────────────╯                                                          │
+ │ Awaiting input (0s, 0 turns)  •  Agents Enabled  •  Review Enabled         │
+ └────────────────────────────────────────────────────────────────────────────┘
+---FRAME---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+ ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
+ │ cargo nextest run --no-fail-fast                                           │
+ │ ┌─────────────────────────────────────────────────────────────────────────┐│
+ │ │ What can I code for you today?                                          ││
+ │ └─────────────────────────────────────────────────────────────────────────┘│
+ │ ╭──────────╮                                                               │
+ │ │ Continue │   Esc to cancel                                               │
+ │ ╰──────────╯                                                               │
+ │ Awaiting input (0s, 0 turns)  •  Agents Enabled  •  Review Enabled         │
+ └────────────────────────────────────────────────────────────────────────────┘
+---FRAME---
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │                                    Code                                    │
+ └────────────────────────────────────────────────────────────────────────────┘
+   /code - perform a coding task (multiple agents)
+   /branch - work in an isolated /branch then /merge when done (great for
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+ ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
+ │ Auto Drive ready to run cargo nextest                                      │
+ │ Proposed action: run focused tests before continuing.                      │
+ │ ┌─────────────────────────────────────────────────────────────────────────┐│
+ │ │ What can I code for you today?                                          ││
+ │ └─────────────────────────────────────────────────────────────────────────┘│
+ │ Running (0s, 0 turns)  •  Agents Enabled  •  Review Enabled                │
+ └────────────────────────────────────────────────────────────────────────────┘
