@@ -12694,7 +12694,7 @@ fi\n\
             TurnComplexity::Medium => {
                 if self.auto_state.subagents_enabled {
                     parts.push(format!(
-                        "This turn is likely medium complexity, so you should launch at least two agents via `agent {{\"action\":\"create\",\"models\":[\"claude\",\"gemini\"],\"read_only\":{}}}`.",
+                        "This turn is likely medium complexity, so you should launch at least two agents via `agent {{\"action\":\"create\",\"create\":{{\"models\":[\"claude\",\"gemini\"],\"read_only\":{}}}}}`.",
                         ro_str
                     ));
                 } else {
@@ -12704,7 +12704,7 @@ fi\n\
             TurnComplexity::High => {
                 if self.auto_state.subagents_enabled {
                     parts.push(format!(
-                        "This turn is likely high complexity; launch the full agent fleet via `agent {{\"action\":\"create\",\"models\":[\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"],\"read_only\":{}}}`.",
+                        "This turn is likely high complexity; launch the full agent fleet via `agent {{\"action\":\"create\",\"create\":{{\"models\":[\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"],\"read_only\":{}}}}}`.",
                         ro_str
                     ));
                 } else {
@@ -12717,9 +12717,9 @@ fi\n\
             && matches!(complexity, TurnComplexity::Medium | TurnComplexity::High)
         {
             if cfg.read_only {
-                parts.push("Use `agent {\"action\":\"wait\",\"batch_id\":\"<batch_id>\",\"return_all\":true}` to wait for all agents to complete automatically. Once they finish, collate their output into your final answer.".to_string());
+                parts.push("Use `agent {\"action\":\"wait\",\"wait\":{\"batch_id\":\"<batch_id>\",\"return_all\":true}}` to wait for all agents to complete automatically. Once they finish, collate their output into your final answer.".to_string());
             } else {
-                parts.push("Use `agent {\"action\":\"wait\",\"batch_id\":\"<batch_id>\",\"return_all\":true}` to wait for all agents to complete. Afterwards inspect each worktree and merge the best solution (or the best parts from each agent), then test to ensure the changes are valid.".to_string());
+                parts.push("Use `agent {\"action\":\"wait\",\"wait\":{\"batch_id\":\"<batch_id>\",\"return_all\":true}}` to wait for all agents to complete. Afterwards inspect each worktree and merge the best solution (or the best parts from each agent), then test to ensure the changes are valid.".to_string());
             }
         }
 
@@ -24789,7 +24789,7 @@ impl ChatWidget<'_> {
                 if let Some(ref batch) = agent.batch_id {
                     if rendered_batches.insert(batch.clone()) {
                         let batch_line = format!(
-                            "Batch {} — use agent {{\"action\":\"wait\",\"batch_id\":\"{}\"}}",
+                            "Batch {} — use agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{}\"}}}}",
                             short_id(batch),
                             batch
                         );

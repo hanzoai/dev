@@ -425,9 +425,11 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
-                "agent_id": "qa-bot",
-                "task": "Run targeted regression suite",
-                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                "create": {
+                    "name": "qa-bot",
+                    "task": "Run targeted regression suite",
+                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                }
             })),
         }),
     );
@@ -440,9 +442,11 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
-                "agent_id": "qa-bot",
-                "task": "Run targeted regression suite",
-                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                "create": {
+                    "name": "qa-bot",
+                    "task": "Run targeted regression suite",
+                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                }
             })),
             duration: Duration::from_secs(94),
             result: Ok("Regression sweep complete\n- 58 tests passed\n- 0 failures".into()),
@@ -459,9 +463,10 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "wait",
-                "agent_id": "deploy-helper",
-                "status_url": "https://status.example.com/run/42",
-                "timeout_seconds": 600
+                "wait": {
+                    "agent_id": "deploy-helper",
+                    "timeout_seconds": 600
+                }
             })),
         }),
     );
@@ -694,9 +699,11 @@ fn agent_run_grouped_desired_layout() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
-                "agent_id": "qa-bot",
-                "task": "Run targeted regression suite",
-                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                "create": {
+                    "name": "qa-bot",
+                    "task": "Run targeted regression suite",
+                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                }
             })),
         }),
     );
@@ -754,9 +761,11 @@ fn agent_run_grouped_desired_layout() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
-                "agent_id": "qa-bot",
-                "task": "Run targeted regression suite",
-                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                "create": {
+                    "name": "qa-bot",
+                    "task": "Run targeted regression suite",
+                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                }
             })),
             duration: Duration::from_secs(94),
             result: Ok("Regression sweep complete\n- 58 tests passed\n- 0 failures".into()),
@@ -789,10 +798,11 @@ fn agent_run_grouped_plain_tool_name() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
-                "batch_id": "batch-001",
-                "agent_id": "qa-bot",
-                "task": "Run targeted regression suite",
-                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                "create": {
+                    "name": "qa-bot",
+                    "task": "Run targeted regression suite",
+                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                }
             })),
         }),
     );
@@ -835,11 +845,12 @@ fn agent_run_grouped_plain_tool_name() {
             call_id: "agent-run-plain".into(),
             tool_name: "agent".into(),
             parameters: Some(json!({
-                "action": "run",
-                "batch_id": "batch-001",
-                "agent_id": "qa-bot",
-                "task": "Run targeted regression suite",
-                "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                "action": "create",
+                "create": {
+                    "name": "qa-bot",
+                    "task": "Run targeted regression suite",
+                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                }
             })),
             duration: Duration::from_secs(104),
             result: Ok("Regression sweep complete\n- 58 tests passed\n- 0 failures".into()),
@@ -869,10 +880,11 @@ fn plan_agent_keeps_single_aggregate_block() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
-                "batch_id": "batch-plan",
-                "agent_id": "planner",
-                "task": "Draft implementation plan",
-                "plan": ["Outline work", "Validate approach", "Summarize"]
+                "create": {
+                    "name": "planner",
+                    "task": "Draft implementation plan",
+                    "plan": ["Outline work", "Validate approach", "Summarize"]
+                }
             })),
         }),
     );
