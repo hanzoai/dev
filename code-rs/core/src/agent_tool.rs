@@ -1077,9 +1077,23 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
 
     let mut create_properties = BTreeMap::new();
     create_properties.insert(
+        "name".to_string(),
+        JsonSchema::String {
+            description: Some("Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_string()),
+            allowed_values: None,
+        },
+    );
+    create_properties.insert(
         "task".to_string(),
         JsonSchema::String {
             description: Some("Task prompt to execute".to_string()),
+            allowed_values: None,
+        },
+    );
+    create_properties.insert(
+        "context".to_string(),
+        JsonSchema::String {
+            description: Some("Optional background context".to_string()),
             allowed_values: None,
         },
     );
@@ -1100,20 +1114,6 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
     create_properties.insert(
-        "context".to_string(),
-        JsonSchema::String {
-            description: Some("Optional background context".to_string()),
-            allowed_values: None,
-        },
-    );
-    create_properties.insert(
-        "output".to_string(),
-        JsonSchema::String {
-            description: Some("Optional desired output description".to_string()),
-            allowed_values: None,
-        },
-    );
-    create_properties.insert(
         "files".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String {
@@ -1126,13 +1126,10 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
     create_properties.insert(
-        "plan".to_string(),
-        JsonSchema::Array {
-            items: Box::new(JsonSchema::String {
-                description: None,
-                allowed_values: None,
-            }),
-            description: Some("Optional list of plan steps to display in the UI".to_string()),
+        "output".to_string(),
+        JsonSchema::String {
+            description: Some("Optional desired output description".to_string()),
+            allowed_values: None,
         },
     );
     create_properties.insert(
@@ -1141,13 +1138,6 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
             description: Some(
                 "When true, run in read-only mode (default: false)".to_string(),
             ),
-        },
-    );
-    create_properties.insert(
-        "name".to_string(),
-        JsonSchema::String {
-            description: Some("Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_string()),
-            allowed_values: None,
         },
     );
     properties.insert(
@@ -1328,7 +1318,6 @@ pub struct AgentCreateOptions {
     pub files: Option<Vec<String>>,
     pub read_only: Option<bool>,
     pub name: Option<String>,
-    pub plan: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
