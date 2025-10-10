@@ -404,7 +404,13 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
                 "failed to prepare target cache link"
             );
         }
-        spawn_seed_branch_targets(&worktree_path);
+        if let Err(err) = seed_branch_targets(&worktree_path).await {
+            tracing::warn!(
+                target = %worktree_path.display(),
+                error = %err,
+                "failed to seed cached build artifacts"
+            );
+        }
         return Ok((worktree_path, effective_branch));
     }
 
@@ -459,22 +465,15 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
             "failed to prepare target cache link"
         );
     }
-    spawn_seed_branch_targets(&worktree_path);
+    if let Err(err) = seed_branch_targets(&worktree_path).await {
+        tracing::warn!(
+            target = %worktree_path.display(),
+            error = %err,
+            "failed to seed cached build artifacts"
+        );
+    }
 
     Ok((worktree_path, effective_branch))
-}
-
-fn spawn_seed_branch_targets(worktree_path: &Path) {
-    let target_path = worktree_path.to_path_buf();
-    task::spawn(async move {
-        if let Err(err) = seed_branch_targets(&target_path).await {
-            tracing::warn!(
-                target = %target_path.display(),
-                error = %err,
-                "failed to seed cached build artifacts"
-            );
-        }
-    });
 }
 
 /// Append the created worktree to a per-process session file so the TUI can
