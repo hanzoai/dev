@@ -12131,7 +12131,13 @@ fi\n\
 
     pub(crate) fn close_auto_drive_settings(&mut self) {
         self.bottom_pane.clear_auto_drive_settings();
-        if self.auto_state.active && !self.auto_state.paused_for_manual_edit {
+        let should_rebuild_view = if self.auto_state.active {
+            !self.auto_state.paused_for_manual_edit
+        } else {
+            self.auto_state.awaiting_goal_input || self.auto_state.last_run_summary.is_some()
+        };
+
+        if should_rebuild_view {
             self.auto_rebuild_live_ring();
         }
         self.bottom_pane.ensure_input_focus();
