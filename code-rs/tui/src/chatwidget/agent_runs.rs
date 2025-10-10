@@ -235,6 +235,70 @@ impl InvocationMetadata {
                     }
                 }
             }
+            if let Some(create) = map.get("create").and_then(|v| v.as_object()) {
+                if meta.task.is_none() {
+                    if let Some(task) = create.get("task").and_then(|v| v.as_str()) {
+                        meta.task = Some(task.to_string());
+                    }
+                }
+                if meta.label.is_none() {
+                    if let Some(name) = create.get("name").and_then(|v| v.as_str()) {
+                        meta.label = Some(name.to_string());
+                    }
+                }
+                if meta.plan.is_empty() {
+                    if let Some(plan) = create.get("plan").and_then(|v| v.as_array()) {
+                        meta.plan = plan
+                            .iter()
+                            .filter_map(|step| step.as_str().map(|s| s.to_string()))
+                            .collect();
+                    }
+                }
+                if let Some(models) = create.get("models").and_then(|v| v.as_array()) {
+                    for model in models {
+                        if let Some(name) = model.as_str() {
+                            meta.agent_ids.push(name.to_string());
+                        }
+                    }
+                }
+            }
+            if let Some(wait) = map.get("wait").and_then(|v| v.as_object()) {
+                if meta.batch_id.is_none() {
+                    if let Some(batch) = wait.get("batch_id").and_then(|v| v.as_str()) {
+                        meta.batch_id = Some(batch.to_string());
+                    }
+                }
+                if let Some(agent_id) = wait.get("agent_id").and_then(|v| v.as_str()) {
+                    meta.agent_ids.push(agent_id.to_string());
+                }
+            }
+            if let Some(status) = map.get("status").and_then(|v| v.as_object()) {
+                if let Some(agent_id) = status.get("agent_id").and_then(|v| v.as_str()) {
+                    meta.agent_ids.push(agent_id.to_string());
+                }
+            }
+            if let Some(result) = map.get("result").and_then(|v| v.as_object()) {
+                if let Some(agent_id) = result.get("agent_id").and_then(|v| v.as_str()) {
+                    meta.agent_ids.push(agent_id.to_string());
+                }
+            }
+            if let Some(cancel) = map.get("cancel").and_then(|v| v.as_object()) {
+                if meta.batch_id.is_none() {
+                    if let Some(batch) = cancel.get("batch_id").and_then(|v| v.as_str()) {
+                        meta.batch_id = Some(batch.to_string());
+                    }
+                }
+                if let Some(agent_id) = cancel.get("agent_id").and_then(|v| v.as_str()) {
+                    meta.agent_ids.push(agent_id.to_string());
+                }
+            }
+            if let Some(list) = map.get("list").and_then(|v| v.as_object()) {
+                if meta.batch_id.is_none() {
+                    if let Some(batch) = list.get("batch_id").and_then(|v| v.as_str()) {
+                        meta.batch_id = Some(batch.to_string());
+                    }
+                }
+            }
         }
         if meta.label.is_none() {
             if let Some(first) = meta.agent_ids.first() {

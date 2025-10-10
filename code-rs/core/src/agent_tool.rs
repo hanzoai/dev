@@ -38,6 +38,8 @@ pub struct Agent {
     pub id: String,
     pub batch_id: Option<String>,
     pub model: String,
+    #[serde(default)]
+    pub name: Option<String>,
     pub prompt: String,
     pub context: Option<String>,
     pub output_goal: Option<String>,
@@ -96,7 +98,11 @@ impl AgentManager {
                 .values()
                 .map(|agent| {
                     // Just show the model name - status provides the useful info
-                    let name = agent.model.clone();
+                    let name = agent
+                        .name
+                        .as_ref()
+                        .map(|value| value.clone())
+                        .unwrap_or_else(|| agent.model.clone());
                     let start = agent.started_at.unwrap_or(agent.created_at);
                     let end = agent.completed_at.unwrap_or(now);
                     let elapsed_ms = match end.signed_duration_since(start).num_milliseconds() {
@@ -149,6 +155,7 @@ impl AgentManager {
     pub async fn create_agent(
         &mut self,
         model: String,
+        name: Option<String>,
         prompt: String,
         context: Option<String>,
         output_goal: Option<String>,
@@ -158,6 +165,7 @@ impl AgentManager {
     ) -> String {
         self.create_agent_internal(
             model,
+            name,
             prompt,
             context,
             output_goal,
@@ -172,6 +180,7 @@ impl AgentManager {
     pub async fn create_agent_with_config(
         &mut self,
         model: String,
+        name: Option<String>,
         prompt: String,
         context: Option<String>,
         output_goal: Option<String>,
@@ -182,6 +191,7 @@ impl AgentManager {
     ) -> String {
         self.create_agent_internal(
             model,
+            name,
             prompt,
             context,
             output_goal,
@@ -196,6 +206,7 @@ impl AgentManager {
     async fn create_agent_internal(
         &mut self,
         model: String,
+        name: Option<String>,
         prompt: String,
         context: Option<String>,
         output_goal: Option<String>,
@@ -210,6 +221,7 @@ impl AgentManager {
             id: agent_id.clone(),
             batch_id,
             model,
+            name: normalize_agent_name(name),
             prompt,
             context,
             output_goal,
@@ -1063,15 +1075,15 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
 
-    properties.insert(
+    let mut create_properties = BTreeMap::new();
+    create_properties.insert(
         "task".to_string(),
         JsonSchema::String {
-            description: Some("For action=create: task prompt to execute".to_string()),
+            description: Some("Task prompt to execute".to_string()),
             allowed_values: None,
         },
     );
-
-    properties.insert(
+    create_properties.insert(
         "models".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String {
@@ -1083,29 +1095,25 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                 },
             }),
             description: Some(
-                "For action=create: optional array of model names (e.g., ['claude','gemini','qwen','code','cloud'])"
-                    .to_string(),
+                "Optional array of model names (e.g., ['claude','gemini','qwen','code','cloud'])".to_string(),
             ),
         },
     );
-
-    properties.insert(
+    create_properties.insert(
         "context".to_string(),
         JsonSchema::String {
-            description: Some("For action=create: optional background context".to_string()),
+            description: Some("Optional background context".to_string()),
             allowed_values: None,
         },
     );
-
-    properties.insert(
+    create_properties.insert(
         "output".to_string(),
         JsonSchema::String {
-            description: Some("For action=create: optional desired output description".to_string()),
+            description: Some("Optional desired output description".to_string()),
             allowed_values: None,
         },
     );
-
-    properties.insert(
+    create_properties.insert(
         "files".to_string(),
         JsonSchema::Array {
             items: Box::new(JsonSchema::String {
@@ -1113,75 +1121,173 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
                 allowed_values: None,
             }),
             description: Some(
-                "For action=create: optional array of file paths to include in context".to_string(),
+                "Optional array of file paths to include in context".to_string(),
             ),
         },
     );
-
-    properties.insert(
+    create_properties.insert(
+        "plan".to_string(),
+        JsonSchema::Array {
+            items: Box::new(JsonSchema::String {
+                description: None,
+                allowed_values: None,
+            }),
+            description: Some("Optional list of plan steps to display in the UI".to_string()),
+        },
+    );
+    create_properties.insert(
         "read_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "For action=create: when true, run in read-only mode (default: false)".to_string(),
+                "When true, run in read-only mode (default: false)".to_string(),
             ),
         },
     );
-
+    create_properties.insert(
+        "name".to_string(),
+        JsonSchema::String {
+            description: Some("Display name shown in the UI (e.g., \"Plan TUI Refactor\")".to_string()),
+            allowed_values: None,
+        },
+    );
     properties.insert(
+        "create".to_string(),
+        JsonSchema::Object {
+            properties: create_properties,
+            required: Some(vec!["task".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut status_properties = BTreeMap::new();
+    status_properties.insert(
         "agent_id".to_string(),
         JsonSchema::String {
-            description: Some(
-                "For actions=status/result/cancel/wait: specify the target agent ID".to_string(),
-            ),
+            description: Some("Agent identifier to inspect".to_string()),
             allowed_values: None,
         },
     );
-
     properties.insert(
+        "status".to_string(),
+        JsonSchema::Object {
+            properties: status_properties,
+            required: Some(vec!["agent_id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut result_properties = BTreeMap::new();
+    result_properties.insert(
+        "agent_id".to_string(),
+        JsonSchema::String {
+            description: Some("Agent identifier whose result should be fetched".to_string()),
+            allowed_values: None,
+        },
+    );
+    properties.insert(
+        "result".to_string(),
+        JsonSchema::Object {
+            properties: result_properties,
+            required: Some(vec!["agent_id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut cancel_properties = BTreeMap::new();
+    cancel_properties.insert(
+        "agent_id".to_string(),
+        JsonSchema::String {
+            description: Some("Cancel a specific agent".to_string()),
+            allowed_values: None,
+        },
+    );
+    cancel_properties.insert(
         "batch_id".to_string(),
         JsonSchema::String {
-            description: Some(
-                "For actions=cancel/wait/list: optional batch identifier".to_string(),
-            ),
+            description: Some("Cancel all agents in the batch".to_string()),
             allowed_values: None,
         },
     );
-
     properties.insert(
+        "cancel".to_string(),
+        JsonSchema::Object {
+            properties: cancel_properties,
+            required: Some(Vec::new()),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut wait_properties = BTreeMap::new();
+    wait_properties.insert(
+        "agent_id".to_string(),
+        JsonSchema::String {
+            description: Some("Wait for a specific agent".to_string()),
+            allowed_values: None,
+        },
+    );
+    wait_properties.insert(
+        "batch_id".to_string(),
+        JsonSchema::String {
+            description: Some("Wait for any agent in the batch".to_string()),
+            allowed_values: None,
+        },
+    );
+    wait_properties.insert(
         "timeout_seconds".to_string(),
         JsonSchema::Number {
             description: Some(
-                "For action=wait: optional timeout before giving up (default 300, max 600)".to_string(),
+                "Optional timeout before giving up (default 300, max 600)".to_string(),
             ),
         },
     );
-
-    properties.insert(
+    wait_properties.insert(
         "return_all".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "For action=wait with batch_id: return all completed agents instead of the first".to_string(),
+                "When waiting on a batch, return all completed agents instead of the first".to_string(),
             ),
         },
     );
-
     properties.insert(
+        "wait".to_string(),
+        JsonSchema::Object {
+            properties: wait_properties,
+            required: Some(Vec::new()),
+            additional_properties: Some(false.into()),
+        },
+    );
+
+    let mut list_properties = BTreeMap::new();
+    list_properties.insert(
         "status_filter".to_string(),
         JsonSchema::String {
             description: Some(
-                "For action=list: optional status filter (pending, running, completed, failed, cancelled)"
-                    .to_string(),
+                "Optional status filter (pending, running, completed, failed, cancelled)".to_string(),
             ),
             allowed_values: None,
         },
     );
-
-    properties.insert(
+    list_properties.insert(
+        "batch_id".to_string(),
+        JsonSchema::String {
+            description: Some("Limit results to a batch".to_string()),
+            allowed_values: None,
+        },
+    );
+    list_properties.insert(
         "recent_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "For action=list: when true, only include agents from the last two hours".to_string(),
+                "When true, only include agents from the last two hours".to_string(),
             ),
+        },
+    );
+    properties.insert(
+        "list".to_string(),
+        JsonSchema::Object {
+            properties: list_properties,
+            required: Some(Vec::new()),
+            additional_properties: Some(false.into()),
         },
     );
 
@@ -1209,26 +1315,163 @@ pub struct RunAgentParams {
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
     pub read_only: Option<bool>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentToolRequest {
-    pub action: String,
-    #[serde(default)]
+pub struct AgentCreateOptions {
     pub task: Option<String>,
     #[serde(default, deserialize_with = "deserialize_models_field")]
     pub models: Vec<String>,
     pub context: Option<String>,
     pub output: Option<String>,
-    #[serde(default)]
     pub files: Option<Vec<String>>,
     pub read_only: Option<bool>,
+    pub name: Option<String>,
+    pub plan: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentIdentifierOptions {
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCancelOptions {
+    pub agent_id: Option<String>,
+    pub batch_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWaitOptions {
     pub agent_id: Option<String>,
     pub batch_id: Option<String>,
     pub timeout_seconds: Option<u64>,
     pub return_all: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentListOptions {
     pub status_filter: Option<String>,
+    pub batch_id: Option<String>,
     pub recent_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentToolRequest {
+    pub action: String,
+    pub create: Option<AgentCreateOptions>,
+    pub status: Option<AgentIdentifierOptions>,
+    pub result: Option<AgentIdentifierOptions>,
+    pub cancel: Option<AgentCancelOptions>,
+    pub wait: Option<AgentWaitOptions>,
+    pub list: Option<AgentListOptions>,
+}
+
+pub(crate) fn normalize_agent_name(name: Option<String>) -> Option<String> {
+    let Some(name) = name.map(|value| value.trim().to_string()) else {
+        return None;
+    };
+
+    if name.is_empty() {
+        return None;
+    }
+
+    let canonicalized = canonicalize_agent_word_boundaries(&name);
+    let words: Vec<&str> = canonicalized.split_whitespace().collect();
+    if words.is_empty() {
+        return None;
+    }
+
+    Some(
+        words
+            .into_iter()
+            .map(format_agent_word)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn canonicalize_agent_word_boundaries(input: &str) -> String {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    let mut prev_char: Option<char> = None;
+    let mut uppercase_run: usize = 0;
+
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() || matches!(ch, '_' | '-' | '/' | ':' | '.') {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            prev_char = None;
+            uppercase_run = 0;
+            continue;
+        }
+
+        let next_char = chars.peek().copied();
+        let mut split = false;
+
+        if !current.is_empty() {
+            if let Some(prev) = prev_char {
+                if prev.is_ascii_lowercase() && ch.is_ascii_uppercase() {
+                    split = true;
+                } else if prev.is_ascii_uppercase()
+                    && ch.is_ascii_uppercase()
+                    && uppercase_run > 0
+                    && next_char.map_or(false, |c| c.is_ascii_lowercase())
+                {
+                    split = true;
+                }
+            }
+        }
+
+        if split {
+            tokens.push(std::mem::take(&mut current));
+            uppercase_run = 0;
+        }
+
+        current.push(ch);
+
+        if ch.is_ascii_uppercase() {
+            uppercase_run += 1;
+        } else {
+            uppercase_run = 0;
+        }
+
+        prev_char = Some(ch);
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens.join(" ")
+}
+
+const AGENT_NAME_ACRONYMS: &[&str] = &[
+    "AI", "API", "CLI", "CPU", "DB", "GPU", "HTTP", "HTTPS", "ID", "LLM", "SDK", "SQL", "TUI", "UI", "UX",
+];
+
+fn format_agent_word(word: &str) -> String {
+    if word.is_empty() {
+        return String::new();
+    }
+
+    let uppercase = word.to_ascii_uppercase();
+    if AGENT_NAME_ACRONYMS.contains(&uppercase.as_str()) {
+        return uppercase;
+    }
+
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+
+    let mut formatted = String::new();
+    formatted.extend(first.to_uppercase());
+    formatted.push_str(&chars.flat_map(char::to_lowercase).collect::<String>());
+    formatted
 }
 
 fn deserialize_models_field<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -1248,6 +1491,37 @@ where
         Some(ModelsInput::One(single)) => vec![single],
         None => Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_agent_name;
+
+    #[test]
+    fn drops_empty_names() {
+        assert_eq!(normalize_agent_name(None), None);
+        assert_eq!(normalize_agent_name(Some("   ".into())), None);
+    }
+
+    #[test]
+    fn title_cases_and_restores_separators() {
+        assert_eq!(
+            normalize_agent_name(Some("plan_tui_refactor".into())),
+            Some("Plan TUI Refactor".into())
+        );
+        assert_eq!(
+            normalize_agent_name(Some("run-ui-tests".into())),
+            Some("Run UI Tests".into())
+        );
+    }
+
+    #[test]
+    fn handles_camel_case_and_acronyms() {
+        assert_eq!(
+            normalize_agent_name(Some("shipCloudAPI".into())),
+            Some("Ship Cloud API".into())
+        );
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
