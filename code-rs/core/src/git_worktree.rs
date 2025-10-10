@@ -315,6 +315,14 @@ pub fn load_branch_metadata(worktree_path: &Path) -> Option<BranchMetadata> {
     serde_json::from_slice(&bytes).ok()
 }
 
+pub fn remove_branch_metadata(worktree_path: &Path) {
+    if let Some(path) = metadata_file_path(worktree_path) {
+        let _ = stdfs::remove_file(path);
+    }
+    let legacy_path = worktree_path.join(".codex-branch.json");
+    let _ = stdfs::remove_file(legacy_path);
+}
+
 /// Ensure a remote named `origin` exists. If it's missing, choose a likely
 /// writable remote (prefer `fork`, then `upstream-push`, then the first push
 /// URL we find) and alias it as `origin`. Finally, set the remote HEAD so
