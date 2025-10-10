@@ -392,6 +392,13 @@ pub async fn run_main(
         }
     };
 
+    let housekeeping_home = code_home.clone();
+    let housekeeping_handle = std::thread::spawn(move || {
+        if let Err(err) = code_core::run_housekeeping_if_due(&housekeeping_home) {
+            tracing::warn!("code home housekeeping failed: {err}");
+        }
+    });
+
     let workspace_write_network_access_explicit = {
         let cli_override = cli_kv_overrides
             .iter()
@@ -504,15 +511,20 @@ pub async fn run_main(
         None
     };
 
-    run_ratatui_app(
+    let run_result = run_ratatui_app(
         cli,
         config,
         should_show_trust_screen,
         startup_footer_notice,
         latest_upgrade_version,
         theme_configured_explicitly,
-    )
-        .map_err(|err| std::io::Error::other(err.to_string()))
+    );
+
+    if let Err(err) = housekeeping_handle.join() {
+        tracing::warn!("code home housekeeping task panicked: {err:?}");
+    }
+
+    run_result.map_err(|err| std::io::Error::other(err.to_string()))
 }
 
 fn run_ratatui_app(
