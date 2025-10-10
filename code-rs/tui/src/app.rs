@@ -1155,6 +1155,14 @@ impl App<'_> {
                                     let now = Instant::now();
                                     const THRESHOLD: Duration = Duration::from_millis(600);
 
+                                    if widget.auto_manual_entry_active()
+                                        && !widget.composer_is_empty()
+                                    {
+                                        widget.clear_composer();
+                                        self.last_esc_time = Some(now);
+                                        continue;
+                                    }
+
                                     // Step 1: stop agent if running, regardless of composer content.
                                     if widget.is_task_running() {
                                         let _ = widget.on_ctrl_c();

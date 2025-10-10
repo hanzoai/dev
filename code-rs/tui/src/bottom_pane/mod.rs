@@ -276,13 +276,25 @@ impl BottomPane<'_> {
     pub fn desired_height(&self, width: u16) -> u16 {
         let (view_height, pad_lines) = if let Some(view) = self.active_view.as_ref() {
             let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-            let top_spacer = if is_auto && self.top_spacer_enabled { 1 } else { 0 };
-            let pad = if is_auto {
-                BottomPane::BOTTOM_PAD_LINES
+            let top_spacer = if is_auto {
+                0
+            } else if self.top_spacer_enabled {
+                1
             } else {
                 0
             };
-            (view.desired_height(width).saturating_add(top_spacer), pad)
+            let pad = if is_auto { 0 } else { BottomPane::BOTTOM_PAD_LINES };
+            let base_height = if is_auto {
+                view
+                    .as_any()
+                    .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+                    .map(|auto_view| auto_view.desired_height_with_composer(width, &self.composer))
+                    .unwrap_or_else(|| view.desired_height(width))
+            } else {
+                view.desired_height(width)
+            };
+
+            (base_height.saturating_add(top_spacer), pad)
         } else {
             // Optionally add 1 for the empty line above the composer
             let spacer = if self.top_spacer_enabled { 1 } else { 0 };
@@ -439,11 +451,18 @@ impl BottomPane<'_> {
     }
 
     pub fn handle_paste(&mut self, pasted: String) {
-        if let Some(ref mut view) = self.active_view {
+        if let Some(mut view) = self.active_view.take() {
             use crate::bottom_pane::bottom_pane_view::ConditionalUpdate;
-            match view.handle_paste(pasted) {
-                ConditionalUpdate::NeedsRedraw => self.request_redraw(),
-                ConditionalUpdate::NoRedraw => {}
+            let kind = self.active_view_kind;
+            let update = view.handle_paste_with_composer(&mut self.composer, pasted);
+            if !view.is_complete() {
+                self.active_view = Some(view);
+                self.active_view_kind = kind;
+            } else {
+                self.active_view_kind = ActiveViewKind::None;
+            }
+            if matches!(update, ConditionalUpdate::NeedsRedraw) {
+                self.request_redraw();
             }
             return;
         }
@@ -477,6 +496,7 @@ impl BottomPane<'_> {
         // Consider a modal inactive once it has completed to avoid blocking
         // Esc routing and other overlay checks after a decision is made.
         match self.active_view.as_ref() {
+            Some(_) if matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator) => false,
             Some(view) => !view.is_complete(),
             None => false,
         }
@@ -1013,7 +1033,7 @@ impl WidgetRef for &BottomPane<'_> {
                     let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                     let horizontal_padding = 1u16;
 
-                    if is_auto && self.top_spacer_enabled && avail > 0 {
+                    if !is_auto && self.top_spacer_enabled && avail > 0 {
                         y_offset = y_offset.saturating_add(1);
                         avail = avail.saturating_sub(1);
                     }
@@ -1022,11 +1042,7 @@ impl WidgetRef for &BottomPane<'_> {
                         return;
                     }
 
-                    let pad = if is_auto {
-                        BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
-                    } else {
-                        0
-                    };
+                    let pad = if is_auto { 0 } else { BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1)) };
 
                     let view_height = avail.saturating_sub(pad);
                     if view_height == 0 {
