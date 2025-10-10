@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::ErrorKind;
 use std::io::Read;
 use std::sync::Arc;
@@ -34,6 +34,157 @@ pub struct ExecCommandOutput {
     exit_status: ExitStatus,
     original_token_count: Option<u64>,
     output: String,
+}
+
+struct TruncatingCollector {
+    cap_bytes: usize,
+    total_bytes: u64,
+    prefix: Vec<u8>,
+    suffix: VecDeque<u8>,
+}
+
+impl TruncatingCollector {
+    fn new(cap_bytes: usize) -> Self {
+        Self {
+            cap_bytes,
+            total_bytes: 0,
+            prefix: Vec::new(),
+            suffix: VecDeque::new(),
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        self.total_bytes = self
+            .total_bytes
+            .saturating_add(chunk.len() as u64);
+
+        if self.prefix.len() < self.cap_bytes {
+            let remaining = self.cap_bytes - self.prefix.len();
+            let take = remaining.min(chunk.len());
+            self.prefix.extend_from_slice(&chunk[..take]);
+        }
+
+        if self.cap_bytes > 0 {
+            for byte in chunk {
+                self.suffix.push_back(*byte);
+                if self.suffix.len() > self.cap_bytes {
+                    self.suffix.pop_front();
+                }
+            }
+        }
+    }
+
+    fn finalize(&self) -> (String, Option<u64>) {
+        let est_tokens = (self.total_bytes).div_ceil(4);
+        if self.cap_bytes == 0 {
+            if self.total_bytes == 0 {
+                return (String::new(), None);
+            }
+            return (format!("…{est_tokens} tokens truncated…"), Some(est_tokens));
+        }
+
+        if (self.total_bytes as usize) <= self.cap_bytes {
+            return (
+                String::from_utf8_lossy(&self.prefix).into_owned(),
+                None,
+            );
+        }
+
+        let prefix_str = String::from_utf8_lossy(&self.prefix).into_owned();
+        let suffix_bytes: Vec<u8> = self.suffix.iter().copied().collect();
+        let suffix_str = String::from_utf8_lossy(&suffix_bytes).into_owned();
+
+        let mut guess_tokens = est_tokens;
+        for _ in 0..4 {
+            let marker = format!("…{guess_tokens} tokens truncated…");
+            let marker_len = marker.len();
+            let keep_budget = self.cap_bytes.saturating_sub(marker_len);
+            if keep_budget == 0 {
+                return (format!("…{est_tokens} tokens truncated…"), Some(est_tokens));
+            }
+            let left_budget = keep_budget / 2;
+            let right_budget = keep_budget - left_budget;
+            let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
+            let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
+            let kept_content_bytes = prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len();
+            let truncated_content_bytes = self
+                .total_bytes
+                .saturating_sub(kept_content_bytes as u64);
+            let new_tokens = truncated_content_bytes.div_ceil(4);
+            if new_tokens == guess_tokens {
+                let mut out = String::with_capacity(marker_len + kept_content_bytes + 1);
+                out.push_str(prefix_slice);
+                out.push_str(&marker);
+                out.push('\n');
+                out.push_str(suffix_slice);
+                return (out, Some(est_tokens));
+            }
+            guess_tokens = new_tokens;
+        }
+
+        let marker = format!("…{guess_tokens} tokens truncated…");
+        let marker_len = marker.len();
+        let keep_budget = self.cap_bytes.saturating_sub(marker_len);
+        if keep_budget == 0 {
+            return (format!("…{est_tokens} tokens truncated…"), Some(est_tokens));
+        }
+        let left_budget = keep_budget / 2;
+        let right_budget = keep_budget - left_budget;
+        let prefix_slice = pick_prefix_slice(&prefix_str, left_budget);
+        let suffix_slice = pick_suffix_slice(&suffix_str, right_budget);
+        let mut out = String::with_capacity(
+            marker_len + prefix_slice.as_bytes().len() + suffix_slice.as_bytes().len() + 1,
+        );
+        out.push_str(prefix_slice);
+        out.push_str(&marker);
+        out.push('\n');
+        out.push_str(suffix_slice);
+        (out, Some(est_tokens))
+    }
+}
+
+fn pick_prefix_slice<'a>(input: &'a str, left_budget: usize) -> &'a str {
+    if left_budget >= input.len() {
+        return input;
+    }
+    if let Some(head) = input.get(..left_budget) {
+        if let Some(idx) = head.rfind('\n') {
+            return &input[..idx + 1];
+        }
+    }
+    truncate_on_boundary(input, left_budget)
+}
+
+fn pick_suffix_slice<'a>(input: &'a str, right_budget: usize) -> &'a str {
+    if right_budget >= input.len() {
+        return input;
+    }
+    let tail_start = input.len().saturating_sub(right_budget);
+    if let Some(tail) = input.get(tail_start..) {
+        if let Some(idx) = tail.find('\n') {
+            return &input[tail_start + idx + 1..];
+        }
+    }
+    let mut idx = tail_start;
+    while idx < input.len() && !input.is_char_boundary(idx) {
+        idx += 1;
+    }
+    &input[idx..]
+}
+
+fn truncate_on_boundary<'a>(input: &'a str, max_len: usize) -> &'a str {
+    if input.len() <= max_len {
+        return input;
+    }
+    let mut end = max_len;
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    &input[..end]
 }
 
 impl ExecCommandOutput {
@@ -105,11 +256,10 @@ impl SessionManager {
         self.sessions.lock().await.insert(session_id, session);
 
         // Collect output until either timeout expires or process exits.
-        // Do not cap during collection; truncate at the end if needed.
-        // Use a modest initial capacity to avoid large preallocation.
+        // Enforce the byte cap incrementally so runaway commands cannot exhaust memory.
         let cap_bytes_u64 = params.max_output_tokens.saturating_mul(4);
         let cap_bytes: usize = cap_bytes_u64.min(usize::MAX as u64) as usize;
-        let mut collected: Vec<u8> = Vec::with_capacity(4096);
+        let mut collector = TruncatingCollector::new(cap_bytes);
 
         let start_time = Instant::now();
         let deadline = start_time + Duration::from_millis(params.yield_time_ms);
@@ -129,7 +279,7 @@ impl SessionManager {
                     while Instant::now() < grace_deadline {
                         match timeout(Duration::from_millis(1), output_rx.recv()).await {
                             Ok(Ok(chunk)) => {
-                                collected.extend_from_slice(&chunk);
+                                collector.push(&chunk);
                             }
                             Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
                                 // Skip missed messages; keep trying within grace period.
@@ -144,7 +294,7 @@ impl SessionManager {
                 chunk = timeout(remaining, output_rx.recv()) => {
                     match chunk {
                         Ok(Ok(chunk)) => {
-                            collected.extend_from_slice(&chunk);
+                            collector.push(&chunk);
                         }
                         Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
                             // Skip missed messages; continue collecting fresh output.
@@ -156,16 +306,13 @@ impl SessionManager {
             }
         }
 
-        let output = String::from_utf8_lossy(&collected).to_string();
-
         let exit_status = if let Some(code) = exit_code {
             ExitStatus::Exited(code)
         } else {
             ExitStatus::Ongoing(session_id)
         };
 
-        // If output exceeds cap, truncate the middle and record original token estimate.
-        let (output, original_token_count) = truncate_middle(&output, cap_bytes);
+        let (output, original_token_count) = collector.finalize();
         Ok(ExecCommandOutput {
             wall_time: Instant::now().duration_since(start_time),
             exit_status,
@@ -206,8 +353,11 @@ impl SessionManager {
             return Err("failed to write to stdin".to_string());
         }
 
+        let cap_bytes_u64 = max_output_tokens.saturating_mul(4);
+        let cap_bytes: usize = cap_bytes_u64.min(usize::MAX as u64) as usize;
+
         // Collect output up to yield_time_ms, truncating to max_output_tokens bytes.
-        let mut collected: Vec<u8> = Vec::with_capacity(4096);
+        let mut collector = TruncatingCollector::new(cap_bytes);
         let start_time = Instant::now();
         let deadline = start_time + Duration::from_millis(yield_time_ms);
         loop {
@@ -218,8 +368,8 @@ impl SessionManager {
             let remaining = deadline - now;
             match timeout(remaining, output_rx.recv()).await {
                 Ok(Ok(chunk)) => {
-                    // Collect all output within the time budget; truncate at the end.
-                    collected.extend_from_slice(&chunk);
+                    // Collect all output within the time budget while enforcing the cap.
+                    collector.push(&chunk);
                 }
                 Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
                     // Skip missed messages; continue collecting fresh output.
@@ -229,11 +379,7 @@ impl SessionManager {
             }
         }
 
-        // Return structured output, truncating middle if over cap.
-        let output = String::from_utf8_lossy(&collected).to_string();
-        let cap_bytes_u64 = max_output_tokens.saturating_mul(4);
-        let cap_bytes: usize = cap_bytes_u64.min(usize::MAX as u64) as usize;
-        let (output, original_token_count) = truncate_middle(&output, cap_bytes);
+        let (output, original_token_count) = collector.finalize();
         Ok(ExecCommandOutput {
             wall_time: Instant::now().duration_since(start_time),
             exit_status: ExitStatus::Ongoing(session_id),
@@ -370,112 +516,11 @@ async fn create_exec_command_session(
 /// preserving the beginning and the end. Returns the possibly truncated
 /// string and `Some(original_token_count)` (estimated at 4 bytes/token)
 /// if truncation occurred; otherwise returns the original string and `None`.
-fn truncate_middle(s: &str, max_bytes: usize) -> (String, Option<u64>) {
-    // No truncation needed
-    if s.len() <= max_bytes {
-        return (s.to_string(), None);
-    }
-    let est_tokens = (s.len() as u64).div_ceil(4);
-    if max_bytes == 0 {
-        // Cannot keep any content; still return a full marker (never truncated).
-        return (format!("…{est_tokens} tokens truncated…"), Some(est_tokens));
-    }
-
-    // Helper to truncate a string to a given byte length on a char boundary.
-    fn truncate_on_boundary(input: &str, max_len: usize) -> &str {
-        if input.len() <= max_len {
-            return input;
-        }
-        let mut end = max_len;
-        while end > 0 && !input.is_char_boundary(end) {
-            end -= 1;
-        }
-        &input[..end]
-    }
-
-    // Given a left/right budget, prefer newline boundaries; otherwise fall back
-    // to UTF-8 char boundaries.
-    fn pick_prefix_end(s: &str, left_budget: usize) -> usize {
-        if let Some(head) = s.get(..left_budget) {
-            if let Some(i) = head.rfind('\n') {
-                return i + 1; // keep the newline so suffix starts on a fresh line
-            }
-        }
-        truncate_on_boundary(s, left_budget).len()
-    }
-
-    fn pick_suffix_start(s: &str, right_budget: usize) -> usize {
-        let start_tail = s.len().saturating_sub(right_budget);
-        if let Some(tail) = s.get(start_tail..) {
-            if let Some(i) = tail.find('\n') {
-                return start_tail + i + 1; // start after newline
-            }
-        }
-        // Fall back to a char boundary at or after start_tail.
-        let mut idx = start_tail.min(s.len());
-        while idx < s.len() && !s.is_char_boundary(idx) {
-            idx += 1;
-        }
-        idx
-    }
-
-    // Refine marker length and budgets until stable. Marker is never truncated.
-    let mut guess_tokens = est_tokens; // worst-case: everything truncated
-    for _ in 0..4 {
-        let marker = format!("…{guess_tokens} tokens truncated…");
-        let marker_len = marker.len();
-        let keep_budget = max_bytes.saturating_sub(marker_len);
-        if keep_budget == 0 {
-            // No room for any content within the cap; return a full, untruncated marker
-            // that reflects the entire truncated content.
-            return (format!("…{est_tokens} tokens truncated…"), Some(est_tokens));
-        }
-
-        let left_budget = keep_budget / 2;
-        let right_budget = keep_budget - left_budget;
-        let prefix_end = pick_prefix_end(s, left_budget);
-        let mut suffix_start = pick_suffix_start(s, right_budget);
-        if suffix_start < prefix_end {
-            suffix_start = prefix_end;
-        }
-        let kept_content_bytes = prefix_end + (s.len() - suffix_start);
-        let truncated_content_bytes = s.len().saturating_sub(kept_content_bytes);
-        let new_tokens = (truncated_content_bytes as u64).div_ceil(4);
-        if new_tokens == guess_tokens {
-            let mut out = String::with_capacity(marker_len + kept_content_bytes + 1);
-            out.push_str(&s[..prefix_end]);
-            out.push_str(&marker);
-            // Place marker on its own line for symmetry when we keep line boundaries.
-            out.push('\n');
-            out.push_str(&s[suffix_start..]);
-            return (out, Some(est_tokens));
-        }
-        guess_tokens = new_tokens;
-    }
-
-    // Fallback: use last guess to build output.
-    let marker = format!("…{guess_tokens} tokens truncated…");
-    let marker_len = marker.len();
-    let keep_budget = max_bytes.saturating_sub(marker_len);
-    if keep_budget == 0 {
-        return (format!("…{est_tokens} tokens truncated…"), Some(est_tokens));
-    }
-    let left_budget = keep_budget / 2;
-    let right_budget = keep_budget - left_budget;
-    let prefix_end = pick_prefix_end(s, left_budget);
-    let suffix_start = pick_suffix_start(s, right_budget);
-    let mut out = String::with_capacity(marker_len + prefix_end + (s.len() - suffix_start) + 1);
-    out.push_str(&s[..prefix_end]);
-    out.push_str(&marker);
-    out.push('\n');
-    out.push_str(&s[suffix_start..]);
-    (out, Some(est_tokens))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::exec_command::session_id::SessionId;
+    use crate::truncate::truncate_middle;
 
     /// Test that verifies that [`SessionManager::handle_exec_command_request()`]
     /// and [`SessionManager::handle_write_stdin_request()`] work as expected
@@ -636,48 +681,42 @@ abc"#;
     }
 
     #[test]
-    fn truncate_middle_no_newlines_fallback() {
-        // A long string with no newlines that exceeds the cap.
+    fn truncating_collector_no_newlines_fallback() {
         let s = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let max_bytes = 16; // force truncation
-        let (out, original) = truncate_middle(s, max_bytes);
-        // For very small caps, we return the full, untruncated marker,
-        // even if it exceeds the cap.
-        assert_eq!(out, "…16 tokens truncated…");
-        // Original string length is 62 bytes => ceil(62/4) = 16 tokens.
-        assert_eq!(original, Some(16));
+        let cap_bytes = 16; // force truncation
+        let mut collector = TruncatingCollector::new(cap_bytes);
+        collector.push(s.as_bytes());
+        let result = collector.finalize();
+        let expected = truncate_middle(s, cap_bytes);
+        assert_eq!(result, expected);
     }
 
     #[test]
-    fn truncate_middle_prefers_newline_boundaries() {
-        // Build a multi-line string of 20 numbered lines (each "NNN\n").
+    fn truncating_collector_prefers_newline_boundaries() {
         let mut s = String::new();
         for i in 1..=20 {
             s.push_str(&format!("{i:03}\n"));
         }
-        // Total length: 20 lines * 4 bytes per line = 80 bytes.
         assert_eq!(s.len(), 80);
 
-        // Choose a cap that forces truncation while leaving room for
-        // a few lines on each side after accounting for the marker.
-        let max_bytes = 64;
-        // Expect exact output: first 4 lines, marker, last 4 lines, and correct token estimate (80/4 = 20).
-        assert_eq!(
-            truncate_middle(&s, max_bytes),
-            (
-                r#"001
-002
-003
-004
-…12 tokens truncated…
-017
-018
-019
-020
-"#
-                .to_string(),
-                Some(20)
-            )
-        );
+        let cap_bytes = 64;
+        let mut collector = TruncatingCollector::new(cap_bytes);
+        for chunk in s.as_bytes().chunks(7) {
+            collector.push(chunk);
+        }
+        let result = collector.finalize();
+        let expected = truncate_middle(&s, cap_bytes);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn truncating_collector_handles_zero_cap() {
+        let input = "some output that will be completely truncated";
+        let mut collector = TruncatingCollector::new(0);
+        collector.push(input.as_bytes());
+        let (out, original) = collector.finalize();
+        let expected_tokens = (input.len() as u64).div_ceil(4);
+        assert_eq!(out, format!("…{expected_tokens} tokens truncated…"));
+        assert_eq!(original, Some(expected_tokens));
     }
 }
