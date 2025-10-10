@@ -1,8 +1,9 @@
 use serde::Deserialize;
 use serde::Serialize;
 use shlex;
-use std::path::Path;
 use std::path::PathBuf;
+
+use crate::util::is_shell_like_executable;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct ZshShell {
@@ -137,15 +138,7 @@ fn strip_bash_lc(command: &[String]) -> Option<String> {
 }
 
 fn is_bash_like(cmd: &str) -> bool {
-    let trimmed = cmd.trim_matches('"').trim_matches('\'');
-    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
-        return true;
-    }
-    Path::new(trimmed)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
-        .unwrap_or(false)
+    is_shell_like_executable(cmd)
 }
 
 #[cfg(unix)]
