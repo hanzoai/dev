@@ -1100,21 +1100,23 @@ async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result
         };
         if !metadata.is_dir() { continue; }
 
+        let mut dst_dir = worktree_path.join(&rel);
+
         if target_cache_enabled && is_target_directory(&rel) {
             if let Some(cache_target) = cache_target_path(worktree_path, &rel) {
-                if let Err(err) = symlink_branch_to_cache(worktree_path.join(&rel), cache_target).await {
+                let branch_target = dst_dir.clone();
+                if let Err(err) = symlink_branch_to_cache(branch_target, cache_target.clone()).await {
                     tracing::warn!(
                         target = %worktree_path.join(&rel).display(),
                         error = %err,
                         "failed to link shared target cache; falling back to copy"
                     );
                 } else {
-                    continue;
+                    dst_dir = cache_target;
                 }
             }
         }
 
-        let dst_dir = worktree_path.join(&rel);
         let label = rel.to_string_lossy().to_string();
         let src_clone = src_dir.clone();
         let dst_clone = dst_dir.clone();
