@@ -46,14 +46,17 @@ Your agents are like having a team of expert peers at your disposal at any time.
 Example;
 agent {
   "action": "create",
-  "task": "Implement JWT middleware (RS256) with key rotation and unit/integration tests. Preserve existing OAuth flows. Provide README usage snippet.",
-  "context": "Service: services/api (Rust Axum). Secrets via env. CI: `cargo test --all`.",
-  "files": ["services/api", "services/api/src", "services/api/Cargo.toml"],
-  "models": ["claude","gemini","code"],
-  "output": "Middleware + passing tests + README snippet",
-  "read_only": false // Allow changes - will launch every agent in a separate worktree
+  "create": {
+    "name": "jwt-middleware",
+    "task": "Implement JWT middleware (RS256) with key rotation and unit/integration tests. Preserve existing OAuth flows. Provide README usage snippet.",
+    "context": "Service: services/api (Rust Axum). Secrets via env. CI: `cargo test --all`.",
+    "files": ["services/api", "services/api/src", "services/api/Cargo.toml"],
+    "models": ["claude","gemini","code"],
+    "output": "Middleware + passing tests + README snippet",
+    "read_only": false // Allow changes - will launch every agent in a separate worktree
+  }
 }
-agent {"action":"wait","batch_id":"<batch_id>","return_all":true,"timeout_seconds":600 } // Long timeout or you can do separate work and check back later.
+agent {"action":"wait","wait":{"batch_id":"<batch_id>","return_all":true,"timeout_seconds":600}} // Long timeout or you can do separate work and check back later.
 
 
 # WARNING (using git)
