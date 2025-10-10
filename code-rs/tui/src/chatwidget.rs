@@ -18666,6 +18666,32 @@ fi\n\
         self.submit_user_message(msg);
     }
 
+    fn submit_hidden_text_message_with_preface(&mut self, agent_text: String, preface: String) {
+        if agent_text.trim().is_empty() && preface.trim().is_empty() {
+            return;
+        }
+        use crate::chatwidget::message::UserMessage;
+        use code_core::protocol::InputItem;
+
+        let mut ordered = Vec::new();
+        if !preface.trim().is_empty() {
+            ordered.push(InputItem::Text { text: preface });
+        }
+        if !agent_text.trim().is_empty() {
+            ordered.push(InputItem::Text { text: agent_text });
+        }
+
+        if ordered.is_empty() {
+            return;
+        }
+
+        let msg = UserMessage {
+            display_text: String::new(),
+            ordered_items: ordered,
+        };
+        self.submit_user_message(msg);
+    }
+
     /// Queue a note that will be delivered to the agent as a hidden system
     /// message immediately before the next user input is sent. Notes are
     /// drained in FIFO order so multiple updates retain their sequencing.
@@ -20936,6 +20962,33 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
+    fn auto_resolve_commit_sha(&self) -> Option<String> {
+        self.auto_resolve_state
+            .as_ref()
+            .and_then(|state| state.metadata.as_ref())
+            .and_then(|metadata| metadata.commit.clone())
+    }
+
+    fn auto_resolve_scope(&self) -> Option<String> {
+        self.auto_resolve_state
+            .as_ref()
+            .and_then(|state| state.metadata.as_ref())
+            .and_then(|metadata| metadata.scope.clone())
+    }
+
+    fn worktree_has_uncommitted_changes(&self) -> Option<bool> {
+        let output = Command::new("git")
+            .current_dir(&self.config.cwd)
+            .args(["status", "--short"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Some(!stdout.trim().is_empty())
+    }
+
     fn auto_resolve_should_block_auto_resume(&self) -> bool {
         match self.auto_resolve_state.as_ref().map(|state| &state.phase) {
             Some(AutoResolvePhase::PendingFix { .. })
@@ -21071,8 +21124,24 @@ impl ChatWidget<'_> {
             preface.push_str("\n\nFindings:\n");
             preface.push_str(&summary);
         }
+        if self
+            .auto_resolve_scope()
+            .as_deref()
+            .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"))
+        {
+            if let Some(commit) = self.auto_resolve_commit_sha() {
+                let short_sha: String = commit.chars().take(7).collect();
+                preface.push_str("\n\nCommit under review: ");
+                preface.push_str(&commit);
+                preface.push_str(" (short SHA ");
+                preface.push_str(&short_sha);
+                preface.push_str(
+                    "). If you make changes to address these findings, amend this commit before responding so the review target reflects your fixes.",
+                );
+            }
+        }
         self.auto_resolve_notice("Auto-resolve: asking the agent to verify and address the review findings.");
-        self.submit_text_message_with_preface(
+        self.submit_hidden_text_message_with_preface(
             "Is this a real issue introduced by our changes? If so, please fix and resolve all similar issues.".to_string(),
             preface,
         );
@@ -21092,12 +21161,25 @@ impl ChatWidget<'_> {
             preface.push_str(fix);
         }
         preface.push_str("\n\nReturn JSON: {\"status\": \"...\", \"rationale\": \"optional explanation\"}.");
+        if self
+            .auto_resolve_scope()
+            .as_deref()
+            .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"))
+        {
+            if let Some(commit) = self.auto_resolve_commit_sha() {
+                let short_sha: String = commit.chars().take(7).collect();
+                preface.push_str("\n\nCommit under review: ");
+                preface.push_str(&commit);
+                preface.push_str(" (short SHA ");
+                preface.push_str(&short_sha);
+                preface.push_str(
+                    "). Confirm that any fixes have been committed (amend the commit if necessary) before returning `no_issue`.",
+                );
+            }
+        }
 
         self.auto_resolve_notice("Auto-resolve: requesting status JSON from the agent.");
-        self.submit_text_message_with_preface(
-            "Auto-resolve status check".to_string(),
-            preface,
-        );
+        self.submit_hidden_text_message_with_preface("Auto-resolve status check".to_string(), preface);
     }
 
     fn dispatch_auto_continue(&mut self, review: &ReviewOutputEvent) {
@@ -21110,7 +21192,7 @@ impl ChatWidget<'_> {
             preface.push_str(&summary);
         }
         self.auto_resolve_notice("Auto-resolve: asking the agent to continue working on the findings.");
-        self.submit_text_message_with_preface("Please continue".to_string(), preface);
+        self.submit_hidden_text_message_with_preface("Please continue".to_string(), preface);
     }
 
     fn restart_auto_resolve_review(&mut self) {
@@ -21123,11 +21205,36 @@ impl ChatWidget<'_> {
         let prep_label = format!(
             "Preparing follow-up code review (attempt {bounded_attempt} of {max_attempts})"
         );
-        let continued_prompt = format!(
-            "{}\n\n{}",
-            state_snapshot.prompt.trim_end(),
-            AUTO_RESOLVE_REVIEW_FOLLOWUP
-        );
+        let mut continued_prompt = state_snapshot.prompt.trim_end().to_string();
+        if let Some(last_review) = state_snapshot.last_review.as_ref() {
+            let recap = Self::auto_resolve_format_findings(last_review);
+            if !recap.is_empty() {
+                continued_prompt.push_str("\n\nPreviously reported findings to re-validate:\n");
+                continued_prompt.push_str(&recap);
+            }
+        }
+        if state_snapshot
+            .metadata
+            .as_ref()
+            .and_then(|meta| meta.scope.as_ref())
+            .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"))
+        {
+            if let Some(commit) = state_snapshot
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.commit.clone())
+            {
+                if let Some(true) = self.worktree_has_uncommitted_changes() {
+                    continued_prompt.push_str("\n\nNote: there are uncommitted changes in the working tree since commit ");
+                    continued_prompt.push_str(&commit);
+                    continued_prompt.push_str(
+                        ". Ensure the review covers the updated workspace rather than only the original commit snapshot.",
+                    );
+                }
+            }
+        }
+        continued_prompt.push_str("\n\n");
+        continued_prompt.push_str(AUTO_RESOLVE_REVIEW_FOLLOWUP);
         self.begin_review(
             continued_prompt,
             state_snapshot.hint.clone(),
