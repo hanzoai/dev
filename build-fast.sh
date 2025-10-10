@@ -14,6 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
+  BUILD_FAST_BINS="code code-tui"      Override bins to build (space or comma separated)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -25,6 +26,23 @@ Examples:
   ./build-fast.sh perf
   ./build-fast.sh perf run
 USAGE
+}
+
+trim() {
+  local value="${1:-}"
+  value="${value#${value%%[![:space:]]*}}"
+  value="${value%${value##*[![:space:]]}}"
+  printf '%s' "$value"
+}
+
+bin_requested() {
+  local needle="${1:-}"
+  for candidate in "${TARGET_BINS[@]}"; do
+    if [ "${candidate}" = "${needle}" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 resolve_bin_path() {
@@ -142,6 +160,26 @@ else
   REPO_NAME="$(basename "${SCRIPT_DIR}")"
 fi
 
+REPO_ROOT="${SCRIPT_DIR}"
+
+if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
+  CACHE_HOME="${CODE_HOME%/}"
+elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
+  CACHE_HOME="${CODEX_HOME%/}"
+else
+  if [ -d "/mnt/data" ] && [ -w "/mnt/data" ]; then
+    CACHE_HOME="/mnt/data/.code"
+  else
+    CACHE_HOME="${REPO_ROOT}/.code"
+  fi
+fi
+case "${CACHE_HOME}" in
+  /*) ;;
+  *)
+    CACHE_HOME="${REPO_ROOT}/${CACHE_HOME#./}"
+    ;;
+esac
+
 case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
     WORKSPACE_DIR="codex-rs"
@@ -163,6 +201,23 @@ if [ ! -d "$WORKSPACE_PATH" ]; then
   exit 1
 fi
 
+TARGET_CACHE_ROOT="${CACHE_HOME}/working/_target-cache/${REPO_NAME}"
+TARGET_CACHE_DIR="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
+
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  TARGET_CACHE_DIR_ABS="${TARGET_CACHE_DIR}"
+  case "${TARGET_CACHE_DIR_ABS}" in
+    /*) ;;
+    *)
+      TARGET_CACHE_DIR_ABS="${REPO_ROOT}/${TARGET_CACHE_DIR_ABS#./}"
+      ;;
+  esac
+  mkdir -p "${TARGET_CACHE_DIR_ABS}" 2>/dev/null || true
+  export CARGO_TARGET_DIR="${TARGET_CACHE_DIR_ABS}"
+else
+  TARGET_CACHE_DIR_ABS="${CARGO_TARGET_DIR}"
+fi
+
 # Change to the selected Rust workspace root regardless of caller CWD
 cd "${WORKSPACE_PATH}"
 
@@ -175,11 +230,29 @@ if [ -z "${EXEC_BIN}" ]; then
   EXEC_BIN="${EXEC_PACKAGE}"
 fi
 
-# Compute repository root (the directory containing this script)
-# Note: We intentionally set REPO_ROOT to SCRIPT_DIR so any defaults (like CARGO_HOME)
-# resolve inside the repository, not its parent. This prevents permission issues on CI
-# where the parent folder may be owned by a different user.
-REPO_ROOT="${SCRIPT_DIR}"
+TARGET_BINS=()
+if [ -n "${BUILD_FAST_BINS:-}" ]; then
+  for raw_bin in ${BUILD_FAST_BINS//,/ }; do
+    bin_candidate="$(trim "$raw_bin")"
+    if [ -n "${bin_candidate}" ]; then
+      TARGET_BINS+=("${bin_candidate}")
+    fi
+  done
+fi
+if [ "${#TARGET_BINS[@]}" -eq 0 ]; then
+  TARGET_BINS=("${CRATE_PREFIX}")
+fi
+PRIMARY_PRESENT=0
+for candidate in "${TARGET_BINS[@]}"; do
+  if [ "${candidate}" = "${CRATE_PREFIX}" ]; then
+    PRIMARY_PRESENT=1
+    break
+  fi
+done
+if [ "$PRIMARY_PRESENT" -eq 0 ]; then
+  TARGET_BINS=("${CRATE_PREFIX}" "${TARGET_BINS[@]}")
+fi
+PRIMARY_BIN="${TARGET_BINS[0]}"
 
 # Default to preserving caller environment unless explicitly disabled
 KEEP_ENV="${KEEP_ENV:-1}"
@@ -291,6 +364,23 @@ if [ "${KEEP_ENV}" != "1" ]; then
   CANONICAL_ENV_APPLIED=1
 else
   CANONICAL_ENV_APPLIED=0
+fi
+
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  export CARGO_TARGET_DIR="${TARGET_CACHE_DIR_ABS}"
+fi
+
+if command -v sccache >/dev/null 2>&1; then
+  if [ -z "${RUSTC_WRAPPER:-}" ]; then
+    export RUSTC_WRAPPER="$(command -v sccache)"
+  fi
+  if [ -z "${SCCACHE_DIR:-}" ]; then
+    export SCCACHE_DIR="${CACHE_HOME}/sccache"
+  fi
+  if [ -z "${SCCACHE_CACHE_SIZE:-}" ]; then
+    export SCCACHE_CACHE_SIZE="50G"
+  fi
+  mkdir -p "${SCCACHE_DIR}" 2>/dev/null || true
 fi
 
 # Optional debug symbol override for profiling sessions
@@ -472,8 +562,12 @@ fi
 
 # Build with or without --locked based on lockfile validity
 # Keep stderr and stdout separate so downstream tools can capture both streams.
-echo "Using exec bin: ${EXEC_BIN}"
-${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" --bin "${CRATE_PREFIX}" --bin "${CRATE_PREFIX}-tui" --bin "${EXEC_BIN}"
+CARGO_BIN_ARGS=()
+for bin in "${TARGET_BINS[@]}"; do
+  CARGO_BIN_ARGS+=("--bin" "${bin}")
+done
+echo "Building bins: ${TARGET_BINS[*]}"
+${USE_CARGO} build ${USE_LOCKED} --profile "${PROFILE}" "${CARGO_BIN_ARGS[@]}"
 
 # Check if build succeeded
 if [ $? -eq 0 ]; then
@@ -562,6 +656,20 @@ if [ $? -eq 0 ]; then
       create_cli_symlinks "./code-cli/bin" "${CLI_TARGET_CODE}"
     fi
 
+    BIN_DIR="./bin"
+    mkdir -p "${BIN_DIR}"
+    BIN_DIR_ABS="$(cd "${BIN_DIR}" >/dev/null 2>&1 && pwd)"
+    for BIN_NAME in "${TARGET_BINS[@]}"; do
+      BIN_TARGET_PATH="${TARGET_DIR_ABS}/${BIN_SUBDIR}/${BIN_NAME}"
+      if [ -e "${BIN_TARGET_PATH}" ]; then
+        TMP_BIN_PATH="${BIN_DIR}/${BIN_NAME}.tmp"
+        cp -f "${BIN_TARGET_PATH}" "${TMP_BIN_PATH}"
+        mv -f "${TMP_BIN_PATH}" "${BIN_DIR}/${BIN_NAME}"
+        chmod +x "${BIN_DIR}/${BIN_NAME}" 2>/dev/null || true
+      fi
+    done
+    RUN_BIN_PATH="${BIN_DIR_ABS}/${PRIMARY_BIN}"
+
     # Ensure repo-local developer alias stays mapped to latest build output
     # so the user's `${CRATE_PREFIX}-dev` alias keeps working when pointing at target/dev-fast/${CRATE_PREFIX}
     # Only create this symlink if we're not already building in dev-fast profile
@@ -578,9 +686,15 @@ if [ $? -eq 0 ]; then
     # dependencies/proc-macro dylibs are not affected.
     if [ "${DETERMINISTIC_NO_UUID:-}" = "1" ] && [ "$(uname -s)" = "Darwin" ]; then
       echo "Deterministic post-link: removing LC_UUID from executables"
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${CLI_PACKAGE}" --bin "${CRATE_PREFIX}" -- -C link-arg=-Wl,-no_uuid || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${TUI_PACKAGE}" --bin "${CRATE_PREFIX}-tui" -- -C link-arg=-Wl,-no_uuid || true
-      ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${EXEC_PACKAGE}" --bin "${EXEC_BIN}" -- -C link-arg=-Wl,-no_uuid || true
+      if bin_requested "${CRATE_PREFIX}"; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${CLI_PACKAGE}" --bin "${CRATE_PREFIX}" -- -C link-arg=-Wl,-no_uuid || true
+      fi
+      if bin_requested "${CRATE_PREFIX}-tui"; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${TUI_PACKAGE}" --bin "${CRATE_PREFIX}-tui" -- -C link-arg=-Wl,-no_uuid || true
+      fi
+      if bin_requested "${EXEC_BIN}"; then
+        ${USE_CARGO} rustc ${USE_LOCKED} --profile "${PROFILE}" -p "${EXEC_PACKAGE}" --bin "${EXEC_BIN}" -- -C link-arg=-Wl,-no_uuid || true
+      fi
     fi
 
     # Compute absolute path and SHA256 for clarity (after any post-linking)
@@ -607,13 +721,17 @@ if [ $? -eq 0 ]; then
     fi
 
     if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
-      if [ ! -x "${ABS_BIN_PATH}" ]; then
-        echo "❌ Run failed: ${ABS_BIN_PATH} is missing or not executable"
+      RUN_PATH="${RUN_BIN_PATH}"
+      if [ ! -x "${RUN_PATH}" ]; then
+        RUN_PATH="${TARGET_DIR_ABS}/${BIN_SUBDIR}/${PRIMARY_BIN}"
+      fi
+      if [ ! -x "${RUN_PATH}" ]; then
+        echo "❌ Run failed: ${RUN_PATH} is missing or not executable"
         exit 1
       fi
-      echo "Running ${ABS_BIN_PATH} (cwd: ${CALLER_CWD})..."
+      echo "Running ${RUN_PATH} (cwd: ${CALLER_CWD})..."
       (
-        cd "${CALLER_CWD}" && "${ABS_BIN_PATH}"
+        cd "${CALLER_CWD}" && "${RUN_PATH}"
       )
       RUN_STATUS=$?
       if [ $RUN_STATUS -ne 0 ]; then
