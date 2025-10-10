@@ -1,17 +1,16 @@
-use crate::app_event::{AppEvent, AutoContinueMode};
+use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::colors;
-use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
-use crate::spinner;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::prelude::Widget;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use ratatui::widgets::{Block, Borders, Paragraph, WidgetRef, Wrap};
+use unicode_width::UnicodeWidthStr;
+use std::time::{Duration, Instant};
 
 use super::{
     bottom_pane_view::{BottomPaneView, ConditionalUpdate},
@@ -43,19 +42,17 @@ pub(crate) struct AutoActiveViewModel {
     pub manual_hint: Option<String>,
     pub ctrl_switch_hint: String,
     pub cli_running: bool,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct AutoSetupViewModel {
-    pub goal: String,
-    pub auto_review_enabled: bool,
-    pub subagents_enabled: bool,
-    pub continue_mode: AutoContinueMode,
+    pub review_enabled: bool,
+    pub agents_enabled: bool,
+    pub turns_completed: usize,
+    pub started_at: Option<Instant>,
+    pub elapsed: Option<Duration>,
+    pub progress_past: Option<String>,
+    pub progress_current: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum AutoCoordinatorViewModel {
-    Setup(AutoSetupViewModel),
     Active(AutoActiveViewModel),
 }
 
@@ -73,29 +70,14 @@ struct VariantContext {
 pub(crate) struct AutoCoordinatorView {
     model: AutoCoordinatorViewModel,
     app_event_tx: AppEventSender,
-    header_wave: HeaderWaveEffect,
-    header_border: HeaderBorderWeaveEffect,
     status_message: Option<String>,
 }
 
 impl AutoCoordinatorView {
     pub fn new(model: AutoCoordinatorViewModel, app_event_tx: AppEventSender) -> Self {
-        let now = Instant::now();
-        let header_wave = {
-            let effect = HeaderWaveEffect::new();
-            effect.set_enabled(false, now);
-            effect
-        };
-        let header_border = {
-            let effect = HeaderBorderWeaveEffect::new();
-            effect.set_enabled(false, now);
-            effect
-        };
         Self {
             model,
             app_event_tx,
-            header_wave,
-            header_border,
             status_message: None,
         }
     }
@@ -135,41 +117,28 @@ impl AutoCoordinatorView {
         true
     }
 
-    fn status_message_for_display(message: &str) -> Option<String> {
-        let trimmed = message.trim();
-        if trimmed.is_empty() {
-            None
-        } else if trimmed.ends_with("...") || trimmed.ends_with('…') {
-            Some(trimmed.to_string())
-        } else {
-            Some(format!("{trimmed}..."))
+    pub(crate) fn handle_active_key_event(
+        &mut self,
+        _pane: &mut BottomPane<'_>,
+        key_event: KeyEvent,
+    ) -> bool {
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return false;
         }
-    }
 
-    fn spinner_should_run(model: &AutoActiveViewModel) -> bool {
-        model.cli_running
-    }
-
-    fn overlay_text(&self, spinner_symbol: &str) -> Option<String> {
-        let message = self
-            .status_message
-            .as_ref()
-            .and_then(|msg| Self::status_message_for_display(msg))
-            .unwrap_or_else(|| "Working...".to_string());
-        if message.is_empty() {
-            None
-        } else {
-            Some(format!(" {spinner_symbol} {message} "))
+        if key_event
+            .modifiers
+            .contains(KeyModifiers::CONTROL)
+            && matches!(key_event.code, KeyCode::Char('s') | KeyCode::Char('S'))
+        {
+            self.app_event_tx.send(AppEvent::ShowAutoDriveSettings);
+            return true;
         }
+
+        matches!(key_event.code, KeyCode::Up | KeyCode::Down)
     }
 
-    fn render_frame(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        now: Instant,
-        overlay: Option<&str>,
-    ) -> Option<Rect> {
+    fn render_frame(&self, area: Rect, buf: &mut Buffer) -> Option<Rect> {
         const BASE_TITLE: &str = " Auto Drive ";
         if area.width < 3 || area.height < 3 {
             return None;
@@ -185,96 +154,12 @@ impl AutoCoordinatorView {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(colors::border()))
             .render(area, buf);
-        if self.header_wave.is_enabled() {
-            self.header_wave.render(area, buf, now);
-        }
-        if self.header_border.is_enabled() {
-            self.header_border.render(area, buf, now);
-        }
-        // Reapply static title styling so animation never recolors it
-        let title_style = Style::default()
-            .fg(colors::text())
-            .add_modifier(Modifier::BOLD);
-        let title_y = area.y;
-        let title_start = area.x + 1;
-        for (offset, ch) in BASE_TITLE.chars().enumerate() {
-            let x = title_start + offset as u16;
-            if x >= area.x && x < area.x.saturating_add(area.width) {
-                let mut ch_buf = [0u8; 4];
-                let symbol = ch.encode_utf8(&mut ch_buf);
-                let cell = &mut buf[(x, title_y)];
-                cell.set_symbol(symbol);
-                cell.set_style(title_style);
-            }
-        }
-
-        if let Some(text) = overlay {
-            self.render_title_overlay(area, buf, text);
-        }
-
         Some(Rect {
             x: area.x + 1,
             y: area.y + 1,
             width: area.width.saturating_sub(2),
             height: area.height.saturating_sub(2),
         })
-    }
-
-    fn render_title_overlay(&self, area: Rect, buf: &mut Buffer, text: &str) {
-        if area.width <= 2 {
-            return;
-        }
-        const BASE_TITLE: &str = " Auto Drive ";
-        let overlay_width = UnicodeWidthStr::width(text);
-        if overlay_width == 0 {
-            return;
-        }
-        let available = area.width.saturating_sub(2) as usize;
-        let trimmed = if overlay_width > available {
-            let mut acc = String::new();
-            let mut used = 0usize;
-            for ch in text.chars() {
-                let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-                if used + w > available {
-                    acc.push('…');
-                    break;
-                }
-                acc.push(ch);
-                used += w;
-            }
-            acc
-        } else {
-            text.to_string()
-        };
-        let draw_width = UnicodeWidthStr::width(trimmed.as_str());
-        if draw_width == 0 {
-            return;
-        }
-        let base_width = UnicodeWidthStr::width(BASE_TITLE) as u16;
-        let base_end = area.x + 1 + base_width;
-        let mut start_x = area.x + (area.width.saturating_sub(draw_width as u16)) / 2;
-        start_x = start_x.max(base_end);
-        if start_x + draw_width as u16 >= area.x.saturating_add(area.width) {
-            if area.width > draw_width as u16 + 1 {
-                start_x = area.x + area.width - draw_width as u16 - 1;
-            } else {
-                start_x = area.x + 1;
-            }
-        }
-        let title_y = area.y;
-        let style = Style::default().fg(colors::info());
-        let mut x = start_x;
-        for ch in trimmed.chars() {
-            if x >= area.x.saturating_add(area.width) {
-                break;
-            }
-            let mut ch_buf = [0u8; 4];
-            let symbol = ch.encode_utf8(&mut ch_buf);
-            let cell = &mut buf[(x, title_y)];
-            cell.set_symbol(symbol);
-            cell.set_style(style);
-            x += UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
-        }
     }
 
     fn derived_status_entries(&self, model: &AutoActiveViewModel) -> Vec<(String, Style)> {
@@ -500,6 +385,13 @@ impl AutoCoordinatorView {
             }
         }
 
+        let composer_min = 5usize; // input block with surrounding padding
+        let summary_height = 1usize; // status summary line at bottom
+
+        total = total
+            .saturating_add(composer_min)
+            .saturating_add(summary_height);
+
         total
             .saturating_add(2) // frame borders
             .min(u16::MAX as usize) as u16
@@ -510,300 +402,306 @@ impl AutoCoordinatorView {
         area: Rect,
         buf: &mut Buffer,
         model: &AutoActiveViewModel,
+        composer: &ChatComposer,
     ) {
-        let now = Instant::now();
-        let mut frame_needed = false;
-
-        let should_enable_border = model.waiting_for_response && !model.cli_running;
-        let mut border_enabled = self.header_border.is_enabled();
-        if should_enable_border && !border_enabled {
-            self.header_border.set_enabled(true, now);
-            border_enabled = true;
-        } else if !should_enable_border && border_enabled {
-            self.header_border.set_enabled(false, now);
-            border_enabled = false;
-        }
-
-        if border_enabled && self.header_border.schedule_if_needed(now) {
-            frame_needed = true;
-        }
-
-        let spinner_active = Self::spinner_should_run(model);
-        let spinner_def = spinner::current_spinner();
-        let spinner_symbol = if spinner_active {
-            let now_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            Some(spinner::frame_at_time(spinner_def, now_ms))
-        } else {
-            None
-        };
-        let overlay_text = spinner_symbol
-            .as_ref()
-            .and_then(|symbol| self.overlay_text(symbol));
-
-        let Some(inner) = self.render_frame(area, buf, now, overlay_text.as_deref()) else {
+        let Some(inner) = self.render_frame(area, buf) else {
             return;
         };
         let inner = self.apply_left_padding(inner, buf);
-        if inner.height == 0 {
+        if inner.height == 0 || inner.width == 0 {
             return;
         }
 
-        let status_entries = self.derived_status_entries(model);
-        let mut content_lines: Vec<Line<'static>> = Vec::new();
-        let mut footer_lines: Vec<Line<'static>> = Vec::new();
-        let mut has_button_block = false;
-
         let ctx = Self::build_context(model);
+        let mut top_lines: Vec<Line<'static>> = Vec::new();
+        let mut after_lines: Vec<Line<'static>> = Vec::new();
 
         if model.awaiting_submission {
             if let Some(prompt_lines) =
-                self.cli_prompt_lines(model, Style::default().fg(colors::text_dim()))
+                self.cli_prompt_lines(model, Style::default().fg(colors::text()))
             {
-                content_lines.extend(prompt_lines);
+                top_lines.extend(prompt_lines);
             }
 
             if let Some(button_block) = self.button_block_lines(&ctx) {
-                has_button_block = true;
-                footer_lines.extend(button_block);
-            } else if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
-                footer_lines.push(ctrl_hint_line);
-            }
-        } else {
-            let status_lines = self.status_lines_with_entries(&status_entries);
-            content_lines.extend(status_lines);
-
-            if let Some(button_block) = self.button_block_lines(&ctx) {
-                has_button_block = true;
-                footer_lines.extend(button_block);
-            }
-
-            if let Some(hint_line) = self.manual_hint_line(&ctx) {
-                footer_lines.push(hint_line);
+                after_lines.extend(button_block);
             }
 
             if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
-                footer_lines.push(Line::default());
-                footer_lines.push(ctrl_hint_line);
+                if !after_lines.is_empty() {
+                    after_lines.push(Line::default());
+                }
+                after_lines.push(ctrl_hint_line);
+            }
+        } else {
+            let status_entries = self.derived_status_entries(model);
+            top_lines.extend(self.status_lines_with_entries(&status_entries));
+
+            if let Some(button_block) = self.button_block_lines(&ctx) {
+                after_lines.extend(button_block);
+            }
+
+            if let Some(hint_line) = self.manual_hint_line(&ctx) {
+                after_lines.push(hint_line);
+            }
+
+            if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
+                if !after_lines.is_empty() {
+                    after_lines.push(Line::default());
+                }
+                after_lines.push(ctrl_hint_line);
             }
         }
 
-        if !content_lines.is_empty() && !footer_lines.is_empty() {
-            if has_button_block {
-                // keep the button snug against the prompt/status text
-            } else if footer_lines
-                .first()
-                .map(|line| line.width() == 0)
-                .unwrap_or(false)
-            {
-                // already spaced
-            } else {
-                footer_lines.insert(0, Line::default());
+        if model.waiting_for_response || model.awaiting_submission || model.cli_running {
+            if let Some(progress_text) = Self::compose_progress_line(model) {
+                let line = Line::from(Span::styled(
+                    progress_text,
+                    Style::default().fg(colors::text()),
+                ));
+                if top_lines.is_empty() {
+                    top_lines.push(line);
+                } else {
+                    top_lines.insert(0, line);
+                }
             }
         }
 
-        let available_height = inner.height as usize;
-        if available_height == 0 {
-            return;
+        let summary_line = self.build_status_summary(model);
+        let summary_height = if summary_line.is_some() { 1 } else { 0 };
+
+        let mut top_height = Self::lines_height(&top_lines, inner.width);
+        let mut after_height = Self::lines_height(&after_lines, inner.width);
+        let min_composer_height = 3u16;
+
+        let mut composer_height = inner
+            .height
+            .saturating_sub(top_height)
+            .saturating_sub(after_height)
+            .saturating_sub(summary_height);
+
+        if composer_height < min_composer_height {
+            let deficit = min_composer_height.saturating_sub(composer_height);
+            let reduce_after = after_height.min(deficit);
+            after_height -= reduce_after;
+            let remaining = deficit - reduce_after;
+            let reduce_top = top_height.min(remaining);
+            top_height -= reduce_top;
+            composer_height = inner
+                .height
+                .saturating_sub(top_height)
+                .saturating_sub(after_height)
+                .saturating_sub(summary_height);
         }
 
-        if footer_lines.is_empty() {
-            let lines: Vec<Line<'static>> = if content_lines.len() > available_height {
-                let skip = content_lines.len() - available_height;
-                content_lines.into_iter().skip(skip).collect()
+        if composer_height == 0 {
+            composer_height = inner
+                .height
+                .saturating_sub(top_height)
+                .saturating_sub(after_height)
+                .saturating_sub(summary_height);
+        }
+
+        if composer_height == 0 {
+            composer_height = 1;
+        }
+
+        let mut cursor_y = inner.y;
+        if top_height > 0 {
+            let max_height = inner.y + inner.height - cursor_y;
+            let rect_height = top_height.min(max_height);
+            if rect_height > 0 {
+                let top_rect = Rect {
+                    x: inner.x,
+                    y: cursor_y,
+                    width: inner.width,
+                    height: rect_height,
+                };
+                Paragraph::new(top_lines.clone())
+                    .wrap(Wrap { trim: true })
+                    .render(top_rect, buf);
+                cursor_y = cursor_y.saturating_add(rect_height);
+            }
+        }
+
+        if composer_height > 0 && cursor_y < inner.y + inner.height {
+            let max_height = inner.y + inner.height - cursor_y;
+            let rect_height = composer_height.min(max_height);
+            if rect_height > 0 {
+                let composer_rect = Rect {
+                    x: inner.x,
+                    y: cursor_y,
+                    width: inner.width,
+                    height: rect_height,
+                };
+                composer.render_ref(composer_rect, buf);
+                cursor_y = cursor_y.saturating_add(rect_height);
+            }
+        }
+
+        if after_height > 0 && cursor_y < inner.y + inner.height {
+            let max_height = inner
+                .y
+                .saturating_add(inner.height)
+                .saturating_sub(cursor_y)
+                .saturating_sub(summary_height);
+            let rect_height = after_height.min(max_height);
+            if rect_height > 0 {
+                let after_rect = Rect {
+                    x: inner.x,
+                    y: cursor_y,
+                    width: inner.width,
+                    height: rect_height,
+                };
+                Paragraph::new(after_lines.clone())
+                    .wrap(Wrap { trim: true })
+                    .render(after_rect, buf);
+                cursor_y = cursor_y.saturating_add(rect_height);
+            }
+        }
+
+        if let Some(line) = summary_line {
+            if cursor_y < inner.y + inner.height {
+                let rect_height = (inner.y + inner.height - cursor_y).max(1);
+                let summary_rect = Rect {
+                    x: inner.x,
+                    y: cursor_y,
+                    width: inner.width,
+                    height: rect_height,
+                };
+                Paragraph::new(line).render(summary_rect, buf);
+            }
+        }
+    }
+
+    fn lines_height(lines: &[Line<'static>], width: u16) -> u16 {
+        if lines.is_empty() {
+            return 0;
+        }
+        if width == 0 {
+            return lines.len() as u16;
+        }
+        lines.iter().fold(0u16, |acc, line| {
+            let line_width = line.width() as u16;
+            let segments = if line_width == 0 {
+                1
             } else {
-                content_lines
+                (line_width + width - 1) / width
             };
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: true })
-                .render(inner, buf);
+            acc.saturating_add(segments.max(1))
+        })
+    }
+
+    fn build_status_summary(&self, model: &AutoActiveViewModel) -> Option<Line<'static>> {
+        let status_label = if model.waiting_for_response {
+            "Running"
+        } else if model.awaiting_submission {
+            "Awaiting input"
+        } else if model.elapsed.is_some() && model.started_at.is_none() {
+            "Stopped"
         } else {
-            let footer_len = footer_lines.len();
-            let footer_keep = footer_len.min(available_height);
-            let footer_skip = footer_len - footer_keep;
-            let footer_lines: Vec<Line<'static>> = footer_lines
-                .into_iter()
-                .skip(footer_skip)
-                .collect();
-            let footer_height = footer_lines.len();
-            let content_capacity = available_height.saturating_sub(footer_height);
-            let mut lines: Vec<Line<'static>> = if content_capacity == 0 {
-                Vec::new()
-            } else if content_lines.len() > content_capacity {
-                let skip = content_lines.len() - content_capacity;
-                content_lines.into_iter().skip(skip).collect()
-            } else {
-                content_lines
-            };
-            lines.extend(footer_lines);
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: true })
-                .render(inner, buf);
-        }
-
-        if spinner_active || frame_needed {
-            let mut next_interval = if spinner_active {
-                Duration::from_millis(spinner_def.interval_ms.max(80))
-            } else {
-                Duration::from_millis(200)
-            };
-            if frame_needed {
-                next_interval = next_interval.min(HeaderBorderWeaveEffect::FRAME_INTERVAL);
-            }
-            self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(next_interval));
-        }
-    }
-
-    fn estimated_height_setup(&self, width: u16, model: &AutoSetupViewModel) -> u16 {
-        let inner_width = self.inner_width(width);
-        if inner_width == 0 {
-            return 2;
-        }
-
-        let lines = Self::setup_text_lines(model);
-        let mut total = 0usize;
-        for line in lines {
-            if line.is_empty() {
-                total += 1;
-            } else {
-                total += Self::wrap_count(&line, inner_width).max(1);
-            }
-        }
-
-        total
-            .saturating_add(2)
-            .min(u16::MAX as usize) as u16
-    }
-
-    fn render_setup(&self, area: Rect, buf: &mut Buffer, model: &AutoSetupViewModel) {
-        let now = Instant::now();
-        if self.header_wave.is_enabled() {
-            self.header_wave.set_enabled(false, now);
-        }
-        if self.header_border.is_enabled() {
-            self.header_border.set_enabled(false, now);
-        }
-
-        let Some(inner) = self.render_frame(area, buf, now, None) else {
-            return;
-        };
-        let inner = self.apply_left_padding(inner, buf);
-        if inner.height == 0 {
-            return;
-        }
-
-        let lines = Self::setup_render_lines(model);
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .render(inner, buf);
-    }
-
-    fn setup_text_lines(model: &AutoSetupViewModel) -> Vec<String> {
-        let goal_text = model.goal.trim();
-        let goal_display = if goal_text.is_empty() {
-            "Goal: (none)".to_string()
-        } else {
-            format!("Goal: {goal_text}")
+            "Ready"
         };
 
-        vec![
-            goal_display,
-            String::new(),
-            Self::setup_toggle_text("Automatic review", "R", model.auto_review_enabled),
-            Self::setup_toggle_text("Sub agents", "S", model.subagents_enabled),
-            Self::setup_countdown_text(model),
-            String::new(),
-            "Enter to launch Auto Drive | Esc to cancel".to_string(),
-        ]
-    }
-
-    fn setup_toggle_text(label: &str, key_hint: &str, enabled: bool) -> String {
-        let checkbox = if enabled { "[x]" } else { "[ ]" };
-        format!("{checkbox} {label} ({key_hint} to toggle)")
-    }
-
-    fn setup_countdown_text(model: &AutoSetupViewModel) -> String {
-        format!(
-            "Auto-continue: {} (C cycle | 0=now | 1=10s | 6=60s | M=manual)",
-            model.continue_mode.label()
-        )
-    }
-
-    fn setup_render_lines(model: &AutoSetupViewModel) -> Vec<Line<'static>> {
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        let goal_text = model.goal.trim();
-        let goal_display = if goal_text.is_empty() {
-            "(none)"
+        let elapsed = if let Some(duration) = model.elapsed {
+            Some(duration)
+        } else if let Some(started_at) = model.started_at {
+            Some(Instant::now().saturating_duration_since(started_at))
         } else {
-            goal_text
+            None
         };
-        lines.push(Line::from(vec![
-            Span::styled("Goal: ", Style::default().fg(colors::text())),
-            Span::styled(
-                goal_display.to_string(),
-                Style::default().fg(colors::text()).add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::default());
-        lines.push(Self::setup_toggle_line(
-            "Automatic review",
-            "R",
-            model.auto_review_enabled,
-        ));
-        lines.push(Self::setup_toggle_line("Sub agents", "S", model.subagents_enabled));
-        lines.push(Self::setup_countdown_line(model));
-        lines.push(Line::default());
-        lines.push(Line::from(Span::styled(
-            "Enter to launch Auto Drive | Esc to cancel".to_string(),
-            Style::default()
-                .fg(colors::text_dim())
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines
-    }
 
-    fn setup_toggle_line(label: &str, key_hint: &str, enabled: bool) -> Line<'static> {
-        let checkbox = if enabled { "[x]" } else { "[ ]" };
-        let state_style = if enabled {
-            Style::default()
-                .fg(colors::success())
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(colors::text_dim())
-        };
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled(checkbox.to_string(), state_style));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(label.to_string(), Style::default().fg(colors::text())));
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!("({key_hint} to toggle)"),
-            Style::default().fg(colors::text_dim()),
-        ));
-        Line::from(spans)
-    }
+        let mut primary = status_label.to_string();
+        let mut details: Vec<String> = Vec::new();
 
-    fn setup_countdown_line(model: &AutoSetupViewModel) -> Line<'static> {
+        if let Some(duration) = elapsed {
+            details.push(Self::format_elapsed(duration));
+        }
+
+        details.push(Self::format_turns(model.turns_completed));
+
+        if !details.is_empty() {
+            primary.push_str(" (");
+            primary.push_str(&details.join(", "));
+            primary.push(')');
+        }
+
         let mut spans: Vec<Span<'static>> = Vec::new();
         spans.push(Span::styled(
-            "Auto-continue: ".to_string(),
-            Style::default().fg(colors::text()),
-        ));
-        spans.push(Span::styled(
-            model.continue_mode.label().to_string(),
+            primary,
             Style::default()
-                .fg(colors::primary())
+                .fg(colors::text())
                 .add_modifier(Modifier::BOLD),
         ));
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            "C cycle | 0=now | 1=10s | 6=60s | M=manual".to_string(),
-            Style::default().fg(colors::text_dim()),
-        ));
-        Line::from(spans)
+
+        let secondary_style = Style::default().fg(colors::text_dim());
+
+        let agents_text = if model.agents_enabled {
+            "Agents Enabled"
+        } else {
+            "Agents Disabled"
+        };
+        let review_text = if model.review_enabled {
+            "Review Enabled"
+        } else {
+            "Review Disabled"
+        };
+
+        spans.push(Span::styled("  •  ", secondary_style));
+        spans.push(Span::styled(agents_text.to_string(), secondary_style));
+        spans.push(Span::styled("  •  ", secondary_style));
+        spans.push(Span::styled(review_text.to_string(), secondary_style));
+
+        Some(Line::from(spans))
+    }
+
+    fn format_elapsed(duration: Duration) -> String {
+        let total_seconds = duration.as_secs();
+        let hours = total_seconds / 3600;
+        let minutes = (total_seconds % 3600) / 60;
+        let seconds = total_seconds % 60;
+
+        if hours > 0 {
+            if minutes > 0 {
+                format!("{}h {:02}m", hours, minutes)
+            } else {
+                format!("{}h", hours)
+            }
+        } else if minutes > 0 {
+            if seconds > 0 {
+                format!("{}m {:02}s", minutes, seconds)
+            } else {
+                format!("{}m", minutes)
+            }
+        } else {
+            format!("{}s", seconds)
+        }
+    }
+
+    fn format_turns(turns: usize) -> String {
+        let label = if turns == 1 { "turn" } else { "turns" };
+        format!("{} {}", turns, label)
+    }
+
+    fn compose_progress_line(model: &AutoActiveViewModel) -> Option<String> {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(past) = model.progress_past.as_ref() {
+            let trimmed = past.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+        if let Some(current) = model.progress_current.as_ref() {
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" "))
+        }
     }
 
     fn apply_left_padding(&self, area: Rect, buf: &mut Buffer) -> Rect {
@@ -829,83 +727,23 @@ impl AutoCoordinatorView {
 
 impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
-        let AutoCoordinatorViewModel::Setup(model) = &self.model else {
-            return;
-        };
-
-        let has_ctrl_like = key_event.modifiers.contains(KeyModifiers::CONTROL)
-            || key_event.modifiers.contains(KeyModifiers::ALT)
-            || key_event.modifiers.contains(KeyModifiers::SUPER);
-        if has_ctrl_like {
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return;
         }
 
-        match key_event.code {
-            KeyCode::Enter => {
-                self.app_event_tx.send(AppEvent::AutoSetupConfirm);
-            }
-            KeyCode::Esc => {
-                self.app_event_tx.send(AppEvent::AutoSetupCancel);
-            }
-            KeyCode::Left => {
-                self
-                    .app_event_tx
-                    .send(AppEvent::AutoSetupSelectCountdown(model.continue_mode.cycle_backward()));
-            }
-            KeyCode::Right => {
-                self
-                    .app_event_tx
-                    .send(AppEvent::AutoSetupSelectCountdown(model.continue_mode.cycle_forward()));
-            }
-            KeyCode::Char(ch) => {
-                let lowered = ch.to_ascii_lowercase();
-                match lowered {
-                    'r' => {
-                        self.app_event_tx.send(AppEvent::AutoSetupToggleReview);
-                    }
-                    's' => {
-                        self.app_event_tx.send(AppEvent::AutoSetupToggleSubagents);
-                    }
-                    'c' => {
-                        self
-                            .app_event_tx
-                            .send(AppEvent::AutoSetupSelectCountdown(model.continue_mode.cycle_forward()));
-                    }
-                    '0' => {
-                        self
-                            .app_event_tx
-                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::Immediate));
-                    }
-                    '1' => {
-                        self
-                            .app_event_tx
-                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::TenSeconds));
-                    }
-                    '6' => {
-                        self
-                            .app_event_tx
-                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::SixtySeconds));
-                    }
-                    'm' => {
-                        self
-                            .app_event_tx
-                            .send(AppEvent::AutoSetupSelectCountdown(AutoContinueMode::Manual));
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
+        if key_event
+            .modifiers
+            .contains(KeyModifiers::CONTROL)
+            && matches!(key_event.code, KeyCode::Char('s') | KeyCode::Char('S'))
+        {
+            self.app_event_tx.send(AppEvent::ShowAutoDriveSettings);
         }
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        match &self.model {
-            AutoCoordinatorViewModel::Active(model) => {
-                let ctx = Self::build_context(model);
-                self.estimated_height_active(width, &ctx, model)
-            }
-            AutoCoordinatorViewModel::Setup(model) => self.estimated_height_setup(width, model),
-        }
+        let AutoCoordinatorViewModel::Active(model) = &self.model;
+        let ctx = Self::build_context(model);
+        self.estimated_height_active(width, &ctx, model)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -913,10 +751,23 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
             return;
         }
 
-        match &self.model {
-            AutoCoordinatorViewModel::Active(model) => self.render_active(area, buf, model),
-            AutoCoordinatorViewModel::Setup(model) => self.render_setup(area, buf, model),
+        // Fallback path when the composer is not available: draw the outer
+        // frame so the layout remains stable.
+        let _ = self.render_frame(area, buf);
+    }
+
+    fn render_with_composer(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        composer: &ChatComposer,
+    ) {
+        if area.height == 0 {
+            return;
         }
+
+        let AutoCoordinatorViewModel::Active(model) = &self.model;
+        self.render_active(area, buf, model, composer);
     }
 
     fn update_status_text(&mut self, text: String) -> ConditionalUpdate {

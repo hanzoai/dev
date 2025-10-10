@@ -5,6 +5,7 @@ use std::any::Any;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use super::ChatComposer;
 use super::BottomPane;
 use super::CancellationEvent;
 
@@ -36,6 +37,19 @@ pub(crate) trait BottomPaneView<'a> {
 
     /// Render the view: this will be displayed in place of the composer.
     fn render(&self, area: Rect, buf: &mut Buffer);
+
+    /// Render the view when the caller maintains a persistent composer instance.
+    /// Default implementation falls back to `render` for views that do not need
+    /// direct access to the composer.
+    fn render_with_composer(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        composer: &ChatComposer,
+    ) {
+        let _ = composer;
+        self.render(area, buf);
+    }
 
     /// Update the status indicator text.
     fn update_status_text(&mut self, _text: String) -> ConditionalUpdate {
