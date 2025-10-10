@@ -480,10 +480,11 @@ impl ChatComposer {
 
     pub fn desired_height(&self, width: u16) -> u16 {
         // Calculate hint/popup height
-        let hint_height = match &self.active_popup {
-            ActivePopup::None => 1u16,
-            ActivePopup::Command(c) => c.calculate_required_height(),
-            ActivePopup::File(c) => c.calculate_required_height(),
+        let hint_height = match (&self.active_popup, self.embedded_mode) {
+            (ActivePopup::Command(c), _) => c.calculate_required_height(),
+            (ActivePopup::File(c), _) => c.calculate_required_height(),
+            (ActivePopup::None, true) => 0,
+            (ActivePopup::None, false) => 1,
         };
 
         // IMPORTANT: `width` here is the full BottomPane width. Subtract the
@@ -500,14 +501,11 @@ impl ChatComposer {
 
     pub fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if matches!(self.active_popup, ActivePopup::None) {
-            1
-        } else {
-            match &self.active_popup {
-                ActivePopup::Command(popup) => popup.calculate_required_height(),
-                ActivePopup::File(popup) => popup.calculate_required_height(),
-                ActivePopup::None => 1,
-            }
+        let hint_height = match (&self.active_popup, self.embedded_mode) {
+            (ActivePopup::Command(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::File(popup), _) => popup.calculate_required_height(),
+            (ActivePopup::None, true) => 0,
+            (ActivePopup::None, false) => 1,
         };
         // Calculate dynamic height based on content
         let content_width = area.width.saturating_sub(4); // Account for border and padding
