@@ -2462,6 +2462,9 @@ impl ChatWidget<'_> {
                     return;
                 }
                 if role == "user" {
+                    if text.starts_with("<user_action>") {
+                        return;
+                    }
                     if let Some(expected) = self.pending_dispatched_user_messages.front() {
                         if expected.trim() == text {
                             self.pending_dispatched_user_messages.pop_front();
@@ -8535,8 +8538,26 @@ impl ChatWidget<'_> {
     fn finalize_sent_user_message(&mut self, message: UserMessage) {
         let UserMessage {
             display_text,
-            ..
+            ordered_items,
         } = message;
+
+        let combined_message_text = {
+            let mut buffer = String::new();
+            for item in &ordered_items {
+                if let InputItem::Text { text } = item {
+                    if !buffer.is_empty() {
+                        buffer.push('\n');
+                    }
+                    buffer.push_str(text);
+                }
+            }
+            let trimmed = buffer.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        };
 
         if !display_text.is_empty() {
             let key = self.next_req_key_prompt();
@@ -8544,11 +8565,13 @@ impl ChatWidget<'_> {
             let _ = self.history_insert_plain_state_with_key(state, key, "prompt");
             self.pending_user_prompts_for_next_turn =
                 self.pending_user_prompts_for_next_turn.saturating_add(1);
-            self.pending_dispatched_user_messages
-                .push_back(display_text.clone());
         }
 
         self.flush_pending_agent_notes();
+
+        if let Some(model_echo) = combined_message_text {
+            self.pending_dispatched_user_messages.push_back(model_echo);
+        }
 
         if !display_text.is_empty() {
             if let Err(e) = self
@@ -20989,6 +21012,40 @@ impl ChatWidget<'_> {
         Some(!stdout.trim().is_empty())
     }
 
+    fn current_head_commit_sha(&self) -> Option<String> {
+        let output = Command::new("git")
+            .current_dir(&self.config.cwd)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            None
+        } else {
+            Some(stdout)
+        }
+    }
+
+    fn commit_subject_for(&self, commit: &str) -> Option<String> {
+        let output = Command::new("git")
+            .current_dir(&self.config.cwd)
+            .args(["show", "-s", "--format=%s", commit])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            None
+        } else {
+            Some(stdout)
+        }
+    }
+
     fn auto_resolve_should_block_auto_resume(&self) -> bool {
         match self.auto_resolve_state.as_ref().map(|state| &state.phase) {
             Some(AutoResolvePhase::PendingFix { .. })
@@ -21205,7 +21262,39 @@ impl ChatWidget<'_> {
         let prep_label = format!(
             "Preparing follow-up code review (attempt {bounded_attempt} of {max_attempts})"
         );
-        let mut continued_prompt = state_snapshot.prompt.trim_end().to_string();
+        let mut base_prompt = state_snapshot.prompt.trim_end().to_string();
+        if let Some(idx) = base_prompt.find(AUTO_RESOLVE_REVIEW_FOLLOWUP) {
+            base_prompt = base_prompt[..idx].trim_end().to_string();
+        }
+
+        let mut next_hint = state_snapshot.hint.clone();
+        let mut next_metadata = state_snapshot.metadata.clone();
+
+        if next_metadata
+            .as_ref()
+            .and_then(|meta| meta.scope.as_ref())
+            .is_some_and(|scope| scope.eq_ignore_ascii_case("commit"))
+        {
+            if let Some(new_commit) = self.current_head_commit_sha() {
+                let short_sha: String = new_commit.chars().take(7).collect();
+                let subject = self.commit_subject_for(&new_commit);
+                base_prompt = if let Some(subject) = subject {
+                    format!(
+                        "Review the code changes introduced by commit {new_commit} (\"{subject}\"). Provide prioritized, actionable findings."
+                    )
+                } else {
+                    format!(
+                        "Review the code changes introduced by commit {new_commit}. Provide prioritized, actionable findings."
+                    )
+                };
+                next_hint = format!("commit {short_sha}");
+                if let Some(meta) = next_metadata.as_mut() {
+                    meta.commit = Some(new_commit.clone());
+                }
+            }
+        }
+
+        let mut continued_prompt = base_prompt.clone();
         if let Some(last_review) = state_snapshot.last_review.as_ref() {
             let recap = Self::auto_resolve_format_findings(last_review);
             if !recap.is_empty() {
@@ -21237,12 +21326,15 @@ impl ChatWidget<'_> {
         continued_prompt.push_str(AUTO_RESOLVE_REVIEW_FOLLOWUP);
         self.begin_review(
             continued_prompt,
-            state_snapshot.hint.clone(),
+            next_hint.clone(),
             Some(prep_label),
-            state_snapshot.metadata.clone(),
+            next_metadata.clone(),
         );
         if let Some(state) = self.auto_resolve_state.as_mut() {
             state.phase = AutoResolvePhase::WaitingForReview;
+            state.prompt = base_prompt;
+            state.hint = next_hint;
+            state.metadata = next_metadata;
             state.last_review = None;
             state.last_fix_message = None;
         }

@@ -3774,6 +3774,12 @@ async fn exit_review_mode(
         }
     };
 
+    let developer_message = ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText { text: developer_text.clone() }],
+    };
+
     let status = if review_output.is_some() {
         "complete"
     } else {
@@ -3811,7 +3817,7 @@ async fn exit_review_mode(
     };
 
     session
-        .record_conversation_items(&[metadata_message])
+        .record_conversation_items(&[developer_message, metadata_message])
         .await;
 }
 
