@@ -27,6 +27,7 @@ use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
 use code_core::parse_command::ParsedCommand;
 use code_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
@@ -54,6 +55,140 @@ fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
         break;
     }
     None
+}
+
+fn explore_status_from_exec(action: ExecAction, record: &ExecRecord) -> history_cell::ExploreEntryStatus {
+    match record.status {
+        ExecStatus::Running => history_cell::ExploreEntryStatus::Running,
+        ExecStatus::Success => history_cell::ExploreEntryStatus::Success,
+        ExecStatus::Error => match (record.exit_code, action) {
+            (Some(1), ExecAction::Search | ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
+            _ => history_cell::ExploreEntryStatus::Error {
+                exit_code: record.exit_code,
+            },
+        },
+    }
+}
+
+fn promote_exec_cell_to_explore(chat: &mut ChatWidget<'_>, idx: usize) -> bool {
+    if idx >= chat.history_cells.len() {
+        return false;
+    }
+
+    let (segments, action) = match history_record_for_cell(chat, idx) {
+        Some(HistoryRecord::Exec(exec_record)) => {
+            let action = exec_record.action;
+            (vec![exec_record], action)
+        }
+        Some(HistoryRecord::MergedExec(merged)) => {
+            let action = merged.action;
+            (merged.segments, action)
+        }
+        _ => return false,
+    };
+
+    if !matches!(
+        action,
+        ExecAction::Read | ExecAction::Search | ExecAction::List
+    ) {
+        return false;
+    }
+
+    let session_root = chat.config.cwd.clone();
+
+    let mut target_idx = chat.exec.running_explore_agg_index.and_then(|candidate| {
+        if candidate < chat.history_cells.len()
+            && chat.history_cells[candidate]
+                .as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .is_some()
+        {
+            Some(candidate)
+        } else {
+            None
+        }
+    });
+
+    if target_idx.is_none() {
+        target_idx = find_trailing_explore_agg(chat);
+    }
+
+    let push_segments = |record: &mut ExploreRecord| -> bool {
+        let mut added_any = false;
+        for segment in &segments {
+            if segment.parsed.is_empty() {
+                continue;
+            }
+            let status = explore_status_from_exec(segment.action, segment);
+            let cwd_buf: PathBuf = segment
+                .working_dir
+                .clone()
+                .unwrap_or_else(|| chat.config.cwd.clone());
+            if history_cell::explore_record_push_from_parsed(
+                record,
+                &segment.parsed,
+                status,
+                cwd_buf.as_path(),
+                session_root.as_path(),
+                &segment.command,
+            )
+            .is_some()
+            {
+                added_any = true;
+            }
+        }
+        added_any
+    };
+
+    if let Some(agg_idx) = target_idx {
+        let Some(mut record) = chat.history_cells.get(agg_idx).and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .map(|existing| existing.record().clone())
+        }) else {
+            return false;
+        };
+
+        if !push_segments(&mut record) {
+            return false;
+        }
+
+        let replacement = history_cell::ExploreAggregationCell::from_record(record.clone());
+        chat.history_replace_with_record(
+            agg_idx,
+            Box::new(replacement),
+            HistoryDomainRecord::Explore(record),
+        );
+
+        if agg_idx != idx {
+            chat.history_remove_at(idx);
+        }
+
+        chat.bottom_pane.set_has_chat_history(true);
+        chat.autoscroll_if_near_bottom();
+        chat.exec.running_explore_agg_index = None;
+        return true;
+    }
+
+    let mut record = ExploreRecord {
+        id: HistoryId::ZERO,
+        entries: Vec::new(),
+    };
+
+    if !push_segments(&mut record) {
+        return false;
+    }
+
+    let cell = history_cell::ExploreAggregationCell::from_record(record.clone());
+    chat.history_replace_with_record(
+        idx,
+        Box::new(cell),
+        HistoryDomainRecord::Explore(record),
+    );
+    chat.bottom_pane.set_has_chat_history(true);
+    chat.autoscroll_if_near_bottom();
+    chat.exec.running_explore_agg_index = None;
+    true
 }
 
 fn update_explore_entry_status(
@@ -600,6 +735,9 @@ fn try_upgrade_fallback_exec_cell(
                             HistoryRecord::Exec(updated_record.clone()),
                         );
                         if let Some(idx) = chat.cell_index_for_history_id(id) {
+                            if promote_exec_cell_to_explore(chat, idx) {
+                                return true;
+                            }
                             crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
                         }
                         upgraded = true;
@@ -612,6 +750,9 @@ fn try_upgrade_fallback_exec_cell(
                         .downcast_mut::<history_cell::ExecCell>()
                     {
                         exec_mut.replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
+                    }
+                    if promote_exec_cell_to_explore(chat, i) {
+                        return true;
                     }
                     try_merge_completed_exec_at(chat, i);
                 }
@@ -694,6 +835,9 @@ fn apply_exec_begin_metadata_to_finished_call(
             {
                 chat.update_cell_from_record(id, HistoryRecord::Exec(updated_record.clone()));
                 if let Some(idx) = chat.cell_index_for_history_id(id) {
+                    if promote_exec_cell_to_explore(chat, idx) {
+                        return true;
+                    }
                     crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
                 }
                 chat.invalidate_height_cache();
@@ -708,6 +852,9 @@ fn apply_exec_begin_metadata_to_finished_call(
                     Box::new(cell),
                     HistoryDomainRecord::Exec(exec_record),
                 );
+                if promote_exec_cell_to_explore(chat, idx) {
+                    return true;
+                }
                 return true;
             }
 
@@ -759,6 +906,11 @@ fn apply_exec_begin_metadata_to_finished_call(
             } = mutation
             {
                 chat.update_cell_from_record(id, HistoryRecord::MergedExec(updated_record));
+                if let Some(idx) = chat.cell_index_for_history_id(id) {
+                    if promote_exec_cell_to_explore(chat, idx) {
+                        return true;
+                    }
+                }
                 chat.invalidate_height_cache();
                 chat.request_redraw();
                 return true;
@@ -771,6 +923,9 @@ fn apply_exec_begin_metadata_to_finished_call(
                     Box::new(cell),
                     HistoryDomainRecord::MergedExec(merged_record),
                 );
+                if promote_exec_cell_to_explore(chat, idx) {
+                    return true;
+                }
                 return true;
             }
 
