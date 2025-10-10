@@ -427,8 +427,7 @@ fn tool_activity_showcase() {
                 "action": "create",
                 "create": {
                     "name": "qa-bot",
-                    "task": "Run targeted regression suite",
-                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                    "task": "Run targeted regression suite"
                 }
             })),
         }),
@@ -444,8 +443,7 @@ fn tool_activity_showcase() {
                 "action": "create",
                 "create": {
                     "name": "qa-bot",
-                    "task": "Run targeted regression suite",
-                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                    "task": "Run targeted regression suite"
                 }
             })),
             duration: Duration::from_secs(94),
@@ -701,8 +699,7 @@ fn agent_run_grouped_desired_layout() {
                 "action": "create",
                 "create": {
                     "name": "qa-bot",
-                    "task": "Run targeted regression suite",
-                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                    "task": "Run targeted regression suite"
                 }
             })),
         }),
@@ -763,8 +760,7 @@ fn agent_run_grouped_desired_layout() {
                 "action": "create",
                 "create": {
                     "name": "qa-bot",
-                    "task": "Run targeted regression suite",
-                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                    "task": "Run targeted regression suite"
                 }
             })),
             duration: Duration::from_secs(94),
@@ -800,8 +796,7 @@ fn agent_run_grouped_plain_tool_name() {
                 "action": "create",
                 "create": {
                     "name": "qa-bot",
-                    "task": "Run targeted regression suite",
-                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                    "task": "Run targeted regression suite"
                 }
             })),
         }),
@@ -848,8 +843,7 @@ fn agent_run_grouped_plain_tool_name() {
                 "action": "create",
                 "create": {
                     "name": "qa-bot",
-                    "task": "Run targeted regression suite",
-                    "plan": ["Init workspace", "Nextest smoke", "Summarize"]
+                    "task": "Run targeted regression suite"
                 }
             })),
             duration: Duration::from_secs(104),
@@ -882,8 +876,7 @@ fn plan_agent_keeps_single_aggregate_block() {
                 "action": "create",
                 "create": {
                     "name": "planner",
-                    "task": "Draft implementation plan",
-                    "plan": ["Outline work", "Validate approach", "Summarize"]
+                    "task": "Draft implementation plan"
                 }
             })),
         }),

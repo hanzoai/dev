@@ -6532,7 +6532,6 @@ pub(crate) async fn handle_agent_tool(
             let context = create_opts.context.take();
             let output = create_opts.output.take();
             let files = create_opts.files.take();
-            let plan = create_opts.plan.take();
             let read_only = create_opts.read_only.take();
             let mut normalized_name = normalize_agent_name(create_opts.name.take());
             if normalized_name.is_none() {
@@ -6579,20 +6578,6 @@ pub(crate) async fn handle_agent_tool(
                         "files".to_string(),
                         serde_json::Value::Array(
                             files_vec
-                                .iter()
-                                .cloned()
-                                .map(serde_json::Value::String)
-                                .collect(),
-                        ),
-                    );
-                }
-            }
-            if let Some(ref plan_vec) = plan {
-                if !plan_vec.is_empty() {
-                    create_event.insert(
-                        "plan".to_string(),
-                        serde_json::Value::Array(
-                            plan_vec
                                 .iter()
                                 .cloned()
                                 .map(serde_json::Value::String)
