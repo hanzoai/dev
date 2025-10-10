@@ -106,6 +106,9 @@ sync_target_cache_impl() {
 }
 
 update_target_cache() {
+  if [ "${BRANCH_TARGET_CACHE_ENABLED:-0}" -eq 0 ]; then
+    return 0
+  fi
   if [ "${BRANCH_TARGET_CACHE_ENABLED:-1}" -eq 1 ]; then
     local link_ok=0
     if [ -n "${WORKSPACE_PATH:-}" ] && [ -L "${WORKSPACE_PATH}/target" ]; then
@@ -261,7 +264,7 @@ fi
 TARGET_CACHE_BASE="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
 TARGET_CACHE_DIR="${TARGET_CACHE_BASE}/target"
 
-BRANCH_TARGET_CACHE_FLAG="${CODE_BRANCH_TARGET_CACHE:-${CODEX_BRANCH_TARGET_CACHE:-1}}"
+BRANCH_TARGET_CACHE_FLAG="${CODE_BRANCH_TARGET_CACHE:-${CODEX_BRANCH_TARGET_CACHE:-0}}"
 BRANCH_TARGET_CACHE_FLAG="$(printf '%s' "${BRANCH_TARGET_CACHE_FLAG}" | tr '[:upper:]' '[:lower:]')"
 case "${BRANCH_TARGET_CACHE_FLAG}" in
   0|false|no|off|disabled)
