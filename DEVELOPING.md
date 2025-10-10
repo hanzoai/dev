@@ -34,3 +34,14 @@ Available knobs (all optional):
 When a fault fires, the CLI logs a `[faults] …` warning including the remaining
 count. Without the feature flag (default builds), all hooks compile out and
 production behaviour is unaffected.
+
+## Auto Drive review preconditions
+
+- The Auto Drive coordinator now emits a `review_commit` payload alongside
+  `turn_descriptor` when it wants to enter review mode. The field identifies the
+  artifact under review:
+  - `{ "source": "staged" }` -> review the currently staged diff.
+  - `{ "source": "commit", "sha": "…" }` -> review the specified commit.
+- The TUI rejects review turns unless the referenced commit exists or staged
+  changes are present. When the check fails, Auto Drive asks the CLI to stage or
+  commit the outstanding work before retrying.

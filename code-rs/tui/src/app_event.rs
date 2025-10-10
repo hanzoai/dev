@@ -79,6 +79,19 @@ pub(crate) enum BackgroundPlacement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutoReviewCommitSource {
+    Staged,
+    Commit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AutoReviewCommit {
+    pub source: AutoReviewCommitSource,
+    pub sha: Option<String>,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AutoCoordinatorStatus {
     Continue,
     Success,
@@ -212,6 +225,7 @@ pub(crate) enum AppEvent {
         transcript: Vec<ResponseItem>,
         turn_descriptor: Option<TurnDescriptor>,
         turn_config: Option<TurnConfig>,
+        review_commit: Option<AutoReviewCommit>,
     },
     AutoCoordinatorThinking {
         delta: String,
