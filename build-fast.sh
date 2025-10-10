@@ -14,6 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
+  CODE_BRANCH_TARGET_CACHE=0          Disable shared target cache seeding (default: enabled)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -77,7 +78,7 @@ sync_target_cache_impl() {
   mkdir -p "${TARGET_CACHE_DIR}" || return 0
   if command -v rsync >/dev/null 2>&1; then
     local -a args
-    args=(-a --delete)
+    args=(-a --delete --quiet)
     if rsync --help 2>&1 | grep -q -- '--copy-as=clone'; then
       args+=(--copy-as=clone)
     fi
@@ -105,6 +106,33 @@ sync_target_cache_impl() {
 }
 
 update_target_cache() {
+  if [ "${BRANCH_TARGET_CACHE_ENABLED:-1}" -eq 1 ]; then
+    local link_ok=0
+    if [ -n "${WORKSPACE_PATH:-}" ] && [ -L "${WORKSPACE_PATH}/target" ]; then
+      local link_target
+      link_target="$(readlink "${WORKSPACE_PATH}/target")"
+      if [ -n "${link_target}" ]; then
+        local link_real
+        if [ "${link_target#/}" = "${link_target}" ]; then
+          link_real="$(cd "${WORKSPACE_PATH}" >/dev/null 2>&1 && cd "$(dirname "${link_target}")" >/dev/null 2>&1 && pwd)/$(basename "${link_target}")"
+        else
+          link_real="$(cd "$(dirname "${link_target}")" >/dev/null 2>&1 && pwd)/$(basename "${link_target}")"
+        fi
+        local cache_real
+        cache_real="$(cd "${TARGET_CACHE_DIR}" >/dev/null 2>&1 && pwd)"
+        if [ -n "${link_real}" ] && [ "${link_real}" = "${cache_real}" ]; then
+          link_ok=1
+        fi
+      fi
+    fi
+
+    if [ "${link_ok}" -eq 1 ]; then
+      return 0
+    fi
+
+    BRANCH_TARGET_CACHE_ENABLED=0
+    echo "⚠️  Shared target cache link unavailable; falling back to cache sync" >&2
+  fi
   if [ "${CODE_SKIP_TARGET_CACHE_UPDATE:-0}" = "1" ]; then
     return 0
   fi
@@ -232,6 +260,17 @@ fi
 
 TARGET_CACHE_BASE="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
 TARGET_CACHE_DIR="${TARGET_CACHE_BASE}/target"
+
+BRANCH_TARGET_CACHE_FLAG="${CODE_BRANCH_TARGET_CACHE:-${CODEX_BRANCH_TARGET_CACHE:-1}}"
+BRANCH_TARGET_CACHE_FLAG="$(printf '%s' "${BRANCH_TARGET_CACHE_FLAG}" | tr '[:upper:]' '[:lower:]')"
+case "${BRANCH_TARGET_CACHE_FLAG}" in
+  0|false|no|off|disabled)
+    BRANCH_TARGET_CACHE_ENABLED=0
+    ;;
+  *)
+    BRANCH_TARGET_CACHE_ENABLED=1
+    ;;
+esac
 
 # Change to the selected Rust workspace root regardless of caller CWD
 cd "${WORKSPACE_PATH}"

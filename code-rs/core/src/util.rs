@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use std::sync::Arc;
@@ -25,9 +26,37 @@ pub fn escape_command(command: &[String]) -> String {
 
 pub fn strip_bash_lc_and_escape(command: &[String]) -> String {
     match command {
-        [first, second, third] if first == "bash" && second == "-lc" => third.clone(),
+        [first, second, third]
+            if is_shell_like_executable(first)
+                && (second == "-lc" || second == "-c") =>
+        {
+            third.clone()
+        }
         _ => escape_command(command),
     }
+}
+
+pub(crate) fn is_shell_like_executable(token: &str) -> bool {
+    let trimmed = token.trim_matches('"').trim_matches('\'');
+    let name = Path::new(trimmed)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "bash"
+            | "bash.exe"
+            | "sh"
+            | "sh.exe"
+            | "zsh"
+            | "zsh.exe"
+            | "dash"
+            | "dash.exe"
+            | "ksh"
+            | "ksh.exe"
+            | "busybox"
+    )
 }
 
 #[allow(dead_code)]
