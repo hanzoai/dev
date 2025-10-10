@@ -14,7 +14,6 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
-  CODE_BRANCH_TARGET_CACHE=0          Disable shared target cache seeding (default: enabled)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -68,93 +67,6 @@ resolve_bin_path() {
     BIN_DISPLAY_PATH="./${WORKSPACE_DIR}/target/${BIN_SUBPATH}"
   else
     BIN_DISPLAY_PATH="${BIN_PATH}"
-  fi
-}
-
-sync_target_cache_impl() {
-  if [ -z "${CARGO_TARGET_DIR:-}" ] || [ ! -d "${CARGO_TARGET_DIR:-}" ]; then
-    return 0
-  fi
-  mkdir -p "${TARGET_CACHE_DIR}" || return 0
-  if command -v rsync >/dev/null 2>&1; then
-    local -a args
-    args=(-a --delete --quiet)
-    if rsync --help 2>&1 | grep -q -- '--copy-as=clone'; then
-      args+=(--copy-as=clone)
-    fi
-    args+=("${CARGO_TARGET_DIR%/}/" "${TARGET_CACHE_DIR%/}/")
-    if ! rsync "${args[@]}"; then
-      echo "⚠️  Warning: failed to rsync target cache" >&2
-      return 0
-    fi
-    return 0
-  fi
-  if [ "$(uname -s)" = "Darwin" ]; then
-    rm -rf "${TARGET_CACHE_DIR:?}/"* 2>/dev/null || true
-    if ! cp -cR "${CARGO_TARGET_DIR%/}/." "${TARGET_CACHE_DIR}"; then
-      echo "⚠️  Warning: failed to clone target cache with cp" >&2
-      return 0
-    fi
-  else
-    rm -rf "${TARGET_CACHE_DIR:?}/"* 2>/dev/null || true
-    if ! cp -a "${CARGO_TARGET_DIR%/}/." "${TARGET_CACHE_DIR}"; then
-      echo "⚠️  Warning: failed to copy target cache" >&2
-      return 0
-    fi
-  fi
-  return 0
-}
-
-update_target_cache() {
-  if [ "${BRANCH_TARGET_CACHE_ENABLED:-0}" -eq 0 ]; then
-    return 0
-  fi
-  if [ "${BRANCH_TARGET_CACHE_ENABLED:-1}" -eq 1 ]; then
-    local link_ok=0
-    if [ -n "${WORKSPACE_PATH:-}" ] && [ -L "${WORKSPACE_PATH}/target" ]; then
-      local link_target
-      link_target="$(readlink "${WORKSPACE_PATH}/target")"
-      if [ -n "${link_target}" ]; then
-        local link_real
-        if [ "${link_target#/}" = "${link_target}" ]; then
-          link_real="$(cd "${WORKSPACE_PATH}" >/dev/null 2>&1 && cd "$(dirname "${link_target}")" >/dev/null 2>&1 && pwd)/$(basename "${link_target}")"
-        else
-          link_real="$(cd "$(dirname "${link_target}")" >/dev/null 2>&1 && pwd)/$(basename "${link_target}")"
-        fi
-        local cache_real
-        cache_real="$(cd "${TARGET_CACHE_DIR}" >/dev/null 2>&1 && pwd)"
-        if [ -n "${link_real}" ] && [ "${link_real}" = "${cache_real}" ]; then
-          link_ok=1
-        fi
-      fi
-    fi
-
-    if [ "${link_ok}" -eq 1 ]; then
-      return 0
-    fi
-
-    BRANCH_TARGET_CACHE_ENABLED=0
-    echo "⚠️  Shared target cache link unavailable; falling back to cache sync" >&2
-  fi
-  if [ "${CODE_SKIP_TARGET_CACHE_UPDATE:-0}" = "1" ]; then
-    return 0
-  fi
-  if [ -z "${CARGO_TARGET_DIR:-}" ] || [ ! -d "${CARGO_TARGET_DIR}" ]; then
-    return 0
-  fi
-  mkdir -p "${TARGET_CACHE_BASE}" || return 0
-  if command -v flock >/dev/null 2>&1; then
-    (
-      exec 9>"${TARGET_CACHE_BASE}/.cache.lock"
-      if flock -w 30 9; then
-        sync_target_cache_impl
-      else
-        echo "⚠️  Warning: skipping target cache update (lock unavailable)" >&2
-        true
-      fi
-    )
-  else
-    sync_target_cache_impl
   fi
 }
 
@@ -230,16 +142,6 @@ else
   REPO_NAME="$(basename "${SCRIPT_DIR}")"
 fi
 
-if [ -n "${CODE_HOME:-}" ] && [ -n "${CODE_HOME}" ]; then
-  CACHE_HOME="${CODE_HOME}"
-elif [ -n "${CODEX_HOME:-}" ] && [ -n "${CODEX_HOME}" ]; then
-  CACHE_HOME="${CODEX_HOME}"
-else
-  CACHE_HOME="${HOME}/.code"
-fi
-CACHE_HOME="${CACHE_HOME%/}"
-TARGET_CACHE_ROOT="${CACHE_HOME}/working/_target-cache/${REPO_NAME}"
-
 case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
     WORKSPACE_DIR="codex-rs"
@@ -260,20 +162,6 @@ if [ ! -d "$WORKSPACE_PATH" ]; then
   echo "Error: Workspace directory '${WORKSPACE_PATH}' not found." >&2
   exit 1
 fi
-
-TARGET_CACHE_BASE="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
-TARGET_CACHE_DIR="${TARGET_CACHE_BASE}/target"
-
-BRANCH_TARGET_CACHE_FLAG="${CODE_BRANCH_TARGET_CACHE:-${CODEX_BRANCH_TARGET_CACHE:-0}}"
-BRANCH_TARGET_CACHE_FLAG="$(printf '%s' "${BRANCH_TARGET_CACHE_FLAG}" | tr '[:upper:]' '[:lower:]')"
-case "${BRANCH_TARGET_CACHE_FLAG}" in
-  0|false|no|off|disabled)
-    BRANCH_TARGET_CACHE_ENABLED=0
-    ;;
-  *)
-    BRANCH_TARGET_CACHE_ENABLED=1
-    ;;
-esac
 
 # Change to the selected Rust workspace root regardless of caller CWD
 cd "${WORKSPACE_PATH}"
@@ -717,8 +605,6 @@ if [ $? -eq 0 ]; then
     else
       echo "Binary artifact not found at ${ABS_BIN_PATH}"
     fi
-
-    update_target_cache || true
 
     if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
       if [ ! -x "${ABS_BIN_PATH}" ]; then
