@@ -15588,6 +15588,11 @@ fi\n\
             && self.auto_state.paused_for_manual_edit
     }
 
+    pub(crate) fn auto_manual_entry_active(&self) -> bool {
+        self.auto_state.awaiting_goal_input
+            || (self.auto_state.active && self.auto_state.awaiting_submission)
+    }
+
     pub(crate) fn is_task_running(&self) -> bool {
         self.bottom_pane.is_task_running()
             || self.terminal_is_running()
