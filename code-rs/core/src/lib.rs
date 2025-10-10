@@ -35,6 +35,7 @@ mod flags;
 pub mod git_info;
 pub mod landlock;
 pub mod http_client;
+pub mod housekeeping;
 pub mod mcp_connection_manager;
 mod mcp_tool_call;
 mod message_history;
@@ -101,6 +102,8 @@ pub mod util;
 pub use apply_patch::CODEX_APPLY_PATCH_ARG1;
 pub use command_safety::is_safe_command;
 pub use safety::get_platform_sandbox;
+pub use housekeeping::run_housekeeping_if_due;
+pub use housekeeping::CleanupOutcome;
 // Use our internal protocol module for crate-internal types and helpers.
 // External callers should rely on specific re-exports below.
 // Re-export protocol config enums to ensure call sites can use the same types
