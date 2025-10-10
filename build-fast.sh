@@ -107,7 +107,31 @@ sync_target_cache_impl() {
 
 update_target_cache() {
   if [ "${BRANCH_TARGET_CACHE_ENABLED:-1}" -eq 1 ]; then
-    return 0
+    local link_ok=0
+    if [ -n "${WORKSPACE_PATH:-}" ] && [ -L "${WORKSPACE_PATH}/target" ]; then
+      local link_target
+      link_target="$(readlink "${WORKSPACE_PATH}/target")"
+      if [ -n "${link_target}" ]; then
+        local link_real
+        if [ "${link_target#/}" = "${link_target}" ]; then
+          link_real="$(cd "${WORKSPACE_PATH}" >/dev/null 2>&1 && cd "$(dirname "${link_target}")" >/dev/null 2>&1 && pwd)/$(basename "${link_target}")"
+        else
+          link_real="$(cd "$(dirname "${link_target}")" >/dev/null 2>&1 && pwd)/$(basename "${link_target}")"
+        fi
+        local cache_real
+        cache_real="$(cd "${TARGET_CACHE_DIR}" >/dev/null 2>&1 && pwd)"
+        if [ -n "${link_real}" ] && [ "${link_real}" = "${cache_real}" ]; then
+          link_ok=1
+        fi
+      fi
+    fi
+
+    if [ "${link_ok}" -eq 1 ]; then
+      return 0
+    fi
+
+    BRANCH_TARGET_CACHE_ENABLED=0
+    echo "⚠️  Shared target cache link unavailable; falling back to cache sync" >&2
   fi
   if [ "${CODE_SKIP_TARGET_CACHE_UPDATE:-0}" = "1" ]; then
     return 0
