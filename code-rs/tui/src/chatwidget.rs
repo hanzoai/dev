@@ -4486,14 +4486,19 @@ impl ChatWidget<'_> {
 
         if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
             && matches!(key_event.code, crossterm::event::KeyCode::Esc)
-            && self.auto_state.active
         {
-            if self.auto_state.countdown_active() {
-                self.auto_pause_for_manual_edit();
+            if self.auto_state.active {
+                if self.auto_state.countdown_active() {
+                    self.auto_pause_for_manual_edit();
+                    return;
+                }
+                if self.auto_state.awaiting_submission {
+                    self.auto_stop(Some("Auto Drive stopped during approval.".to_string()));
+                } else {
+                    self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+                }
                 return;
             }
-            self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
-            return;
         }
 
         if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
@@ -4518,6 +4523,12 @@ impl ChatWidget<'_> {
                 crossterm::event::KeyCode::Enter
                 | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
                     self.auto_submit_prompt();
+                    return;
+                }
+                crossterm::event::KeyCode::Char('e') | crossterm::event::KeyCode::Char('E')
+                    if key_event.modifiers.is_empty() =>
+                {
+                    self.auto_pause_for_manual_edit();
                     return;
                 }
                 _ => {}
@@ -11985,6 +11996,8 @@ fi\n\
             goal: None,
             status_lines,
             cli_prompt: None,
+            cli_context: None,
+            show_composer: true,
             awaiting_submission: false,
             waiting_for_response: false,
             countdown: None,
@@ -12891,18 +12904,29 @@ fi\n\
         if !self.auto_state.active || !self.auto_state.awaiting_submission {
             return;
         }
-        let Some(prompt) = self.auto_state.current_cli_prompt.clone() else {
-            return;
-        };
 
-        let full_prompt = self.auto_build_cli_message(&prompt);
+        let prompt_text = self
+            .auto_state
+            .current_cli_prompt
+            .clone()
+            .unwrap_or_default();
+        let mut full_prompt = self.auto_build_cli_message(&prompt_text);
+        if full_prompt.trim().is_empty() {
+            full_prompt = self
+                .auto_state
+                .current_cli_context
+                .clone()
+                .unwrap_or_default();
+        }
 
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         self.auto_state.reset_countdown();
         self.clear_composer();
-        self.insert_str(&full_prompt);
+        if !full_prompt.is_empty() {
+            self.insert_str(&full_prompt);
+        }
         self.bottom_pane.ensure_input_focus();
         self.bottom_pane.set_task_running(true);
         self.bottom_pane
@@ -13217,6 +13241,8 @@ fi\n\
                     goal: summary.goal.clone(),
                     status_lines,
                     cli_prompt: None,
+                    cli_context: None,
+                    show_composer: true,
                     awaiting_submission: false,
                     waiting_for_response: false,
                     countdown: None,
@@ -13333,8 +13359,14 @@ fi\n\
             .current_cli_prompt
             .clone()
             .filter(|p| !p.trim().is_empty());
+        let cli_context = self
+            .auto_state
+            .current_cli_context
+            .clone()
+            .filter(|value| !value.trim().is_empty());
 
         let countdown_limit = self.auto_state.countdown_seconds();
+        let countdown_active = self.auto_state.countdown_active();
         let countdown = if self.auto_state.awaiting_submission {
             match countdown_limit {
                 Some(limit) if limit > 0 => Some(CountdownState {
@@ -13347,14 +13379,10 @@ fi\n\
         };
 
         let button = if self.auto_state.awaiting_submission {
-            let label = if self.auto_state.countdown_active() {
-                format!("Continue ({}s)", self.auto_state.seconds_remaining)
+            let label = if countdown_active {
+                format!("Send prompt ({}s)", self.auto_state.seconds_remaining)
             } else {
-                match countdown_limit {
-                    Some(0) => "Continue now".to_string(),
-                    Some(_) => "Continue now".to_string(),
-                    None => "Continue".to_string(),
-                }
+                "Send prompt".to_string()
             };
             Some(AutoCoordinatorButton {
                 label,
@@ -13366,10 +13394,28 @@ fi\n\
             None
         };
 
-        let manual_hint = None;
+        let show_composer = !self.auto_state.awaiting_submission || self.auto_state.paused_for_manual_edit;
+
+        let manual_hint = if self.auto_state.awaiting_submission {
+            if self.auto_state.paused_for_manual_edit {
+                Some("Edit the prompt, then press Enter to continue.".to_string())
+            } else if countdown_active {
+                Some("Enter to send now • Esc/E to edit prompt".to_string())
+            } else {
+                Some("Enter to send • E to edit prompt • Esc to cancel Auto Drive".to_string())
+            }
+        } else {
+            None
+        };
 
         let ctrl_switch_hint = if self.auto_state.awaiting_submission {
-            "Esc to cancel".to_string()
+            if countdown_active {
+                "Esc to edit prompt".to_string()
+            } else if self.auto_state.paused_for_manual_edit {
+                "Esc to cancel".to_string()
+            } else {
+                "E edit prompt • Esc cancel Auto Drive".to_string()
+            }
         } else if self.auto_state.waiting_for_response {
             String::new()
         } else {
@@ -13394,6 +13440,8 @@ fi\n\
             elapsed: None,
             progress_past: self.auto_state.current_progress_past.clone(),
             progress_current: self.auto_state.current_progress_current.clone(),
+            cli_context,
+            show_composer,
         });
 
         self
@@ -15755,8 +15803,11 @@ fi\n\
     /// routing through the generic interrupt logic.
     pub(crate) fn auto_should_handle_global_esc(&self) -> bool {
         self.auto_state.active
-            && self.auto_state.awaiting_submission
-            && self.auto_state.paused_for_manual_edit
+            && (
+                self.auto_state.awaiting_submission
+                    || self.auto_state.waiting_for_response
+                    || self.auto_state.coordinator_waiting
+            )
     }
 
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
