@@ -1117,6 +1117,15 @@ async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result
             }
         }
 
+        if let (Ok(src_real), Ok(dst_real)) = (
+            tokio::fs::canonicalize(&src_dir).await,
+            tokio::fs::canonicalize(&dst_dir).await,
+        ) {
+            if src_real == dst_real {
+                continue;
+            }
+        }
+
         let label = rel.to_string_lossy().to_string();
         let src_clone = src_dir.clone();
         let dst_clone = dst_dir.clone();
