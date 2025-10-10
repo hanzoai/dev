@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
 use super::ChatWidget;
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, AutoContinueMode};
+use crate::auto_drive_strings;
 use crate::app_event_sender::AppEventSender;
 use crate::history_cell::{self, HistoryCellType};
 use crate::markdown_render::render_markdown_text;
@@ -35,6 +36,25 @@ pub struct LayoutMetrics {
     pub scroll_offset: u16,
     pub last_viewport_height: u16,
     pub last_max_scroll: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoContinueModeFixture {
+    Immediate,
+    TenSeconds,
+    SixtySeconds,
+    Manual,
+}
+
+impl AutoContinueModeFixture {
+    fn into_internal(self) -> AutoContinueMode {
+        match self {
+            Self::Immediate => AutoContinueMode::Immediate,
+            Self::TenSeconds => AutoContinueMode::TenSeconds,
+            Self::SixtySeconds => AutoContinueMode::SixtySeconds,
+            Self::Manual => AutoContinueMode::Manual,
+        }
+    }
 }
 
 impl ChatWidgetHarness {
@@ -210,6 +230,178 @@ impl ChatWidgetHarness {
         lines.extend(rendered.lines.drain(..));
         let state = history_cell::plain_message_state_from_lines(lines, HistoryCellType::Assistant);
         self.chat.history_push_plain_state(state);
+    }
+
+    pub fn auto_drive_activate(
+        &mut self,
+        goal: impl Into<String>,
+        review_enabled: bool,
+        agents_enabled: bool,
+        continue_mode: AutoContinueModeFixture,
+    ) {
+        let goal = goal.into();
+        {
+            let chat = self.chat();
+            let placeholder = auto_drive_strings::next_auto_drive_phrase().to_string();
+            let mode = continue_mode.into_internal();
+            chat.auto_state.reset();
+            chat.auto_state.active = true;
+            chat.auto_state.goal = Some(goal);
+            chat.auto_state.review_enabled = review_enabled;
+            chat.auto_state.subagents_enabled = agents_enabled;
+            chat.auto_state.continue_mode = mode;
+            chat.auto_state.reset_countdown();
+            chat.auto_state.started_at = Some(Instant::now());
+            chat.auto_state.waiting_for_response = true;
+            chat.auto_state.coordinator_waiting = true;
+            chat.auto_state.placeholder_phrase = Some(placeholder);
+            chat.auto_state.current_display_line = None;
+            chat.auto_state.current_progress_current = None;
+            chat.auto_state.current_progress_past = None;
+            chat.auto_state.current_cli_prompt = None;
+            chat.auto_state.awaiting_submission = false;
+            chat.auto_state.waiting_for_review = false;
+            chat.auto_state.last_run_summary = None;
+            chat.auto_state.last_decision_summary = None;
+            chat.auto_state.last_decision_progress_past = None;
+            chat.auto_state.last_decision_progress_current = None;
+            chat.auto_state.current_summary = None;
+            chat.auto_state.current_summary_index = None;
+            chat.auto_state.current_reasoning_title = None;
+            chat.auto_state.thinking_prefix_stripped = false;
+            chat.refresh_auto_drive_visuals();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_set_waiting_for_response(
+        &mut self,
+        display: impl Into<String>,
+        progress_current: Option<String>,
+        progress_past: Option<String>,
+    ) {
+        {
+            let chat = self.chat();
+            chat.auto_state.awaiting_submission = false;
+            chat.auto_state.waiting_for_review = false;
+            chat.auto_state.waiting_for_response = true;
+            chat.auto_state.coordinator_waiting = false;
+            chat.auto_state.current_display_line = Some(display.into());
+            chat.auto_state.current_display_is_summary = false;
+            chat.auto_state.placeholder_phrase = None;
+            chat.auto_state.current_progress_current = progress_current.clone();
+            chat.auto_state.current_progress_past = progress_past.clone();
+            chat.auto_state.last_decision_progress_current = progress_current;
+            chat.auto_state.last_decision_progress_past = progress_past;
+            chat.auto_state.last_decision_summary = None;
+            chat.auto_rebuild_live_ring();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_set_awaiting_submission(
+        &mut self,
+        cli_prompt: impl Into<String>,
+        headline: impl Into<String>,
+        summary: Option<String>,
+    ) {
+        {
+            let chat = self.chat();
+            chat.auto_state.awaiting_submission = true;
+            chat.auto_state.waiting_for_response = false;
+            chat.auto_state.waiting_for_review = false;
+            chat.auto_state.coordinator_waiting = false;
+            chat.auto_state.current_cli_prompt = Some(cli_prompt.into());
+            chat.auto_state.current_display_line = Some(headline.into());
+            chat.auto_state.current_display_is_summary = summary.is_some();
+            chat.auto_state.placeholder_phrase = None;
+            if let Some(text) = summary {
+                chat.auto_state.current_summary = Some(text.clone());
+                chat.auto_state.last_decision_summary = Some(text);
+            } else {
+                chat.auto_state.current_summary = None;
+                chat.auto_state.last_decision_summary = None;
+            }
+            chat.auto_state.last_decision_progress_past = None;
+            chat.auto_state.last_decision_progress_current = None;
+            chat.auto_state.reset_countdown();
+            chat.auto_state.countdown_id = chat.auto_state.countdown_id.wrapping_add(1);
+            chat.auto_state.seconds_remaining =
+                chat.auto_state.countdown_seconds().unwrap_or(0);
+            chat.auto_rebuild_live_ring();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_override_countdown(&mut self, seconds_remaining: u8) {
+        {
+            let chat = self.chat();
+            chat.auto_state.seconds_remaining = seconds_remaining;
+            chat.auto_rebuild_live_ring();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_set_continue_mode(&mut self, mode: AutoContinueModeFixture) {
+        {
+            let chat = self.chat();
+            let mode = mode.into_internal();
+            chat.auto_state.continue_mode = mode;
+            chat.auto_state.reset_countdown();
+            let countdown = chat.auto_state.countdown_seconds();
+            chat.auto_state.countdown_id = chat.auto_state.countdown_id.wrapping_add(1);
+            chat.auto_state.seconds_remaining = countdown.unwrap_or(0);
+            if chat.auto_state.awaiting_submission && !chat.auto_state.paused_for_manual_edit {
+                chat.auto_start_countdown(chat.auto_state.countdown_id, countdown);
+                if countdown == Some(0) {
+                    chat.auto_state.awaiting_submission = false;
+                    chat.auto_state.waiting_for_response = true;
+                    chat.auto_state.coordinator_waiting = false;
+                    chat.auto_state.seconds_remaining = 0;
+                }
+            }
+            chat.refresh_auto_drive_visuals();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_advance_countdown(&mut self, seconds_left: u8) {
+        {
+            let chat = self.chat();
+            let countdown_id = chat.auto_state.countdown_id;
+            let runtime = &*TEST_RUNTIME;
+            let _guard = runtime.enter();
+            chat.auto_handle_countdown(countdown_id, seconds_left);
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_set_waiting_for_review(&mut self, summary: Option<String>) {
+        {
+            let chat = self.chat();
+            chat.auto_state.awaiting_submission = false;
+            chat.auto_state.waiting_for_response = false;
+            chat.auto_state.waiting_for_review = true;
+            chat.auto_state.coordinator_waiting = false;
+            if let Some(text) = summary {
+                chat.auto_state.current_summary = Some(text.clone());
+                chat.auto_state.current_display_line = Some(text);
+                chat.auto_state.current_display_is_summary = true;
+            } else {
+                chat.auto_state.current_summary = None;
+                chat.auto_state.current_display_line = None;
+                chat.auto_state.current_display_is_summary = false;
+            }
+            chat.auto_state.placeholder_phrase = None;
+            chat.auto_rebuild_live_ring();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
     }
 
     pub(crate) fn set_standard_terminal_mode(&mut self, enabled: bool) {

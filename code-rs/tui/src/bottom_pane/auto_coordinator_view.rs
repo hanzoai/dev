@@ -39,6 +39,7 @@ pub(crate) struct AutoActiveViewModel {
     pub show_composer: bool,
     pub awaiting_submission: bool,
     pub waiting_for_response: bool,
+    pub waiting_for_review: bool,
     pub countdown: Option<CountdownState>,
     pub button: Option<AutoCoordinatorButton>,
     pub manual_hint: Option<String>,
@@ -519,7 +520,8 @@ impl AutoCoordinatorView {
         let composer_block = usize::from(composer_height);
         let show_summary = model.waiting_for_response
             || model.awaiting_submission
-            || model.cli_running;
+            || model.cli_running
+            || model.waiting_for_review;
         let summary_height = if show_summary { 1usize } else { 0usize };
 
         total = total
@@ -611,7 +613,8 @@ impl AutoCoordinatorView {
 
         let show_summary = model.waiting_for_response
             || model.awaiting_submission
-            || model.cli_running;
+            || model.cli_running
+            || model.waiting_for_review;
         let summary_line = if show_summary {
             self.build_status_summary(model)
         } else {
@@ -770,7 +773,9 @@ impl AutoCoordinatorView {
     }
 
     fn build_status_summary(&self, model: &AutoActiveViewModel) -> Option<Line<'static>> {
-        let status_label = if model.waiting_for_response {
+        let status_label = if model.waiting_for_review {
+            "Awaiting review"
+        } else if model.waiting_for_response {
             "Running"
         } else if model.awaiting_submission {
             "Awaiting input"

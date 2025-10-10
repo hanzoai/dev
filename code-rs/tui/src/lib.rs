@@ -107,6 +107,7 @@ pub use public_widgets::composer_input::{ComposerAction, ComposerInput};
 
 #[cfg(feature = "test-helpers")]
 pub mod test_helpers {
+    pub use crate::chatwidget::smoke_helpers::AutoContinueModeFixture;
     pub use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     pub use crate::chatwidget::smoke_helpers::LayoutMetrics;
     #[cfg(test)]
