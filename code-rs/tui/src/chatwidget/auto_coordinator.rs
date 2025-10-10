@@ -21,7 +21,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::app_event::{AppEvent, AutoCoordinatorStatus, AutoObserverStatus, AutoObserverTelemetry};
+use crate::app_event::{
+    AppEvent,
+    AutoCoordinatorStatus,
+    AutoObserverStatus,
+    AutoObserverTelemetry,
+    AutoReviewCommit,
+    AutoReviewCommitSource,
+};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
@@ -391,6 +398,8 @@ struct CoordinatorDecision {
     turn_descriptor: Option<TurnDescriptor>,
     #[serde(default)]
     turn_config: Option<TurnConfig>,
+    #[serde(default)]
+    review_commit: Option<ReviewCommitPayload>,
 }
 
 struct ParsedCoordinatorDecision {
@@ -402,6 +411,44 @@ struct ParsedCoordinatorDecision {
     response_items: Vec<ResponseItem>,
     turn_descriptor: Option<TurnDescriptor>,
     turn_config: Option<TurnConfig>,
+    review_commit: Option<AutoReviewCommit>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewCommitPayload {
+    source: String,
+    #[serde(default)]
+    sha: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+}
+
+impl ReviewCommitPayload {
+    fn try_into_commit(self) -> Result<AutoReviewCommit> {
+        let ReviewCommitPayload { source, sha, summary } = self;
+
+        let source = match source.trim().to_ascii_lowercase().as_str() {
+            "staged" => AutoReviewCommitSource::Staged,
+            "commit" => AutoReviewCommitSource::Commit,
+            other => {
+                return Err(anyhow!("invalid review_commit.source '{other}'"));
+            }
+        };
+
+        let sha = sha
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        if matches!(source, AutoReviewCommitSource::Commit) && sha.is_none() {
+            return Err(anyhow!("review_commit.sha is required when source='commit'"));
+        }
+
+        let summary = summary
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+
+        Ok(AutoReviewCommit { source, sha, summary })
+    }
 }
 
 pub(super) fn start_auto_coordinator(
@@ -570,6 +617,7 @@ fn run_auto_loop(
                     response_items,
                     turn_descriptor,
                     turn_config,
+                    review_commit,
                 }) => {
                     if matches!(status, AutoCoordinatorStatus::Continue) {
                         if let (Some(handle), Some(cadence)) =
@@ -601,6 +649,7 @@ fn run_auto_loop(
                             transcript: response_items,
                             turn_descriptor: turn_descriptor.clone(),
                             turn_config: turn_config.clone(),
+                            review_commit: review_commit.clone(),
                         };
                         app_event_tx.send(event);
                         continue;
@@ -663,6 +712,7 @@ fn run_auto_loop(
                         transcript: response_items,
                         turn_descriptor: turn_descriptor.clone(),
                         turn_config: turn_config.clone(),
+                        review_commit: review_commit.clone(),
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -682,6 +732,7 @@ fn run_auto_loop(
                         transcript: Vec::new(),
                         turn_descriptor: None,
                         turn_config: None,
+                        review_commit: None,
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -777,6 +828,7 @@ fn run_final_observer_validation(
 }
 
 fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
+    let review_guardrails = "- `turn_descriptor.mode = \"review\"` is allowed **only** after the CLI has produced a reviewable artifact. Set `review_commit.source` to `staged` for staged diffs or to `commit` (and provide `sha`) for a specific commit. If neither exists, keep coding, testing, and polishing until one does.\n";
     let intro = format!(
         "You have a special role within Code. You are a Coordinator, in charge of this session, coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.
         
@@ -796,6 +848,10 @@ fn build_developer_message(goal_text: &str, environment_details: &str) -> (Strin
   * `agent_preferences`: Optional hints (`prefer_research`, `prefer_planning`, `requested_models`).
   * `review_strategy`: Optional review guidance (`timing`, `custom_prompt`, `scope_hint`).
 - `turn_config`: Legacy fallback containing only `read_only` and `complexity`. Provide this **only** when the client is known to lack `turn_descriptor` support.
+- `review_commit`: Required when `turn_descriptor.mode` is `review`. Specify what the CLI should review:
+  * Set `source` to `'staged'` when the staged workspace diff is ready.
+  * Set `source` to `'commit'` and provide `sha` with the commit to review. Optional `summary` may describe the change.
+  If you cannot point to staged work or a commit, keep the turn in a non-review mode and continue iterating.
 
 Example `turn_descriptor` snippet:
 ```json
@@ -815,6 +871,8 @@ Example `turn_descriptor` snippet:
 - Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.
 - Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.
 
+{review_guardrails}
+
 **WARNING**
 - Only send the CLI ONE instruction to follow at a time.
 - DO NOT repeat earlier instructions sent to the CLI otherwise you will end in a loop as the CLI will yield once it completes the first instruction. So for example if you say something like 1. Research the codebase 2. Fix the problem., the CLI will yield as soon as it finishes instruction 1. If you keep sending both instructions, you'll just keep looping on the first instruction. Just send them one at the time. i.e. `Research the codebase` then once you have the results `Fix the problem`
@@ -830,7 +888,7 @@ In short:
 
 Environment:
 {environment_details}"
-    );
+    , review_guardrails = review_guardrails);
     let primary_goal = format!("**Primary Goal**\n{goal_text}");
     (intro, primary_goal)
 }
@@ -895,6 +953,30 @@ fn build_schema() -> Value {
                 "type": ["string", "null"],
                 "minLength": 1,
                 "description": "This is the prompt sent to the CLI. It should be 1-2 sentences. Shorter commands are preferred - e.g. ('What do you think the solution is?', 'Please fix this') let the CLI do the work. You just direct it! Ignored unless finish_status is 'continue'"
+            },
+            "review_commit": {
+                "type": ["object", "null"],
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "enum": ["staged", "commit"],
+                        "description": "What artifact is ready for review (staged diff or specific commit)."
+                    },
+                    "sha": {
+                        "type": ["string", "null"],
+                        "description": "Commit SHA to review when source is 'commit'."
+                    },
+                    "summary": {
+                        "type": ["string", "null"],
+                        "description": "Optional short summary of the changes under review."
+                    }
+                },
+                "required": [ // NB: OpenAI requires ALL properties to be listed as required
+                    "source",
+                    "sha",
+                    "summary"
+                ],
+                "additionalProperties": false
             },
             "turn_descriptor": {
                 "type": ["object", "null"],
@@ -980,6 +1062,7 @@ fn build_schema() -> Value {
             "progress_current",
             "cli_context",
             "cli_prompt",
+            "review_commit",
             "turn_descriptor",
             "turn_config"
         ],
@@ -1065,6 +1148,11 @@ fn request_coordinator_decision(
     let (turn_descriptor, turn_config) =
         merge_turn_descriptor(decision.turn_descriptor, decision.turn_config);
 
+    let review_commit = match decision.review_commit {
+        Some(payload) => Some(payload.try_into_commit()?),
+        None => None,
+    };
+
     Ok(ParsedCoordinatorDecision {
         status,
         progress_past,
@@ -1074,6 +1162,7 @@ fn request_coordinator_decision(
         response_items,
         turn_descriptor,
         turn_config,
+        review_commit,
     })
 }
 

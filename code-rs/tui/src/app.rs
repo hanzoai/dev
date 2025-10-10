@@ -1655,6 +1655,7 @@ impl App<'_> {
                     transcript,
                     turn_descriptor,
                     turn_config,
+                    review_commit,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_decision(
@@ -1666,6 +1667,7 @@ impl App<'_> {
                             transcript,
                             turn_descriptor,
                             turn_config,
+                            review_commit,
                         );
                     }
                 }

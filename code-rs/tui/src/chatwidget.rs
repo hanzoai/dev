@@ -259,6 +259,8 @@ use crate::app_event::{
     AutoObserverStatus,
     AutoObserverTelemetry,
     AutoContinueMode,
+    AutoReviewCommit,
+    AutoReviewCommitSource,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -12244,6 +12246,7 @@ fi\n\
         transcript: Vec<code_protocol::models::ResponseItem>,
         turn_descriptor: Option<TurnDescriptor>,
         turn_config: Option<TurnConfig>,
+        review_commit: Option<crate::app_event::AutoReviewCommit>,
     ) {
         if !self.auto_state.active {
             return;
@@ -12312,8 +12315,15 @@ fi\n\
         if matches!(status, AutoCoordinatorStatus::Continue)
             && (review_requested || prewrite_or_immediate_requested)
         {
-            self.auto_state.current_cli_prompt = None;
-            self.dispatch_review_turn(review_descriptor.as_ref());
+            match self.ensure_review_commit_available(review_commit.as_ref()) {
+                Ok(_) => {
+                    self.auto_state.current_cli_prompt = None;
+                    self.dispatch_review_turn(review_descriptor.as_ref(), review_commit.as_ref());
+                }
+                Err(err) => {
+                    self.reject_review_without_commit(err);
+                }
+            }
             return;
         }
 
@@ -12323,15 +12333,7 @@ fi\n\
                     self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
                     return;
                 };
-                self.auto_state.current_cli_prompt = Some(prompt_text.clone());
-                self.auto_state.awaiting_submission = true;
-                self.auto_state.reset_countdown();
-                self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-                let countdown_id = self.auto_state.countdown_id;
-                let countdown_seconds = self.auto_state.countdown_seconds();
-                self.auto_rebuild_live_ring();
-                self.request_redraw();
-                self.auto_start_countdown(countdown_id, countdown_seconds);
+                self.schedule_auto_cli_prompt(prompt_text.clone());
             }
             AutoCoordinatorStatus::Success => {
                 let normalized = summary_text.trim();
@@ -12366,36 +12368,120 @@ fi\n\
         }
     }
 
-    fn dispatch_review_turn(&mut self, descriptor: Option<&TurnDescriptor>) {
+    fn dispatch_review_turn(
+        &mut self,
+        descriptor: Option<&TurnDescriptor>,
+        review_commit: Option<&AutoReviewCommit>,
+    ) {
         let strategy = descriptor.and_then(|d| d.review_strategy.as_ref());
-        let prompt = strategy
-            .and_then(|s| s.custom_prompt.clone())
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| {
-                "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string()
-            });
-        let hint = strategy
-            .and_then(|s| s.scope_hint.clone())
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "Auto Drive review".to_string());
-        let metadata = strategy
-            .and_then(|s| s.scope_hint.clone())
-            .map(|scope| ReviewContextMetadata {
-                scope: Some(scope),
-                ..Default::default()
-            });
+
+        let mut prompt;
+        let mut hint;
+        let mut auto_metadata: Option<ReviewContextMetadata>;
+        let mut review_metadata: Option<ReviewContextMetadata>;
+
+        match review_commit {
+            Some(commit) if matches!(commit.source, AutoReviewCommitSource::Commit) => {
+                let sha = commit
+                    .sha
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .expect("commit source should have been validated");
+                let short_sha: String = sha.chars().take(8).collect();
+                prompt = format!(
+                    "Review commit {sha} generated during the latest Auto Drive turn. Highlight bugs, regressions, risky patterns, and missing tests before merge."
+                );
+                hint = format!("Auto Drive commit {short_sha}");
+                review_metadata = Some(ReviewContextMetadata {
+                    scope: Some("commit".to_string()),
+                    commit: Some(sha.to_string()),
+                    ..Default::default()
+                });
+                auto_metadata = Some(ReviewContextMetadata {
+                    scope: Some("workspace".to_string()),
+                    ..Default::default()
+                });
+            }
+            _ => {
+                prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
+                hint = "current workspace changes".to_string();
+                review_metadata = Some(ReviewContextMetadata {
+                    scope: Some("workspace".to_string()),
+                    ..Default::default()
+                });
+                auto_metadata = review_metadata.clone();
+            }
+        }
+
+        if let Some(strategy) = strategy {
+            if let Some(custom_prompt) = strategy
+                .custom_prompt
+                .as_ref()
+                .and_then(|text| {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+            {
+                prompt = custom_prompt.to_string();
+            }
+
+            if let Some(scope_hint) = strategy
+                .scope_hint
+                .as_ref()
+                .and_then(|text| {
+                    let trimmed = text.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+            {
+                hint = scope_hint.to_string();
+
+                let apply_scope = |meta: &mut ReviewContextMetadata| {
+                    meta.scope = Some(scope_hint.to_string());
+                };
+
+                if let Some(meta) = review_metadata.as_mut() {
+                    apply_scope(meta);
+                } else {
+                    review_metadata = Some(ReviewContextMetadata {
+                        scope: Some(scope_hint.to_string()),
+                        ..Default::default()
+                    });
+                }
+
+                if let Some(meta) = auto_metadata.as_mut() {
+                    apply_scope(meta);
+                } else {
+                    auto_metadata = Some(ReviewContextMetadata {
+                        scope: Some(scope_hint.to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
 
         if self.config.tui.review_auto_resolve {
             self.auto_resolve_state = Some(AutoResolveState::new(
                 prompt.clone(),
                 hint.clone(),
-                metadata.clone(),
+                auto_metadata.clone(),
             ));
         } else {
             self.auto_resolve_state = None;
         }
 
-        self.begin_review(prompt, hint, None, metadata);
+        if let Some(commit) = review_commit {
+            if let Some(summary) = commit.summary.as_ref() {
+                self.push_background_tail(format!("Review target: {summary}"));
+            } else if matches!(commit.source, AutoReviewCommitSource::Commit) {
+                if let Some(sha) = commit.sha.as_ref() {
+                    let short_sha: String = sha.trim().chars().take(8).collect();
+                    self.push_background_tail(format!("Review target: commit {short_sha}"));
+                }
+            }
+        }
+
+        self.begin_review(prompt, hint, None, review_metadata);
         self.auto_state.waiting_for_review = true;
         self.auto_state.waiting_for_response = false;
         self.auto_state.awaiting_submission = false;
@@ -12404,6 +12490,73 @@ fi\n\
         self.bottom_pane.set_task_running(false);
         self.auto_rebuild_live_ring();
         self.request_redraw();
+    }
+
+    fn ensure_review_commit_available(
+        &self,
+        review_commit: Option<&AutoReviewCommit>,
+    ) -> Result<(), String> {
+        let Some(commit) = review_commit else {
+            return Err(
+                "Coordinator requested a review but omitted `review_commit` metadata.".to_string(),
+            );
+        };
+
+        match commit.source {
+            AutoReviewCommitSource::Commit => {
+                let Some(sha) = commit
+                    .sha
+                    .as_ref()
+                    .map(|value| value.trim())
+                    .filter(|s| !s.is_empty())
+                else {
+                    return Err("Review target set to `commit` but `sha` was missing.".to_string());
+                };
+                let tree_ref = format!("{sha}^{{tree}}");
+                self.run_git_command(["cat-file", "-e", tree_ref.as_str()], |_: String| Ok(()))
+                    .map_err(|err| format!("Commit {sha} is not accessible for review: {err}"))?;
+                Ok(())
+            }
+            AutoReviewCommitSource::Staged => self.run_git_command(
+                ["diff", "--staged", "--name-only"],
+                |stdout| {
+                    let has_entries = stdout.lines().any(|line| !line.trim().is_empty());
+                    if has_entries {
+                        Ok(())
+                    } else {
+                        Err("No staged changes found for review.".to_string())
+                    }
+                },
+            ),
+        }
+    }
+
+    fn reject_review_without_commit(&mut self, reason: String) {
+        let summary = format!(
+            "Skipping coordinator review request: {reason} Prepare a staged diff or commit before retrying."
+        );
+        self.push_background_tail(summary);
+
+        let prompt = format!(
+            "Stage the latest changes and create a commit (or keep them staged) so a review can run. Reply with the commit SHA or confirm the staged diff is ready. ({reason})"
+        );
+        self.schedule_auto_cli_prompt(prompt);
+        self.auto_state.waiting_for_review = false;
+        self.auto_state.waiting_for_response = false;
+        self.auto_state.coordinator_waiting = false;
+        self.update_header_border_activation();
+    }
+
+    fn schedule_auto_cli_prompt(&mut self, prompt_text: String) {
+        self.auto_state.current_cli_prompt = Some(prompt_text);
+        self.auto_state.awaiting_submission = true;
+        self.auto_state.reset_countdown();
+        self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+        let countdown_id = self.auto_state.countdown_id;
+        let countdown_seconds = self.auto_state.countdown_seconds();
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+        self.auto_start_countdown(countdown_id, countdown_seconds);
     }
 
     fn auto_start_countdown(&self, countdown_id: u64, countdown_seconds: Option<u8>) {
@@ -19577,6 +19730,14 @@ mod tests {
     use std::collections::HashMap;
     use std::time::SystemTime;
     use std::path::PathBuf;
+
+    fn test_review_commit() -> Option<AutoReviewCommit> {
+        Some(AutoReviewCommit {
+            source: AutoReviewCommitSource::Commit,
+            sha: Some("HEAD".to_string()),
+            summary: None,
+        })
+    }
     use code_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
 
     struct CaptureCommitStubGuard;
@@ -19913,6 +20074,7 @@ mod tests {
             Vec::new(),
             None,
             Some(legacy.clone()),
+            None,
         );
 
         assert!(chat.pending_auto_turn_config.is_some());
@@ -19955,6 +20117,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            test_review_commit(),
         );
 
         let stored_descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
@@ -19986,6 +20149,8 @@ mod tests {
             }),
         };
 
+        let review_commit = test_review_commit();
+
         chat.auto_handle_decision(
             AutoCoordinatorStatus::Continue,
             None,
@@ -19998,6 +20163,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            review_commit,
         );
 
         assert!(chat.auto_state.waiting_for_review);
@@ -20047,6 +20213,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            test_review_commit(),
         );
 
         assert!(chat.auto_state.waiting_for_review);
@@ -20112,6 +20279,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            test_review_commit(),
         );
 
         assert!(chat.auto_state.waiting_for_review);
@@ -20160,6 +20328,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            test_review_commit(),
         );
 
         assert!(chat.auto_state.waiting_for_review);
@@ -20209,6 +20378,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            None,
         );
 
         assert!(chat.auto_state.waiting_for_review);
@@ -20267,6 +20437,7 @@ mod tests {
                 read_only: descriptor.read_only,
                 complexity: descriptor.complexity,
             }),
+            None,
         );
 
         assert!(!chat.auto_state.waiting_for_review);
