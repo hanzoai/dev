@@ -74,6 +74,9 @@ pub(crate) struct AutoCoordinatorView {
 }
 
 impl AutoCoordinatorView {
+    const DEFAULT_COMPOSER_BLOCK: u16 = 5;
+    const MIN_COMPOSER_VIEWPORT: u16 = 3;
+
     pub fn new(model: AutoCoordinatorViewModel, app_event_tx: AppEventSender) -> Self {
         Self {
             model,
@@ -84,6 +87,20 @@ impl AutoCoordinatorView {
 
     pub fn update_model(&mut self, model: AutoCoordinatorViewModel) {
         self.model = model;
+    }
+
+    pub(crate) fn desired_height_with_composer(&self, width: u16, composer: &ChatComposer) -> u16 {
+        let AutoCoordinatorViewModel::Active(model) = &self.model;
+        let ctx = Self::build_context(model);
+        // The framed Auto Drive view introduces an extra border (2 cols) plus a
+        // dedicated left padding column before the embedded composer. When the
+        // composer renders, it subtracts an additional 4 columns (border + inner
+        // padding) from the area we hand it. To keep the measured height in sync
+        // with the final render width, subtract those 3 exterior columns before
+        // delegating to `ChatComposer::desired_height`.
+        let composer_width = width.saturating_sub(3);
+        let composer_height = composer.desired_height(composer_width);
+        self.estimated_height_active(width, &ctx, model, composer_height)
     }
 
     fn build_context(model: &AutoActiveViewModel) -> VariantContext {
@@ -338,6 +355,7 @@ impl AutoCoordinatorView {
         width: u16,
         ctx: &VariantContext,
         model: &AutoActiveViewModel,
+        composer_height: u16,
     ) -> u16 {
         let inner_width = self.inner_width(width);
         let button_height = if ctx.button.is_some() { 3 } else { 0 };
@@ -355,7 +373,7 @@ impl AutoCoordinatorView {
             Self::wrap_count(ctrl_hint, inner_width)
         };
 
-        let mut total = 0;
+        let mut total = 0usize;
 
         if model.awaiting_submission {
             if let Some(prompt) = &model.cli_prompt {
@@ -385,11 +403,14 @@ impl AutoCoordinatorView {
             }
         }
 
-        let composer_min = 5usize; // input block with surrounding padding
-        let summary_height = 1usize; // status summary line at bottom
+        let composer_block = usize::from(composer_height);
+        let show_summary = model.waiting_for_response
+            || model.awaiting_submission
+            || model.cli_running;
+        let summary_height = if show_summary { 1usize } else { 0usize };
 
         total = total
-            .saturating_add(composer_min)
+            .saturating_add(composer_block)
             .saturating_add(summary_height);
 
         total
@@ -467,44 +488,72 @@ impl AutoCoordinatorView {
             }
         }
 
-        let summary_line = self.build_status_summary(model);
-        let summary_height = if summary_line.is_some() { 1 } else { 0 };
+        let show_summary = model.waiting_for_response
+            || model.awaiting_submission
+            || model.cli_running;
+        let summary_line = if show_summary {
+            self.build_status_summary(model)
+        } else {
+            None
+        };
+        let mut summary_height: u16 = if summary_line.is_some() { 1 } else { 0 };
 
         let mut top_height = Self::lines_height(&top_lines, inner.width);
         let mut after_height = Self::lines_height(&after_lines, inner.width);
-        let min_composer_height = 3u16;
 
-        let mut composer_height = inner
+        // `inner` matches the bordered content area **after** the extra left pad.
+        // `ChatComposer::render_ref` expects to operate on a region that is two
+        // columns wider than the tight composer rectangle (to account for the
+        // outer horizontal padding applied by the BottomPane). Reconstruct that
+        // width so height estimation matches render-time wrapping exactly.
+        let measurement_width = inner.width.saturating_add(2);
+
+        let mut desired_block = composer.desired_height(measurement_width);
+        if desired_block < Self::MIN_COMPOSER_VIEWPORT {
+            desired_block = Self::MIN_COMPOSER_VIEWPORT;
+        }
+        let mut composer_block: u16 = desired_block;
+
+        let total_needed = top_height as usize
+            + after_height as usize
+            + summary_height as usize
+            + composer_block as usize;
+
+        if total_needed > inner.height as usize {
+            let mut deficit = total_needed - inner.height as usize;
+
+            let reduce_after = usize::from(after_height).min(deficit);
+            after_height = after_height.saturating_sub(reduce_after as u16);
+            deficit -= reduce_after;
+
+            let reduce_top = usize::from(top_height).min(deficit);
+            top_height = top_height.saturating_sub(reduce_top as u16);
+            deficit -= reduce_top;
+
+            if deficit > 0 && summary_height > 0 {
+                let reduce_summary = usize::from(summary_height).min(deficit);
+                summary_height = summary_height.saturating_sub(reduce_summary as u16);
+                deficit -= reduce_summary;
+            }
+
+            if deficit > 0 {
+                let reducible = composer_block.saturating_sub(Self::MIN_COMPOSER_VIEWPORT);
+                let reduce_composer = usize::from(reducible).min(deficit);
+                composer_block = composer_block.saturating_sub(reduce_composer as u16);
+            }
+        }
+
+        let max_space_for_composer = inner
             .height
             .saturating_sub(top_height)
             .saturating_sub(after_height)
             .saturating_sub(summary_height);
 
-        if composer_height < min_composer_height {
-            let deficit = min_composer_height.saturating_sub(composer_height);
-            let reduce_after = after_height.min(deficit);
-            after_height -= reduce_after;
-            let remaining = deficit - reduce_after;
-            let reduce_top = top_height.min(remaining);
-            top_height -= reduce_top;
-            composer_height = inner
-                .height
-                .saturating_sub(top_height)
-                .saturating_sub(after_height)
-                .saturating_sub(summary_height);
-        }
-
-        if composer_height == 0 {
-            composer_height = inner
-                .height
-                .saturating_sub(top_height)
-                .saturating_sub(after_height)
-                .saturating_sub(summary_height);
-        }
-
-        if composer_height == 0 {
-            composer_height = 1;
-        }
+        let composer_height = if max_space_for_composer == 0 {
+            1
+        } else {
+            composer_block.min(max_space_for_composer).max(1)
+        };
 
         let mut cursor_y = inner.y;
         if top_height > 0 {
@@ -726,6 +775,10 @@ impl AutoCoordinatorView {
 }
 
 impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
         if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return;
@@ -743,7 +796,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
     fn desired_height(&self, width: u16) -> u16 {
         let AutoCoordinatorViewModel::Active(model) = &self.model;
         let ctx = Self::build_context(model);
-        self.estimated_height_active(width, &ctx, model)
+        self.estimated_height_active(width, &ctx, model, Self::DEFAULT_COMPOSER_BLOCK)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -772,6 +825,18 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
 
     fn update_status_text(&mut self, text: String) -> ConditionalUpdate {
         if self.update_status_message(text) {
+            ConditionalUpdate::NeedsRedraw
+        } else {
+            ConditionalUpdate::NoRedraw
+        }
+    }
+
+    fn handle_paste_with_composer(
+        &mut self,
+        composer: &mut ChatComposer,
+        pasted: String,
+    ) -> ConditionalUpdate {
+        if composer.handle_paste(pasted) {
             ConditionalUpdate::NeedsRedraw
         } else {
             ConditionalUpdate::NoRedraw

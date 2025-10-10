@@ -51,6 +51,11 @@ pub(crate) trait BottomPaneView<'a> {
         self.render(area, buf);
     }
 
+    /// Allow read-only downcasting for views that expose additional APIs.
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
+
     /// Update the status indicator text.
     fn update_status_text(&mut self, _text: String) -> ConditionalUpdate {
         ConditionalUpdate::NoRedraw
@@ -80,5 +85,16 @@ pub(crate) trait BottomPaneView<'a> {
     /// is needed. Default: ignore paste.
     fn handle_paste(&mut self, _text: String) -> ConditionalUpdate {
         ConditionalUpdate::NoRedraw
+    }
+
+    /// Handle pasted text when a persistent composer is available.
+    /// Default implementation forwards to `handle_paste` to preserve
+    /// existing behaviour for views that do not interact with the composer.
+    fn handle_paste_with_composer(
+        &mut self,
+        _composer: &mut ChatComposer,
+        text: String,
+    ) -> ConditionalUpdate {
+        self.handle_paste(text)
     }
 }
