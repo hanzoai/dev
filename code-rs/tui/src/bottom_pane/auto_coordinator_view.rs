@@ -35,6 +35,8 @@ pub(crate) struct AutoActiveViewModel {
     pub goal: Option<String>,
     pub status_lines: Vec<String>,
     pub cli_prompt: Option<String>,
+    pub cli_context: Option<String>,
+    pub show_composer: bool,
     pub awaiting_submission: bool,
     pub waiting_for_response: bool,
     pub countdown: Option<CountdownState>,
@@ -99,7 +101,11 @@ impl AutoCoordinatorView {
         // with the final render width, subtract those 3 exterior columns before
         // delegating to `ChatComposer::desired_height`.
         let composer_width = width.saturating_sub(3);
-        let composer_height = composer.desired_height(composer_width);
+        let composer_height = if model.show_composer {
+            composer.desired_height(composer_width)
+        } else {
+            0
+        };
         self.estimated_height_active(width, &ctx, model, composer_height)
     }
 
@@ -150,6 +156,22 @@ impl AutoCoordinatorView {
         {
             self.app_event_tx.send(AppEvent::ShowAutoDriveSettings);
             return true;
+        }
+
+        let awaiting_without_input = matches!(
+            &self.model,
+            AutoCoordinatorViewModel::Active(model)
+                if model.awaiting_submission && !model.show_composer
+        );
+        if awaiting_without_input {
+            // Allow approval keys to bubble so ChatWidget handles them.
+            let allow_passthrough = matches!(
+                key_event.code,
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('e') | KeyCode::Char('E')
+            );
+            if !allow_passthrough {
+                return true;
+            }
         }
 
         matches!(key_event.code, KeyCode::Up | KeyCode::Down)
@@ -227,20 +249,104 @@ impl AutoCoordinatorView {
         lines
     }
 
-    fn cli_prompt_lines(&self, model: &AutoActiveViewModel, style: Style) -> Option<Vec<Line<'static>>> {
-        model.cli_prompt.as_ref().map(|prompt| {
-            prompt
-                .lines()
-                .map(|line| Line::from(Span::styled(line.trim_end().to_string(), style)))
-                .collect()
-        })
+    fn cli_prompt_lines(&self, model: &AutoActiveViewModel) -> Option<Vec<Line<'static>>> {
+        let prompt = model
+            .cli_prompt
+            .as_ref()
+            .map(|value| value.trim_end())
+            .filter(|value| !value.is_empty());
+        let context = model
+            .cli_context
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+
+        if prompt.is_none() && context.is_none() {
+            return None;
+        }
+
+        let header_style = Style::default()
+            .fg(colors::text())
+            .add_modifier(Modifier::BOLD);
+        let context_label_style = Style::default()
+            .fg(colors::text_dim())
+            .add_modifier(Modifier::BOLD);
+        let context_body_style = Style::default()
+            .fg(colors::text_dim())
+            .add_modifier(Modifier::ITALIC);
+        let prompt_label_style = Style::default()
+            .fg(colors::info())
+            .add_modifier(Modifier::BOLD);
+        let prompt_body_style = Style::default().fg(colors::text());
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(vec![
+            Span::raw("   "),
+            Span::styled("Auto Drive will send:", header_style),
+        ]));
+
+        if let Some(value) = context {
+            lines.push(Line::from(vec![
+                Span::raw("     "),
+                Span::styled("Preface:", context_label_style),
+            ]));
+            for line in value.lines() {
+                let trimmed = line.trim_end();
+                if trimmed.is_empty() {
+                    lines.push(Line::default());
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("       "),
+                        Span::styled(trimmed.to_string(), context_body_style),
+                    ]));
+                }
+            }
+        }
+
+        if context.is_some() && prompt.is_some() {
+            lines.push(Line::default());
+        }
+
+        if let Some(value) = prompt {
+            lines.push(Line::from(vec![
+                Span::raw("     "),
+                Span::styled("Prompt:", prompt_label_style),
+            ]));
+            for line in value.lines() {
+                let trimmed = line.trim_end();
+                if trimmed.is_empty() {
+                    lines.push(Line::default());
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("       "),
+                        Span::styled(trimmed.to_string(), prompt_body_style),
+                    ]));
+                }
+            }
+        } else {
+            lines.push(Line::from(vec![
+                Span::raw("     "),
+                Span::styled("Prompt:", prompt_label_style),
+            ]));
+            lines.push(Line::from(vec![
+                Span::raw("       "),
+                Span::styled(
+                    "(Coordinator did not supply a prompt)".to_string(),
+                    prompt_body_style.add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+
+        Some(lines)
     }
 
     fn manual_hint_line(&self, ctx: &VariantContext) -> Option<Line<'static>> {
         ctx.manual_hint.as_ref().map(|hint| {
             Line::from(Span::styled(
                 hint.clone(),
-                Style::default().fg(colors::warning()),
+                Style::default()
+                    .fg(colors::info())
+                    .add_modifier(Modifier::ITALIC),
             ))
         })
     }
@@ -376,11 +482,18 @@ impl AutoCoordinatorView {
         let mut total = 0usize;
 
         if model.awaiting_submission {
-            if let Some(prompt) = &model.cli_prompt {
-                total += Self::wrap_count(prompt, inner_width).max(1);
+            if let Some(prompt_lines) = self.cli_prompt_lines(model) {
+                let prompt_height = Self::lines_height(&prompt_lines, inner_width) as usize;
+                total += prompt_height;
+                if prompt_height > 0 && ctx.button.is_some() {
+                    total += 1; // spacer before button
+                }
             }
             if ctx.button.is_some() {
                 total += button_height;
+            }
+            if ctx.manual_hint.is_some() {
+                total += hint_height.max(1);
             }
             if ctrl_height > 0 {
                 total += 1; // spacer before ctrl hint
@@ -438,14 +551,22 @@ impl AutoCoordinatorView {
         let mut after_lines: Vec<Line<'static>> = Vec::new();
 
         if model.awaiting_submission {
-            if let Some(prompt_lines) =
-                self.cli_prompt_lines(model, Style::default().fg(colors::text()))
-            {
-                top_lines.extend(prompt_lines);
+            if let Some(mut prompt_lines) = self.cli_prompt_lines(model) {
+                top_lines.append(&mut prompt_lines);
             }
 
             if let Some(button_block) = self.button_block_lines(&ctx) {
-                after_lines.extend(button_block);
+                if !top_lines.is_empty() {
+                    top_lines.push(Line::default());
+                }
+                top_lines.extend(button_block);
+            }
+
+            if let Some(hint_line) = self.manual_hint_line(&ctx) {
+                if !after_lines.is_empty() {
+                    after_lines.push(Line::default());
+                }
+                after_lines.push(hint_line);
             }
 
             if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
@@ -506,13 +627,16 @@ impl AutoCoordinatorView {
         // columns wider than the tight composer rectangle (to account for the
         // outer horizontal padding applied by the BottomPane). Reconstruct that
         // width so height estimation matches render-time wrapping exactly.
-        let measurement_width = inner.width.saturating_add(2);
-
-        let mut desired_block = composer.desired_height(measurement_width);
-        if desired_block < Self::MIN_COMPOSER_VIEWPORT {
-            desired_block = Self::MIN_COMPOSER_VIEWPORT;
-        }
-        let mut composer_block: u16 = desired_block;
+        let mut composer_block: u16 = if model.show_composer {
+            let measurement_width = inner.width.saturating_add(2);
+            let mut desired_block = composer.desired_height(measurement_width);
+            if desired_block < Self::MIN_COMPOSER_VIEWPORT {
+                desired_block = Self::MIN_COMPOSER_VIEWPORT;
+            }
+            desired_block
+        } else {
+            0
+        };
 
         let total_needed = top_height as usize
             + after_height as usize
@@ -536,23 +660,27 @@ impl AutoCoordinatorView {
                 deficit -= reduce_summary;
             }
 
-            if deficit > 0 {
+            if deficit > 0 && model.show_composer {
                 let reducible = composer_block.saturating_sub(Self::MIN_COMPOSER_VIEWPORT);
                 let reduce_composer = usize::from(reducible).min(deficit);
                 composer_block = composer_block.saturating_sub(reduce_composer as u16);
             }
         }
 
-        let max_space_for_composer = inner
-            .height
-            .saturating_sub(top_height)
-            .saturating_sub(after_height)
-            .saturating_sub(summary_height);
+        let composer_height = if model.show_composer {
+            let max_space_for_composer = inner
+                .height
+                .saturating_sub(top_height)
+                .saturating_sub(after_height)
+                .saturating_sub(summary_height);
 
-        let composer_height = if max_space_for_composer == 0 {
-            1
+            if max_space_for_composer == 0 {
+                1
+            } else {
+                composer_block.min(max_space_for_composer).max(1)
+            }
         } else {
-            composer_block.min(max_space_for_composer).max(1)
+            0
         };
 
         let mut cursor_y = inner.y;
