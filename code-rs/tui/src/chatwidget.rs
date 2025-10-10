@@ -773,6 +773,7 @@ pub(crate) struct ChatWidget<'a> {
     agent_context: Option<String>,
     agent_task: Option<String>,
     recent_agent_hint: Option<String>,
+    suppress_next_agent_hint: bool,
     active_review_hint: Option<String>,
     active_review_prompt: Option<String>,
     auto_resolve_state: Option<AutoResolveState>,
@@ -3574,6 +3575,7 @@ impl ChatWidget<'_> {
             agent_context: None,
             agent_task: None,
             recent_agent_hint: None,
+            suppress_next_agent_hint: false,
             active_review_hint: None,
             active_review_prompt: None,
             auto_resolve_state: None,
@@ -3868,6 +3870,7 @@ impl ChatWidget<'_> {
             agent_context: None,
             agent_task: None,
             recent_agent_hint: None,
+            suppress_next_agent_hint: false,
             active_review_hint: None,
             active_review_prompt: None,
             auto_resolve_state: None,
@@ -7025,7 +7028,8 @@ impl ChatWidget<'_> {
         match processed {
             crate::slash_command::ProcessedCommand::ExpandedPrompt(_expanded) => {
                 // If a built-in multi-agent slash command was used, resolve
-                // configured subagent settings and show an acknowledgement in history.
+                // configured subagent settings and feed the synthesized prompt
+                // without echoing an additional acknowledgement cell.
                 let trimmed = original_trimmed;
                 let (cmd_name, args_opt) = if let Some(rest) = trimmed.strip_prefix("/plan ") {
                     ("plan", Some(rest.trim().to_string()))
@@ -7045,22 +7049,9 @@ impl ChatWidget<'_> {
                         Some(&self.config.subagent_commands),
                     );
 
-                    // Acknowledge the command and show which agents will run.
-                    let mode = if res.read_only { "read-only" } else { "write" };
-                    let agents = if res.models.is_empty() {
-                        "<none>".to_string()
-                    } else {
-                        res.models.join(", ")
-                    };
-                    let lines = vec![
-                        format!("/{} configured", cmd_name),
-                        format!("mode: {}", mode),
-                        format!("agents: {}", agents),
-                        format!("command: {}", original_text.trim()),
-                    ];
-                    self.history_push_plain_paragraphs(PlainMessageKind::Notice, lines);
-
-                    // Replace the message with the resolved prompt
+                    // Replace the message with the resolved prompt and suppress the
+                    // agent launch hint that would otherwise echo back immediately.
+                    self.suppress_next_agent_hint = true;
                     message
                         .ordered_items
                         .clear();
@@ -9049,6 +9040,7 @@ impl ChatWidget<'_> {
                 // Final re-check for idle state
                 self.maybe_hide_spinner();
                 self.emit_turn_complete_notification(last_agent_message);
+                self.suppress_next_agent_hint = false;
                 self.mark_needs_redraw();
                 self.flush_history_snapshot_if_needed(true);
 
@@ -10052,6 +10044,12 @@ impl ChatWidget<'_> {
                 ) {
                     return;
                 }
+                let is_agent_hint = message.starts_with("🤖 Agent");
+                if is_agent_hint && self.suppress_next_agent_hint {
+                    self.suppress_next_agent_hint = false;
+                    self.clear_resume_placeholder();
+                    return;
+                }
                 self.clear_resume_placeholder();
                 // Route through unified system notice helper. If the core ties the
                 // event to a turn (order present), prefer placing it before the next
@@ -10083,7 +10081,7 @@ impl ChatWidget<'_> {
                         .update_status_text("using browser (CDP)".to_string());
                 }
 
-                if message.starts_with("🤖 Agent")
+                if is_agent_hint
                     || message.starts_with("⚠️ Agent reuse")
                     || message.starts_with("⚠️ Agent prompt")
                 {
