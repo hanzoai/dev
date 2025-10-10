@@ -28,6 +28,7 @@ use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
 use code_core::config::Config;
 use code_core::git_info::CommitLogEntry;
 use code_core::config_types::AgentConfig;
+use code_core::config_types::AutoDriveContinueMode;
 use code_core::config_types::Notifications;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::TextVerbosity;
@@ -141,7 +142,6 @@ use crate::bottom_pane::{
     AutoActiveViewModel,
     AutoCoordinatorButton,
     AutoCoordinatorViewModel,
-    AutoSetupViewModel,
     CountdownState,
 };
 use crate::exec_command::strip_bash_lc_and_escape;
@@ -206,6 +206,24 @@ const RESUME_PLACEHOLDER_MESSAGE: &str = "Resuming previous session...";
 const RESUME_NO_HISTORY_NOTICE: &str =
     "No saved messages for this session. Start typing to continue.";
 const ENABLE_WARP_STRIPES: bool = false;
+
+fn auto_continue_from_config(mode: AutoDriveContinueMode) -> AutoContinueMode {
+    match mode {
+        AutoDriveContinueMode::Immediate => AutoContinueMode::Immediate,
+        AutoDriveContinueMode::TenSeconds => AutoContinueMode::TenSeconds,
+        AutoDriveContinueMode::SixtySeconds => AutoContinueMode::SixtySeconds,
+        AutoDriveContinueMode::Manual => AutoContinueMode::Manual,
+    }
+}
+
+fn auto_continue_to_config(mode: AutoContinueMode) -> AutoDriveContinueMode {
+    match mode {
+        AutoContinueMode::Immediate => AutoDriveContinueMode::Immediate,
+        AutoContinueMode::TenSeconds => AutoDriveContinueMode::TenSeconds,
+        AutoContinueMode::SixtySeconds => AutoDriveContinueMode::SixtySeconds,
+        AutoContinueMode::Manual => AutoDriveContinueMode::Manual,
+    }
+}
 
 fn status_field_prefix(label: &str) -> String {
     let padding = STATUS_LABEL_GAP
@@ -549,7 +567,9 @@ struct AutoCoordinatorUiState {
     review_enabled: bool,
     subagents_enabled: bool,
     continue_mode: AutoContinueMode,
-    setup: Option<AutoSetupState>,
+    started_at: Option<Instant>,
+    turns_completed: usize,
+    last_run_summary: Option<AutoRunSummary>,
 }
 
 impl AutoCoordinatorUiState {
@@ -613,17 +633,20 @@ impl Default for AutoCoordinatorUiState {
             review_enabled: false,
             subagents_enabled: false,
             continue_mode,
-            setup: None,
+            started_at: None,
+            turns_completed: 0,
+            last_run_summary: None,
         }
     }
 }
 
-#[derive(Clone)]
-struct AutoSetupState {
-    goal: String,
-    auto_review_enabled: bool,
-    subagents_enabled: bool,
-    continue_mode: AutoContinueMode,
+struct AutoRunSummary {
+    duration: Duration,
+    turns_completed: usize,
+    review_enabled: bool,
+    agents_enabled: bool,
+    message: Option<String>,
+    goal: Option<String>,
 }
 
 const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
@@ -3707,6 +3730,11 @@ impl ChatWidget<'_> {
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
+        let auto_defaults = w.config.tui.auto_drive.clone();
+        w.auto_state.review_enabled = auto_defaults.review_enabled;
+        w.auto_state.subagents_enabled = auto_defaults.agents_enabled;
+        w.auto_state.continue_mode = auto_continue_from_config(auto_defaults.continue_mode);
+        w.auto_state.reset_countdown();
         w.set_standard_terminal_mode(!config.tui.alternate_screen);
         if config.experimental_resume.is_none() {
             w.history_push_top_next_req(history_cell::new_animated_welcome()); // tag: prelude
@@ -4448,6 +4476,20 @@ impl ChatWidget<'_> {
                 return;
             }
             self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+            return;
+        }
+
+        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+            && matches!(key_event.code, KeyCode::Esc)
+            && !self.auto_state.active
+            && self.auto_state.last_run_summary.is_some()
+        {
+            self.auto_state.last_run_summary = None;
+            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_live_ring();
+            self.bottom_pane.set_standard_terminal_hint(None);
+            self.bottom_pane.ensure_input_focus();
+            self.request_redraw();
             return;
         }
 
@@ -11890,49 +11932,56 @@ fi\n\
 
     fn refresh_auto_drive_visuals(&mut self) {
         self.update_header_border_activation();
-        if self.auto_state.active {
+        if self.auto_state.active
+            || self.auto_state.awaiting_goal_input
+            || self.auto_state.last_run_summary.is_some()
+        {
             self.auto_rebuild_live_ring();
         }
     }
 
-    fn auto_present_setup(&mut self) {
-        let Some(setup) = self.auto_state.setup.as_ref() else {
-            return;
-        };
-        let goal = setup.goal.clone();
-        let auto_review_enabled = setup.auto_review_enabled;
-        let subagents_enabled = setup.subagents_enabled;
-        let continue_mode = setup.continue_mode;
-        self.auto_state.review_enabled = auto_review_enabled;
-        self.auto_state.subagents_enabled = subagents_enabled;
-        self.auto_state.continue_mode = continue_mode;
-        self.auto_state.reset_countdown();
-        let model = AutoCoordinatorViewModel::Setup(AutoSetupViewModel {
-            goal,
-            auto_review_enabled,
-            subagents_enabled,
-            continue_mode,
+    fn auto_show_goal_entry_panel(&mut self) {
+        self.auto_state.goal = None;
+        let hint = "Type an Auto Drive goal and press Enter to begin.".to_string();
+        let status_lines = vec![hint];
+        let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
+            goal: None,
+            status_lines,
+            cli_prompt: None,
+            awaiting_submission: false,
+            waiting_for_response: false,
+            countdown: None,
+            button: None,
+            manual_hint: None,
+            ctrl_switch_hint: String::new(),
+            cli_running: false,
+            review_enabled: self.auto_state.review_enabled,
+            agents_enabled: self.auto_state.subagents_enabled,
+            turns_completed: 0,
+            started_at: None,
+            elapsed: None,
+            progress_past: None,
+            progress_current: None,
         });
         self.bottom_pane.show_auto_coordinator_view(model);
         self.bottom_pane.set_task_running(false);
         self.bottom_pane.clear_live_ring();
-        self.bottom_pane
-            .update_status_text("Auto Drive Setup".to_string());
-        self.bottom_pane
-            .set_standard_terminal_hint(Some("Enter to launch | Esc to cancel".to_string()));
+        self.bottom_pane.update_status_text("Auto Drive".to_string());
+        self.bottom_pane.set_standard_terminal_hint(Some(
+            "Ctrl+S Change Settings".to_string(),
+        ));
         self.bottom_pane.ensure_input_focus();
         self.update_header_border_activation();
         self.request_redraw();
     }
 
-    fn auto_launch_with_setup(&mut self, setup: AutoSetupState) {
-        let AutoSetupState {
-            goal,
-            auto_review_enabled,
-            subagents_enabled,
-            continue_mode,
-        } = setup;
-
+    fn auto_launch_with_goal(
+        &mut self,
+        goal: String,
+        review_enabled: bool,
+        subagents_enabled: bool,
+        continue_mode: AutoContinueMode,
+    ) {
         let conversation = self.rebuild_auto_history();
         match start_auto_coordinator(
             self.app_event_tx.clone(),
@@ -11945,12 +11994,14 @@ fi\n\
             Ok(handle) => {
                 self.auto_handle = Some(handle);
                 self.auto_state.reset();
-                self.auto_state.setup = None;
-                self.auto_state.review_enabled = auto_review_enabled;
+                self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
                 self.auto_state.active = true;
+                self.auto_state.started_at = Some(Instant::now());
+                self.auto_state.turns_completed = 0;
+                self.auto_state.last_run_summary = None;
                 self.auto_state.goal = Some(goal.clone());
                 self.auto_state.current_summary = None;
                 self.auto_state.current_progress_past = None;
@@ -11969,8 +12020,9 @@ fi\n\
                 self.auto_state.last_decision_progress_current = None;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
-                self.bottom_pane
-                    .set_standard_terminal_hint(Some("Esc to stop Auto Drive".to_string()));
+                self.bottom_pane.set_standard_terminal_hint(Some(
+                    "Esc stop Auto Drive • Ctrl+S Change Settings".to_string(),
+                ));
                 self.update_header_border_activation();
                 self.auto_rebuild_live_ring();
                 self.push_background_tail(format!("Auto Drive started: {goal}"));
@@ -11978,13 +12030,14 @@ fi\n\
             }
             Err(err) => {
                 self.push_background_tail(format!("Coordinator failed to start: {err}"));
-                self.auto_state.setup = Some(AutoSetupState {
-                    goal,
-                    auto_review_enabled,
-                    subagents_enabled,
-                    continue_mode,
-                });
-                self.auto_present_setup();
+                self.auto_state.active = false;
+                self.auto_state.goal = None;
+                self.auto_state.awaiting_goal_input = true;
+                self.auto_state.review_enabled = review_enabled;
+                self.auto_state.subagents_enabled = subagents_enabled;
+                self.auto_state.continue_mode = continue_mode;
+                self.auto_state.reset_countdown();
+                self.auto_show_goal_entry_panel();
             }
         }
     }
@@ -12014,12 +12067,15 @@ fi\n\
             self.auto_state.awaiting_goal_input = true;
             self.clear_composer();
             self.bottom_pane.ensure_input_focus();
-            self.bottom_pane.set_task_running(true);
-            self.bottom_pane
-                .update_status_text("Auto Drive Goal".to_string());
             self.push_background_tail(
                 "Please enter the goal you would like to work autonomously towards.".to_string(),
             );
+            let defaults = self.config.tui.auto_drive.clone();
+            self.auto_state.review_enabled = defaults.review_enabled;
+            self.auto_state.subagents_enabled = defaults.agents_enabled;
+            self.auto_state.continue_mode = auto_continue_from_config(defaults.continue_mode);
+            self.auto_state.reset_countdown();
+            self.auto_show_goal_entry_panel();
             self.update_header_border_activation();
             self.request_redraw();
             return;
@@ -12031,70 +12087,74 @@ fi\n\
             self.auto_stop(None);
         }
 
-        self.auto_state.reset();
-        self.auto_state.setup = Some(AutoSetupState {
-            goal: goal_text.clone(),
-            auto_review_enabled: false,
-            subagents_enabled: false,
-            continue_mode: AutoContinueMode::default(),
-        });
-        self.auto_state.review_enabled = false;
-        self.auto_state.subagents_enabled = false;
-        self.auto_state.continue_mode = AutoContinueMode::default();
-        self.auto_state.reset_countdown();
+        let defaults = self.config.tui.auto_drive.clone();
+        let default_mode = auto_continue_from_config(defaults.continue_mode);
 
-        self.push_background_tail(format!(
-            "Auto Drive setup ready. Review defaults before launching goal: {goal_text}"
-        ));
-        self.auto_present_setup();
+        self.auto_launch_with_goal(
+            goal_text,
+            defaults.review_enabled,
+            defaults.agents_enabled,
+            default_mode,
+        );
     }
 
-    pub(crate) fn auto_setup_toggle_review(&mut self) {
-        if let Some(setup) = self.auto_state.setup.as_mut() {
-            setup.auto_review_enabled = !setup.auto_review_enabled;
-            self.auto_state.review_enabled = setup.auto_review_enabled;
-            self.auto_present_setup();
+    pub(crate) fn show_auto_drive_settings(&mut self) {
+        let review = self.auto_state.review_enabled;
+        let agents = self.auto_state.subagents_enabled;
+        let mode = self.auto_state.continue_mode;
+        self.bottom_pane
+            .show_auto_drive_settings(review, agents, mode);
+    }
+
+    pub(crate) fn close_auto_drive_settings(&mut self) {
+        self.bottom_pane.clear_auto_drive_settings();
+        if self.auto_state.active && !self.auto_state.paused_for_manual_edit {
+            self.auto_rebuild_live_ring();
         }
+        self.bottom_pane.ensure_input_focus();
     }
 
-    pub(crate) fn auto_setup_toggle_subagents(&mut self) {
-        if let Some(setup) = self.auto_state.setup.as_mut() {
-            setup.subagents_enabled = !setup.subagents_enabled;
-            self.auto_state.subagents_enabled = setup.subagents_enabled;
-            self.auto_present_setup();
+    pub(crate) fn apply_auto_drive_settings(
+        &mut self,
+        review_enabled: bool,
+        agents_enabled: bool,
+        continue_mode: AutoContinueMode,
+    ) {
+        let mut changed = false;
+        if self.auto_state.review_enabled != review_enabled {
+            self.auto_state.review_enabled = review_enabled;
+            changed = true;
         }
-    }
-
-    pub(crate) fn auto_setup_select_countdown(&mut self, mode: AutoContinueMode) {
-        if let Some(setup) = self.auto_state.setup.as_mut() {
-            if setup.continue_mode != mode {
-                setup.continue_mode = mode;
-                self.auto_state.continue_mode = mode;
-                self.auto_state.reset_countdown();
-                self.auto_present_setup();
-            }
+        if self.auto_state.subagents_enabled != agents_enabled {
+            self.auto_state.subagents_enabled = agents_enabled;
+            changed = true;
         }
-    }
-
-    pub(crate) fn auto_setup_confirm(&mut self) {
-        if let Some(setup) = self.auto_state.setup.clone() {
-            self.auto_launch_with_setup(setup);
+        if self.auto_state.continue_mode != continue_mode {
+            self.auto_state.continue_mode = continue_mode;
+            self.auto_state.reset_countdown();
+            changed = true;
         }
-    }
 
-    pub(crate) fn auto_setup_cancel(&mut self) {
-        if self.auto_state.setup.is_none() {
+        if !changed {
             return;
         }
-        self.auto_state.reset();
-        self.bottom_pane.clear_auto_coordinator_view();
-        self.bottom_pane.set_standard_terminal_hint(None);
-        self.bottom_pane.update_status_text(String::new());
-        self.bottom_pane.set_task_running(false);
-        self.bottom_pane.ensure_input_focus();
-        self.update_header_border_activation();
+
+        self.config.tui.auto_drive.review_enabled = review_enabled;
+        self.config.tui.auto_drive.agents_enabled = agents_enabled;
+        self.config.tui.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
+
+        if let Ok(home) = code_core::config::find_code_home() {
+            if let Err(err) =
+                code_core::config::set_tui_auto_drive_settings(&home, &self.config.tui.auto_drive)
+            {
+                tracing::warn!("Failed to persist Auto Drive settings: {err}");
+            }
+        } else {
+            tracing::warn!("Could not locate config home to persist Auto Drive settings");
+        }
+
+        self.refresh_auto_drive_visuals();
         self.request_redraw();
-        self.push_background_tail("Auto Drive setup canceled.".to_string());
     }
 
     fn auto_send_conversation(&mut self) {
@@ -12150,6 +12210,8 @@ fi\n\
 
         let progress_past = Self::normalize_progress_field(progress_past);
         let progress_current = Self::normalize_progress_field(progress_current);
+
+        self.auto_state.turns_completed = self.auto_state.turns_completed.saturating_add(1);
 
         if !transcript.is_empty() {
             self.auto_history.append_raw(&transcript);
@@ -12731,15 +12793,23 @@ fi\n\
             handle.cancel();
             let _ = handle.send(AutoCoordinatorCommand::Stop);
         }
-        if let Some(msg) = message {
+        let duration = self
+            .auto_state
+            .started_at
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        let turns_completed = self.auto_state.turns_completed;
+        let review_enabled = self.auto_state.review_enabled;
+        let agents_enabled = self.auto_state.subagents_enabled;
+
+        if let Some(msg) = message.clone() {
             self.push_background_tail(msg);
         }
-        self.bottom_pane.set_standard_terminal_hint(None);
-        self.auto_state.reset();
+
+        self.bottom_pane
+            .set_standard_terminal_hint(Some("Press Esc again to exit Auto Drive".to_string()));
         self.auto_history.clear();
         self.auto_turn_review_state = None;
-        self.bottom_pane.clear_auto_coordinator_view();
-        self.bottom_pane.clear_live_ring();
         let any_exec_running = !self.exec.running_commands.is_empty();
         let any_tools_running = !self.tools_state.running_custom_tools.is_empty()
             || !self.tools_state.running_web_search.is_empty()
@@ -12758,7 +12828,19 @@ fi\n\
         if ENABLE_WARP_STRIPES {
             self.header_wave.set_enabled(false, Instant::now());
         }
+        let goal = self.auto_state.goal.clone();
+        let summary = AutoRunSummary {
+            duration,
+            turns_completed,
+            review_enabled,
+            agents_enabled,
+            message,
+            goal,
+        };
+        self.auto_state.reset();
+        self.auto_state.last_run_summary = Some(summary);
         self.update_header_border_activation();
+        self.auto_rebuild_live_ring();
         self.request_redraw();
     }
 
@@ -12917,6 +12999,51 @@ fi\n\
 
     fn auto_rebuild_live_ring(&mut self) {
         if !self.auto_state.active {
+            if self.auto_state.awaiting_goal_input {
+                self.auto_show_goal_entry_panel();
+                return;
+            }
+            if let Some(summary) = self.auto_state.last_run_summary.as_ref() {
+                self.bottom_pane.clear_live_ring();
+                let mut status_lines: Vec<String> = Vec::new();
+                if let Some(msg) = summary.message.as_ref() {
+                    let trimmed = msg.trim();
+                    if !trimmed.is_empty() {
+                        status_lines.push(trimmed.to_string());
+                    }
+                }
+                if status_lines.is_empty() {
+                    if let Some(goal) = summary.goal.as_ref() {
+                        status_lines.push(format!("Auto Drive completed: {goal}"));
+                    } else {
+                        status_lines.push("Auto Drive completed.".to_string());
+                    }
+                }
+                let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
+                    goal: summary.goal.clone(),
+                    status_lines,
+                    cli_prompt: None,
+                    awaiting_submission: false,
+                    waiting_for_response: false,
+                    countdown: None,
+                    button: None,
+                    manual_hint: None,
+                    ctrl_switch_hint: "Esc to exit Auto Drive".to_string(),
+                    cli_running: false,
+                    review_enabled: summary.review_enabled,
+                    agents_enabled: summary.agents_enabled,
+                    turns_completed: summary.turns_completed,
+                    started_at: None,
+                    elapsed: Some(summary.duration),
+                    progress_past: None,
+                    progress_current: None,
+                });
+                self
+                    .bottom_pane
+                    .show_auto_coordinator_view(model);
+                return;
+            }
+
             self.bottom_pane.clear_auto_coordinator_view();
             self.bottom_pane.clear_live_ring();
             return;
@@ -13066,6 +13193,13 @@ fi\n\
             manual_hint,
             ctrl_switch_hint,
             cli_running,
+            review_enabled: self.auto_state.review_enabled,
+            agents_enabled: self.auto_state.subagents_enabled,
+            turns_completed: self.auto_state.turns_completed,
+            started_at: self.auto_state.started_at,
+            elapsed: None,
+            progress_past: self.auto_state.current_progress_past.clone(),
+            progress_current: self.auto_state.current_progress_current.clone(),
         });
 
         self
@@ -13074,14 +13208,17 @@ fi\n\
 
         if self.auto_state.waiting_for_response {
             self.bottom_pane
-                .set_standard_terminal_hint(Some("Esc to stop Auto Drive".to_string()));
+                .set_standard_terminal_hint(Some(
+                    "Esc stop Auto Drive • Ctrl+S Change Settings".to_string(),
+                ));
         } else {
             self.bottom_pane.set_standard_terminal_hint(None);
         }
 
-        let interval = crate::spinner::current_spinner().interval_ms.max(80);
-        self.app_event_tx
-            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(interval)));
+        if self.auto_state.started_at.is_some() {
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
+        }
     }
 
     fn auto_format_status_headline(&self, text: &str) -> String {

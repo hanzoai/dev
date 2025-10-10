@@ -1,6 +1,6 @@
 //! Bottom pane: shows the ChatComposer or a BottomPaneView, if one is active.
 
-use crate::app_event::AppEvent;
+use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
@@ -11,14 +11,14 @@ use code_file_search::FileMatch;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Widget, WidgetRef};
+use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
 mod approval_modal_view;
 #[cfg(feature = "code-fork")]
 mod approval_ui;
 mod auto_coordinator_view;
+mod auto_drive_settings_view;
 mod bottom_pane_view;
 mod chat_composer;
 mod chat_composer_history;
@@ -67,9 +67,9 @@ pub(crate) use auto_coordinator_view::{
     AutoCoordinatorButton,
     AutoCoordinatorView,
     AutoCoordinatorViewModel,
-    AutoSetupViewModel,
     CountdownState,
 };
+pub(crate) use auto_drive_settings_view::AutoDriveSettingsView;
 pub(crate) use login_accounts_view::{
     LoginAccountsState,
     LoginAccountsView,
@@ -97,6 +97,7 @@ pub(crate) use undo_timeline_view::{UndoTimelineEntry, UndoTimelineEntryKind, Un
 enum ActiveViewKind {
     None,
     AutoCoordinator,
+    AutoSettings,
     Other,
 }
 
@@ -190,6 +191,34 @@ impl BottomPane<'_> {
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
+    }
+
+    pub(crate) fn show_auto_drive_settings(
+        &mut self,
+        review_enabled: bool,
+        agents_enabled: bool,
+        continue_mode: AutoContinueMode,
+    ) {
+        let view = AutoDriveSettingsView::new(
+            self.app_event_tx.clone(),
+            review_enabled,
+            agents_enabled,
+            continue_mode,
+        );
+        self.active_view = Some(Box::new(view));
+        self.active_view_kind = ActiveViewKind::AutoSettings;
+        self.status_view_active = false;
+        self.composer.set_embedded_mode(false);
+        self.request_redraw();
+    }
+
+    pub(crate) fn clear_auto_drive_settings(&mut self) {
+        if matches!(self.active_view_kind, ActiveViewKind::AutoSettings) {
+            self.active_view = None;
+            self.active_view_kind = ActiveViewKind::None;
+            self.status_view_active = false;
+            self.request_redraw();
+        }
     }
 
     /// Show per-agent editor
@@ -290,6 +319,39 @@ impl BottomPane<'_> {
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> InputResult {
         if let Some(mut view) = self.active_view.take() {
             let kind = self.active_view_kind;
+            if matches!(kind, ActiveViewKind::AutoCoordinator) {
+                let consumed = if let Some(auto_view) = view
+                    .as_any_mut()
+                    .and_then(|any| any.downcast_mut::<AutoCoordinatorView>())
+                {
+                    auto_view.handle_active_key_event(self, key_event)
+                } else {
+                    view.handle_key_event(self, key_event);
+                    true
+                };
+
+                if !view.is_complete() {
+                    self.active_view = Some(view);
+                    self.active_view_kind = kind;
+                } else {
+                    self.active_view_kind = ActiveViewKind::None;
+                }
+
+                if consumed {
+                    self.request_redraw();
+                    if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        match key_event.code {
+                            KeyCode::Up => return InputResult::ScrollUp,
+                            KeyCode::Down => return InputResult::ScrollDown,
+                            _ => {}
+                        }
+                    }
+                    return InputResult::None;
+                }
+
+                return self.handle_composer_key_event(key_event);
+            }
+
             view.handle_key_event(self, key_event);
             if !view.is_complete() {
                 self.active_view = Some(view);
@@ -301,37 +363,30 @@ impl BottomPane<'_> {
             // Debounce view navigation redraws to reduce render thrash
             self.request_redraw();
 
-            if matches!(kind, ActiveViewKind::AutoCoordinator)
-                && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            {
-                match key_event.code {
-                    KeyCode::Up => return InputResult::ScrollUp,
-                    KeyCode::Down => return InputResult::ScrollDown,
-                    _ => {}
-                }
-            }
-
             InputResult::None
         } else {
-            // If a task is running and a status line is visible, allow Esc to
-            // send an interrupt even while the composer has focus.
-            if matches!(key_event.code, crossterm::event::KeyCode::Esc) && self.is_task_running {
-                // Send Op::Interrupt directly when a task is running so Esc can cancel.
-                self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
-                self.request_redraw();
-                return InputResult::None;
-            }
-            let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
-            if needs_redraw {
-                // Route input updates through the app's debounced redraw path
-                // so typing doesn't attempt a full-screen redraw per key.
-                self.request_redraw();
-            }
-            if self.composer.is_in_paste_burst() {
-                self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
-            }
-            input_result
+            self.handle_composer_key_event(key_event)
         }
+    }
+
+    fn handle_composer_key_event(&mut self, key_event: KeyEvent) -> InputResult {
+        if matches!(key_event.code, crossterm::event::KeyCode::Esc) && self.is_task_running {
+            // Send Op::Interrupt directly when a task is running so Esc can cancel.
+            self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
+            self.request_redraw();
+            return InputResult::None;
+        }
+
+        let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
+        if needs_redraw {
+            // Route input updates through the app's debounced redraw path so typing
+            // doesn't attempt a full-screen redraw per key.
+            self.request_redraw();
+        }
+        if self.composer.is_in_paste_burst() {
+            self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+        }
+        input_result
     }
 
     /// Attempt to navigate history upwards from the composer. Returns true if consumed.
@@ -744,6 +799,7 @@ impl BottomPane<'_> {
                             .map_or_else(String::new, str::to_string);
                         let _ = auto_view.update_status_text(status_text);
                         self.status_view_active = false;
+                        self.composer.set_embedded_mode(true);
                         self.request_redraw();
                         return;
                     }
@@ -764,6 +820,7 @@ impl BottomPane<'_> {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::AutoCoordinator;
         self.status_view_active = false;
+        self.composer.set_embedded_mode(true);
         self.request_redraw();
     }
 
@@ -772,6 +829,7 @@ impl BottomPane<'_> {
             self.active_view = None;
             self.active_view_kind = ActiveViewKind::None;
             self.status_view_active = false;
+            self.composer.set_embedded_mode(false);
             self.request_redraw();
         }
     }
@@ -906,63 +964,8 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
-    fn spans_char_width(spans: &[Span]) -> usize {
-        spans.iter().map(|s| s.content.chars().count()).sum()
-    }
-
-    fn render_auto_coordinator_footer(&self, area: Rect, buf: &mut Buffer) {
-        if area.height == 0 {
-            return;
-        }
-
-        let base_style = ratatui::style::Style::default()
-            .bg(crate::colors::background())
-            .fg(crate::colors::text());
-        fill_rect(buf, area, Some(' '), base_style);
-
-        let hint_text = self
-            .composer
-            .standard_terminal_hint()
-            .unwrap_or("Esc to stop Auto Drive");
-
-        let warning_style = ratatui::style::Style::default()
-            .fg(crate::colors::warning())
-            .add_modifier(ratatui::style::Modifier::BOLD);
-        let label_style = ratatui::style::Style::default().fg(crate::colors::text_dim());
-
-        let mut content_spans: Vec<Span> = Vec::new();
-        if let Some((first, rest)) = hint_text.split_once(' ') {
-            content_spans.push(Span::from(first.to_string()).style(warning_style));
-            if !rest.is_empty() {
-                content_spans.push(Span::from(format!(" {}", rest)).style(label_style));
-            }
-        } else {
-            content_spans.push(Span::from(hint_text.to_string()).style(warning_style));
-        }
-
-        let token_spans = self.composer.token_usage_spans(label_style);
-        if !token_spans.is_empty() {
-            content_spans.push(Span::from("  •  ").style(label_style));
-            content_spans.extend(token_spans);
-        }
-
-        let total_width = area.width as usize;
-        let trailing_pad = 1usize;
-        let content_len = BottomPane::spans_char_width(&content_spans);
-        let padding = total_width
-            .saturating_sub(content_len + trailing_pad)
-            .max(1);
-
-        let mut line_spans: Vec<Span> = Vec::new();
-        line_spans.push(Span::from(" ".repeat(padding)));
-        line_spans.extend(content_spans);
-        line_spans.push(Span::from(" "));
-
-        let line = Line::from(line_spans)
-            .style(ratatui::style::Style::default().bg(crate::colors::background()));
-
-        ratatui::widgets::Paragraph::new(line).render(area, buf);
-    }
+    #[allow(dead_code)]
+    fn render_auto_coordinator_footer(&self, _area: Rect, _buf: &mut Buffer) {}
 
     // Removed restart_live_status_with_text – no longer used by the current streaming UI.
 }
@@ -1039,16 +1042,11 @@ impl WidgetRef for &BottomPane<'_> {
                     // Ensure view background is painted under its content
                     let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
                     fill_rect(buf, view_rect, None, view_bg);
-                    view.render(view_rect, buf);
+                    view.render_with_composer(view_rect, buf, &self.composer);
 
                     if is_auto && pad > 0 {
-                        let footer_rect = Rect {
-                            x: area.x + horizontal_padding,
-                            y: view_rect.y.saturating_add(view_rect.height),
-                            width: area.width.saturating_sub(horizontal_padding * 2),
-                            height: pad,
-                        };
-                        self.render_auto_coordinator_footer(footer_rect, buf);
+                        // Auto Drive view handles its own status footer inside the
+                        // container; leave the reserved padding empty.
                     }
                 }
                 return;

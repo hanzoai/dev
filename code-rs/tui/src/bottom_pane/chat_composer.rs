@@ -147,6 +147,7 @@ pub(crate) struct ChatComposer {
     paste_burst: PasteBurst,
     post_paste_space_guard: Option<PostPasteSpaceGuard>,
     footer_hint_override: Option<Vec<(String, String)>>,
+    embedded_mode: bool,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -204,6 +205,7 @@ impl ChatComposer {
             paste_burst: PasteBurst::default(),
             post_paste_space_guard: None,
             footer_hint_override: None,
+            embedded_mode: false,
         }
     }
 
@@ -315,6 +317,12 @@ impl ChatComposer {
     pub fn flash_footer_notice(&mut self, text: String) {
         let expiry = std::time::Instant::now() + std::time::Duration::from_secs(2);
         self.footer_notice = Some((text, expiry));
+    }
+
+    pub(crate) fn set_embedded_mode(&mut self, enabled: bool) {
+        if self.embedded_mode != enabled {
+            self.embedded_mode = enabled;
+        }
     }
 
     /// Override the footer hint line with a simple key/label list.
@@ -1858,10 +1866,6 @@ impl ChatComposer {
         self.next_down_scrolls_history = true;
     }
 
-    pub(crate) fn standard_terminal_hint(&self) -> Option<&str> {
-        self.standard_terminal_hint.as_deref()
-    }
-
     pub(crate) fn token_usage_spans(&self, label_style: Style) -> Vec<Span<'static>> {
         let mut spans: Vec<Span<'static>> = Vec::new();
         if let Some(token_usage_info) = &self.token_usage_info {
@@ -1895,7 +1899,12 @@ impl WidgetRef for ChatComposer {
             ActivePopup::None => 1,
         };
         // Split area: textarea with border at top, hints/popup at bottom
-        let hint_height = if matches!(self.active_popup, ActivePopup::None) {
+        let hint_height = if self.embedded_mode {
+            match &self.active_popup {
+                ActivePopup::None => 0,
+                _ => popup_height,
+            }
+        } else if matches!(self.active_popup, ActivePopup::None) {
             1
         } else {
             popup_height
@@ -1906,227 +1915,277 @@ impl WidgetRef for ChatComposer {
         let content_lines = self.textarea.desired_height(content_width).max(1);
         let desired_input_height = (content_lines + 2).max(3); // Parent layout enforces max
 
-        // Use desired height but don't exceed available space
-        let input_height = desired_input_height.min(area.height.saturating_sub(hint_height));
-        let [input_area, hint_area] = Layout::vertical([
-            Constraint::Length(input_height),
-            Constraint::Length(hint_height),
-        ])
-        .areas(area);
-        match &self.active_popup {
-            ActivePopup::Command(popup) => {
-                popup.render_ref(hint_area, buf);
-            }
-            ActivePopup::File(popup) => {
-                popup.render_ref(hint_area, buf);
-            }
-            ActivePopup::None => {
-                let bottom_line_rect = hint_area;
-                if let Some(hints) = &self.footer_hint_override {
-                    let key_hint_style = Style::default().fg(crate::colors::function());
-                    let label_style = Style::default().fg(crate::colors::text_dim());
-                    let mut left_spans: Vec<Span> = vec![Span::from("  ")];
-                    for (idx, (key, label)) in hints.iter().enumerate() {
-                        if idx > 0 {
-                            left_spans.push(Span::from("   ").style(label_style));
-                        }
-                        if !key.is_empty() {
-                            left_spans.push(Span::from(key.clone()).style(key_hint_style));
-                        }
-                        if !label.is_empty() {
-                            let prefix = if key.is_empty() { String::new() } else { String::from(" ") };
-                            left_spans.push(Span::from(format!("{prefix}{label}")).style(label_style));
-                        }
-                    }
+        let available_height = area.height.saturating_sub(hint_height);
+        if available_height == 0 {
+            return;
+        }
+        let input_height = desired_input_height.min(available_height);
 
-                    let token_spans: Vec<Span> = self.token_usage_spans(label_style);
-                    let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let right_len: usize = token_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let total_width = bottom_line_rect.width as usize;
-                    let trailing_pad = 1usize;
-                    let spacer = if total_width > left_len + right_len + trailing_pad {
-                        " ".repeat(total_width - left_len - right_len - trailing_pad)
-                    } else {
-                        String::from(" ")
-                    };
+        let (input_area, hint_area) = if hint_height == 0 {
+            (
+                Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: area.width,
+                    height: available_height,
+                },
+                None,
+            )
+        } else {
+            let [input_area, hint_area] = Layout::vertical([
+                Constraint::Length(input_height),
+                Constraint::Length(hint_height),
+            ])
+            .areas(area);
+            (input_area, Some(hint_area))
+        };
 
-                    let mut line_spans = left_spans;
-                    line_spans.push(Span::from(spacer));
-                    line_spans.extend(token_spans);
-                    line_spans.push(Span::from(" "));
-
-                    Line::from(line_spans)
-                        .style(
-                            Style::default()
-                                .fg(crate::colors::text_dim())
-                                .add_modifier(Modifier::DIM),
-                        )
-                        .render_ref(bottom_line_rect, buf);
-                } else {
-                    let key_hint_style = Style::default().fg(crate::colors::function());
-                    let label_style = Style::default().fg(crate::colors::text_dim());
-                    // Left side: padding + notices (and Ctrl+C again-to-quit notice if active)
-                    let mut left_spans: Vec<Span> = Vec::new();
-                    left_spans.push(Span::from("  "));
-
-                    // Access mode indicator (Read Only / Write with Approval / Full Access)
-                    // When the label is ephemeral, hide it after expiry. The "(Shift+Tab change)"
-                    // suffix is shown for a short time even for persistent labels.
-                    let show_access_label = if let Some(until) = self.access_mode_label_expiry {
-                        std::time::Instant::now() <= until
-                    } else { true };
-                    if show_access_label {
-                        if let Some(label) = &self.access_mode_label {
-                            // Access label without bold per design
-                            left_spans.push(Span::from(label.clone()).style(label_style));
-                            // Show the hint suffix while the hint timer is active; if the whole label
-                            // is ephemeral, keep the suffix visible for the same duration.
-                            let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
-                                std::time::Instant::now() <= until
-                            } else {
-                                // If label itself is ephemeral, mirror its lifetime for the suffix
-                                self.access_mode_label_expiry.is_some()
-                            };
-                            if show_suffix {
-                                left_spans.push(Span::from("  (").style(label_style));
-                                left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
-                                left_spans.push(Span::from(" change)").style(label_style));
+        if let Some(hint_area) = hint_area {
+            match &self.active_popup {
+                ActivePopup::Command(popup) => {
+                    popup.render_ref(hint_area, buf);
+                }
+                ActivePopup::File(popup) => {
+                    popup.render_ref(hint_area, buf);
+                }
+                ActivePopup::None => {
+                    if self.embedded_mode {
+                        // Suppress footer hints entirely when embedded inside another UI shell.
+                    } else if let Some(hints) = &self.footer_hint_override {
+                        let key_hint_style = Style::default().fg(crate::colors::function());
+                        let label_style = Style::default().fg(crate::colors::text_dim());
+                        let mut left_spans: Vec<Span<'static>> = vec![Span::from("  ")];
+                        for (idx, (key, label)) in hints.iter().enumerate() {
+                            if idx > 0 {
+                                left_spans.push(Span::from("   ").style(label_style));
+                            }
+                            if !key.is_empty() {
+                                left_spans.push(Span::from(key.clone()).style(key_hint_style));
+                            }
+                            if !label.is_empty() {
+                                let prefix = if key.is_empty() { String::new() } else { String::from(" ") };
+                                left_spans.push(Span::from(format!("{prefix}{label}")).style(label_style));
                             }
                         }
-                    }
 
-                    if self.ctrl_c_quit_hint {
-                        // Treat as a notice; keep on the left
-                        if !self.access_mode_label.is_none() { left_spans.push(Span::from("   ")); }
-                        left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
-                        left_spans.push(Span::from(" again to quit").style(label_style));
-                    }
+                        let token_spans: Vec<Span<'static>> = self.token_usage_spans(label_style);
+                        let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+                        let right_len: usize = token_spans.iter().map(|s| s.content.chars().count()).sum();
+                        let total_width = hint_area.width as usize;
+                        let trailing_pad = 1usize;
+                        let spacer = if total_width > left_len + right_len + trailing_pad {
+                            " ".repeat(total_width - left_len - right_len - trailing_pad)
+                        } else {
+                            String::from(" ")
+                        };
 
-                    if let Some(hint) = &self.standard_terminal_hint {
-                        if left_spans.len() > 1 {
-                            left_spans.push(Span::from("   "));
+                        let mut line_spans = left_spans;
+                        line_spans.push(Span::from(spacer));
+                        line_spans.extend(token_spans);
+                        line_spans.push(Span::from(" "));
+
+                        Line::from(line_spans)
+                            .style(
+                                Style::default()
+                                    .fg(crate::colors::text_dim())
+                                    .add_modifier(Modifier::DIM),
+                            )
+                            .render_ref(hint_area, buf);
+                    } else {
+                        let key_hint_style = Style::default().fg(crate::colors::function());
+                        let label_style = Style::default().fg(crate::colors::text_dim());
+
+                        // Left side: padding + notices (and Ctrl+C again-to-quit notice if active)
+                        let mut left_spans: Vec<Span> = vec![Span::from("  ")];
+
+                        // Access mode indicator (Read Only / Write with Approval / Full Access)
+                        // When the label is ephemeral, hide it after expiry. The "(Shift+Tab change)"
+                        // suffix is shown for a short time even for persistent labels.
+                        let show_access_label = if let Some(until) = self.access_mode_label_expiry {
+                            std::time::Instant::now() <= until
+                        } else {
+                            true
+                        };
+                        if show_access_label {
+                            if let Some(label) = &self.access_mode_label {
+                                // Access label without bold per design
+                                left_spans.push(Span::from(label.clone()).style(label_style));
+                                // Show the hint suffix while the hint timer is active; if the whole label
+                                // is ephemeral, keep the suffix visible for the same duration.
+                                let show_suffix = if let Some(until) = self.access_mode_hint_expiry {
+                                    std::time::Instant::now() <= until
+                                } else {
+                                    // If label itself is ephemeral, mirror its lifetime for the suffix
+                                    self.access_mode_label_expiry.is_some()
+                                };
+                                if show_suffix {
+                                    left_spans.push(Span::from("  (").style(label_style));
+                                    left_spans.push(Span::from("Shift+Tab").style(key_hint_style));
+                                    left_spans.push(Span::from(" change)").style(label_style));
+                                }
+                            }
                         }
-                        left_spans.push(
-                            Span::from(hint.clone())
-                                .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
-                        );
-                    }
 
-                    // Append ephemeral footer notice if present and not expired
-                    if let Some((msg, until)) = &self.footer_notice {
-                        if std::time::Instant::now() <= *until {
+                        if self.ctrl_c_quit_hint {
+                            // Treat as a notice; keep on the left
+                            if self.access_mode_label.is_some() {
+                                left_spans.push(Span::from("   "));
+                            }
+                            left_spans.push(Span::from("Ctrl+C").style(key_hint_style));
+                            left_spans.push(Span::from(" again to quit").style(label_style));
+                        }
+
+                        if let Some(hint) = &self.standard_terminal_hint {
                             if left_spans.len() > 1 {
                                 left_spans.push(Span::from("   "));
                             }
-                            left_spans.push(Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)));
+                            left_spans.push(
+                                Span::from(hint.clone())
+                                    .style(Style::default().fg(crate::colors::warning()).add_modifier(Modifier::BOLD)),
+                            );
                         }
-                    }
 
-                    // Right side: command key hints (Ctrl+R/D/H), token usage, and a small auth notice
-                    // when using an API key instead of ChatGPT auth. We elide hints first if space is tight.
-                    let mut right_spans: Vec<Span> = Vec::new();
-
-                    // Prepare token usage spans (always shown when available)
-                    let token_spans: Vec<Span> = self.token_usage_spans(label_style);
-
-                    // Helper to build hint spans based on inclusion flags
-                    let build_hints = |include_reasoning: bool, include_diff: bool| -> Vec<Span> {
-                        let mut spans: Vec<Span> = Vec::new();
-                        if !self.ctrl_c_quit_hint {
-                            if self.show_reasoning_hint && include_reasoning {
-                                if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                                spans.push(Span::from("Ctrl+R").style(key_hint_style));
-                                let label = if self.reasoning_shown { " hide reasoning" } else { " show reasoning" };
-                                spans.push(Span::from(label).style(label_style));
+                        // Append ephemeral footer notice if present and not expired
+                        if let Some((msg, until)) = &self.footer_notice {
+                            if std::time::Instant::now() <= *until {
+                                if left_spans.len() > 1 {
+                                    left_spans.push(Span::from("   "));
+                                }
+                                left_spans.push(
+                                    Span::from(msg.clone()).style(Style::default().add_modifier(Modifier::DIM)),
+                                );
                             }
-                            if self.show_diffs_hint && include_diff {
-                                if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                                spans.push(Span::from("Ctrl+D").style(key_hint_style));
-                                spans.push(Span::from(" diff viewer").style(label_style));
-                            }
-                            // Always show help at the end of the command hints
-                            if !spans.is_empty() { spans.push(Span::from("  •  ").style(label_style)); }
-                            spans.push(Span::from("Ctrl+H").style(key_hint_style));
-                            spans.push(Span::from(" help").style(label_style));
                         }
-                        spans
-                    };
 
-                    // Start with all hints included
-                    let mut include_reasoning = true;
-                    let mut include_diff = true;
-                    let mut hint_spans = build_hints(include_reasoning, include_diff);
+                        // Right side: command key hints (Ctrl+R/D/H), token usage, and a small auth notice
+                        // when using an API key instead of ChatGPT auth. We elide hints first if space is tight.
+                        let mut right_spans: Vec<Span<'static>> = Vec::new();
 
-                    // Measure function for spans length
-                    let measure = |spans: &Vec<Span>| -> usize {
-                        spans.iter().map(|s| s.content.chars().count()).sum()
-                    };
+                        // Prepare token usage spans (always shown when available)
+                        let token_spans: Vec<Span> = self.token_usage_spans(label_style);
 
-                    // Compute spacer between left and right to make right content right-aligned
-                    let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let total_width = bottom_line_rect.width as usize;
-                    let trailing_pad = 1usize; // one space on the right edge
+                        // Helper to build hint spans based on inclusion flags
+                        let build_hints = |include_reasoning: bool,
+                                           include_diff: bool|
+                         -> Vec<Span<'static>> {
+                            let mut spans: Vec<Span<'static>> = Vec::new();
+                            if !self.ctrl_c_quit_hint {
+                                if self.show_reasoning_hint && include_reasoning {
+                                    if !spans.is_empty() {
+                                        spans.push(Span::from("  •  ").style(label_style));
+                                    }
+                                    spans.push(Span::from("Ctrl+R").style(key_hint_style));
+                                    let label = if self.reasoning_shown {
+                                        " hide reasoning"
+                                    } else {
+                                        " show reasoning"
+                                    };
+                                    spans.push(Span::from(label).style(label_style));
+                                }
+                                if self.show_diffs_hint && include_diff {
+                                    if !spans.is_empty() {
+                                        spans.push(Span::from("  •  ").style(label_style));
+                                    }
+                                    spans.push(Span::from("Ctrl+D").style(key_hint_style));
+                                    spans.push(Span::from(" diff viewer").style(label_style));
+                                }
+                                // Always show help at the end of the command hints
+                                if !spans.is_empty() {
+                                    spans.push(Span::from("  •  ").style(label_style));
+                                }
+                                spans.push(Span::from("Ctrl+H").style(key_hint_style));
+                                spans.push(Span::from(" help").style(label_style));
+                            }
+                            spans
+                        };
 
-                    // Optional auth notice: show a small "API key" tag when not using ChatGPT auth
-                    let mut auth_spans: Vec<Span> = Vec::new();
-                    if !self.using_chatgpt_auth {
-                        auth_spans.push(Span::from("API key").style(label_style));
-                    }
+                        // Start with all hints included
+                        let mut include_reasoning = true;
+                        let mut include_diff = true;
+                        let mut hint_spans = build_hints(include_reasoning, include_diff);
 
-                    // We'll add separators between sections when both are present
-                    let sep_len = "  •  ".chars().count();
-                    let combined_len = |h: &Vec<Span>, t: &Vec<Span>, a: &Vec<Span>| -> usize {
-                        let mut len = measure(h) + measure(t) + measure(a);
-                        if !h.is_empty() && !t.is_empty() { len += sep_len; }
-                        if (!h.is_empty() || !t.is_empty()) && !a.is_empty() { len += sep_len; }
-                        len
-                    };
+                        // Measure function for spans length
+                        let measure = |spans: &[Span<'static>]| -> usize {
+                            spans.iter().map(|s| s.content.chars().count()).sum()
+                        };
 
-                    // Elide hints in order until content fits
-                    while left_len + combined_len(&hint_spans, &token_spans, &auth_spans) + trailing_pad > total_width {
-                        if include_reasoning {
-                            include_reasoning = false;
-                        } else if include_diff {
-                            include_diff = false;
-                        } else if !auth_spans.is_empty() {
-                            // If still too tight, drop the auth tag as a last resort
-                            auth_spans.clear();
+                        // Compute spacer between left and right to make right content right-aligned
+                        let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+                        let total_width = hint_area.width as usize;
+                        let trailing_pad = 1usize; // one space on the right edge
+
+                        // Optional auth notice: show a small "API key" tag when not using ChatGPT auth
+                        let mut auth_spans: Vec<Span<'static>> = Vec::new();
+                        if !self.using_chatgpt_auth {
+                            auth_spans.push(Span::from("API key").style(label_style));
+                        }
+
+                        // We'll add separators between sections when both are present
+                        let sep_len = "  •  ".chars().count();
+                        let combined_len =
+                            |h: &[Span<'static>], t: &[Span<'static>], a: &[Span<'static>]| -> usize {
+                                let mut len = measure(h) + measure(t) + measure(a);
+                                if !h.is_empty() && !t.is_empty() {
+                                    len += sep_len;
+                                }
+                                if (!h.is_empty() || !t.is_empty()) && !a.is_empty() {
+                                    len += sep_len;
+                                }
+                                len
+                            };
+
+                        // Elide hints in order until content fits
+                        while left_len + combined_len(&hint_spans, &token_spans, &auth_spans) + trailing_pad
+                            > total_width
+                        {
+                            if include_reasoning {
+                                include_reasoning = false;
+                            } else if include_diff {
+                                include_diff = false;
+                            } else if !auth_spans.is_empty() {
+                                // If still too tight, drop the auth tag as a last resort
+                                auth_spans.clear();
+                            } else {
+                                break;
+                            }
+                            hint_spans = build_hints(include_reasoning, include_diff);
+                        }
+
+                        // Compose final right spans: hints, optional separator, then tokens
+                        if !hint_spans.is_empty() {
+                            right_spans.extend(hint_spans);
+                        }
+                        if !right_spans.is_empty() && !token_spans.is_empty() {
+                            right_spans.push(Span::from("  •  ").style(label_style));
+                        }
+                        right_spans.extend(token_spans);
+                        // Append auth notice at the very end (right-most) if present
+                        if !right_spans.is_empty() && !auth_spans.is_empty() {
+                            right_spans.push(Span::from("  •  ").style(label_style));
+                        }
+                        right_spans.extend(auth_spans);
+
+                        // Recompute spacer after elision
+                        let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
+                        let spacer = if total_width > left_len + right_len + trailing_pad {
+                            " ".repeat(total_width - left_len - right_len - trailing_pad)
                         } else {
-                            break;
-                        }
-                        hint_spans = build_hints(include_reasoning, include_diff);
+                            String::from(" ")
+                        };
+
+                        let mut line_spans = left_spans;
+                        line_spans.push(Span::from(spacer));
+                        line_spans.extend(right_spans);
+                        line_spans.push(Span::from(" "));
+
+                        Line::from(line_spans)
+                            .style(
+                                Style::default()
+                                    .fg(crate::colors::text_dim())
+                                    .add_modifier(Modifier::DIM),
+                            )
+                            .render_ref(hint_area, buf);
                     }
-
-                    // Compose final right spans: hints, optional separator, then tokens
-                    if !hint_spans.is_empty() { right_spans.extend(hint_spans); }
-                    if !right_spans.is_empty() && !token_spans.is_empty() {
-                        right_spans.push(Span::from("  •  ").style(label_style));
-                    }
-                    right_spans.extend(token_spans);
-                    // Append auth notice at the very end (right-most) if present
-                    if !right_spans.is_empty() && !auth_spans.is_empty() {
-                        right_spans.push(Span::from("  •  ").style(label_style));
-                    }
-                    right_spans.extend(auth_spans);
-
-                    // Recompute spacer after elision
-                    let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
-                    let spacer = if total_width > left_len + right_len + trailing_pad {
-                        " ".repeat(total_width - left_len - right_len - trailing_pad)
-                    } else { String::from(" ") };
-
-                    let mut line_spans = left_spans;
-                    line_spans.push(Span::from(spacer));
-                    line_spans.extend(right_spans);
-                    line_spans.push(Span::from(" "));
-
-                    Line::from(line_spans)
-                        .style(
-                            Style::default()
-                                .fg(crate::colors::text_dim())
-                                .add_modifier(Modifier::DIM),
-                        )
-                        .render_ref(bottom_line_rect, buf);
                 }
             }
         }
@@ -2138,7 +2197,7 @@ impl WidgetRef for ChatComposer {
             // never shows through when the composer grows/shrinks.
             .style(Style::default().bg(crate::colors::background()));
 
-        if self.is_task_running {
+        if self.is_task_running && !self.embedded_mode {
             if self.status_message.eq_ignore_ascii_case("auto drive") {
                 let title_line = Line::from(Span::styled(
                     " Auto Drive ",
