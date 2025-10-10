@@ -14,6 +14,7 @@ Environment flags:
   DETERMINISTIC=1                     Add -C debuginfo=0; promotes to release-prod unless DETERMINISTIC_FORCE_RELEASE=0
   DETERMINISTIC_FORCE_RELEASE=0|1     Keep dev-fast (0) or switch to release-prod (1, default)
   DETERMINISTIC_NO_UUID=1             macOS only: strip LC_UUID on final executables
+  CODE_BRANCH_TARGET_CACHE=0          Disable shared target cache seeding (default: enabled)
   --workspace codex|code|both         Select workspace to build (default: code)
 
 Examples:
@@ -77,7 +78,7 @@ sync_target_cache_impl() {
   mkdir -p "${TARGET_CACHE_DIR}" || return 0
   if command -v rsync >/dev/null 2>&1; then
     local -a args
-    args=(-a --delete)
+    args=(-a --delete --quiet)
     if rsync --help 2>&1 | grep -q -- '--copy-as=clone'; then
       args+=(--copy-as=clone)
     fi
@@ -105,6 +106,9 @@ sync_target_cache_impl() {
 }
 
 update_target_cache() {
+  if [ "${BRANCH_TARGET_CACHE_ENABLED:-1}" -eq 1 ]; then
+    return 0
+  fi
   if [ "${CODE_SKIP_TARGET_CACHE_UPDATE:-0}" = "1" ]; then
     return 0
   fi
@@ -232,6 +236,17 @@ fi
 
 TARGET_CACHE_BASE="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
 TARGET_CACHE_DIR="${TARGET_CACHE_BASE}/target"
+
+BRANCH_TARGET_CACHE_FLAG="${CODE_BRANCH_TARGET_CACHE:-${CODEX_BRANCH_TARGET_CACHE:-1}}"
+BRANCH_TARGET_CACHE_FLAG="$(printf '%s' "${BRANCH_TARGET_CACHE_FLAG}" | tr '[:upper:]' '[:lower:]')"
+case "${BRANCH_TARGET_CACHE_FLAG}" in
+  0|false|no|off|disabled)
+    BRANCH_TARGET_CACHE_ENABLED=0
+    ;;
+  *)
+    BRANCH_TARGET_CACHE_ENABLED=1
+    ;;
+esac
 
 # Change to the selected Rust workspace root regardless of caller CWD
 cd "${WORKSPACE_PATH}"
