@@ -666,6 +666,10 @@ pub struct Tui {
     #[serde(default)]
     pub theme: ThemeConfig,
 
+    /// Auto Drive behavioral defaults.
+    #[serde(default)]
+    pub auto_drive: AutoDriveSettings,
+
     /// Cached autodetect result so we can skip probing the terminal repeatedly.
     #[serde(default)]
     pub cached_terminal_background: Option<CachedTerminalBackground>,
@@ -712,6 +716,7 @@ impl Default for Tui {
     fn default() -> Self {
         Self {
             theme: ThemeConfig::default(),
+            auto_drive: AutoDriveSettings::default(),
             cached_terminal_background: None,
             highlight: HighlightConfig::default(),
             show_reasoning: false,
@@ -721,6 +726,55 @@ impl Default for Tui {
             alternate_screen: true,
             review_auto_resolve: false,
         }
+    }
+}
+
+/// Auto Drive behavioral defaults persisted via `config.toml`.
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct AutoDriveSettings {
+    #[serde(default)]
+    pub review_enabled: bool,
+
+    #[serde(default)]
+    pub agents_enabled: bool,
+
+    #[serde(default)]
+    pub continue_mode: AutoDriveContinueMode,
+}
+
+impl Default for AutoDriveSettings {
+    fn default() -> Self {
+        Self {
+            review_enabled: false,
+            agents_enabled: false,
+            continue_mode: AutoDriveContinueMode::TenSeconds,
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoDriveContinueMode {
+    Immediate,
+    TenSeconds,
+    SixtySeconds,
+    Manual,
+}
+
+impl AutoDriveContinueMode {
+    pub fn seconds(self) -> Option<u8> {
+        match self {
+            Self::Immediate => Some(0),
+            Self::TenSeconds => Some(10),
+            Self::SixtySeconds => Some(60),
+            Self::Manual => None,
+        }
+    }
+}
+
+impl Default for AutoDriveContinueMode {
+    fn default() -> Self {
+        Self::TenSeconds
     }
 }
 

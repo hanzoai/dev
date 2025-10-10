@@ -1598,6 +1598,29 @@ impl App<'_> {
                         self.config.auto_upgrade_enabled = enabled;
                     }
                 }
+                AppEvent::ShowAutoDriveSettings => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.show_auto_drive_settings();
+                    }
+                }
+                AppEvent::CloseAutoDriveSettings => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.close_auto_drive_settings();
+                    }
+                }
+                AppEvent::AutoDriveSettingsChanged {
+                    review_enabled,
+                    agents_enabled,
+                    continue_mode,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.apply_auto_drive_settings(
+                            review_enabled,
+                            agents_enabled,
+                            continue_mode,
+                        );
+                    }
+                }
                 AppEvent::RequestAgentInstall { name, selected_index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if let Some(launch) = widget.launch_agent_install(name, selected_index) {
@@ -1661,31 +1684,6 @@ impl App<'_> {
                             replace_message,
                             additional_instructions,
                         );
-                    }
-                }
-                AppEvent::AutoSetupToggleReview => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_setup_toggle_review();
-                    }
-                }
-                AppEvent::AutoSetupToggleSubagents => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_setup_toggle_subagents();
-                    }
-                }
-                AppEvent::AutoSetupSelectCountdown(mode) => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_setup_select_countdown(mode);
-                    }
-                }
-                AppEvent::AutoSetupConfirm => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_setup_confirm();
-                    }
-                }
-                AppEvent::AutoSetupCancel => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_setup_cancel();
                     }
                 }
                 AppEvent::PerformUndoRestore {

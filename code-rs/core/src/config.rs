@@ -2,6 +2,8 @@ use crate::codex::ApprovedCommandPattern;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
+use crate::config_types::AutoDriveContinueMode;
+use crate::config_types::AutoDriveSettings;
 use crate::config_types::AllowedCommand;
 use crate::config_types::AllowedCommandMatchKind;
 use crate::config_types::BrowserConfig;
@@ -968,6 +970,39 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     };
 
     doc["tui"]["review_auto_resolve"] = toml_edit::value(enabled);
+
+    std::fs::create_dir_all(code_home)?;
+    let tmp_file = NamedTempFile::new_in(code_home)?;
+    std::fs::write(tmp_file.path(), doc.to_string())?;
+    tmp_file.persist(config_path)?;
+
+    Ok(())
+}
+
+/// Persist Auto Drive defaults under `[tui.auto_drive]`.
+pub fn set_tui_auto_drive_settings(
+    code_home: &Path,
+    settings: &AutoDriveSettings,
+) -> anyhow::Result<()> {
+    let config_path = code_home.join(CONFIG_TOML_FILE);
+    let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
+
+    let mut doc = match std::fs::read_to_string(&read_path) {
+        Ok(contents) => contents.parse::<DocumentMut>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DocumentMut::new(),
+        Err(e) => return Err(e.into()),
+    };
+
+    doc["tui"]["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
+    doc["tui"]["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
+
+    let mode_str = match settings.continue_mode {
+        AutoDriveContinueMode::Immediate => "immediate",
+        AutoDriveContinueMode::TenSeconds => "ten-seconds",
+        AutoDriveContinueMode::SixtySeconds => "sixty-seconds",
+        AutoDriveContinueMode::Manual => "manual",
+    };
+    doc["tui"]["auto_drive"]["continue_mode"] = toml_edit::value(mode_str);
 
     std::fs::create_dir_all(code_home)?;
     let tmp_file = NamedTempFile::new_in(code_home)?;

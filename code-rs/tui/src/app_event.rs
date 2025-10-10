@@ -227,11 +227,13 @@ pub(crate) enum AppEvent {
         replace_message: Option<String>,
         additional_instructions: Option<String>,
     },
-    AutoSetupToggleReview,
-    AutoSetupToggleSubagents,
-    AutoSetupSelectCountdown(AutoContinueMode),
-    AutoSetupConfirm,
-    AutoSetupCancel,
+    ShowAutoDriveSettings,
+    CloseAutoDriveSettings,
+    AutoDriveSettingsChanged {
+        review_enabled: bool,
+        agents_enabled: bool,
+        continue_mode: AutoContinueMode,
+    },
 
     /// Dispatch a recognized slash command from the UI (composer) to the app
     /// layer so it can be handled centrally. Includes the full command text.
