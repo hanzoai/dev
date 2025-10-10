@@ -527,6 +527,7 @@ use crate::agent_tool::CancelAgentParams;
 use crate::agent_tool::CheckAgentStatusParams;
 use crate::agent_tool::GetAgentResultParams;
 use crate::agent_tool::ListAgentsParams;
+use crate::agent_tool::normalize_agent_name;
 use crate::agent_tool::RunAgentParams;
 use crate::agent_tool::WaitForAgentParams;
 use crate::apply_patch::convert_apply_patch_to_protocol;
@@ -6507,94 +6508,291 @@ pub(crate) async fn handle_agent_tool(
     let action = req.action.to_ascii_lowercase();
     match action.as_str() {
         "create" => {
-            let task = match req.task.take() {
-                Some(task) if !task.trim().is_empty() => task,
-                _ => {
+            let mut create_opts = match req.create.take() {
+                Some(opts) => opts,
+                None => {
                     return agent_tool_failure(
                         ctx,
-                        "action=create requires a non-empty 'task' field",
+                        "action=create requires a 'create' object",
                     );
                 }
             };
 
-            let run_params = RunAgentParams {
-                task,
-                models: std::mem::take(&mut req.models),
-                context: req.context.take(),
-                output: req.output.take(),
-                files: req.files.take(),
-                read_only: req.read_only.take(),
+            let task = match create_opts.task.take() {
+                Some(task) if !task.trim().is_empty() => task,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=create requires a non-empty 'create.task' field",
+                    );
+                }
             };
 
+            let models = std::mem::take(&mut create_opts.models);
+            let context = create_opts.context.take();
+            let output = create_opts.output.take();
+            let files = create_opts.files.take();
+            let plan = create_opts.plan.take();
+            let read_only = create_opts.read_only.take();
+            let mut normalized_name = normalize_agent_name(create_opts.name.take());
+            if normalized_name.is_none() {
+                normalized_name = derive_agent_name_from_task(&task);
+            }
+
+            let run_params = RunAgentParams {
+                task: task.clone(),
+                models: models.clone(),
+                context: context.clone(),
+                output: output.clone(),
+                files: files.clone(),
+                read_only,
+                name: normalized_name.clone(),
+            };
+
+            let mut create_event = serde_json::Map::new();
+            create_event.insert("task".to_string(), serde_json::Value::String(task));
+            if !models.is_empty() {
+                create_event.insert(
+                    "models".to_string(),
+                    serde_json::Value::Array(
+                        models
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(ref ctx_str) = context {
+                if !ctx_str.is_empty() {
+                    create_event.insert("context".to_string(), serde_json::Value::String(ctx_str.clone()));
+                }
+            }
+            if let Some(ref output_str) = output {
+                if !output_str.is_empty() {
+                    create_event.insert("output".to_string(), serde_json::Value::String(output_str.clone()));
+                }
+            }
+            if let Some(ref files_vec) = files {
+                if !files_vec.is_empty() {
+                    create_event.insert(
+                        "files".to_string(),
+                        serde_json::Value::Array(
+                            files_vec
+                                .iter()
+                                .cloned()
+                                .map(serde_json::Value::String)
+                                .collect(),
+                        ),
+                    );
+                }
+            }
+            if let Some(ref plan_vec) = plan {
+                if !plan_vec.is_empty() {
+                    create_event.insert(
+                        "plan".to_string(),
+                        serde_json::Value::Array(
+                            plan_vec
+                                .iter()
+                                .cloned()
+                                .map(serde_json::Value::String)
+                                .collect(),
+                        ),
+                    );
+                }
+            }
+            if let Some(ro) = read_only {
+                create_event.insert("read_only".to_string(), serde_json::Value::Bool(ro));
+            }
+            if let Some(ref name_str) = normalized_name {
+                if !name_str.is_empty() {
+                    create_event.insert("name".to_string(), serde_json::Value::String(name_str.clone()));
+                }
+            }
+
+            let mut event_root = serde_json::Map::new();
+            event_root.insert("action".to_string(), serde_json::Value::String("create".to_string()));
+            event_root.insert("create".to_string(), serde_json::Value::Object(create_event));
+            let event_payload = serde_json::Value::Object(event_root);
+
             match serde_json::to_string(&run_params) {
-                Ok(json) => handle_run_agent(sess, ctx, json).await,
+                Ok(json) => handle_run_agent(sess, ctx, json, event_payload).await,
                 Err(e) => agent_tool_failure(ctx, format!("Failed to encode create arguments: {}", e)),
             }
         }
         "status" => {
-            let agent_id = match req.agent_id.take() {
+            let agent_id = match req
+                .status
+                .as_mut()
+                .and_then(|opts| opts.agent_id.take())
+            {
                 Some(id) => id,
-                None => return agent_tool_failure(ctx, "action=status requires 'agent_id'"),
+                None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=status requires 'status.agent_id'",
+                    );
+                }
             };
-            let params = CheckAgentStatusParams { agent_id };
+            let params = CheckAgentStatusParams {
+                agent_id: agent_id.clone(),
+            };
+            let mut status_event = serde_json::Map::new();
+            status_event.insert("agent_id".to_string(), serde_json::Value::String(agent_id));
+            let mut status_event_root = serde_json::Map::new();
+            status_event_root.insert("action".to_string(), serde_json::Value::String("status".to_string()));
+            status_event_root.insert("status".to_string(), serde_json::Value::Object(status_event));
+            let status_event_payload = serde_json::Value::Object(status_event_root);
             match serde_json::to_string(&params) {
-                Ok(json) => handle_check_agent_status(sess, ctx, json).await,
+                Ok(json) => handle_check_agent_status(sess, ctx, json, status_event_payload).await,
                 Err(e) => agent_tool_failure(ctx, format!("Failed to encode status arguments: {}", e)),
             }
         }
         "result" => {
-            let agent_id = match req.agent_id.take() {
+            let agent_id = match req
+                .result
+                .as_mut()
+                .and_then(|opts| opts.agent_id.take())
+            {
                 Some(id) => id,
-                None => return agent_tool_failure(ctx, "action=result requires 'agent_id'"),
+                None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=result requires 'result.agent_id'",
+                    );
+                }
             };
-            let params = GetAgentResultParams { agent_id };
+            let params = GetAgentResultParams {
+                agent_id: agent_id.clone(),
+            };
+            let mut result_event = serde_json::Map::new();
+            result_event.insert("agent_id".to_string(), serde_json::Value::String(agent_id));
+            let mut result_event_root = serde_json::Map::new();
+            result_event_root.insert("action".to_string(), serde_json::Value::String("result".to_string()));
+            result_event_root.insert("result".to_string(), serde_json::Value::Object(result_event));
+            let result_event_payload = serde_json::Value::Object(result_event_root);
             match serde_json::to_string(&params) {
-                Ok(json) => handle_get_agent_result(sess, ctx, json).await,
+                Ok(json) => handle_get_agent_result(sess, ctx, json, result_event_payload).await,
                 Err(e) => agent_tool_failure(ctx, format!("Failed to encode result arguments: {}", e)),
             }
         }
         "cancel" => {
-            if req.agent_id.is_none() && req.batch_id.is_none() {
-                return agent_tool_failure(
-                    ctx,
-                    "action=cancel requires 'agent_id' or 'batch_id'",
-                );
-            }
-            let params = CancelAgentParams {
-                agent_id: req.agent_id.take(),
-                batch_id: req.batch_id.take(),
+            let mut cancel_opts = match req.cancel.take() {
+                Some(opts) => opts,
+                None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=cancel requires a 'cancel' object",
+                    );
+                }
             };
+            if cancel_opts.agent_id.is_none() && cancel_opts.batch_id.is_none() {
+                return agent_tool_failure(ctx, "action=cancel requires 'cancel.agent_id' or 'cancel.batch_id'");
+            }
+            let cancel_agent_id = cancel_opts.agent_id.clone();
+            let cancel_batch_id = cancel_opts.batch_id.clone();
+            let params = CancelAgentParams {
+                agent_id: cancel_opts.agent_id.take(),
+                batch_id: cancel_opts.batch_id.take(),
+            };
+            let mut cancel_event = serde_json::Map::new();
+            if let Some(id) = cancel_agent_id {
+                cancel_event.insert("agent_id".to_string(), serde_json::Value::String(id));
+            }
+            if let Some(batch) = cancel_batch_id {
+                cancel_event.insert("batch_id".to_string(), serde_json::Value::String(batch));
+            }
+            let mut cancel_event_root = serde_json::Map::new();
+            cancel_event_root.insert("action".to_string(), serde_json::Value::String("cancel".to_string()));
+            cancel_event_root.insert("cancel".to_string(), serde_json::Value::Object(cancel_event));
+            let cancel_event_payload = serde_json::Value::Object(cancel_event_root);
             match serde_json::to_string(&params) {
-                Ok(json) => handle_cancel_agent(sess, ctx, json).await,
+                Ok(json) => handle_cancel_agent(sess, ctx, json, cancel_event_payload).await,
                 Err(e) => agent_tool_failure(ctx, format!("Failed to encode cancel arguments: {}", e)),
             }
         }
         "wait" => {
-            if req.agent_id.is_none() && req.batch_id.is_none() {
-                return agent_tool_failure(
-                    ctx,
-                    "action=wait requires 'agent_id' or 'batch_id'",
-                );
-            }
-            let params = WaitForAgentParams {
-                agent_id: req.agent_id.take(),
-                batch_id: req.batch_id.take(),
-                timeout_seconds: req.timeout_seconds,
-                return_all: req.return_all,
+            let mut wait_opts = match req.wait.take() {
+                Some(opts) => opts,
+                None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=wait requires a 'wait' object",
+                    );
+                }
             };
+            if wait_opts.agent_id.is_none() && wait_opts.batch_id.is_none() {
+                return agent_tool_failure(ctx, "action=wait requires 'wait.agent_id' or 'wait.batch_id'");
+            }
+            let wait_agent_id = wait_opts.agent_id.clone();
+            let wait_batch_id = wait_opts.batch_id.clone();
+            let wait_timeout = wait_opts.timeout_seconds;
+            let wait_return_all = wait_opts.return_all;
+            let params = WaitForAgentParams {
+                agent_id: wait_opts.agent_id.take(),
+                batch_id: wait_opts.batch_id.take(),
+                timeout_seconds: wait_timeout,
+                return_all: wait_return_all,
+            };
+            let mut wait_event = serde_json::Map::new();
+            if let Some(id) = wait_agent_id {
+                wait_event.insert("agent_id".to_string(), serde_json::Value::String(id));
+            }
+            if let Some(batch) = wait_batch_id {
+                wait_event.insert("batch_id".to_string(), serde_json::Value::String(batch));
+            }
+            if let Some(timeout) = wait_timeout {
+                wait_event.insert("timeout_seconds".to_string(), serde_json::Value::from(timeout));
+            }
+            if let Some(return_all) = wait_return_all {
+                wait_event.insert("return_all".to_string(), serde_json::Value::Bool(return_all));
+            }
+            let mut wait_event_root = serde_json::Map::new();
+            wait_event_root.insert("action".to_string(), serde_json::Value::String("wait".to_string()));
+            wait_event_root.insert("wait".to_string(), serde_json::Value::Object(wait_event));
+            let wait_event_payload = serde_json::Value::Object(wait_event_root);
             match serde_json::to_string(&params) {
-                Ok(json) => handle_wait_for_agent(sess, ctx, json).await,
+                Ok(json) => handle_wait_for_agent(sess, ctx, json, wait_event_payload).await,
                 Err(e) => agent_tool_failure(ctx, format!("Failed to encode wait arguments: {}", e)),
             }
         }
         "list" => {
-            let params = ListAgentsParams {
-                status_filter: req.status_filter.take(),
-                batch_id: req.batch_id.take(),
-                recent_only: req.recent_only,
+            let mut list_opts = match req.list.take() {
+                Some(opts) => opts,
+                None => crate::agent_tool::AgentListOptions {
+                    status_filter: None,
+                    batch_id: None,
+                    recent_only: None,
+                },
             };
+            let status_filter = list_opts.status_filter.take();
+            let batch_id = list_opts.batch_id.take();
+            let recent_only = list_opts.recent_only;
+            let params = ListAgentsParams {
+                status_filter: status_filter.clone(),
+                batch_id: batch_id.clone(),
+                recent_only,
+            };
+            let mut list_event = serde_json::Map::new();
+            if let Some(ref status) = status_filter {
+                if !status.is_empty() {
+                    list_event.insert("status_filter".to_string(), serde_json::Value::String(status.clone()));
+                }
+            }
+            if let Some(ref batch) = batch_id {
+                if !batch.is_empty() {
+                    list_event.insert("batch_id".to_string(), serde_json::Value::String(batch.clone()));
+                }
+            }
+            if let Some(recent) = recent_only {
+                list_event.insert("recent_only".to_string(), serde_json::Value::Bool(recent));
+            }
+            let mut list_event_root = serde_json::Map::new();
+            list_event_root.insert("action".to_string(), serde_json::Value::String("list".to_string()));
+            list_event_root.insert("list".to_string(), serde_json::Value::Object(list_event));
+            let list_event_payload = serde_json::Value::Object(list_event_root);
             match serde_json::to_string(&params) {
-                Ok(json) => handle_list_agents(sess, ctx, json).await,
+                Ok(json) => handle_list_agents(sess, ctx, json, list_event_payload).await,
                 Err(e) => agent_tool_failure(ctx, format!("Failed to encode list arguments: {}", e)),
             }
         }
@@ -6602,22 +6800,23 @@ pub(crate) async fn handle_agent_tool(
     }
 }
 
-pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
-    let mut params_for_event = serde_json::from_str(&arguments).ok();
-    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
-        map.insert("action".to_string(), serde_json::Value::String("create".to_string()));
-    }
+pub(crate) async fn handle_run_agent(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+    event_payload: serde_json::Value,
+) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        params_for_event,
+        Some(event_payload),
         || async move {
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
-        Ok(params) => {
-            let trimmed_task = params.task.trim();
+        Ok(mut params) => {
+            let trimmed_task = params.task.trim().to_string();
             let word_count = trimmed_task
                 .split_whitespace()
                 .filter(|segment| !segment.is_empty())
@@ -6649,6 +6848,13 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
             }
 
             let mut manager = AGENT_MANAGER.write().await;
+            let mut agent_name = params.name.clone();
+            if agent_name.is_none() {
+                if let Some(fallback) = derive_agent_name_from_task(trimmed_task.as_str()) {
+                    agent_name = Some(fallback.clone());
+                    params.name = Some(fallback);
+                }
+            }
 
             // Collect requested models from the `models` field.
             let raw_models: Vec<String> = params.models.clone();
@@ -6739,6 +6945,22 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                 None
             };
 
+            let multi_model = models.len() > 1;
+            let display_label_for = |model: &str| -> String {
+                agent_name
+                    .as_ref()
+                    .and_then(|value| {
+                        if value.is_empty() {
+                            None
+                        } else if multi_model {
+                            Some(format!("{} ({})", value, model))
+                        } else {
+                            Some(value.to_string())
+                        }
+                    })
+                    .unwrap_or_else(|| model.to_string())
+            };
+
             let mut agent_ids = Vec::new();
             let mut agent_labels: Vec<(String, String)> = Vec::new();
             let mut skipped: Vec<String> = Vec::new();
@@ -6767,6 +6989,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     let agent_id = manager
                         .create_agent_with_config(
                             model.clone(),
+                            agent_name.clone(),
                             params.task.clone(),
                             params.context.clone(),
                             params.output.clone(),
@@ -6777,7 +7000,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         )
                         .await;
                     agent_ids.push(agent_id);
-                    agent_labels.push((agent_ids.last().cloned().unwrap(), model));
+                    let label = display_label_for(&model);
+                    agent_labels.push((agent_ids.last().cloned().unwrap(), label));
                 } else {
                     // Use default configuration for unknown agents
                     let (cmd_to_check, is_builtin) = resolve_command_for_check(&model, None);
@@ -6789,6 +7013,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     let agent_id = manager
                         .create_agent(
                             model.clone(),
+                            agent_name.clone(),
                             params.task.clone(),
                             params.context.clone(),
                             params.output.clone(),
@@ -6798,7 +7023,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                         )
                         .await;
                     agent_ids.push(agent_id);
-                    agent_labels.push((agent_ids.last().cloned().unwrap(), model));
+                    let label = display_label_for(&model);
+                    agent_labels.push((agent_ids.last().cloned().unwrap(), label));
                 }
             }
 
@@ -6808,6 +7034,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                 let agent_id = manager
                     .create_agent(
                         "code".to_string(),
+                        agent_name.clone(),
                         params.task.clone(),
                         params.context.clone(),
                         params.output.clone(),
@@ -6817,7 +7044,8 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     )
                     .await;
                 agent_ids.push(agent_id);
-                agent_labels.push((agent_ids.last().cloned().unwrap(), "code".to_string()));
+                let label = display_label_for("code");
+                agent_labels.push((agent_ids.last().cloned().unwrap(), label));
             }
 
             // Send agent status update event
@@ -6830,7 +7058,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                 let short_batch = short_id(batch);
                 let agent_phrase = agent_labels
                     .iter()
-                    .map(|(id, model)| format!("{} [{}]", short_id(id), model))
+                    .map(|(id, label)| format!("{} [{}]", short_id(id), label))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let first_agent = agent_labels
@@ -6838,7 +7066,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     .map(|(id, _)| id.as_str())
                     .unwrap_or(batch.as_str());
                 format!(
-                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"batch_id\":\"{batch}\",\"return_all\":true}}` to wait for all agents, then `agent {{\"action\":\"result\",\"agent_id\":\"{first_agent}\"}}` for a detailed report."
+                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to wait for all agents, then `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{first_agent}\"}}}}` for a detailed report."
                 )
             } else {
                 let (single_id, single_model) = agent_labels
@@ -6846,7 +7074,7 @@ pub(crate) async fn handle_run_agent(sess: &Session, ctx: &ToolCallCtx, argument
                     .map(|(id, model)| (id.as_str(), model.as_str()))
                     .unwrap();
                 format!(
-                    "🤖 Agent {} [{}] started. Use `agent {{\"action\":\"wait\",\"agent_id\":\"{}\",\"return_all\":true}}` to follow progress, or `agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}` when it finishes.",
+                    "🤖 Agent {} [{}] started. Use `agent {{\"action\":\"wait\",\"wait\":{{\"agent_id\":\"{}\",\"return_all\":true}}}}` to follow progress, or `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}` when it finishes.",
                     short_id(single_id),
                     single_model,
                     single_id,
@@ -6903,18 +7131,39 @@ fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
-    let mut params_for_event = serde_json::from_str(&arguments).ok();
-    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
-        map.insert("action".to_string(), serde_json::Value::String("status".to_string()));
+fn derive_agent_name_from_task(task: &str) -> Option<String> {
+    let trimmed = task.trim();
+    if trimmed.is_empty() {
+        return None;
     }
+
+    let first_clause = trimmed
+        .split(|c: char| matches!(c, '.' | '!' | '?' | '\n'))
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(trimmed)
+        .trim();
+
+    let words: Vec<&str> = first_clause.split_whitespace().take(5).collect();
+    if words.is_empty() {
+        return None;
+    }
+
+    normalize_agent_name(Some(words.join(" ")))
+}
+
+async fn handle_check_agent_status(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+    event_payload: serde_json::Value,
+) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        params_for_event,
+        Some(event_payload),
         || async move {
     match serde_json::from_str::<CheckAgentStatusParams>(&arguments_clone) {
         Ok(params) => {
@@ -6974,6 +7223,7 @@ async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments:
 
                 let response = serde_json::json!({
                     "agent_id": params.agent_id,
+                    "name": agent.name,
                     "status": agent.status,
                     "model": agent.model,
                     "created_at": agent.created_at,
@@ -7016,18 +7266,19 @@ async fn handle_check_agent_status(sess: &Session, ctx: &ToolCallCtx, arguments:
     ).await
 }
 
-async fn handle_get_agent_result(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
-    let mut params_for_event = serde_json::from_str(&arguments).ok();
-    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
-        map.insert("action".to_string(), serde_json::Value::String("result".to_string()));
-    }
+async fn handle_get_agent_result(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+    event_payload: serde_json::Value,
+) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        params_for_event,
+        Some(event_payload),
         || async move {
     match serde_json::from_str::<GetAgentResultParams>(&arguments_clone) {
         Ok(params) => {
@@ -7127,18 +7378,19 @@ async fn handle_get_agent_result(sess: &Session, ctx: &ToolCallCtx, arguments: S
     ).await
 }
 
-async fn handle_cancel_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
-    let mut params_for_event = serde_json::from_str(&arguments).ok();
-    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
-        map.insert("action".to_string(), serde_json::Value::String("cancel".to_string()));
-    }
+async fn handle_cancel_agent(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+    event_payload: serde_json::Value,
+) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        params_for_event,
+        Some(event_payload),
         || async move {
     match serde_json::from_str::<CancelAgentParams>(&arguments_clone) {
         Ok(params) => {
@@ -7193,18 +7445,19 @@ async fn handle_cancel_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Strin
     ).await
 }
 
-async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
-    let mut params_for_event = serde_json::from_str(&arguments).ok();
-    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
-        map.insert("action".to_string(), serde_json::Value::String("wait".to_string()));
-    }
+async fn handle_wait_for_agent(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+    event_payload: serde_json::Value,
+) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        params_for_event,
+        Some(event_payload),
         || async move {
     match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
         Ok(params) => {
@@ -7276,7 +7529,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                             };
 
                             let hint = format!(
-                                "agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}",
+                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
                                 agent.id
                             );
                             let mut response = serde_json::json!({
@@ -7285,7 +7538,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "action": "result", "agent_id": agent.id },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": agent.id } },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7370,7 +7623,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 };
 
                                 let hint = format!(
-                                    "agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}",
+                                    "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
                                     a.id
                                 );
                                 let mut obj = serde_json::json!({
@@ -7378,7 +7631,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                     "status": a.status,
                                     "total_lines": total_lines,
                                     "agent_result_hint": hint,
-                                    "agent_result_params": { "action": "result", "agent_id": a.id },
+                                    "agent_result_params": { "action": "result", "result": { "agent_id": a.id } },
                                 });
                                 if let Some(map) = obj.as_object_mut() {
                                     map.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7464,7 +7717,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                             };
 
                             let hint = format!(
-                                "agent {{\"action\":\"result\",\"agent_id\":\"{}\"}}",
+                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
                                 unseen.id
                             );
                             let mut response = serde_json::json!({
@@ -7473,7 +7726,7 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "action": "result", "agent_id": unseen.id },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": unseen.id } },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7528,18 +7781,19 @@ async fn handle_wait_for_agent(sess: &Session, ctx: &ToolCallCtx, arguments: Str
     ).await
 }
 
-async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String) -> ResponseInputItem {
-    let mut params_for_event = serde_json::from_str(&arguments).ok();
-    if let Some(serde_json::Value::Object(map)) = params_for_event.as_mut() {
-        map.insert("action".to_string(), serde_json::Value::String("list".to_string()));
-    }
+async fn handle_list_agents(
+    sess: &Session,
+    ctx: &ToolCallCtx,
+    arguments: String,
+    event_payload: serde_json::Value,
+) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        params_for_event,
+        Some(event_payload),
         || async move {
     match serde_json::from_str::<ListAgentsParams>(&arguments_clone) {
         Ok(params) => {
@@ -7615,6 +7869,7 @@ async fn handle_list_agents(sess: &Session, ctx: &ToolCallCtx, arguments: String
                 "agents": agents.iter().map(|t| {
                     serde_json::json!({
                         "id": t.id,
+                        "name": t.name.clone(),
                         "model": t.model,
                         "status": t.status,
                         "created_at": t.created_at,
