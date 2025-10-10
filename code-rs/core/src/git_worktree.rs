@@ -5,6 +5,7 @@ use std::collections::{HashSet, VecDeque};
 use std::fs as stdfs;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::{Component, Path, PathBuf};
+use std::process::Stdio;
 use std::sync::OnceLock;
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
@@ -99,6 +100,80 @@ impl Default for CacheSettings {
 fn cache_settings() -> CacheSettings {
     static SETTINGS: OnceLock<CacheSettings> = OnceLock::new();
     SETTINGS.get_or_init(CacheSettings::from_config).clone()
+}
+
+fn branch_target_cache_enabled() -> bool {
+    const VARS: &[&str] = &["CODE_BRANCH_TARGET_CACHE", "CODEX_BRANCH_TARGET_CACHE"];
+    for var in VARS {
+        if let Ok(value) = std::env::var(var) {
+            let normalized = value.trim().to_ascii_lowercase();
+            if normalized.is_empty() || matches!(normalized.as_str(), "1" | "true" | "yes" | "on") {
+                return true;
+            }
+            if matches!(normalized.as_str(), "0" | "false" | "no" | "off" | "disabled") {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn target_cache_root(repo_name: &str) -> PathBuf {
+    find_code_home()
+        .map(|mut home| {
+            home.push("working");
+            home.push("_target-cache");
+            home.push(repo_name);
+            home
+        })
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".code")
+                .join("working")
+                .join("_target-cache")
+                .join(repo_name)
+        })
+}
+
+fn cache_target_path(worktree_path: &Path, rel_path: &Path) -> Option<PathBuf> {
+    let repo_root = resolve_repo_root(worktree_path)?;
+    let repo_name = repo_root.file_name()?.to_str()?;
+    Some(target_cache_root(repo_name).join(rel_path))
+}
+
+fn is_target_directory(rel_path: &Path) -> bool {
+    rel_path
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .map(|segment| segment == "target")
+        .unwrap_or(false)
+}
+
+fn collect_cache_candidates(worktree_path: &Path, settings: &CacheSettings) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = match settings.mode {
+        CacheMode::Manual => settings
+            .explicit_paths
+            .iter()
+            .filter_map(|path| {
+                if path.is_absolute() {
+                    tracing::warn!(
+                        target = %path.display(),
+                        "build_cache.paths entries must be relative to the worktree; skipping absolute entry"
+                    );
+                    None
+                } else {
+                    Some(normalize_relative(path))
+                }
+            })
+            .collect(),
+        CacheMode::Auto => auto_cache_candidates(worktree_path),
+        CacheMode::Off => Vec::new(),
+    };
+
+    candidates.sort();
+    candidates.dedup();
+    candidates
 }
 
 impl CacheSettings {
@@ -322,13 +397,14 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
         // of removing and re-adding a worktree. This makes repeated agent runs
         // start much faster.
         record_worktree_in_session(git_root, &worktree_path).await;
-        if let Err(err) = seed_branch_targets(&worktree_path).await {
+        if let Err(err) = ensure_target_cache_links(&worktree_path).await {
             tracing::warn!(
                 target = %worktree_path.display(),
                 error = %err,
-                "failed to seed cached build artifacts for existing worktree"
+                "failed to prepare target cache link"
             );
         }
+        spawn_seed_branch_targets(&worktree_path);
         return Ok((worktree_path, effective_branch));
     }
 
@@ -376,16 +452,29 @@ pub async fn setup_worktree(git_root: &Path, branch_id: &str) -> Result<(PathBuf
 
     // Record created worktree for this process; best-effort.
     record_worktree_in_session(git_root, &worktree_path).await;
-
-    if let Err(err) = seed_branch_targets(&worktree_path).await {
+    if let Err(err) = ensure_target_cache_links(&worktree_path).await {
         tracing::warn!(
             target = %worktree_path.display(),
             error = %err,
-            "failed to seed cached build artifacts for new worktree"
+            "failed to prepare target cache link"
         );
     }
+    spawn_seed_branch_targets(&worktree_path);
 
     Ok((worktree_path, effective_branch))
+}
+
+fn spawn_seed_branch_targets(worktree_path: &Path) {
+    let target_path = worktree_path.to_path_buf();
+    task::spawn(async move {
+        if let Err(err) = seed_branch_targets(&target_path).await {
+            tracing::warn!(
+                target = %target_path.display(),
+                error = %err,
+                "failed to seed cached build artifacts"
+            );
+        }
+    });
 }
 
 /// Append the created worktree to a per-process session file so the TUI can
@@ -429,47 +518,15 @@ async fn seed_branch_targets(worktree_path: &Path) -> Result<(), String> {
         return Ok(());
     };
 
-    let cache_base = find_code_home()
-        .map(|mut home| {
-            home.push("working");
-            home.push("_target-cache");
-            home
-        })
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".code")
-                .join("working")
-                .join("_target-cache")
-        });
-    let cache_root = cache_base.join(&repo_name);
+    let cache_root = target_cache_root(&repo_name);
 
-    let mut candidates: Vec<PathBuf> = match settings.mode {
-        CacheMode::Manual => settings
-            .explicit_paths
-            .iter()
-            .filter_map(|path| {
-                if path.is_absolute() {
-                    tracing::warn!(
-                        target = %path.display(),
-                        "build_cache.paths entries must be relative to the worktree; skipping absolute entry"
-                    );
-                    None
-                } else {
-                    Some(normalize_relative(path))
-                }
-            })
-            .collect(),
-        CacheMode::Auto => auto_cache_candidates(worktree_path),
-        CacheMode::Off => Vec::new(),
-    };
+    let target_cache_enabled = branch_target_cache_enabled();
+
+    let candidates = collect_cache_candidates(worktree_path, &settings);
 
     if candidates.is_empty() {
         return Ok(());
     }
-
-    candidates.sort();
-    candidates.dedup();
 
     for rel_path in candidates {
         if rel_path.as_os_str().is_empty() {
@@ -477,11 +534,27 @@ async fn seed_branch_targets(worktree_path: &Path) -> Result<(), String> {
         }
 
         let branch_target = worktree_path.join(&rel_path);
+        let cache_target = cache_root.join(&rel_path);
         if branch_target.exists() {
+            if target_cache_enabled && is_target_directory(&rel_path) {
+                continue;
+            }
             continue;
         }
 
-        let cache_target = cache_root.join(&rel_path);
+        if target_cache_enabled && is_target_directory(&rel_path) {
+            if let Err(err) = symlink_branch_to_cache(branch_target.clone(), cache_target.clone()).await {
+                tracing::warn!(
+                    target = %branch_target.display(),
+                    cache = %cache_target.display(),
+                    error = %err,
+                    "failed to link shared target cache; falling back to copy"
+                );
+            } else {
+                continue;
+            }
+        }
+
         if !cache_target.is_dir() {
             continue;
         }
@@ -505,6 +578,54 @@ async fn seed_branch_targets(worktree_path: &Path) -> Result<(), String> {
                 "failed to seed cached build artifacts"
             );
         }
+    }
+
+    Ok(())
+}
+
+async fn ensure_target_cache_links(worktree_path: &Path) -> Result<(), String> {
+    if !branch_target_cache_enabled() {
+        return Ok(());
+    }
+
+    const DISABLE_ENV: &str = "CODEX_DISABLE_TARGET_SEED";
+    if std::env::var(DISABLE_ENV)
+        .map(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "True"))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let settings = cache_settings();
+    if matches!(settings.mode, CacheMode::Off) {
+        return Ok(());
+    }
+
+    let Some(repo_root) = resolve_repo_root(worktree_path) else {
+        return Ok(());
+    };
+    let Some(repo_name) = repo_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|value| value.to_string())
+    else {
+        return Ok(());
+    };
+
+    let cache_root = target_cache_root(&repo_name);
+    let candidates = collect_cache_candidates(worktree_path, &settings);
+
+    for rel_path in candidates {
+        if !is_target_directory(&rel_path) {
+            continue;
+        }
+        if rel_path.as_os_str().is_empty() {
+            continue;
+        }
+
+        let branch_target = worktree_path.join(&rel_path);
+        let cache_target = cache_root.join(&rel_path);
+        symlink_branch_to_cache(branch_target, cache_target).await?;
     }
 
     Ok(())
@@ -559,6 +680,9 @@ async fn run_rsync(
     if copy_as_clone {
         cmd.arg("--copy-as=clone");
     }
+    cmd.arg("--quiet");
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
 
     let mut src_arg = cache_target.to_string_lossy().to_string();
     if !src_arg.ends_with('/') {
@@ -613,6 +737,9 @@ async fn run_cp(cache_target: &Path, branch_target: &Path, prefer_clone: bool) -
         cmd.arg(cache_target.join("."));
         cmd.arg(branch_target);
 
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+
         let status = cmd
             .status()
             .await
@@ -635,6 +762,9 @@ async fn run_cp(cache_target: &Path, branch_target: &Path, prefer_clone: bool) -
             clone_cmd.arg(cache_target.join("."));
             clone_cmd.arg(branch_target);
 
+            clone_cmd.stdout(Stdio::null());
+            clone_cmd.stderr(Stdio::null());
+
             match clone_cmd.status().await {
                 Ok(status) if status.success() => {
                     return Ok(());
@@ -655,6 +785,8 @@ async fn run_cp(cache_target: &Path, branch_target: &Path, prefer_clone: bool) -
         cmd.arg("-a");
         cmd.arg(cache_target.join("."));
         cmd.arg(branch_target);
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
 
         let status = cmd
             .status()
@@ -950,6 +1082,7 @@ pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path)
 }
 
 async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result<usize, String> {
+    let target_cache_enabled = branch_target_cache_enabled();
     let candidates = gather_branch_cache_candidates(src_root);
     let mut seen = HashSet::new();
     let mut total = 0usize;
@@ -967,6 +1100,20 @@ async fn copy_branch_cache_dirs(src_root: &Path, worktree_path: &Path) -> Result
             }
         };
         if !metadata.is_dir() { continue; }
+
+        if target_cache_enabled && is_target_directory(&rel) {
+            if let Some(cache_target) = cache_target_path(worktree_path, &rel) {
+                if let Err(err) = symlink_branch_to_cache(worktree_path.join(&rel), cache_target).await {
+                    tracing::warn!(
+                        target = %worktree_path.join(&rel).display(),
+                        error = %err,
+                        "failed to link shared target cache; falling back to copy"
+                    );
+                } else {
+                    continue;
+                }
+            }
+        }
 
         let dst_dir = worktree_path.join(&rel);
         let label = rel.to_string_lossy().to_string();
@@ -1007,6 +1154,53 @@ fn gather_branch_cache_candidates(src_root: &Path) -> Vec<PathBuf> {
     }
 
     out
+}
+
+async fn symlink_branch_to_cache(branch_target: PathBuf, cache_target: PathBuf) -> Result<(), String> {
+    if let Some(parent) = branch_target.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| format!("failed to prepare branch cache parent {}: {err}", parent.display()))?;
+    }
+
+    tokio::fs::create_dir_all(&cache_target)
+        .await
+        .map_err(|err| format!("failed to ensure cache directory {}: {err}", cache_target.display()))?;
+
+    let branch_clone = branch_target.clone();
+    let cache_clone = cache_target.clone();
+    let result = task::spawn_blocking(move || -> Result<(), IoError> {
+        if let Ok(existing) = stdfs::read_link(&branch_clone) {
+            if existing == cache_clone {
+                return Ok(());
+            }
+        }
+
+        remove_existing_path(&branch_clone)?;
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&cache_clone, &branch_clone)?;
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::symlink_dir;
+            symlink_dir(&cache_clone, &branch_clone)?;
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|err| format!("failed to join symlink task: {err}"))?;
+
+    result.map_err(|err| {
+        format!(
+            "failed to create shared cache link {} -> {}: {err}",
+            branch_target.display(),
+            cache_target.display()
+        )
+    })
 }
 
 fn append_cargo_targets(src_root: &Path, out: &mut Vec<PathBuf>) {
