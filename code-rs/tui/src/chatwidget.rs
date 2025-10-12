@@ -93,7 +93,6 @@ use self::auto_coordinator::{
     start_auto_coordinator,
     AutoCoordinatorCommand,
     AutoCoordinatorHandle,
-    TurnComplexity,
     TurnConfig,
     TurnDescriptor,
 };
@@ -570,6 +569,7 @@ struct AutoCoordinatorUiState {
     coordinator_waiting: bool,
     review_enabled: bool,
     subagents_enabled: bool,
+    pending_agent_actions: Vec<AutoTurnAgentsAction>,
     continue_mode: AutoContinueMode,
     started_at: Option<Instant>,
     turns_completed: usize,
@@ -636,6 +636,7 @@ impl Default for AutoCoordinatorUiState {
             coordinator_waiting: false,
             review_enabled: false,
             subagents_enabled: false,
+            pending_agent_actions: Vec::new(),
             continue_mode,
             started_at: None,
             turns_completed: 0,
@@ -12307,13 +12308,14 @@ fi\n\
 
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
+        if matches!(status, AutoCoordinatorStatus::Continue) {
+            self.auto_state.pending_agent_actions = agents.clone();
+        } else {
+            self.auto_state.pending_agent_actions.clear();
+        }
 
         if let Some(review_action) = review {
             self.auto_trigger_review_action(review_action);
-        }
-
-        for agent_action in agents {
-            self.auto_launch_agents_action(agent_action);
         }
 
         match status {
@@ -12805,7 +12807,10 @@ fi\n\
             return;
         }
 
-        let full_prompt = self.auto_build_cli_message(&prompt);
+        let Some(full_prompt) = self.build_auto_turn_message(&prompt) else {
+            self.auto_stop(Some("Coordinator produced an empty prompt.".to_string()));
+            return;
+        };
 
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = true;
@@ -12829,17 +12834,10 @@ fi\n\
         self.auto_state.thinking_prefix_stripped = false;
         // If coordinator hinted medium/high complexity, prime the Agents HUD
         let should_prepare_agents = self.auto_state.subagents_enabled
-            && self
-                .pending_auto_turn_config
-                .as_ref()
-                .and_then(|cfg| cfg.complexity)
-                .is_some_and(|c| matches!(c, TurnComplexity::Medium | TurnComplexity::High));
+            && !self.auto_state.pending_agent_actions.is_empty();
         if should_prepare_agents {
             self.prepare_agents();
         }
-
-        // Build hidden preface with explicit agent create guidance
-        let preface = self.build_auto_turn_preface(&prompt);
 
         if self.auto_state.review_enabled {
             self.prepare_auto_turn_review_state();
@@ -12848,32 +12846,10 @@ fi\n\
         }
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
-        if preface.trim().is_empty() {
-            self.submit_text_message(full_prompt);
-        } else {
-            self.submit_text_message_with_preface(full_prompt, preface);
-        }
+        self.submit_text_message(full_prompt);
+        self.auto_state.pending_agent_actions.clear();
         self.auto_rebuild_live_ring();
         self.request_redraw();
-    }
-
-    fn auto_build_cli_message(&self, prompt: &str) -> String {
-        let context = self
-            .auto_state
-            .current_cli_context
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-
-        if let Some(ctx) = context {
-            if ctx.ends_with('\n') {
-                format!("{ctx}{prompt}")
-            } else {
-                format!("{ctx}\n\n{prompt}")
-            }
-        } else {
-            prompt.to_string()
-        }
     }
 
     fn auto_pause_for_manual_edit(&mut self) {
@@ -12886,14 +12862,9 @@ fi\n\
             .current_cli_prompt
             .clone()
             .unwrap_or_default();
-        let mut full_prompt = self.auto_build_cli_message(&prompt_text);
-        if full_prompt.trim().is_empty() {
-            full_prompt = self
-                .auto_state
-                .current_cli_context
-                .clone()
-                .unwrap_or_default();
-        }
+        let full_prompt = self
+            .build_auto_turn_message(&prompt_text)
+            .unwrap_or_else(|| prompt_text.clone());
 
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
@@ -12913,73 +12884,58 @@ fi\n\
     }
 
     // Build a hidden preface for the next Auto turn based on coordinator hints.
-    fn build_auto_turn_preface(&self, prompt_cli: &str) -> String {
-        let Some(cfg) = self.pending_auto_turn_config.as_ref() else {
-            return String::new();
-        };
-        let complexity = cfg.complexity.unwrap_or(TurnComplexity::Low);
-        let complexity_str = match complexity {
-            TurnComplexity::Low => "low",
-            TurnComplexity::Medium => "medium",
-            TurnComplexity::High => "high",
-        };
-        let ro_str = if cfg.read_only { "true" } else { "false" };
+    fn build_auto_turn_message(&self, prompt_cli: &str) -> Option<String> {
+        let mut sections: Vec<String> = Vec::new();
 
-        // Build single-paragraph guidance as requested
-        let mut parts: Vec<String> = Vec::new();
-        if !prompt_cli.trim().is_empty() {
-            parts.push(format!("Start with prompt: {}.", prompt_cli.trim()));
-        }
-        // Mode sentence
-        if cfg.read_only {
-            parts.push(format!(
-                "This is a {} complexity read-only turn: do not modify files or apply patches this turn.",
-                complexity_str
-            ));
-        } else {
-            parts.push(format!(
-                "This is a {} complexity write turn: you may modify files and apply patches this turn.",
-                complexity_str
-            ));
-        }
-
-        match complexity {
-            TurnComplexity::Low => {
-                parts.push("This turn is likely low complexity, so you should focus on addressing it directly without using agents.".to_string());
-            }
-            TurnComplexity::Medium => {
-                if self.auto_state.subagents_enabled {
-                    parts.push(format!(
-                        "This turn is likely medium complexity, so you should launch at least two agents via `agent {{\"action\":\"create\",\"create\":{{\"models\":[\"claude\",\"gemini\"],\"read_only\":{}}}}}`.",
-                        ro_str
-                    ));
-                } else {
-                    parts.push("This turn is likely medium complexity; break the work into clear steps and handle them directly without launching sub agents.".to_string());
-                }
-            }
-            TurnComplexity::High => {
-                if self.auto_state.subagents_enabled {
-                    parts.push(format!(
-                        "This turn is likely high complexity; launch the full agent fleet via `agent {{\"action\":\"create\",\"create\":{{\"models\":[\"claude\",\"gemini\",\"qwen\",\"code\",\"cloud\"],\"read_only\":{}}}}}`.",
-                        ro_str
-                    ));
-                } else {
-                    parts.push("This turn is likely high complexity; plan carefully and execute step by step without invoking sub agents.".to_string());
-                }
-            }
-        }
-
-        if self.auto_state.subagents_enabled
-            && matches!(complexity, TurnComplexity::Medium | TurnComplexity::High)
+        if let Some(ctx) = self
+            .auto_state
+            .current_cli_context
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
         {
-            if cfg.read_only {
-                parts.push("Use `agent {\"action\":\"wait\",\"wait\":{\"batch_id\":\"<batch_id>\",\"return_all\":true}}` to wait for all agents to complete automatically. Once they finish, collate their output into your final answer.".to_string());
-            } else {
-                parts.push("Use `agent {\"action\":\"wait\",\"wait\":{\"batch_id\":\"<batch_id>\",\"return_all\":true}}` to wait for all agents to complete. Afterwards inspect each worktree and merge the best solution (or the best parts from each agent), then test to ensure the changes are valid.".to_string());
-            }
+            sections.push(ctx.to_string());
         }
 
-        parts.join(" ")
+        if !prompt_cli.trim().is_empty() {
+            sections.push(prompt_cli.trim().to_string());
+        }
+
+        let agent_actions = &self.auto_state.pending_agent_actions;
+        if !agent_actions.is_empty() {
+            let mut agent_lines = Vec::with_capacity(agent_actions.len() + 1);
+            for action in agent_actions {
+                let prompt = action
+                    .prompt
+                    .trim()
+                    .replace('\n', " ")
+                    .replace('"', "\\\"");
+                let read_only_text = if action.write { "read_only: false" } else { "read_only: true" };
+                let mut line = format!(
+                    "Please run agent.create with {read_only_text} and prompt like \"{prompt}\"."
+                );
+                if let Some(ctx) = action
+                    .context
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    line.push_str(&format!(" Context: {}.", ctx.replace('\n', " ")));
+                }
+                agent_lines.push(line);
+            }
+            agent_lines.push(
+                "After launching the agents, wait with agent.wait (use the batch_id returned by agent.create) and fold their output into your plan.".to_string(),
+            );
+            sections.push(agent_lines.join("\n"));
+        }
+
+        let combined = sections.join("\n\n");
+        if combined.trim().is_empty() {
+            None
+        } else {
+            Some(combined)
+        }
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
@@ -13207,35 +13163,6 @@ fi\n\
         self.auto_state.waiting_for_review = true;
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
-    fn auto_launch_agents_action(&mut self, action: AutoTurnAgentsAction) {
-        let AutoTurnAgentsAction { prompt, context, write } = action;
-
-        let mut create = serde_json::Map::new();
-        create.insert("prompt".to_string(), serde_json::Value::String(prompt.clone()));
-        create.insert("read_only".to_string(), serde_json::Value::Bool(!write));
-        if let Some(ctx) = context.clone() {
-            if !ctx.trim().is_empty() {
-                create.insert("context".to_string(), serde_json::Value::String(ctx.to_string()));
-            }
-        }
-
-        let mut outer = serde_json::Map::new();
-        outer.insert("action".to_string(), serde_json::Value::String("create".to_string()));
-        outer.insert("create".to_string(), serde_json::Value::Object(create));
-        let payload = serde_json::Value::Object(outer);
-        let command = format!("agent {}", payload);
-        self.submit_hidden_text_message_with_preface(command, String::new());
-
-        let mut notice = format!("Auto Drive: launching agents — {}", prompt);
-        if let Some(ctx) = context {
-            if !ctx.trim().is_empty() {
-                notice.push_str(&format!(" (context: {})", ctx));
-            }
-        }
-        self.push_background_tail(notice);
         self.request_redraw();
     }
 
@@ -19769,6 +19696,7 @@ mod tests {
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use crate::chatwidget::auto_coordinator::{
         AgentPreferences,
+        TurnComplexity,
         TurnMode,
     };
     use code_core::history::state::{
@@ -20164,6 +20092,37 @@ mod tests {
             Some("Run cargo test")
         );
         assert!(chat.auto_state.waiting_for_review);
+        assert_eq!(chat.auto_state.pending_agent_actions.len(), 1);
+        let action = &chat.auto_state.pending_agent_actions[0];
+        assert_eq!(action.prompt, "Draft alternative fix");
+        assert!(!action.write);
+    }
+
+    #[test]
+    fn build_turn_message_includes_agent_guidance() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.subagents_enabled = true;
+        chat.auto_state.pending_agent_actions = vec![AutoTurnAgentsAction {
+            prompt: "Draft alternative fix".to_string(),
+            context: Some("Focus on parser module".to_string()),
+            write: false,
+        }];
+
+        chat.auto_state.current_cli_context = Some("Workspace root: /tmp".to_string());
+
+        let message = chat
+            .build_auto_turn_message("Run diagnostics")
+            .expect("message");
+        assert!(message.contains("Workspace root: /tmp"));
+        assert!(message.contains("Run diagnostics"));
+        assert!(message.contains("Please run agent.create"));
+        assert!(message.contains("read_only: true"));
+        assert!(message.contains("Draft alternative fix"));
+        assert!(message.contains("Focus on parser module"));
+        assert!(message.contains("agent.wait"));
+        assert!(!message.contains("agent {\"action\""), "message should not include raw agent JSON");
     }
 
     #[test]
