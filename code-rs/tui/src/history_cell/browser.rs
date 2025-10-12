@@ -14,22 +14,38 @@ use super::{HistoryCell, HistoryCellType, ToolCellStatus};
 use crate::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::prelude::{Modifier, Style};
+use ratatui::prelude::Style;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
-use std::path::PathBuf;
+use ratatui_image::{Image, Resize};
+use ratatui_image::picker::Picker;
+use ratatui_image::FilterType;
+use image::ImageReader;
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use url::Url;
 use std::time::Duration;
 use unicode_width::UnicodeWidthChar;
 
 const BORDER_TOP: &str = "╭─";
-const BORDER_BODY: &str = "│ ";
+const BORDER_BODY: &str = "│";
 const BORDER_BOTTOM: &str = "╰─";
 
 const MAX_ACTIONS: usize = 24;
 const MAX_CONSOLE: usize = 12;
-const ACTION_TAIL: usize = 6;
-#[derive(Clone, Default)]
+const ACTION_DISPLAY_HEAD: usize = 4;
+const ACTION_DISPLAY_TAIL: usize = 4;
+const MIN_SCREENSHOT_ROWS: usize = 6;
+const MAX_SCREENSHOT_ROWS: usize = 60;
+const DEFAULT_TEXT_INDENT: usize = 2;
+const TEXT_RIGHT_PADDING: usize = 2;
+const SCREENSHOT_GAP: usize = 2;
+const SCREENSHOT_MIN_WIDTH: usize = 18;
+const SCREENSHOT_MAX_WIDTH: usize = 64;
+const SCREENSHOT_LEFT_PAD: usize = 1;
+const MIN_TEXT_WIDTH: usize = 28;
+const ACTION_LABEL_GAP: usize = 2;
 pub(crate) struct BrowserSessionCell {
     url: Option<String>,
     title: Option<String>,
@@ -41,11 +57,68 @@ pub(crate) struct BrowserSessionCell {
     cell_key: Option<String>,
     headless: Option<bool>,
     status_code: Option<String>,
+    cached_picker: Rc<RefCell<Option<ratatui_image::picker::Picker>>>,
+    cached_image_protocol: Rc<RefCell<Option<(PathBuf, ratatui::layout::Rect, ratatui_image::protocol::Protocol)>>>,
+}
+
+impl Clone for BrowserSessionCell {
+    fn clone(&self) -> Self {
+        Self {
+            url: self.url.clone(),
+            title: self.title.clone(),
+            actions: self.actions.clone(),
+            console_messages: self.console_messages.clone(),
+            screenshot_path: self.screenshot_path.clone(),
+            total_duration: self.total_duration,
+            completed: self.completed,
+            cell_key: self.cell_key.clone(),
+            headless: self.headless,
+            status_code: self.status_code.clone(),
+            cached_picker: Rc::clone(&self.cached_picker),
+            cached_image_protocol: Rc::clone(&self.cached_image_protocol),
+        }
+    }
+}
+
+impl Default for BrowserSessionCell {
+    fn default() -> Self {
+        Self {
+            url: None,
+            title: None,
+            actions: Vec::new(),
+            console_messages: Vec::new(),
+            screenshot_path: None,
+            total_duration: Duration::ZERO,
+            completed: false,
+            cell_key: None,
+            headless: None,
+            status_code: None,
+            cached_picker: Rc::new(RefCell::new(None)),
+            cached_image_protocol: Rc::new(RefCell::new(None)),
+        }
+    }
+}
+
+struct ScreenshotLayout {
+    start_row: usize,
+    height_rows: usize,
+    width_cols: usize,
+    indent_cols: usize,
+}
+
+#[derive(Clone)]
+struct ActionEntry {
+    label: String,
+    detail: String,
+}
+
+enum ActionDisplayLine {
+    Entry(ActionEntry),
+    Ellipsis,
 }
 
 #[derive(Clone)]
 struct BrowserAction {
-    duration: Duration,
     action: String,
     target: Option<String>,
     value: Option<String>,
@@ -55,6 +128,22 @@ struct BrowserAction {
 impl BrowserSessionCell {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn ensure_picker_initialized(
+        &self,
+        picker: Option<Picker>,
+        font_size: (u16, u16),
+    ) {
+        let mut slot = self.cached_picker.borrow_mut();
+        if slot.is_some() {
+            return;
+        }
+        if let Some(p) = picker {
+            *slot = Some(p);
+        } else {
+            *slot = Some(Picker::from_fontsize(font_size));
+        }
     }
 
     pub(crate) fn set_url(&mut self, url: impl Into<String>) {
@@ -79,7 +168,6 @@ impl BrowserSessionCell {
             return;
         }
         let action_entry = BrowserAction {
-            duration,
             action,
             target,
             value,
@@ -111,6 +199,7 @@ impl BrowserSessionCell {
 
     pub(crate) fn set_screenshot(&mut self, path: PathBuf) {
         self.screenshot_path = Some(path.display().to_string());
+        self.cached_image_protocol.borrow_mut().take();
     }
 
     pub(crate) fn set_headless(&mut self, headless: Option<bool>) {
@@ -130,7 +219,8 @@ impl BrowserSessionCell {
     }
 
     fn accent_style(style: &CardStyle) -> Style {
-        primary_text_style(style)
+        let dim = colors::mix_toward(style.accent_fg, colors::text_dim(), 0.85);
+        Style::default().fg(dim)
     }
 
     fn normalized_title(&self) -> Option<String> {
@@ -143,41 +233,43 @@ impl BrowserSessionCell {
 
     fn header_summary_text(&self) -> String {
         let label = if self.headless.unwrap_or(true) {
-            "BROWSER (headless)"
+            "Browser (headless)"
         } else {
-            "BROWSER"
+            "Browser"
         };
 
-        let mut primary = format!("{}: {}", label, self.display_label());
+        let mut title = format!("{}: {}", label, self.display_label());
         if let Some(code) = &self.status_code {
-            primary.push(' ');
-            primary.push('[');
-            primary.push_str(code);
-            primary.push(']');
+            title.push_str(&format!(" [{}]", code));
         }
-
-        let mut parts = vec![primary];
-        let action_count = self.actions.len();
-        parts.push(format!(
-            "{} action{}",
-            action_count,
-            if action_count == 1 { "" } else { "s" }
-        ));
-        parts.push(format_duration_seconds(self.total_duration));
-        parts.join(" · ")
+        title
     }
 
     fn top_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
-        let text = truncate_with_ellipsis(self.header_summary_text().as_str(), body_width);
-        let segment = CardSegment::new(text, primary_text_style(style));
-        CardRow::new(BORDER_TOP.to_string(), Self::accent_style(style), vec![segment], None)
+        let mut segments = Vec::new();
+        if body_width == 0 {
+            return CardRow::new(
+                BORDER_TOP.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            );
+        }
+
+        segments.push(CardSegment::new(" ".to_string(), primary_text_style(style)));
+        let remaining = body_width.saturating_sub(1);
+        let text = truncate_with_ellipsis(self.header_summary_text().as_str(), remaining);
+        if !text.is_empty() {
+            segments.push(CardSegment::new(text, primary_text_style(style)));
+        }
+        CardRow::new(BORDER_TOP.to_string(), Self::accent_style(style), segments, None)
     }
 
-    fn blank_border_row(&self, _body_width: usize, style: &CardStyle) -> CardRow {
+    fn blank_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
         CardRow::new(
             BORDER_BODY.to_string(),
             Self::accent_style(style),
-            vec![CardSegment::new(String::new(), Style::default())],
+            vec![CardSegment::new(" ".repeat(body_width), Style::default())],
             None,
         )
     }
@@ -188,14 +280,39 @@ impl BrowserSessionCell {
         body_width: usize,
         style: &CardStyle,
         text_style: Style,
+        indent_cols: usize,
+        right_padding_cols: usize,
     ) -> CardRow {
-        let text = text.into();
-        let segment = CardSegment::new(truncate_with_ellipsis(text.as_str(), body_width), text_style);
-        CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), vec![segment], None)
+        if body_width == 0 {
+            return CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), Vec::new(), None);
+        }
+        let indent = indent_cols.min(body_width.saturating_sub(1));
+        let available = body_width.saturating_sub(indent);
+        let mut segments = Vec::new();
+        if indent > 0 {
+            segments.push(CardSegment::new(" ".repeat(indent), Style::default()));
+        }
+        let text: String = text.into();
+        if available == 0 {
+            return CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None);
+        }
+        let usable_width = available.saturating_sub(right_padding_cols);
+        let display = if usable_width == 0 {
+            String::new()
+        } else {
+            truncate_with_ellipsis(text.as_str(), usable_width)
+        };
+        segments.push(CardSegment::new(display, text_style));
+        if right_padding_cols > 0 && available > 0 {
+            let pad = right_padding_cols.min(available);
+            segments.push(CardSegment::new(" ".repeat(pad), Style::default()));
+        }
+        CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None)
     }
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
-        let text = truncate_with_ellipsis("[Ctrl+B] Expand · [Esc] Stop", body_width);
+        let text_value = format!(" [Ctrl+B] Expand · [Esc] Stop");
+        let text = truncate_with_ellipsis(text_value.as_str(), body_width);
         let segment = CardSegment::new(text, secondary_text_style(style));
         CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)
     }
@@ -222,301 +339,455 @@ impl BrowserSessionCell {
             .unwrap_or_else(|| "Browser Session".to_string())
     }
 
-    fn build_card_rows(&self, width: u16, style: &CardStyle) -> Vec<CardRow> {
+    fn build_card_rows(&self, width: u16, style: &CardStyle) -> (Vec<CardRow>, Option<ScreenshotLayout>) {
         if width == 0 {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         let accent_width = CARD_ACCENT_WIDTH.min(width as usize);
         let body_width = width.saturating_sub(accent_width as u16) as usize;
         if body_width == 0 {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         let mut rows: Vec<CardRow> = Vec::new();
         rows.push(self.top_border_row(body_width, style));
         rows.push(self.blank_border_row(body_width, style));
 
-        let mut content_rows = self.actions_rows(body_width, style);
-        if content_rows.is_empty() {
-            content_rows.push(self.body_text_row(
+        let mut screenshot_layout = self.compute_screenshot_layout(body_width);
+        let indent_cols = screenshot_layout
+            .as_ref()
+            .map(|layout| layout.indent_cols)
+            .unwrap_or(DEFAULT_TEXT_INDENT);
+        let indent_cols = indent_cols.min(body_width.saturating_sub(1));
+        let right_padding = TEXT_RIGHT_PADDING.min(body_width);
+
+        let content_start = rows.len();
+
+        let action_display = self.formatted_action_display();
+        let label_width = action_display
+            .iter()
+            .filter_map(|line| match line {
+                ActionDisplayLine::Entry(entry) => Some(string_display_width(entry.label.as_str())),
+                ActionDisplayLine::Ellipsis => None,
+            })
+            .max()
+            .unwrap_or(0);
+
+        if action_display.is_empty() {
+            for wrapped in wrap_card_lines(
                 "No browser actions yet",
                 body_width,
-                style,
-                secondary_text_style(style),
-            ));
+                indent_cols,
+                right_padding,
+            ) {
+                rows.push(self.body_text_row(
+                    wrapped,
+                    body_width,
+                    style,
+                    secondary_text_style(style),
+                    indent_cols,
+                    right_padding,
+                ));
+            }
+        } else {
+            for line in action_display {
+                match line {
+                    ActionDisplayLine::Entry(entry) => {
+                        let entry_rows = self.render_action_entry_rows(
+                            &entry,
+                            body_width,
+                            style,
+                            indent_cols,
+                            right_padding,
+                            label_width,
+                        );
+                        rows.extend(entry_rows);
+                    }
+                    ActionDisplayLine::Ellipsis => {
+                        rows.push(self.body_text_row(
+                            "⋮",
+                            body_width,
+                            style,
+                            primary_text_style(style),
+                            indent_cols,
+                            right_padding,
+                        ));
+                    }
+                }
+            }
         }
 
-        if let Some(console) = self.console_row(body_width, style) {
-            content_rows.push(self.blank_border_row(body_width, style));
-            content_rows.push(console);
-        }
-
-        if let Some(screenshot) = self.screenshot_row(body_width, style) {
-            content_rows.push(self.blank_border_row(body_width, style));
-            content_rows.push(screenshot);
-        }
-
-        rows.extend(content_rows);
-        if !rows
-            .last()
-            .map(|row| row.segments.iter().all(|segment| segment.text.is_empty()))
-            .unwrap_or(false)
-        {
+        let console_rows = self.console_rows(body_width, style, indent_cols, right_padding);
+        if !console_rows.is_empty() {
             rows.push(self.blank_border_row(body_width, style));
+            rows.extend(console_rows);
         }
+
+        if let Some(layout) = screenshot_layout.as_mut() {
+            layout.start_row = content_start;
+            let existing = rows.len().saturating_sub(content_start);
+            if existing < layout.height_rows {
+                let missing = layout.height_rows - existing;
+                for _ in 0..missing {
+                    rows.push(self.body_text_row(
+                        "",
+                        body_width,
+                        style,
+                        Style::default(),
+                        indent_cols,
+                        right_padding,
+                    ));
+                }
+            }
+        }
+
+        rows.push(self.blank_border_row(body_width, style));
         rows.push(self.bottom_border_row(body_width, style));
 
-        rows
+        (rows, screenshot_layout)
     }
 
-    fn actions_compact_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
-        self
-            .actions
-            .iter()
-            .rev()
-            .take(ACTION_TAIL)
-            .rev()
-            .enumerate()
-            .map(|(idx, action)| {
-                let summary = format!(
-                    "#{} {}",
-                    idx + 1,
-                    format_action_summary(action)
-                );
-                self.body_text_row(summary, body_width, style, primary_text_style(style))
-            })
-            .collect()
-    }
-
-    fn console_row(&self, body_width: usize, style: &CardStyle) -> Option<CardRow> {
-        if self.console_messages.is_empty() {
-            return None;
-        }
-        let last = self.console_messages.last()?.clone();
+    fn console_rows(
+        &self,
+        body_width: usize,
+        style: &CardStyle,
+        indent_cols: usize,
+        right_padding: usize,
+    ) -> Vec<CardRow> {
+        let last = match self.console_messages.last() {
+            Some(value) => value.clone(),
+            None => return Vec::new(),
+        };
         let style_color = if last.contains('⚠') {
             Style::default().fg(colors::warning())
         } else {
             secondary_text_style(style)
         };
         let text = format!("Console: {}", last);
-        Some(self.body_text_row(text, body_width, style, style_color))
+        wrap_card_lines(text.as_str(), body_width, indent_cols, right_padding)
+            .into_iter()
+            .map(|wrapped| {
+                self.body_text_row(
+                    wrapped,
+                    body_width,
+                    style,
+                    style_color,
+                    indent_cols,
+                    right_padding,
+                )
+            })
+            .collect()
     }
 
-    fn screenshot_row(&self, body_width: usize, style: &CardStyle) -> Option<CardRow> {
-        let path = self.screenshot_path.as_ref()?;
-        let label = format!("Screenshot: {}", path);
-        Some(self.body_text_row(
-            label,
-            body_width,
-            style,
-            secondary_text_style(style),
-        ))
-    }
-
-    fn actions_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
-        const MIN_TABLE_WIDTH: usize = 56;
-        if body_width < MIN_TABLE_WIDTH {
-            return self.actions_compact_rows(body_width, style);
+    fn render_action_entry_rows(
+        &self,
+        entry: &ActionEntry,
+        body_width: usize,
+        style: &CardStyle,
+        indent_cols: usize,
+        right_padding: usize,
+        label_width: usize,
+    ) -> Vec<CardRow> {
+        if body_width == 0 {
+            return Vec::new();
         }
-
-        let mut entries = Vec::new();
-        for (idx, action) in self.actions.iter().enumerate() {
-            entries.push(BrowserTableEntry::from(idx, action));
-        }
-        if entries.is_empty() {
+        let indent = indent_cols.min(body_width.saturating_sub(1));
+        let available = body_width.saturating_sub(indent);
+        if available == 0 {
             return Vec::new();
         }
 
-        let widths = BrowserTableWidths::compute(body_width, &entries);
-        let mut rows = Vec::new();
-        rows.push(CardRow::new(
-            BORDER_BODY.to_string(),
-            Self::accent_style(style),
-            widths.render_header(style),
-            None,
-        ));
+        let base_available = available.saturating_sub(right_padding);
+        if base_available == 0 {
+            return Vec::new();
+        }
 
-        for entry in &entries {
-            rows.push(CardRow::new(
-                BORDER_BODY.to_string(),
-                Self::accent_style(style),
-                widths.render_row(entry, style),
-                None,
+        let max_label_width = base_available.saturating_sub(ACTION_LABEL_GAP + 1);
+        if max_label_width == 0 {
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding);
+        }
+
+        let effective_label_width = label_width.min(max_label_width);
+        let detail_width = base_available
+            .saturating_sub(effective_label_width + ACTION_LABEL_GAP);
+        if detail_width == 0 {
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding);
+        }
+
+        let label_full_width = string_display_width(entry.label.as_str());
+        if effective_label_width < label_full_width {
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding);
+        }
+
+        let label_display = entry.label.clone();
+        let label_padding = effective_label_width.saturating_sub(label_full_width);
+        let gap = " ".repeat(ACTION_LABEL_GAP);
+
+        let mut lines = wrap_line_to_width(entry.detail.as_str(), detail_width);
+        if lines.is_empty() {
+            lines.push(String::new());
+        }
+
+        let label_column = format!("{}{}", label_display, " ".repeat(label_padding));
+        let mut rows = Vec::new();
+        let label_style = secondary_text_style(style);
+        let detail_style = primary_text_style(style);
+
+        let indent_string = if indent > 0 {
+            Some(" ".repeat(indent))
+        } else {
+            None
+        };
+
+        if let Some(first) = lines.first() {
+            rows.push(self.build_action_row(
+                body_width,
+                style,
+                indent_string.as_deref().unwrap_or(""),
+                &label_column,
+                &gap,
+                first,
+                indent,
+                effective_label_width,
+                right_padding,
+                label_style,
+                detail_style,
+            ));
+        }
+
+        let continuation_label = " ".repeat(effective_label_width);
+        for detail_line in lines.iter().skip(1) {
+            rows.push(self.build_action_row(
+                body_width,
+                style,
+                indent_string.as_deref().unwrap_or(""),
+                &continuation_label,
+                &gap,
+                detail_line,
+                indent,
+                effective_label_width,
+                right_padding,
+                label_style,
+                detail_style,
             ));
         }
 
         rows
     }
 
+    fn build_action_row(
+        &self,
+        body_width: usize,
+        style: &CardStyle,
+        indent: &str,
+        label: &str,
+        gap: &str,
+        detail: &str,
+        indent_cols: usize,
+        label_width: usize,
+        right_padding: usize,
+        label_style: Style,
+        detail_style: Style,
+    ) -> CardRow {
+        let mut segments = Vec::new();
+        let mut consumed = 0usize;
+        if !indent.is_empty() {
+            segments.push(CardSegment::new(indent.to_string(), Style::default()));
+            consumed += indent_cols;
+        }
+
+        if !label.is_empty() {
+            segments.push(CardSegment::new(label.to_string(), label_style));
+            consumed += label_width;
+        }
+
+        if !gap.is_empty() {
+            segments.push(CardSegment::new(gap.to_string(), Style::default()));
+            consumed += ACTION_LABEL_GAP;
+        }
+
+        segments.push(CardSegment::new(detail.to_string(), detail_style));
+        consumed += string_display_width(detail);
+
+        let available = body_width.saturating_sub(consumed);
+        if available > 0 {
+            let pad = available.min(right_padding);
+            if pad > 0 {
+                segments.push(CardSegment::new(" ".repeat(pad), Style::default()));
+            }
+        }
+
+        CardRow::new(BORDER_BODY.to_string(), Self::accent_style(style), segments, None)
+    }
+
+    fn render_fallback_entry(
+        &self,
+        entry: &ActionEntry,
+        body_width: usize,
+        style: &CardStyle,
+        indent_cols: usize,
+        right_padding: usize,
+    ) -> Vec<CardRow> {
+        let combined = if entry.detail.is_empty() {
+            entry.label.clone()
+        } else {
+            format!("{} {}", entry.label.trim(), entry.detail.trim())
+        };
+        wrap_card_lines(combined.trim(), body_width, indent_cols, right_padding)
+            .into_iter()
+            .map(|wrapped| {
+                self.body_text_row(
+                    wrapped,
+                    body_width,
+                    style,
+                    primary_text_style(style),
+                    indent_cols,
+                    right_padding,
+                )
+            })
+            .collect()
+    }
+
+    fn formatted_action_display(&self) -> Vec<ActionDisplayLine> {
+        let mut entries: Vec<ActionEntry> = Vec::new();
+        let has_actions = !self.actions.is_empty();
+        if !has_actions {
+            if let Some(url) = self.url.as_ref() {
+                entries.push(ActionEntry {
+                    label: "Opened".to_string(),
+                    detail: url.clone(),
+                });
+            }
+        }
+
+        entries.extend(self.actions.iter().map(format_action_entry));
+
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        if entries.len() > ACTION_DISPLAY_HEAD + ACTION_DISPLAY_TAIL {
+            let mut display: Vec<ActionDisplayLine> = Vec::new();
+            for entry in entries.iter().take(ACTION_DISPLAY_HEAD) {
+                display.push(ActionDisplayLine::Entry(entry.clone()));
+            }
+            display.push(ActionDisplayLine::Ellipsis);
+            let tail = entries
+                .iter()
+                .rev()
+                .take(ACTION_DISPLAY_TAIL)
+                .cloned()
+                .collect::<Vec<_>>();
+            for entry in tail.into_iter().rev() {
+                display.push(ActionDisplayLine::Entry(entry));
+            }
+            display
+        } else {
+            entries
+                .into_iter()
+                .map(ActionDisplayLine::Entry)
+                .collect()
+        }
+    }
+
+    fn compute_screenshot_layout(&self, body_width: usize) -> Option<ScreenshotLayout> {
+        if self.screenshot_path.is_none() {
+            return None;
+        }
+
+        if body_width
+            < SCREENSHOT_LEFT_PAD + SCREENSHOT_MIN_WIDTH + SCREENSHOT_GAP + MIN_TEXT_WIDTH + TEXT_RIGHT_PADDING
+        {
+            return None;
+        }
+
+        let max_screenshot = body_width
+            .saturating_sub(SCREENSHOT_LEFT_PAD + MIN_TEXT_WIDTH + SCREENSHOT_GAP + TEXT_RIGHT_PADDING);
+        if max_screenshot < SCREENSHOT_MIN_WIDTH {
+            return None;
+        }
+
+        let mut screenshot_cols = max_screenshot;
+        if screenshot_cols > SCREENSHOT_MAX_WIDTH {
+            screenshot_cols = SCREENSHOT_MAX_WIDTH;
+        }
+        if screenshot_cols < SCREENSHOT_MIN_WIDTH {
+            screenshot_cols = SCREENSHOT_MIN_WIDTH;
+        }
+
+        let rows = self.compute_screenshot_rows(screenshot_cols)?;
+        Some(ScreenshotLayout {
+            start_row: 0,
+            height_rows: rows,
+            width_cols: screenshot_cols,
+            indent_cols: SCREENSHOT_LEFT_PAD + screenshot_cols + SCREENSHOT_GAP,
+        })
+    }
+
+    fn ensure_picker(&self) -> Picker {
+        let mut picker_ref = self.cached_picker.borrow_mut();
+        if picker_ref.is_none() {
+            *picker_ref = Some(Picker::from_fontsize((8, 16)));
+        }
+        picker_ref.as_ref().unwrap().clone()
+    }
+
+fn compute_screenshot_rows(&self, screenshot_cols: usize) -> Option<usize> {
+        if screenshot_cols == 0 {
+            return None;
+        }
+        let path = Path::new(self.screenshot_path.as_ref()?);
+
+        let picker = self.ensure_picker();
+        let (cell_w, cell_h) = picker.font_size();
+        if cell_w == 0 || cell_h == 0 {
+            return Some(MIN_SCREENSHOT_ROWS);
+        }
+
+        let (img_w, img_h) = match image::image_dimensions(path) {
+            Ok(dim) if dim.0 > 0 && dim.1 > 0 => dim,
+            _ => return Some(MIN_SCREENSHOT_ROWS),
+        };
+
+        let cols = screenshot_cols as u32;
+        if cols == 0 {
+            return None;
+        }
+
+        let cw = cell_w as u32;
+        let ch = cell_h as u32;
+        let img_w = img_w as u32;
+        let img_h = img_h as u32;
+
+        let rows_by_w = (cols * cw * img_h) as f64 / (img_w * ch) as f64;
+        let rows = rows_by_w.ceil().max(1.0) as usize;
+        Some(rows.clamp(MIN_SCREENSHOT_ROWS, MAX_SCREENSHOT_ROWS))
+    }
+
     fn build_plain_summary(&self) -> Vec<String> {
         let mut lines = Vec::new();
         let status = if self.completed { "done" } else { "running" };
-        lines.push(format!(
-            "Browser Session: {} [{}]",
-            self.display_label(), status
-        ));
+        lines.push(format!("Browser Session: {} [{}]", self.display_label(), status));
+        if let Some(url) = &self.url {
+            lines.push(format!("Opened: {}", url));
+        }
         if let Some(code) = &self.status_code {
             lines.push(format!("Status: {}", code));
         }
-        lines.push(format!("Actions: {}", self.actions.len()));
-        if let Some(last) = self.actions.last() {
-            lines.push(format!("Last action: {}", format_action_summary(last)));
+        for action in self
+            .actions
+            .iter()
+            .rev()
+            .take(3)
+            .rev()
+        {
+            lines.push(format!("Action: {}", format_action_line(action)));
         }
         if let Some(path) = &self.screenshot_path {
             lines.push(format!("Screenshot: {}", path));
         }
         lines
-    }
-}
-
-struct BrowserTableEntry {
-    index: usize,
-    action: String,
-    target: String,
-    value: String,
-    outcome: String,
-    duration: String,
-}
-
-impl BrowserTableEntry {
-    fn from(index: usize, action: &BrowserAction) -> Self {
-        Self {
-            index: index + 1,
-            action: action.action.clone(),
-            target: action
-                .target
-                .clone()
-                .unwrap_or_else(|| "—".to_string()),
-            value: action
-                .value
-                .clone()
-                .map(|v| format!("\"{}\"", v))
-                .unwrap_or_else(|| "—".to_string()),
-            outcome: action
-                .outcome
-                .clone()
-                .unwrap_or_else(|| "—".to_string()),
-            duration: format_duration_seconds(action.duration),
-        }
-    }
-}
-
-struct BrowserTableWidths {
-    widths: [usize; BrowserTableWidths::COLUMN_COUNT],
-}
-
-impl BrowserTableWidths {
-    const COLUMN_COUNT: usize = 6;
-    const MIN_WIDTHS: [usize; BrowserTableWidths::COLUMN_COUNT] = [2, 10, 12, 10, 12, 5];
-
-    fn headers() -> [&'static str; BrowserTableWidths::COLUMN_COUNT] {
-        ["#", "ACTION", "TARGET", "VALUE", "RESULT", "t"]
-    }
-
-    fn compute(body_width: usize, entries: &[BrowserTableEntry]) -> Self {
-        let mut widths = Self::MIN_WIDTHS;
-
-        for (idx, header) in Self::headers().iter().enumerate() {
-            widths[idx] = widths[idx].max(string_width(header));
-        }
-
-        for entry in entries {
-            widths[0] = widths[0].max(string_width(entry.index.to_string().as_str()));
-            widths[1] = widths[1].max(string_width(entry.action.as_str()));
-            widths[2] = widths[2].max(string_width(entry.target.as_str()));
-            widths[3] = widths[3].max(string_width(entry.value.as_str()));
-            widths[4] = widths[4].max(string_width(entry.outcome.as_str()));
-            widths[5] = widths[5].max(string_width(entry.duration.as_str()));
-        }
-
-        let spaces = Self::COLUMN_COUNT.saturating_sub(1);
-        let mut total = widths.iter().sum::<usize>() + spaces;
-        let mut columns = widths;
-
-        while total > body_width {
-            let mut reduced = false;
-            for &idx in &[4usize, 2usize, 3usize, 1usize] {
-                if columns[idx] > Self::MIN_WIDTHS[idx] {
-                    columns[idx] -= 1;
-                    total -= 1;
-                    reduced = true;
-                    if total <= body_width {
-                        break;
-                    }
-                }
-            }
-            if !reduced {
-                break;
-            }
-        }
-
-        if total < body_width {
-            let extra = body_width - total;
-            columns[1] += extra;
-        }
-
-        Self { widths: columns }
-    }
-
-    fn render_header(&self, style: &CardStyle) -> Vec<CardSegment> {
-        let mut segments = Vec::new();
-        let header_style = Style::default()
-            .fg(style.accent_fg)
-            .add_modifier(Modifier::BOLD);
-        for (idx, label) in Self::headers().iter().enumerate() {
-            let text = format_cell(label, self.widths[idx], ColumnAlign::Left);
-            segments.push(CardSegment::new(text, header_style));
-            if idx + 1 != Self::COLUMN_COUNT {
-                segments.push(CardSegment::new(" ".to_string(), Style::default()));
-            }
-        }
-        segments
-    }
-
-    fn render_row(&self, entry: &BrowserTableEntry, style: &CardStyle) -> Vec<CardSegment> {
-        let mut segments = Vec::new();
-        for idx in 0..Self::COLUMN_COUNT {
-            let (text, column_style, align) = match idx {
-                0 => (
-                    entry.index.to_string(),
-                    secondary_text_style(style),
-                    ColumnAlign::Right,
-                ),
-                1 => (
-                    entry.action.clone(),
-                    primary_text_style(style),
-                    ColumnAlign::Left,
-                ),
-                2 => (
-                    entry.target.clone(),
-                    secondary_text_style(style),
-                    ColumnAlign::Left,
-                ),
-                3 => (
-                    entry.value.clone(),
-                    secondary_text_style(style),
-                    ColumnAlign::Left,
-                ),
-                4 => (
-                    entry.outcome.clone(),
-                    secondary_text_style(style),
-                    ColumnAlign::Left,
-                ),
-                5 => (
-                    entry.duration.clone(),
-                    secondary_text_style(style),
-                    ColumnAlign::Right,
-                ),
-                _ => continue,
-            };
-            let text = format_cell(&text, self.widths[idx], align);
-            segments.push(CardSegment::new(text, column_style));
-            if idx + 1 != Self::COLUMN_COUNT {
-                segments.push(CardSegment::new(" ".to_string(), Style::default()));
-            }
-        }
-        segments
     }
 }
 
@@ -544,7 +815,7 @@ impl HistoryCell for BrowserSessionCell {
 
     fn desired_height(&self, width: u16) -> u16 {
         let style = browser_card_style();
-        let rows = self.build_card_rows(width, &style);
+        let (rows, _) = self.build_card_rows(width, &style);
         rows.len().max(1) as u16
     }
 
@@ -559,7 +830,7 @@ impl HistoryCell for BrowserSessionCell {
 
         let style = browser_card_style();
         fill_card_background(buf, area, &style);
-        let rows = self.build_card_rows(area.width, &style);
+        let (rows, screenshot_meta) = self.build_card_rows(area.width, &style);
         let lines = rows_to_lines(&rows, &style, area.width);
         let text = Text::from(lines);
 
@@ -567,7 +838,280 @@ impl HistoryCell for BrowserSessionCell {
             .wrap(Wrap { trim: false })
             .scroll((skip_rows, 0))
             .render(area, buf);
+
+        if let Some(layout) = screenshot_meta.as_ref() {
+            if let Some(path) = self.screenshot_path.as_ref() {
+                self.render_screenshot_preview(area, buf, skip_rows, layout, path);
+            }
+        }
     }
+}
+
+impl BrowserSessionCell {
+    fn render_screenshot_preview(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        skip_rows: u16,
+        layout: &ScreenshotLayout,
+        path_str: &str,
+    ) {
+        let accent_width = CARD_ACCENT_WIDTH.min(area.width as usize) as u16;
+        if accent_width >= area.width {
+            return;
+        }
+
+        let viewport_top = skip_rows as usize;
+        let viewport_bottom = viewport_top + area.height as usize;
+        let shot_top = layout.start_row;
+        let shot_bottom = layout.start_row + layout.height_rows;
+
+        if shot_bottom <= viewport_top || shot_top >= viewport_bottom {
+            return;
+        }
+
+        let visible_top = shot_top.max(viewport_top);
+        let visible_bottom = shot_bottom.min(viewport_bottom);
+        if visible_bottom <= visible_top {
+            return;
+        }
+
+        let body_width = area.width.saturating_sub(accent_width);
+        if body_width == 0 {
+            return;
+        }
+
+        let left_pad = SCREENSHOT_LEFT_PAD.min(body_width as usize) as u16;
+        if body_width <= left_pad {
+            return;
+        }
+
+        let usable_width = body_width.saturating_sub(left_pad);
+        let screenshot_width = layout.width_cols.min(usable_width as usize) as u16;
+        if screenshot_width == 0 {
+            return;
+        }
+
+        let path = Path::new(path_str);
+        if !path.exists() {
+            let placeholder_area = Rect {
+                x: area.x + accent_width + left_pad,
+                y: area.y,
+                width: screenshot_width,
+                height: layout.height_rows.min(area.height as usize) as u16,
+            };
+            self.render_screenshot_placeholder(path, placeholder_area, buf);
+            return;
+        }
+
+        let full_height = layout.height_rows as u16;
+        if full_height == 0 {
+            return;
+        }
+
+        let offscreen = match self.render_screenshot_buffer(path, screenshot_width, full_height) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                let placeholder_area = Rect {
+                    x: area.x + accent_width + left_pad,
+                    y: area.y,
+                    width: screenshot_width,
+                    height: layout.height_rows.min(area.height as usize) as u16,
+                };
+                self.render_screenshot_placeholder(path, placeholder_area, buf);
+                return;
+            }
+        };
+
+        let src_start_row = (visible_top - shot_top) as u16;
+        let rows_to_copy = (visible_bottom - visible_top) as u16;
+        if rows_to_copy == 0 {
+            return;
+        }
+
+        let dest_x = area.x + accent_width + left_pad;
+        let dest_y = area.y + (visible_top - viewport_top) as u16;
+        let area_bottom = area.y + area.height;
+        let area_right = area.x + area.width;
+
+        for row in 0..rows_to_copy {
+            let dest_row = dest_y + row;
+            if dest_row >= area_bottom {
+                break;
+            }
+            let src_row = src_start_row + row;
+            for col in 0..screenshot_width {
+                let dest_col = dest_x + col;
+                if dest_col >= area_right {
+                    break;
+                }
+                let Some(src_cell) = offscreen.cell((col, src_row)) else { continue; };
+                if let Some(dest_cell) = buf.cell_mut((dest_col, dest_row)) {
+                    *dest_cell = src_cell.clone();
+                }
+            }
+        }
+    }
+
+    fn render_screenshot_placeholder(&self, path: &Path, area: Rect, buf: &mut Buffer) {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::widgets::{Block, Borders};
+
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("screenshot");
+        let placeholder_text = format!("Screenshot:\n{}", filename);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(colors::info()))
+            .title("Browser");
+        let inner = block.inner(area);
+        block.render(area, buf);
+        Paragraph::new(placeholder_text)
+            .style(
+                Style::default()
+                    .fg(colors::text_dim())
+                    .add_modifier(Modifier::ITALIC),
+            )
+            .wrap(Wrap { trim: true })
+            .render(inner, buf);
+    }
+
+    fn render_screenshot_buffer(&self, path: &Path, width: u16, height: u16) -> Result<Buffer, ()> {
+        if width == 0 || height == 0 {
+            return Err(());
+        }
+
+        let picker = self.ensure_picker();
+        let target = Rect::new(0, 0, width, height);
+        self.ensure_protocol(path, target, &picker)?;
+
+        let mut buffer = Buffer::empty(target);
+        if let Some((_, _, protocol)) = self.cached_image_protocol.borrow_mut().as_mut() {
+            let image = Image::new(protocol);
+            image.render(target, &mut buffer);
+            Ok(buffer)
+        } else {
+            Err(())
+        }
+    }
+
+    fn ensure_protocol(&self, path: &Path, target: Rect, picker: &Picker) -> Result<(), ()> {
+        let mut cache = self.cached_image_protocol.borrow_mut();
+        let needs_recreate = match cache.as_ref() {
+            Some((cached_path, cached_rect, _)) => cached_path != path || *cached_rect != target,
+            None => true,
+        };
+
+        if needs_recreate {
+            let dyn_img = match ImageReader::open(path) {
+                Ok(reader) => reader.decode().map_err(|_| ())?,
+                Err(_) => return Err(()),
+            };
+            let protocol = picker
+                .new_protocol(dyn_img, target, Resize::Fit(Some(FilterType::Lanczos3)))
+                .map_err(|_| ())?;
+            *cache = Some((path.to_path_buf(), target, protocol));
+        }
+
+        Ok(())
+    }
+
+}
+
+fn wrap_card_lines(text: &str, body_width: usize, indent_cols: usize, right_padding: usize) -> Vec<String> {
+    let available = body_width
+        .saturating_sub(indent_cols)
+        .saturating_sub(right_padding);
+    if available == 0 {
+        return vec![String::new()];
+    }
+    wrap_line_to_width(text, available)
+}
+
+fn wrap_line_to_width(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+    if text.trim().is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+
+    for word in text.split_whitespace() {
+        let mut word_parts = if string_display_width(word) > width {
+            split_long_card_word(word, width)
+        } else {
+            vec![word.to_string()]
+        };
+
+        for part in word_parts.drain(..) {
+            let part_width = string_display_width(part.as_str());
+            if current.is_empty() {
+                current.push_str(part.as_str());
+                current_width = part_width;
+            } else if current_width + 1 + part_width > width {
+                lines.push(current);
+                current = part.clone();
+                current_width = part_width;
+            } else {
+                current.push(' ');
+                current.push_str(part.as_str());
+                current_width += 1 + part_width;
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn split_long_card_word(word: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+
+    for ch in word.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+        if current_width + ch_width > width && !current.is_empty() {
+            parts.push(current);
+            current = String::new();
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += ch_width;
+    }
+
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    if parts.is_empty() {
+        parts.push(String::new());
+    }
+    parts
+}
+
+fn string_display_width(text: &str) -> usize {
+    text
+        .chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
 }
 
 fn format_action_summary(action: &BrowserAction) -> String {
@@ -591,16 +1135,251 @@ fn format_action_summary(action: &BrowserAction) -> String {
     }
 }
 
+fn format_action_entry(action: &BrowserAction) -> ActionEntry {
+    let action_lower = action.action.to_ascii_lowercase();
+    match action_lower.as_str() {
+        "click" | "mouse_click" => {
+            let target = action.target.as_deref().unwrap_or("").trim();
+            let detail = if target.starts_with('(') && target.ends_with(')') {
+                format!("at {}", target)
+            } else if !target.is_empty() {
+                target.to_string()
+            } else if let Some(value) = action.value.as_deref() {
+                value.trim().to_string()
+            } else if let Some(outcome) = action.outcome.as_deref() {
+                outcome.trim().to_string()
+            } else {
+                String::new()
+            };
+            ActionEntry {
+                label: "Clicked".to_string(),
+                detail,
+            }
+        }
+        "press_key" | "key" | "press" => {
+            let key_raw = action
+                .value
+                .as_deref()
+                .or(action.outcome.as_deref())
+                .or(action.target.as_deref())
+                .unwrap_or("?")
+                .trim();
+            let key = sanitize_pressed_detail(key_raw);
+            ActionEntry {
+                label: "Pressed".to_string(),
+                detail: key,
+            }
+        }
+        "type" | "input" | "enter_text" | "fill" | "insert_text" => {
+            let typed = action
+                .value
+                .as_deref()
+                .or(action.outcome.as_deref())
+                .unwrap_or("?")
+                .trim()
+                .to_string();
+            ActionEntry {
+                label: "Typed".to_string(),
+                detail: typed,
+            }
+        }
+        "navigate" | "open" | "nav" => {
+            let dest = action
+                .target
+                .as_deref()
+                .map(|value| sanitize_nav_text(value))
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    action
+                        .value
+                        .as_deref()
+                        .map(|value| sanitize_nav_text(value))
+                        .filter(|s| !s.is_empty())
+                })
+                .or_else(|| {
+                    action
+                        .outcome
+                        .as_deref()
+                        .map(|value| sanitize_nav_text(value))
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_else(|| "".to_string());
+            ActionEntry {
+                label: "Opened".to_string(),
+                detail: dest,
+            }
+        }
+        other if other.starts_with("scroll") => {
+            let detail = action
+                .value
+                .as_deref()
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| v.trim().to_string())
+                .or_else(|| {
+                    action
+                        .outcome
+                        .as_deref()
+                        .filter(|o| !o.trim().is_empty())
+                        .map(|o| o.trim().to_string())
+                })
+                .or_else(|| {
+                    action
+                        .target
+                        .as_deref()
+                        .filter(|t| !t.trim().is_empty())
+                        .map(|t| t.trim().to_string())
+                })
+                .unwrap_or_else(|| {
+                    format_action_summary(action)
+                        .strip_prefix(other)
+                        .map(|suffix| suffix.trim_start_matches(|c| c == ' ' || c == ':' || c == '-'))
+                        .filter(|suffix| !suffix.is_empty())
+                        .map(|suffix| suffix.to_string())
+                        .unwrap_or_else(|| format_action_summary(action))
+                });
+            ActionEntry {
+                label: "Scrolled".to_string(),
+                detail,
+            }
+        }
+        _ => {
+            let summary = format_action_summary(action);
+            let label = titleize_action(action.action.as_str());
+            let trimmed = summary
+                .strip_prefix(action.action.as_str())
+                .map(|suffix| suffix.trim_start_matches(|c| c == ' ' || c == ':' || c == '-'))
+                .filter(|suffix| !suffix.is_empty())
+                .map(|suffix| suffix.to_string())
+                .unwrap_or_else(|| summary.clone());
+            ActionEntry {
+                label,
+                detail: trimmed,
+            }
+        }
+    }
+}
+
+fn titleize_action(raw: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    for segment in raw.split(['_', '-']).filter(|part| !part.is_empty()) {
+        let mut chars = segment.chars();
+        if let Some(first) = chars.next() {
+            let first_upper = first.to_uppercase().collect::<String>();
+            let rest = chars.as_str().to_ascii_lowercase();
+            words.push(format!("{}{}", first_upper, rest));
+        }
+    }
+    if words.is_empty() {
+        raw.to_string()
+    } else {
+        words.join(" ")
+    }
+}
+
+fn sanitize_pressed_detail(raw: &str) -> String {
+    let mut candidate = raw;
+    const PREFIXES: &[&str] = &[
+        "pressed key:",
+        "press key:",
+        "key pressed:",
+        "key:",
+    ];
+    for prefix in PREFIXES {
+        if let Some(rest) = strip_prefix_ignore_case(candidate, prefix) {
+            candidate = rest;
+            break;
+        }
+    }
+    let cleaned = candidate.trim();
+    if cleaned.is_empty() {
+        raw.trim().to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+fn sanitize_nav_text(raw: &str) -> String {
+    let mut candidate = raw;
+    const PREFIXES: &[&str] = &[
+        "browser opened to:",
+        "opened to:",
+        "navigated to",
+        "nav to:",
+        "opened:",
+    ];
+    for prefix in PREFIXES {
+        if let Some(rest) = strip_prefix_ignore_case(candidate, prefix) {
+            candidate = rest;
+            break;
+        }
+    }
+    let cleaned = candidate.trim().trim_start_matches(':').trim();
+    cleaned.to_string()
+}
+
+fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let text_bytes = text.as_bytes();
+    let prefix_bytes = prefix.as_bytes();
+    if text_bytes.len() < prefix_bytes.len() {
+        return None;
+    }
+    for (idx, prefix_byte) in prefix_bytes.iter().enumerate() {
+        if text_bytes[idx].to_ascii_lowercase() != prefix_byte.to_ascii_lowercase() {
+            return None;
+        }
+    }
+    Some(text.get(prefix.len()..)?.trim_start())
+}
+
+fn format_action_line(action: &BrowserAction) -> String {
+    let action_lower = action.action.to_ascii_lowercase();
+    let target = action.target.as_deref().unwrap_or("?");
+    let value = action.value.as_deref();
+    let outcome = action.outcome.as_deref();
+
+    match action_lower.as_str() {
+        "click" | "mouse_click" => {
+            let display = target.trim();
+            if display.starts_with('(') {
+                format!("Clicked at {}", display)
+            } else if !display.is_empty() {
+                format!("Clicked {}", display)
+            } else {
+                "Clicked".to_string()
+            }
+        }
+        "press_key" | "key" | "press" => {
+            let key = value.or(outcome).unwrap_or("?");
+            format!("Pressed key: {}", key)
+        }
+        "type" | "input" | "enter_text" | "fill" | "insert_text" => {
+            let typed = value.or(outcome).unwrap_or("?");
+            format!("Typed: {}", typed)
+        }
+        "navigate" | "open" => {
+            let dest = value
+                .or(action.target.as_deref())
+                .or(outcome)
+                .unwrap_or("?");
+            format!("Navigated to {}", dest)
+        }
+        other => {
+            let summary = format_action_summary(action);
+            if summary.is_empty() {
+                other.to_string()
+            } else {
+                summary
+            }
+        }
+    }
+}
+
 fn outcome_for_display(outcome: &str, value: &str) -> String {
     if outcome == "value set" {
         value.to_string()
     } else {
         outcome.to_string()
     }
-}
-
-fn format_duration_seconds(duration: Duration) -> String {
-    format!("{:.1}s", duration.as_secs_f32())
 }
 
 fn extract_status_code(outcome: &str) -> Option<String> {
@@ -619,84 +1398,6 @@ fn extract_status_code(outcome: &str) -> Option<String> {
     }
 }
 
-fn string_width(text: &str) -> usize {
-    text
-        .chars()
-        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
-        .sum()
-}
-
-fn format_cell(text: &str, width: usize, align: ColumnAlign) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let shortened = shorten_with_ellipsis(text, width);
-    let current_width = string_width(shortened.as_str());
-    match align {
-        ColumnAlign::Left => {
-            if current_width >= width {
-                shortened
-            } else {
-                let mut result = shortened;
-                result.push_str(&" ".repeat(width - current_width));
-                result
-            }
-        }
-        ColumnAlign::Right => {
-            if current_width >= width {
-                shortened
-            } else {
-                format!("{}{}", " ".repeat(width - current_width), shortened)
-            }
-        }
-    }
-}
-
-fn shorten_with_ellipsis(text: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    if string_width(text) <= width {
-        return text.to_string();
-    }
-    const ELLIPSIS: &str = "…";
-    let ellipsis_width = string_width(ELLIPSIS);
-    if width <= ellipsis_width {
-        return slice_to_width(text, width);
-    }
-    let mut result = String::new();
-    let mut used = 0;
-    for ch in text.chars() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
-        if used + ch_width > width - ellipsis_width {
-            break;
-        }
-        result.push(ch);
-        used += ch_width;
-    }
-    result.push_str(ELLIPSIS);
-    result
-}
-
-fn slice_to_width(text: &str, width: usize) -> String {
-    let mut result = String::new();
-    let mut used = 0;
-    for ch in text.chars() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
-        if used + ch_width > width {
-            break;
-        }
-        result.push(ch);
-        used += ch_width;
-    }
-    result
-}
-
-#[derive(Clone, Copy)]
-enum ColumnAlign {
-    Left,
-    Right,
-}
 
 impl crate::chatwidget::tool_cards::ToolCardCell for BrowserSessionCell {
     fn tool_card_key(&self) -> Option<&str> {
