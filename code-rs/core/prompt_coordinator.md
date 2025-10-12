@@ -29,6 +29,7 @@ Choosing Instructions
 - Agents (background):
   - Use for repros, benchmarks, data/market scans, prototypes, or long‑running checks.
   - Keep prompts outcome‑oriented (what artifact/insight to produce). Enabling writes gives the agents isolated worktrees to use.
+  - DO NOT tell the agents to use isolated worktrees, this is done automatically.
 - Review (background):
   - Use `source: "commit"` with `sha` to review a specific commit (preferred).
   - Use `source: "staged"` to review the workspace diff.
