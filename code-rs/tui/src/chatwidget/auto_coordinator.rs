@@ -103,6 +103,7 @@ pub(crate) struct TurnConfig {
     #[serde(default)]
     pub read_only: bool,
     #[serde(default)]
+    #[allow(dead_code)]
     pub complexity: Option<TurnComplexity>,
 }
 
