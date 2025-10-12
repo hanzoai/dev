@@ -96,8 +96,6 @@ use self::auto_coordinator::{
     TurnComplexity,
     TurnConfig,
     TurnDescriptor,
-    TurnMode,
-    ReviewTiming,
 };
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
@@ -190,7 +188,7 @@ fn history_cell_logging_enabled() -> bool {
         false
     })
 }
-use serde_json::Value as JsonValue;
+use serde_json::{self, Value as JsonValue};
 use tracing::info;
 // use image::GenericImageView;
 
@@ -261,6 +259,9 @@ use crate::app_event::{
     AutoContinueMode,
     AutoReviewCommit,
     AutoReviewCommitSource,
+    AutoTurnAgentsAction,
+    AutoTurnCliAction,
+    AutoTurnReviewAction,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -12262,12 +12263,10 @@ fi\n\
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
-        cli_context: Option<String>,
-        cli_prompt: Option<String>,
+        cli: Option<AutoTurnCliAction>,
+        agents: Vec<AutoTurnAgentsAction>,
+        review: Option<AutoTurnReviewAction>,
         transcript: Vec<code_protocol::models::ResponseItem>,
-        turn_descriptor: Option<TurnDescriptor>,
-        turn_config: Option<TurnConfig>,
-        review_commit: Option<crate::app_event::AutoReviewCommit>,
     ) {
         if !self.auto_state.active {
             return;
@@ -12286,6 +12285,11 @@ fi\n\
         self.auto_state.current_progress_current = progress_current.clone();
         self.auto_state.last_decision_progress_past = progress_past.clone();
         self.auto_state.last_decision_progress_current = progress_current.clone();
+        let cli_context = cli
+            .as_ref()
+            .and_then(|action| Self::normalize_progress_field(action.context.clone()));
+        let cli_prompt = cli.as_ref().map(|action| action.prompt.clone());
+
         self.auto_state.current_cli_context = cli_context.clone();
 
         let summary_text = Self::compose_progress_summary(&progress_current, &progress_past);
@@ -12301,51 +12305,15 @@ fi\n\
         self.auto_state.waiting_for_response = false;
         self.update_header_border_activation();
 
-        // Stash coordinator-provided hints for the upcoming turn
-        let review_descriptor = match (turn_descriptor, turn_config) {
-            (Some(descriptor), _) => {
-                self.pending_turn_descriptor = Some(descriptor.clone());
-                self.pending_auto_turn_config = Some(TurnConfig {
-                    read_only: descriptor.read_only,
-                    complexity: descriptor.complexity,
-                });
-                Some(descriptor)
-            }
-            (None, Some(cfg)) => {
-                let descriptor = TurnDescriptor::from_legacy(cfg.clone());
-                self.pending_turn_descriptor = Some(descriptor.clone());
-                self.pending_auto_turn_config = Some(cfg);
-                Some(descriptor)
-            }
-            (None, None) => {
-                self.pending_turn_descriptor = None;
-                self.pending_auto_turn_config = None;
-                None
-            }
-        };
-        let review_requested = review_descriptor
-            .as_ref()
-            .is_some_and(|descriptor| matches!(descriptor.mode, TurnMode::Review));
-        let prewrite_or_immediate_requested = review_descriptor
-            .as_ref()
-            .and_then(|descriptor| descriptor.review_strategy.as_ref())
-            .is_some_and(|strategy| {
-                matches!(strategy.timing, ReviewTiming::Immediate | ReviewTiming::PreWrite)
-            });
+        self.pending_turn_descriptor = None;
+        self.pending_auto_turn_config = None;
 
-        if matches!(status, AutoCoordinatorStatus::Continue)
-            && (review_requested || prewrite_or_immediate_requested)
-        {
-            match self.ensure_review_commit_available(review_commit.as_ref()) {
-                Ok(_) => {
-                    self.auto_state.current_cli_prompt = None;
-                    self.dispatch_review_turn(review_descriptor.as_ref(), review_commit.as_ref());
-                }
-                Err(err) => {
-                    self.reject_review_without_commit(err);
-                }
-            }
-            return;
+        if let Some(review_action) = review {
+            self.auto_trigger_review_action(review_action);
+        }
+
+        for agent_action in agents {
+            self.auto_launch_agents_action(agent_action);
         }
 
         match status {
@@ -12354,7 +12322,7 @@ fi\n\
                     self.auto_stop(Some("Coordinator response omitted a prompt.".to_string()));
                     return;
                 };
-                self.schedule_auto_cli_prompt(prompt_text.clone());
+                self.schedule_auto_cli_prompt(prompt_text);
             }
             AutoCoordinatorStatus::Success => {
                 let normalized = summary_text.trim();
@@ -13221,6 +13189,54 @@ fi\n\
             self.auto_resolve_state = None;
         }
         self.begin_review(prompt, hint, Some(preparation), review_metadata);
+    }
+
+    fn auto_trigger_review_action(&mut self, action: AutoTurnReviewAction) {
+        if !self.auto_state.review_enabled {
+            return;
+        }
+
+        let commit = action.commit;
+        if let Err(err) = self.ensure_review_commit_available(Some(&commit)) {
+            self.reject_review_without_commit(err);
+            return;
+        }
+
+        self.auto_state.current_cli_prompt = None;
+        self.dispatch_review_turn(None, Some(&commit));
+        self.auto_state.waiting_for_review = true;
+        self.update_header_border_activation();
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    fn auto_launch_agents_action(&mut self, action: AutoTurnAgentsAction) {
+        let AutoTurnAgentsAction { prompt, context, write } = action;
+
+        let mut create = serde_json::Map::new();
+        create.insert("prompt".to_string(), serde_json::Value::String(prompt.clone()));
+        create.insert("read_only".to_string(), serde_json::Value::Bool(!write));
+        if let Some(ctx) = context.clone() {
+            if !ctx.trim().is_empty() {
+                create.insert("context".to_string(), serde_json::Value::String(ctx.to_string()));
+            }
+        }
+
+        let mut outer = serde_json::Map::new();
+        outer.insert("action".to_string(), serde_json::Value::String("create".to_string()));
+        outer.insert("create".to_string(), serde_json::Value::Object(create));
+        let payload = serde_json::Value::Object(outer);
+        let command = format!("agent {}", payload);
+        self.submit_hidden_text_message_with_preface(command, String::new());
+
+        let mut notice = format!("Auto Drive: launching agents — {}", prompt);
+        if let Some(ctx) = context {
+            if !ctx.trim().is_empty() {
+                notice.push_str(&format!(" (context: {})", ctx));
+            }
+        }
+        self.push_background_tail(notice);
+        self.request_redraw();
     }
 
     fn auto_rebuild_live_ring(&mut self) {
@@ -19753,8 +19769,6 @@ mod tests {
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use crate::chatwidget::auto_coordinator::{
         AgentPreferences,
-        ReviewStrategy,
-        ReviewTiming,
         TurnMode,
     };
     use code_core::history::state::{
@@ -20115,6 +20129,44 @@ mod tests {
     }
 
     #[test]
+    fn auto_handle_decision_launches_cli_agents_and_review() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.review_enabled = true;
+
+        chat.auto_handle_decision(
+            AutoCoordinatorStatus::Continue,
+            Some("Finished setup".to_string()),
+            Some("Running unit tests".to_string()),
+            Some(AutoTurnCliAction {
+                prompt: "Run cargo test".to_string(),
+                context: Some("use --all-features".to_string()),
+            }),
+            vec![AutoTurnAgentsAction {
+                prompt: "Draft alternative fix".to_string(),
+                context: None,
+                write: false,
+            }],
+            Some(AutoTurnReviewAction {
+                commit: AutoReviewCommit {
+                    source: AutoReviewCommitSource::Staged,
+                    sha: None,
+                    summary: Some("Pre-merge checklist".to_string()),
+                },
+            }),
+            Vec::new(),
+        );
+
+        assert_eq!(
+            chat.auto_state.current_cli_prompt.as_deref(),
+            Some("Run cargo test")
+        );
+        assert!(chat.auto_state.waiting_for_review);
+    }
+
+    #[test]
     fn task_complete_triggers_review_when_waiting_flag_set() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -20190,427 +20242,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_turn_config_populates_descriptor() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-
-        let legacy = TurnConfig {
-            read_only: true,
-            complexity: Some(TurnComplexity::Low),
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            None,
-            Some(legacy.clone()),
-            None,
-        );
-
-        assert!(chat.pending_auto_turn_config.is_some());
-        assert!(chat.pending_turn_descriptor.is_some());
-
-        let descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
-        assert_eq!(descriptor.mode, TurnMode::SubAgentReadOnly);
-        assert_eq!(descriptor.read_only, true);
-        assert_eq!(descriptor.complexity, Some(TurnComplexity::Low));
-    }
-
-    #[test]
-    fn new_turn_descriptor_is_preserved() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::SubAgentWrite,
-            read_only: false,
-            complexity: Some(TurnComplexity::Medium),
-            agent_preferences: Some(AgentPreferences {
-                prefer_research: true,
-                prefer_planning: false,
-                requested_models: Some(vec!["claude".to_string()]),
-            }),
-            review_strategy: None,
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            test_review_commit(),
-        );
-
-        let stored_descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
-        assert_eq!(stored_descriptor.mode, TurnMode::SubAgentWrite);
-        assert_eq!(stored_descriptor.complexity, Some(TurnComplexity::Medium));
-
-        let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
-        assert_eq!(stored_config.read_only, descriptor.read_only);
-        assert_eq!(stored_config.complexity, descriptor.complexity);
-    }
-
-    #[test]
-    fn review_mode_descriptor_triggers_review_flow() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.config.tui.review_auto_resolve = false;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Review,
-            read_only: false,
-            complexity: Some(TurnComplexity::Low),
-            agent_preferences: None,
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::Immediate,
-                custom_prompt: Some("Review immediate".to_string()),
-                scope_hint: Some("workspace".to_string()),
-            }),
-        };
-
-        let review_commit = test_review_commit();
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            review_commit,
-        );
-
-        assert!(chat.auto_state.waiting_for_review);
-        assert!(!chat.auto_state.waiting_for_response);
-
-        let stored_descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
-        assert_eq!(stored_descriptor.mode, TurnMode::Review);
-        assert_eq!(
-            stored_descriptor.review_strategy.as_ref().unwrap().timing,
-            ReviewTiming::Immediate
-        );
-
-        let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
-        assert_eq!(stored_config.read_only, descriptor.read_only);
-        assert_eq!(stored_config.complexity, descriptor.complexity);
-    }
-
-    #[test]
-    fn review_mode_resume_occurs_after_review_exit() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.config.tui.review_auto_resolve = false;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Review,
-            read_only: false,
-            complexity: Some(TurnComplexity::Low),
-            agent_preferences: None,
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::Immediate,
-                custom_prompt: Some("Immediate review".to_string()),
-                scope_hint: Some("workspace".to_string()),
-            }),
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            test_review_commit(),
-        );
-
-        assert!(chat.auto_state.waiting_for_review);
-
-        assert!(chat.pending_turn_descriptor.is_some());
-
-        // Block resume via auto_resolve state
-        let blocking_review = review_output_with_finding();
-        chat.auto_resolve_state = Some(make_pending_fix_state(blocking_review.clone()));
-
-        chat.handle_code_event(Event {
-            id: "turn".to_string(),
-            event_seq: 0,
-            msg: EventMsg::ExitedReviewMode(Some(blocking_review.clone())),
-            order: None,
-        });
-
-        // Still waiting because auto_resolve blocks
-        assert!(chat.auto_state.waiting_for_review);
-        assert!(!chat.auto_state.waiting_for_response);
-
-        chat.auto_resolve_state = None;
-
-        chat.handle_code_event(Event {
-            id: "turn".to_string(),
-            event_seq: 1,
-            msg: EventMsg::ExitedReviewMode(Some(review_output_with_finding())),
-            order: None,
-        });
-
-        assert!(!chat.auto_state.waiting_for_review);
-    }
-
-    #[test]
-    fn immediate_review_strategy_triggers_review() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.config.tui.review_auto_resolve = false;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Normal,
-            read_only: false,
-            complexity: Some(TurnComplexity::Low),
-            agent_preferences: None,
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::Immediate,
-                custom_prompt: Some("Strategy review".to_string()),
-                scope_hint: Some("workspace".to_string()),
-            }),
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            test_review_commit(),
-        );
-
-        assert!(chat.auto_state.waiting_for_review);
-
-        let stored_descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
-        assert_eq!(stored_descriptor.mode, TurnMode::Normal);
-        assert_eq!(
-            stored_descriptor.review_strategy.as_ref().unwrap().timing,
-            ReviewTiming::Immediate
-        );
-
-        let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
-        assert_eq!(stored_config.read_only, descriptor.read_only);
-        assert_eq!(stored_config.complexity, descriptor.complexity);
-    }
-
-    #[test]
-    fn prewrite_review_strategy_triggers_review() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.config.tui.review_auto_resolve = false;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Normal,
-            read_only: false,
-            complexity: Some(TurnComplexity::Low),
-            agent_preferences: None,
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::PreWrite,
-                custom_prompt: Some("Strategy review".to_string()),
-                scope_hint: Some("workspace".to_string()),
-            }),
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            test_review_commit(),
-        );
-
-        assert!(chat.auto_state.waiting_for_review);
-
-        let stored_descriptor = chat.pending_turn_descriptor.as_ref().unwrap();
-        assert_eq!(stored_descriptor.mode, TurnMode::Normal);
-        assert_eq!(
-            stored_descriptor.review_strategy.as_ref().unwrap().timing,
-            ReviewTiming::PreWrite
-        );
-
-        let stored_config = chat.pending_auto_turn_config.as_ref().unwrap();
-        assert_eq!(stored_config.read_only, descriptor.read_only);
-        assert_eq!(stored_config.complexity, descriptor.complexity);
-    }
-
-    #[test]
-    fn review_task_complete_preserves_pending_config() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_state.review_enabled = true;
-        chat.config.tui.review_auto_resolve = false;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Normal,
-            read_only: false,
-            complexity: Some(TurnComplexity::Low),
-            agent_preferences: None,
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::PreWrite,
-                custom_prompt: Some("Strategy review".to_string()),
-                scope_hint: Some("workspace".to_string()),
-            }),
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            None,
-        );
-
-        assert!(chat.auto_state.waiting_for_review);
-
-        chat.handle_code_event(Event {
-            id: "review-turn".to_string(),
-            event_seq: 0,
-            msg: EventMsg::TaskStarted,
-            order: None,
-        });
-
-        chat.handle_code_event(Event {
-            id: "review-turn".to_string(),
-            event_seq: 1,
-            msg: EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: None,
-            }),
-            order: None,
-        });
-
-        assert!(chat.auto_state.waiting_for_review);
-        assert!(chat.pending_turn_descriptor.is_some());
-        assert!(chat.pending_auto_turn_config.is_some());
-    }
-
-    #[test]
-    fn post_turn_review_uses_descriptor_prompt_and_hint() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_state.review_enabled = true;
-        chat.config.tui.review_auto_resolve = true;
-
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Normal,
-            read_only: false,
-            complexity: Some(TurnComplexity::Low),
-            agent_preferences: None,
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::PostTurn,
-                custom_prompt: Some("Descriptor prompt".to_string()),
-                scope_hint: Some("Descriptor scope".to_string()),
-            }),
-        };
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Continue,
-            None,
-            None,
-            None,
-            Some("prompt".to_string()),
-            Vec::new(),
-            Some(descriptor.clone()),
-            Some(TurnConfig {
-                read_only: descriptor.read_only,
-                complexity: descriptor.complexity,
-            }),
-            None,
-        );
-
-        assert!(!chat.auto_state.waiting_for_review);
-
-        chat.handle_code_event(Event {
-            id: "turn".to_string(),
-            event_seq: 0,
-            msg: EventMsg::TaskStarted,
-            order: None,
-        });
-
-        chat.handle_code_event(Event {
-            id: "turn".to_string(),
-            event_seq: 1,
-            msg: EventMsg::TaskComplete(TaskCompleteEvent {
-                last_agent_message: None,
-            }),
-            order: None,
-        });
-
-        assert!(chat.auto_state.waiting_for_review);
-
-        let state = chat
-            .auto_resolve_state
-            .as_ref()
-            .expect("auto resolve state should be seeded");
-        assert_eq!(state.prompt, "Descriptor prompt");
-        assert_eq!(state.hint, "Descriptor scope");
-        assert_eq!(
-            state
-                .metadata
-                .as_ref()
-                .and_then(|meta| meta.scope.as_deref()),
-            Some("Descriptor scope")
-        );
-    }
-
     #[test]
     fn finalize_explore_updates_even_with_stale_index() {
         let mut harness = ChatWidgetHarness::new();
