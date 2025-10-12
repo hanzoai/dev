@@ -9046,15 +9046,16 @@ impl ChatWidget<'_> {
                     self.auto_resolve_on_task_complete(last_agent_message.clone());
                 }
                 // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
-                if !self.auto_state.waiting_for_review {
-                    if let Some(cfg) = self.pending_auto_turn_config.clone() {
-                        if self.auto_state.active
-                            && self.auto_state.review_enabled
-                            && !self.is_review_flow_active()
-                        {
-                            let descriptor = self.pending_turn_descriptor.clone();
-                            self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
-                        }
+                if let Some(cfg) = self.pending_auto_turn_config.clone() {
+                    // `waiting_for_review` may already be true here to pause Auto Drive until
+                    // the review pipeline kicks in, so always attempt to launch the post-turn
+                    // review when the coordinator provides a write turn.
+                    if self.auto_state.active
+                        && self.auto_state.review_enabled
+                        && !self.is_review_flow_active()
+                    {
+                        let descriptor = self.pending_turn_descriptor.clone();
+                        self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
                     }
                 }
                 // Defensive: mark any lingering agent state as complete so the spinner can quiesce
@@ -20111,6 +20112,81 @@ mod tests {
             !chat.auto_state.waiting_for_response,
             "skip should not resume coordinator when auto-resolve blocks"
         );
+    }
+
+    #[test]
+    fn task_complete_triggers_review_when_waiting_flag_set() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        let _stub_lock = AUTO_STUB_LOCK.lock().unwrap();
+
+        chat.auto_state.active = true;
+        chat.auto_state.review_enabled = true;
+        chat.auto_state.waiting_for_response = true;
+
+        let turn_config = TurnConfig {
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+        };
+        chat.pending_auto_turn_config = Some(turn_config.clone());
+        chat.pending_turn_descriptor = Some(TurnDescriptor {
+            mode: TurnMode::Normal,
+            read_only: false,
+            complexity: Some(TurnComplexity::Low),
+            agent_preferences: None,
+            review_strategy: None,
+        });
+
+        let base_id = "base-commit".to_string();
+        let final_id = "final-commit".to_string();
+
+        chat.auto_turn_review_state = Some(AutoTurnReviewState {
+            base_commit: Some(GhostCommit::new(base_id.clone(), None)),
+        });
+
+        let base_for_capture = base_id.clone();
+        let final_for_capture = final_id.clone();
+        let _capture_guard = CaptureCommitStubGuard::install(move |message, parent| {
+            assert_eq!(message, "auto turn change snapshot");
+            assert_eq!(parent.as_deref(), Some(base_for_capture.as_str()));
+            Ok(GhostCommit::new(final_for_capture.clone(), parent))
+        });
+
+        let base_for_diff = base_id.clone();
+        let final_for_diff = final_id.clone();
+        let _diff_guard = GitDiffStubGuard::install(move |base, head| {
+            assert_eq!(base, base_for_diff);
+            assert_eq!(head, final_for_diff);
+            Ok(Vec::new())
+        });
+
+        chat.auto_on_assistant_final();
+        assert!(chat.auto_state.waiting_for_review);
+
+        chat.handle_code_event(Event {
+            id: "turn".to_string(),
+            event_seq: 42,
+            msg: EventMsg::TaskComplete(TaskCompleteEvent {
+                last_agent_message: None,
+            }),
+            order: None,
+        });
+
+        assert!(
+            !chat.auto_state.waiting_for_review,
+            "waiting flag should clear after TaskComplete launches skip review"
+        );
+
+        let skip_banner = "Auto review skipped: no file changes detected this turn.";
+        let skip_present = chat.history_cells.iter().any(|cell| {
+            cell.display_lines_trimmed().iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains(skip_banner))
+            })
+        });
+        assert!(skip_present, "skip banner should appear after review skip");
     }
 
     #[test]
