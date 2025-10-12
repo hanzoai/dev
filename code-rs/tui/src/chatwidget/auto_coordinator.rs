@@ -28,12 +28,16 @@ use crate::app_event::{
     AutoObserverTelemetry,
     AutoReviewCommit,
     AutoReviewCommitSource,
+    AutoTurnAgentsAction,
+    AutoTurnCliAction,
+    AutoTurnReviewAction,
 };
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
 use crate::chatwidget::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
 use code_common::elapsed::format_duration;
+use std::fs;
 use chrono::{DateTime, Local, Utc};
 use rand::Rng;
 use super::auto_observer::{
@@ -57,6 +61,7 @@ struct AutoCoordinatorCancelled;
 
 pub(super) const MODEL_SLUG: &str = "gpt-5";
 const SCHEMA_NAME: &str = "auto_coordinator_flow";
+const COORDINATOR_PROMPT_PATH: &str = "code-rs/core/prompt_coordinator.md";
 
 #[derive(Debug, Clone)]
 pub(super) struct AutoCoordinatorHandle {
@@ -189,66 +194,6 @@ impl Default for TurnDescriptor {
     }
 }
 
-impl TurnDescriptor {
-    pub(crate) fn from_legacy(config: TurnConfig) -> Self {
-        let mode = if config.read_only {
-            TurnMode::SubAgentReadOnly
-        } else {
-            TurnMode::Normal
-        };
-        Self {
-            mode,
-            read_only: config.read_only,
-            complexity: config.complexity,
-            agent_preferences: None,
-            review_strategy: None,
-        }
-    }
-
-    fn to_legacy(&self) -> TurnConfig {
-        TurnConfig {
-            read_only: self.read_only,
-            complexity: self.complexity,
-        }
-    }
-}
-
-fn merge_turn_descriptor(
-    descriptor: Option<TurnDescriptor>,
-    legacy: Option<TurnConfig>,
-) -> (Option<TurnDescriptor>, Option<TurnConfig>) {
-    match (descriptor, legacy) {
-        (Some(mut desc), Some(legacy_cfg)) => {
-            tracing::warn!(
-                "coordinator returned both turn_descriptor and turn_config; merging legacy hints"
-            );
-
-            if legacy_cfg.read_only {
-                desc.read_only = true;
-            }
-            if desc.complexity.is_none() {
-                desc.complexity = legacy_cfg.complexity;
-            }
-
-            let merged_cfg = TurnConfig {
-                read_only: desc.read_only,
-                complexity: desc.complexity.or(legacy_cfg.complexity),
-            };
-
-            (Some(desc), Some(merged_cfg))
-        }
-        (Some(desc), None) => {
-            let legacy = desc.to_legacy();
-            (Some(desc), Some(legacy))
-        }
-        (None, Some(cfg)) => {
-            let desc = TurnDescriptor::from_legacy(cfg.clone());
-            (Some(desc), Some(cfg))
-        }
-        (None, None) => (None, None),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,124 +211,133 @@ mod tests {
     }
 
     #[test]
-    fn merge_turn_descriptor_prefers_new_descriptor() {
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Review,
-            read_only: false,
-            complexity: Some(TurnComplexity::Medium),
-            agent_preferences: Some(AgentPreferences {
-                prefer_research: true,
-                prefer_planning: false,
-                requested_models: Some(vec!["claude".to_string()]),
-            }),
-            review_strategy: Some(ReviewStrategy {
-                timing: ReviewTiming::Immediate,
-                custom_prompt: Some("Check workspace".to_string()),
-                scope_hint: Some("workspace".to_string()),
-            }),
-        };
-        let legacy = TurnConfig {
-            read_only: true,
-            complexity: Some(TurnComplexity::Low),
-        };
-
-        let (merged_descriptor, merged_legacy) =
-            merge_turn_descriptor(Some(descriptor.clone()), Some(legacy));
-
-        let merged_descriptor = merged_descriptor.expect("descriptor expected");
-        assert_eq!(merged_descriptor.mode, TurnMode::Review);
-        assert_eq!(merged_descriptor.review_strategy.unwrap().timing, ReviewTiming::Immediate);
-        assert!(merged_descriptor.read_only, "legacy read_only should merge into descriptor");
-
-        let merged_legacy = merged_legacy.expect("legacy expected");
-        assert!(merged_legacy.read_only, "legacy read_only should remain true");
-        assert_eq!(merged_legacy.complexity, descriptor.complexity);
-    }
-
-    #[test]
-    fn merge_turn_descriptor_falls_back_to_legacy_hints() {
-        let descriptor = TurnDescriptor {
-            mode: TurnMode::Normal,
-            read_only: false,
-            complexity: None,
-            agent_preferences: None,
-            review_strategy: None,
-        };
-        let legacy = TurnConfig {
-            read_only: true,
-            complexity: Some(TurnComplexity::High),
-        };
-
-        let (merged_descriptor, merged_legacy) =
-            merge_turn_descriptor(Some(descriptor), Some(legacy));
-
-        let merged_descriptor = merged_descriptor.expect("descriptor expected");
-        assert!(merged_descriptor.read_only, "read_only should inherit from legacy");
-        assert_eq!(merged_descriptor.complexity, Some(TurnComplexity::High));
-
-        let merged_legacy = merged_legacy.expect("legacy expected");
-        assert!(merged_legacy.read_only);
-        assert_eq!(merged_legacy.complexity, Some(TurnComplexity::High));
-    }
-
-    #[test]
-    fn merge_turn_descriptor_builds_from_legacy() {
-        let legacy = TurnConfig {
-            read_only: true,
-            complexity: Some(TurnComplexity::High),
-        };
-
-        let (merged_descriptor, merged_legacy) = merge_turn_descriptor(None, Some(legacy.clone()));
-
-        let merged_descriptor = merged_descriptor.expect("descriptor expected");
-        assert_eq!(merged_descriptor.mode, TurnMode::SubAgentReadOnly);
-        assert!(merged_descriptor.review_strategy.is_none());
-
-        let merged_legacy = merged_legacy.expect("legacy expected");
-        assert_eq!(merged_legacy.read_only, legacy.read_only);
-        assert_eq!(merged_legacy.complexity, legacy.complexity);
-    }
-
-    #[test]
-    fn schema_exposes_turn_descriptor_property() {
+    fn schema_includes_cli_agents_review() {
         let schema = build_schema();
-        let properties = schema
+        let props = schema
             .get("properties")
-            .and_then(|props| props.as_object())
+            .and_then(|v| v.as_object())
             .expect("schema properties");
-        assert!(properties.contains_key("turn_descriptor"));
+        assert!(props.contains_key("cli"), "cli property missing");
+        assert!(props.contains_key("agents"), "agents property missing");
+        assert!(props.contains_key("review"), "review property missing");
+
+        let defs = schema
+            .get("$defs")
+            .and_then(|v| v.as_object())
+            .expect("schema defs");
+        assert!(defs.contains_key("cli"));
+        assert!(defs.contains_key("agents"));
+        assert!(defs.contains_key("review"));
     }
 
     #[test]
-    fn parse_decision_prefers_turn_descriptor() {
+    fn parse_decision_new_schema() {
         let raw = r#"{
             "finish_status": "continue",
-            "progress_past": null,
-            "progress_current": null,
-            "cli_context": null,
-            "cli_prompt": "Review latest changes",
-            "turn_descriptor": {
-                "mode": "review",
-                "read_only": false,
-                "complexity": "medium"
+            "progress": {"past": "Ran smoke tests", "current": "Dispatching fix"},
+            "cli": {"prompt": "Apply the patch for the failing test", "context": "tests/failing.rs"},
+            "agents": [
+                {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B"}
+            ],
+            "review": {"source": "staged", "summary": "Pre-merge sanity"}
+        }"#;
+
+        let (decision, _) = parse_decision(raw).expect("parse new schema decision");
+        assert_eq!(decision.status, AutoCoordinatorStatus::Continue);
+        assert_eq!(decision.progress_past.as_deref(), Some("Ran smoke tests"));
+        assert_eq!(decision.progress_current.as_deref(), Some("Dispatching fix"));
+
+        let cli = decision.cli.expect("cli action expected");
+        assert_eq!(cli.prompt, "Apply the patch for the failing test");
+        assert_eq!(cli.context.as_deref(), Some("tests/failing.rs"));
+
+        assert_eq!(decision.agents.len(), 1);
+        let agent = &decision.agents[0];
+        assert_eq!(agent.prompt, "Draft alternative fix");
+        assert!(!agent.write);
+
+        let review = decision.review.expect("review action expected");
+        assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
+        assert_eq!(review.commit.summary.as_deref(), Some("Pre-merge sanity"));
+    }
+
+    #[test]
+    fn parse_decision_legacy_schema() {
+        let raw = r#"{
+            "finish_status": "continue",
+            "progress_past": "Drafted fix",
+            "progress_current": "Running unit tests",
+            "cli_prompt": "Run cargo test --package core",
+            "cli_context": "Focus on flaky suite",
+            "review_commit": {
+                "source": "staged",
+                "sha": null,
+                "summary": "Smoke diff"
             }
         }"#;
 
-        let (decision, _value) = parse_decision(raw).expect("parse descriptor-only decision");
-        let (descriptor, legacy) = merge_turn_descriptor(decision.turn_descriptor, decision.turn_config);
+        let (decision, _) = parse_decision(raw).expect("parse legacy decision");
+        assert_eq!(decision.status, AutoCoordinatorStatus::Continue);
+        assert_eq!(decision.progress_past.as_deref(), Some("Drafted fix"));
+        assert_eq!(decision.progress_current.as_deref(), Some("Running unit tests"));
 
-        let descriptor = descriptor.expect("descriptor expected");
-        assert_eq!(descriptor.mode, TurnMode::Review);
-        assert_eq!(descriptor.complexity, Some(TurnComplexity::Medium));
+        let cli = decision.cli.expect("cli action expected");
+        assert_eq!(cli.prompt, "Run cargo test --package core");
+        assert_eq!(cli.context.as_deref(), Some("Focus on flaky suite"));
 
-        let legacy = legacy.expect("legacy expected");
-        assert_eq!(legacy.read_only, descriptor.read_only);
-        assert_eq!(legacy.complexity, descriptor.complexity);
+        assert!(decision.agents.is_empty());
+        let review = decision.review.expect("review action expected");
+        assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
     }
 }
 
 #[derive(Debug, Deserialize)]
-struct CoordinatorDecision {
+struct CoordinatorDecisionNew {
+    finish_status: String,
+    progress: ProgressPayload,
+    #[serde(default)]
+    cli: Option<CliPayload>,
+    #[serde(default)]
+    agents: Option<Vec<AgentPayload>>,
+    #[serde(default)]
+    review: Option<ReviewPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProgressPayload {
+    #[serde(default)]
+    past: Option<String>,
+    #[serde(default)]
+    current: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CliPayload {
+    prompt: String,
+    #[serde(default)]
+    context: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentPayload {
+    prompt: String,
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    write: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewPayload {
+    source: String,
+    #[serde(default)]
+    sha: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoordinatorDecisionLegacy {
     finish_status: String,
     #[serde(default)]
     progress_past: Option<String>,
@@ -394,28 +348,11 @@ struct CoordinatorDecision {
     #[serde(default)]
     cli_prompt: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]
-    turn_descriptor: Option<TurnDescriptor>,
-    #[serde(default)]
-    turn_config: Option<TurnConfig>,
-    #[serde(default)]
-    review_commit: Option<ReviewCommitPayload>,
-}
-
-struct ParsedCoordinatorDecision {
-    status: AutoCoordinatorStatus,
-    progress_past: Option<String>,
-    progress_current: Option<String>,
-    cli_context: Option<String>,
-    cli_prompt: Option<String>,
-    response_items: Vec<ResponseItem>,
-    turn_descriptor: Option<TurnDescriptor>,
-    turn_config: Option<TurnConfig>,
-    review_commit: Option<AutoReviewCommit>,
+    review_commit: Option<ReviewCommitPayloadLegacy>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ReviewCommitPayload {
+struct ReviewCommitPayloadLegacy {
     source: String,
     #[serde(default)]
     sha: Option<String>,
@@ -423,32 +360,32 @@ struct ReviewCommitPayload {
     summary: Option<String>,
 }
 
-impl ReviewCommitPayload {
-    fn try_into_commit(self) -> Result<AutoReviewCommit> {
-        let ReviewCommitPayload { source, sha, summary } = self;
+struct ParsedCoordinatorDecision {
+    status: AutoCoordinatorStatus,
+    progress_past: Option<String>,
+    progress_current: Option<String>,
+    cli: Option<CliAction>,
+    agents: Vec<AgentAction>,
+    review: Option<ReviewAction>,
+    response_items: Vec<ResponseItem>,
+}
 
-        let source = match source.trim().to_ascii_lowercase().as_str() {
-            "staged" => AutoReviewCommitSource::Staged,
-            "commit" => AutoReviewCommitSource::Commit,
-            other => {
-                return Err(anyhow!("invalid review_commit.source '{other}'"));
-            }
-        };
+#[derive(Debug, Clone)]
+struct CliAction {
+    prompt: String,
+    context: Option<String>,
+}
 
-        let sha = sha
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+#[derive(Debug, Clone)]
+struct AgentAction {
+    prompt: String,
+    context: Option<String>,
+    write: bool,
+}
 
-        if matches!(source, AutoReviewCommitSource::Commit) && sha.is_none() {
-            return Err(anyhow!("review_commit.sha is required when source='commit'"));
-        }
-
-        let summary = summary
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-
-        Ok(AutoReviewCommit { source, sha, summary })
-    }
+#[derive(Debug, Clone)]
+struct ReviewAction {
+    commit: AutoReviewCommit,
 }
 
 pub(super) fn start_auto_coordinator(
@@ -550,15 +487,15 @@ fn run_auto_loop(
             None
         }
     };
-
     let sandbox_label = if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
         "full access"
     } else {
         "limited sandbox"
     };
     let environment_details = format_environment_details(sandbox_label);
+    let coordinator_prompt = read_coordinator_prompt(config.as_ref());
     let (base_developer_intro, primary_goal_message) =
-        build_developer_message(&goal_text, &environment_details);
+        build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
     let schema = build_schema();
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
@@ -612,13 +549,13 @@ fn run_auto_loop(
                     status,
                     progress_past,
                     progress_current,
-                    cli_context,
-                    cli_prompt,
-                    response_items,
-                    turn_descriptor,
-                    turn_config,
-                    review_commit,
+                    cli,
+                    agents,
+                    review,
+                    mut response_items,
                 }) => {
+                    let cli_prompt_for_observer = cli.as_ref().map(|action| action.prompt.as_str());
+
                     if matches!(status, AutoCoordinatorStatus::Continue) {
                         if let (Some(handle), Some(cadence)) =
                             (observer_handle.as_ref(), observer_cadence)
@@ -626,7 +563,7 @@ fn run_auto_loop(
                             if should_trigger_observer(requests_completed, cadence) {
                                 let conversation = build_observer_conversation(
                                     conv_for_observer,
-                                    cli_prompt.as_deref(),
+                                    cli_prompt_for_observer,
                                 );
                                 let trigger = ObserverTrigger {
                                     conversation,
@@ -644,12 +581,10 @@ fn run_auto_loop(
                             status,
                             progress_past,
                             progress_current,
-                            cli_context: cli_context.clone(),
-                            cli_prompt,
-                            transcript: response_items,
-                            turn_descriptor: turn_descriptor.clone(),
-                            turn_config: turn_config.clone(),
-                            review_commit: review_commit.clone(),
+                            cli: cli.as_ref().map(cli_action_to_event),
+                            agents: agents.iter().map(agent_action_to_event).collect(),
+                            review: review.as_ref().map(review_action_to_event),
+                            transcript: std::mem::take(&mut response_items),
                         };
                         app_event_tx.send(event);
                         continue;
@@ -707,12 +642,10 @@ fn run_auto_loop(
                         status,
                         progress_past,
                         progress_current,
-                        cli_context,
-                        cli_prompt,
+                        cli: cli.as_ref().map(cli_action_to_event),
+                        agents: agents.iter().map(agent_action_to_event).collect(),
+                        review: review.as_ref().map(review_action_to_event),
                         transcript: response_items,
-                        turn_descriptor: turn_descriptor.clone(),
-                        turn_config: turn_config.clone(),
-                        review_commit: review_commit.clone(),
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -727,12 +660,10 @@ fn run_auto_loop(
                         status: AutoCoordinatorStatus::Failed,
                         progress_past: None,
                         progress_current: Some(format!("Coordinator error: {err}")),
-                        cli_context: None,
-                        cli_prompt: None,
+                        cli: None,
+                        agents: Vec::new(),
+                        review: None,
                         transcript: Vec::new(),
-                        turn_descriptor: None,
-                        turn_config: None,
-                        review_commit: None,
                     };
                     app_event_tx.send(event);
                     stopped = true;
@@ -827,69 +758,43 @@ fn run_final_observer_validation(
     run_observer_once(runtime, client, trigger)
 }
 
-fn build_developer_message(goal_text: &str, environment_details: &str) -> (String, String) {
-    let review_guardrails = "- `turn_descriptor.mode = \"review\"` is allowed **only** after the CLI has produced a reviewable artifact. Set `review_commit.source` to `staged` for staged diffs or to `commit` (and provide `sha`) for a specific commit. If neither exists, keep coding, testing, and polishing until one does.\n";
-    let intro = format!(
-        "You have a special role within Code. You are a Coordinator, in charge of this session, coordinating prompts sent to a running Code CLI process. You should act like a human maintainer of the project would act. You will see a **Primary Goal** below - this is what you are always working towards.
-        
-        **Output JSON Structure**
-- `finish_status`: one of `continue`, `finish_success`, or `finish_failed`.
-  * Use `continue` when another prompt is reasonable. Always prefer this option.
-  * Use `finish_success` when the goal has been completed in its entirety and absolutely no work remains.
-  * Use `finish_failed` when the goal absolutely cannot be satisfied or you are stuck in a loop. This should almost never be used. Try other approaches and gather more information if there is no clear path forward.
-- `progress_past`: 1 sentence (<= 160 characters) describing everything completed so far. Use past tense. Leave blank if nothing significant has been done yet.
-- `progress_current`: A short phrase (<= 100 characters) describing what happens when the CLI runs `cli_prompt`. Use present tense.
-- `cli_context`: Generally only should be used at the start of a session if the auto session was started with a lot of background information.
-- `cli_prompt`: The exact prompt to send to the Code CLI process when `finish_status` is `continue`. Prefer 1-2 concise sentences focused on the next instruction.
-- `turn_descriptor`: Preferred configuration object describing the upcoming turn. Include this whenever possible. Fields:
-  * `mode`: `normal`, `sub_agent_write`, `sub_agent_read_only`, or `review`.
-  * `read_only`: Legacy safety flag indicating whether the turn should avoid writes.
-  * `complexity`: `low`, `medium`, or `high`.
-  * `agent_preferences`: Optional hints (`prefer_research`, `prefer_planning`, `requested_models`).
-  * `review_strategy`: Optional review guidance (`timing`, `custom_prompt`, `scope_hint`).
-- `turn_config`: Legacy fallback containing only `read_only` and `complexity`. Provide this **only** when the client is known to lack `turn_descriptor` support.
-- `review_commit`: Required when `turn_descriptor.mode` is `review`. Specify what the CLI should review:
-  * Set `source` to `'staged'` when the staged workspace diff is ready.
-  * Set `source` to `'commit'` and provide `sha` with the commit to review. Optional `summary` may describe the change.
-  If you cannot point to staged work or a commit, keep the turn in a non-review mode and continue iterating.
+fn read_coordinator_prompt(_config: &Config) -> Option<String> {
+    match fs::read_to_string(COORDINATOR_PROMPT_PATH) {
+        Ok(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Err(err) => {
+            warn!(
+                "failed to read coordinator prompt from {}: {err:#}",
+                COORDINATOR_PROMPT_PATH
+            );
+            None
+        }
+    }
+}
 
-Example `turn_descriptor` snippet:
-```json
-\"turn_descriptor\": {{
-  \"mode\": \"sub_agent_read_only\",
-  \"read_only\": true,
-  \"complexity\": \"medium\",
-  \"agent_preferences\": {{ \"prefer_research\": true }}
-}}
-```
-
-**Rules**
-- You set direction, not implementation. Keep the CLI on track, but let it do all the thinking and implementation. You do not have the context the CLI has.
-- When working on an existing code base, start by prompting the CLI to explain the problem and outline plausible approaches. This lets it build context rather than jumping in naively with a solution.
-- Keep every prompt minimal to give the CLI room to make independent decisions.
-- Don't repeat yourself. If something doesn't work, take a different approach. Always push the project forward.
-- Often a simple 'Please continue' or 'Work on feature A next' or 'What do you think is the best approach?' is sufficient. Your job is to keep things running in an appropriate direction. The CLI does all the actual work and thinking. You do not need to know much about the project or codebase, allow the CLI to do all this for you. You are focused on overall direction not implementation details.
-- Only stop when no other options remain. A human is observing your work and will step in if they want to go in a different direction. You should not ask them for assistance - you should use your judgement to move on the most likely path forward. The human may override your message send to the CLI if they choose to go in another direction. This allows you to just guess the best path, knowing an overseer will step in if needed.
-
-{review_guardrails}
-
-**WARNING**
-- Only send the CLI ONE instruction to follow at a time.
-- DO NOT repeat earlier instructions sent to the CLI otherwise you will end in a loop as the CLI will yield once it completes the first instruction. So for example if you say something like 1. Research the codebase 2. Fix the problem., the CLI will yield as soon as it finishes instruction 1. If you keep sending both instructions, you'll just keep looping on the first instruction. Just send them one at the time. i.e. `Research the codebase` then once you have the results `Fix the problem`
-- You should ask the CLI to research the problem before proposing a solution or writing code. The ensures the CLI reads all relevant parts of the code before starting work and results in more significantly accurate code.
-- When problem solving, ask the CLI to write tests for the problem first. This will help it understand the problem better and ensure the problem is fixed correctly.
-
-In short:
-- You should not attempt to solve the task - the CLI will do this.
-- Start with research or tests to understand the task or replicate the issue.
-- Let the CLI make most decisions - it has more context than you do, you just keep it running in the right direction.
-- The CLI can get it wrong, so keep nudging it back on track and trying different approaches.
-- Complete only when you are satisfied the goal is fully complete.
+fn build_developer_message(
+    goal_text: &str,
+    environment_details: &str,
+    coordinator_prompt: Option<&str>,
+) -> (String, String) {
+    let prompt_body = coordinator_prompt.unwrap_or("").trim();
+    let intro = if prompt_body.is_empty() {
+        format!("Environment:
+{}", environment_details)
+    } else {
+        format!("{prompt_body}
 
 Environment:
-{environment_details}"
-    , review_guardrails = review_guardrails);
-    let primary_goal = format!("**Primary Goal**\n{goal_text}");
+{environment_details}")
+    };
+    let primary_goal = format!("**Primary Goal**
+{}", goal_text);
     (intro, primary_goal)
 }
 
@@ -925,150 +830,110 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
 
 fn build_schema() -> Value {
     json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Coordinator Turn (CLI-first; agents + review background)",
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "finish_status": {
                 "type": "string",
                 "enum": ["continue", "finish_success", "finish_failed"],
-                "description": "Decision on how to proceed"
+                "description": "Prefer 'continue' unless the mission is fully complete or truly blocked."
             },
-            "progress_past": {
-                "type": ["string", "null"],
-                "minLength": 1,
-                "maxLength": 160,
-                "description": "1 sentence summary of all work done so far. Leave blank if none. Use past tense. e.g. `Explored codebase and fixed all reported bugs.`"
+            "progress": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "past": {
+                        "type": ["string", "null"],
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "description": "One sentence, past tense, meaningful work since last turn."
+                    },
+                    "current": {
+                        "type": ["string", "null"],
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "description": "Short present-tense phrase of what runs now."
+                    }
+                },
+                "required": ["past", "current"]
             },
-            "progress_current": {
-                "type": ["string", "null"],
-                "minLength": 1,
-                "maxLength": 100,
-                "description": "A few words describing what is happening when the CLI performs the cli_prompt. Use current tense e.g. `Now updating documentation.`"
-            },
-            "cli_context": {
-                "type": ["string", "null"],
-                "minLength": 1,
-                "description": "This context is background information given to the CLI which it doesn't already know. Generally only should be used at the start of a session if the auto session was started with a lot of background information. Ignored unless finish_status is 'continue'"
-            },
-            "cli_prompt": {
-                "type": ["string", "null"],
-                "minLength": 1,
-                "description": "This is the prompt sent to the CLI. It should be 1-2 sentences. Shorter commands are preferred - e.g. ('What do you think the solution is?', 'Please fix this') let the CLI do the work. You just direct it! Ignored unless finish_status is 'continue'"
-            },
-            "review_commit": {
+            "cli": {
                 "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "The single atomic instruction for the CLI this turn. Set to null when finish_status != 'continue'.",
+                "properties": {
+                    "context": {
+                        "type": ["string", "null"],
+                        "maxLength": 1500,
+                        "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "minLength": 4,
+                        "maxLength": 240,
+                        "description": "Exactly one objective in 1–2 sentences. No step lists."
+                    }
+                },
+                "required": ["prompt", "context"]
+            },
+            "agents": {
+                "type": ["array", "null"],
+                "description": "Optional parallel helper agents for the CLI to spawn (background).",
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "write": {
+                            "type": "boolean",
+                            "description": "Allow writes in isolated worktree. Default false."
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "minLength": 8,
+                            "maxLength": 400,
+                            "description": "Outcome-oriented instruction (what to produce)."
+                        },
+                        "context": {
+                            "type": ["string", "null"],
+                            "maxLength": 1500,
+                            "description": "Optional concrete details (paths, commands, constraints)."
+                        }
+                    },
+                    "required": ["prompt", "context", "write"]
+                }
+            },
+            "review": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Optional background review thread to start/update this turn.",
                 "properties": {
                     "source": {
                         "type": "string",
                         "enum": ["staged", "commit"],
-                        "description": "What artifact is ready for review (staged diff or specific commit)."
+                        "description": "What to review."
                     },
                     "sha": {
                         "type": ["string", "null"],
-                        "description": "Commit SHA to review when source is 'commit'."
+                        "minLength": 7,
+                        "maxLength": 64,
+                        "description": "Required when source='commit'; otherwise null."
                     },
                     "summary": {
                         "type": ["string", "null"],
-                        "description": "Optional short summary of the changes under review."
+                        "maxLength": 200,
+                        "description": "Optional focus/risks/acceptance criteria."
                     }
                 },
-                "required": [ // NB: OpenAI requires ALL properties to be listed as required
-                    "source",
-                    "sha",
-                    "summary"
-                ],
-                "additionalProperties": false
-            },
-            "turn_descriptor": {
-                "type": ["object", "null"],
-                "properties": {
-                    "mode": {
-                        "type": "string",
-                        "enum": ["normal", "sub_agent_write", "sub_agent_read_only", "review"],
-                        "description": "Execution mode for the upcoming turn",
-                        "default": "normal"
-                    },
-                    "read_only": {
-                        "type": "boolean",
-                        "description": "Legacy safety flag signalling the turn should not modify files.",
-                        "default": false
-                    },
-                    "complexity": {
-                        "type": "string",
-                        "enum": ["low", "medium", "high"],
-                        "description": "Complexity estimate for this turn."
-                    },
-                    "agent_preferences": {
-                        "type": ["object", "null"],
-                        "properties": {
-                            "prefer_research": { "type": "boolean", "default": false },
-                            "prefer_planning": { "type": "boolean", "default": false },
-                            "requested_models": {
-                                "type": ["array", "null"],
-                                "items": { "type": "string" },
-                                "description": "Preferred agent models (e.g., claude, gemini)."
-                            }
-                        },
-                        "required": [ // NB: OpenAI requires ALL properties to be listed as required
-                            "prefer_research",
-                            "prefer_planning",
-                            "requested_models",
-                        ],
-                        "additionalProperties": false
-                    },
-                    "review_strategy": {
-                        "type": ["object", "null"],
-                        "properties": {
-                            "timing": {
-                                "type": "string",
-                                "enum": ["post_turn", "pre_write", "immediate"],
-                                "default": "post_turn"
-                            },
-                            "custom_prompt": { "type": ["string", "null"] },
-                            "scope_hint": { "type": ["string", "null"] }
-                        },
-                        "required": [ // NB: OpenAI requires ALL properties to be listed as required
-                            "timing",
-                            "custom_prompt",
-                            "scope_hint",
-                        ],
-                        "additionalProperties": false
-                    }
-                },
-                "required": [ // NB: OpenAI requires ALL properties to be listed as required
-                    "mode",
-                    "read_only",
-                    "complexity",
-                    "agent_preferences",
-                    "review_strategy",
-                ],
-                "additionalProperties": false
-            },
-            "turn_config": {
-                "type": ["object", "null"],
-                "properties": {
-                    "read_only": { "type": "boolean", "description": "If true, this turn should not modify files." },
-                    "complexity": { "type": "string", "enum": ["low","medium","high"], "description": "Complexity estimate for this turn." }
-                },
-                "required": [ // NB: OpenAI requires ALL properties to be listed as required
-                    "read_only",
-                    "complexity",
-                ],
-                "additionalProperties": false
+                "required": ["source", "sha", "summary"]
             }
         },
-        "required": [ // NB: OpenAI requires ALL properties to be listed as required
-            "finish_status",
-            "progress_past",
-            "progress_current",
-            "cli_context",
-            "cli_prompt",
-            "review_commit",
-            "turn_descriptor",
-            "turn_config"
-        ],
-        "additionalProperties": false
+        "required": ["finish_status", "progress", "cli", "agents", "review"]
     })
 }
+
 
 struct RequestStreamResult {
     output_text: String,
@@ -1097,73 +962,10 @@ fn request_coordinator_decision(
         app_event_tx,
         cancel_token,
     )?;
-    let (decision, value) = parse_decision(&raw)?;
+    let (mut decision, value) = parse_decision(&raw)?;
     debug!("[Auto coordinator] model decision: {:?}", value);
-
-    let status = match decision.finish_status.as_str() {
-        "continue" => AutoCoordinatorStatus::Continue,
-        "finish_success" => AutoCoordinatorStatus::Success,
-        "finish_failed" => AutoCoordinatorStatus::Failed,
-        other => {
-            return Err(anyhow!("unexpected finish_status '{other}'"));
-        }
-    };
-
-    let clean_field = |field: Option<String>| -> Option<String> {
-        field.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        })
-    };
-
-    let progress_past = clean_field(decision.progress_past);
-    let progress_current = clean_field(decision.progress_current);
-
-    let cli_context = match status {
-        AutoCoordinatorStatus::Continue => clean_field(decision.cli_context).map(|value| {
-            let cleaned = strip_role_prefix(&value);
-            cleaned.trim().to_string()
-        }),
-        _ => None,
-    };
-
-    let cli_prompt = match status {
-        AutoCoordinatorStatus::Continue => {
-            let prompt_text = decision
-                .cli_prompt
-                .as_ref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow!("model response missing cli_prompt for continue"))?;
-            let cleaned = strip_role_prefix(prompt_text);
-            Some(cleaned.to_string())
-        }
-        _ => None,
-    };
-
-    let (turn_descriptor, turn_config) =
-        merge_turn_descriptor(decision.turn_descriptor, decision.turn_config);
-
-    let review_commit = match decision.review_commit {
-        Some(payload) => Some(payload.try_into_commit()?),
-        None => None,
-    };
-
-    Ok(ParsedCoordinatorDecision {
-        status,
-        progress_past,
-        progress_current,
-        cli_context,
-        cli_prompt,
-        response_items,
-        turn_descriptor,
-        turn_config,
-        review_commit,
-    })
+    decision.response_items = response_items;
+    Ok(decision)
 }
 
 fn request_decision(
@@ -1661,7 +1463,7 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
 }
 
 
-fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
+fn parse_decision(raw: &str) -> Result<(ParsedCoordinatorDecision, Value)> {
     let value: Value = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => {
@@ -1671,16 +1473,226 @@ fn parse_decision(raw: &str) -> Result<(CoordinatorDecision, Value)> {
             serde_json::from_str(&json_blob).context("parsing JSON from model output")?
         }
     };
-    let decision: CoordinatorDecision = serde_json::from_value(value.clone()).map_err(|err| {
-        let payload = serde_json::to_string(&value).unwrap_or_else(|_| "<unprintable json>".to_string());
-        let snippet = if payload.len() > 2000 {
-            format!("{}…", &payload[..2000])
+    match serde_json::from_value::<CoordinatorDecisionNew>(value.clone()) {
+        Ok(decision) => {
+            let status = parse_finish_status(&decision.finish_status)?;
+            let parsed = convert_decision_new(decision, status)?;
+            Ok((parsed, value))
+        }
+        Err(new_err) => {
+            let decision: CoordinatorDecisionLegacy = serde_json::from_value(value.clone()).map_err(|legacy_err| {
+                let payload = serde_json::to_string(&value).unwrap_or_else(|_| "<unprintable json>".to_string());
+                let snippet = if payload.len() > 2000 {
+                    format!("{}…", &payload[..2000])
+                } else {
+                    payload
+                };
+                anyhow!("decoding coordinator decision failed: new_schema_err={new_err}; legacy_err={legacy_err}; payload_snippet={snippet}")
+            })?;
+            let status = parse_finish_status(&decision.finish_status)?;
+            let parsed = convert_decision_legacy(decision, status)?;
+            Ok((parsed, value))
+        }
+    }
+}
+
+fn parse_finish_status(finish_status: &str) -> Result<AutoCoordinatorStatus> {
+    let normalized = finish_status.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "continue" => Ok(AutoCoordinatorStatus::Continue),
+        "finish_success" => Ok(AutoCoordinatorStatus::Success),
+        "finish_failed" => Ok(AutoCoordinatorStatus::Failed),
+        other => Err(anyhow!("unexpected finish_status '{other}'")),
+    }
+}
+
+fn convert_decision_new(
+    decision: CoordinatorDecisionNew,
+    status: AutoCoordinatorStatus,
+) -> Result<ParsedCoordinatorDecision> {
+    let CoordinatorDecisionNew {
+        finish_status: _,
+        progress,
+        cli,
+        agents: agent_payloads,
+        review,
+    } = decision;
+
+    let progress_past = clean_optional(progress.past);
+    let progress_current = clean_optional(progress.current);
+
+    let cli = match (status, cli) {
+        (AutoCoordinatorStatus::Continue, Some(payload)) => Some(CliAction {
+            prompt: clean_required(&payload.prompt, "cli.prompt")?,
+            context: clean_optional(payload.context),
+        }),
+        (AutoCoordinatorStatus::Continue, None) => {
+            return Err(anyhow!("model response missing cli prompt for continue"));
+        }
+        (_, Some(_payload)) => None,
+        (_, None) => None,
+    };
+
+    let mut agent_actions: Vec<AgentAction> = Vec::new();
+    if let Some(payloads) = agent_payloads {
+        for payload in payloads {
+            let prompt = clean_required(&payload.prompt, "agents[*].prompt")?;
+            agent_actions.push(AgentAction {
+                prompt,
+                context: clean_optional(payload.context),
+                write: payload.write,
+            });
+        }
+    }
+
+    let review = match review {
+        Some(payload) => Some(ReviewAction {
+            commit: build_review_commit(payload.source, payload.sha, payload.summary)?,
+        }),
+        None => None,
+    };
+
+    Ok(ParsedCoordinatorDecision {
+        status,
+        progress_past,
+        progress_current,
+        cli,
+        agents: agent_actions,
+        review,
+        response_items: Vec::new(),
+    })
+}
+
+fn convert_decision_legacy(
+    decision: CoordinatorDecisionLegacy,
+    status: AutoCoordinatorStatus,
+) -> Result<ParsedCoordinatorDecision> {
+    let CoordinatorDecisionLegacy {
+        finish_status: _,
+        progress_past,
+        progress_current,
+        cli_context,
+        cli_prompt,
+        review_commit,
+    } = decision;
+
+    let progress_past = clean_optional(progress_past);
+    let progress_current = clean_optional(progress_current);
+    let context = clean_optional(cli_context);
+
+    let cli = match (status, cli_prompt) {
+        (AutoCoordinatorStatus::Continue, Some(prompt)) => Some(CliAction {
+            prompt: clean_required(&prompt, "cli_prompt")?,
+            context: context.clone(),
+        }),
+        (AutoCoordinatorStatus::Continue, None) => {
+            return Err(anyhow!("legacy model response missing cli_prompt for continue"));
+        }
+        (_, Some(prompt)) => Some(CliAction {
+            prompt: clean_required(&prompt, "cli_prompt")?,
+            context: context.clone(),
+        }),
+        (_, None) => None,
+    };
+
+    let review = match review_commit {
+        Some(payload) => Some(ReviewAction {
+            commit: payload.try_into_commit()?,
+        }),
+        None => None,
+    };
+
+    Ok(ParsedCoordinatorDecision {
+        status,
+        progress_past,
+        progress_current,
+        cli,
+        agents: Vec::new(),
+        review,
+        response_items: Vec::new(),
+    })
+}
+
+fn clean_optional(input: Option<String>) -> Option<String> {
+    input.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
         } else {
-            payload
-        };
-        anyhow!("decoding coordinator decision failed: {err}; payload_snippet={snippet}")
-    })?;
-    Ok((decision, value))
+            let without_prefix = strip_role_prefix(trimmed);
+            let final_trimmed = without_prefix.trim();
+            if final_trimmed.is_empty() {
+                None
+            } else {
+                Some(final_trimmed.to_string())
+            }
+        }
+    })
+}
+
+fn clean_required(value: &str, field: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err(anyhow!("{field} is empty"))
+    } else {
+        let without_prefix = strip_role_prefix(trimmed);
+        let final_trimmed = without_prefix.trim();
+        if final_trimmed.is_empty() {
+            Err(anyhow!("{field} is empty"))
+        } else {
+            Ok(final_trimmed.to_string())
+        }
+    }
+}
+
+fn build_review_commit(
+    source: String,
+    sha: Option<String>,
+    summary: Option<String>,
+) -> Result<AutoReviewCommit> {
+    let source_enum = match source.trim().to_ascii_lowercase().as_str() {
+        "staged" => AutoReviewCommitSource::Staged,
+        "commit" => AutoReviewCommitSource::Commit,
+        other => return Err(anyhow!("invalid review source '{other}'")),
+    };
+
+    let sha_clean = clean_optional(sha);
+    if matches!(source_enum, AutoReviewCommitSource::Commit) && sha_clean.is_none() {
+        return Err(anyhow!("review requires sha when source='commit'"));
+    }
+
+    Ok(AutoReviewCommit {
+        source: source_enum,
+        sha: sha_clean,
+        summary: clean_optional(summary),
+    })
+}
+
+impl ReviewCommitPayloadLegacy {
+    fn try_into_commit(self) -> Result<AutoReviewCommit> {
+        build_review_commit(self.source, self.sha, self.summary)
+    }
+}
+
+fn cli_action_to_event(action: &CliAction) -> AutoTurnCliAction {
+    AutoTurnCliAction {
+        prompt: action.prompt.clone(),
+        context: action.context.clone(),
+    }
+}
+
+fn agent_action_to_event(action: &AgentAction) -> AutoTurnAgentsAction {
+    AutoTurnAgentsAction {
+        prompt: action.prompt.clone(),
+        context: action.context.clone(),
+        write: action.write,
+    }
+}
+
+fn review_action_to_event(action: &ReviewAction) -> AutoTurnReviewAction {
+    AutoTurnReviewAction {
+        commit: action.commit.clone(),
+    }
 }
 
 pub(super) fn extract_first_json_object(input: &str) -> Option<String> {

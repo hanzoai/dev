@@ -26,7 +26,6 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
 use crate::cloud_tasks_service::CloudEnvironment;
-use crate::chatwidget::auto_coordinator::{TurnConfig, TurnDescriptor};
 
 /// Wrapper to allow including non-Debug types in Debug enums without leaking internals.
 pub(crate) struct Redacted<T>(pub T);
@@ -89,6 +88,24 @@ pub(crate) struct AutoReviewCommit {
     pub source: AutoReviewCommitSource,
     pub sha: Option<String>,
     pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AutoTurnCliAction {
+    pub prompt: String,
+    pub context: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AutoTurnAgentsAction {
+    pub prompt: String,
+    pub context: Option<String>,
+    pub write: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AutoTurnReviewAction {
+    pub commit: AutoReviewCommit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,12 +237,10 @@ pub(crate) enum AppEvent {
         status: AutoCoordinatorStatus,
         progress_past: Option<String>,
         progress_current: Option<String>,
-        cli_context: Option<String>,
-        cli_prompt: Option<String>,
+        cli: Option<AutoTurnCliAction>,
+        agents: Vec<AutoTurnAgentsAction>,
+        review: Option<AutoTurnReviewAction>,
         transcript: Vec<ResponseItem>,
-        turn_descriptor: Option<TurnDescriptor>,
-        turn_config: Option<TurnConfig>,
-        review_commit: Option<AutoReviewCommit>,
     },
     AutoCoordinatorThinking {
         delta: String,

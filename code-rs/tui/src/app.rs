@@ -1650,24 +1650,20 @@ impl App<'_> {
                     status,
                     progress_past,
                     progress_current,
-                    cli_context,
-                    cli_prompt,
+                    cli,
+                    agents,
+                    review,
                     transcript,
-                    turn_descriptor,
-                    turn_config,
-                    review_commit,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_decision(
                             status,
                             progress_past,
                             progress_current,
-                            cli_context,
-                            cli_prompt,
+                            cli,
+                            agents,
+                            review,
                             transcript,
-                            turn_descriptor,
-                            turn_config,
-                            review_commit,
                         );
                     }
                 }
