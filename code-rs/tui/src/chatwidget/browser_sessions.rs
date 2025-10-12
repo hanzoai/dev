@@ -31,6 +31,12 @@ impl BrowserSessionTracker {
     }
 }
 
+fn ensure_cell_picker(chat: &ChatWidget<'_>, cell: &BrowserSessionCell) {
+    let picker = chat.terminal_info.picker.clone();
+    let font_size = chat.terminal_info.font_size;
+    cell.ensure_picker_initialized(picker, font_size);
+}
+
 pub(super) fn handle_custom_tool_begin(
     chat: &mut ChatWidget<'_>,
     order: Option<&OrderMeta>,
@@ -62,6 +68,7 @@ pub(super) fn handle_custom_tool_begin(
         }
     }
 
+    ensure_cell_picker(chat, &tracker.cell);
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::ensure_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
@@ -137,6 +144,7 @@ pub(super) fn handle_custom_tool_end(
     }
     tracker.elapsed = tracker.elapsed.saturating_add(duration);
 
+    ensure_cell_picker(chat, &tracker.cell);
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
@@ -178,6 +186,7 @@ pub(super) fn handle_background_event(
     };
     tracker.cell.add_console_message(console_line);
 
+    ensure_cell_picker(chat, &tracker.cell);
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
@@ -210,6 +219,7 @@ pub(super) fn handle_screenshot_update(
     tracker.cell.set_url(url.to_string());
     tracker.cell.set_screenshot(screenshot_path.clone());
 
+    ensure_cell_picker(chat, &tracker.cell);
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 

@@ -28,14 +28,6 @@ impl CardSegment {
             inherit_background: true,
         }
     }
-
-    pub fn with_fixed_bg(text: String, style: Style) -> Self {
-        Self {
-            text,
-            style,
-            inherit_background: false,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -62,7 +54,7 @@ impl CardRow {
     }
 }
 
-pub(crate) const CARD_ACCENT_WIDTH: usize = 3;
+pub(crate) const CARD_ACCENT_WIDTH: usize = 2;
 
 pub(crate) fn agent_card_style() -> CardStyle {
     let bg = colors::background();
@@ -233,12 +225,4 @@ pub(crate) fn primary_text_style(style: &CardStyle) -> Style {
 
 pub(crate) fn secondary_text_style(style: &CardStyle) -> Style {
     Style::default().fg(style.text_secondary)
-}
-
-pub(crate) fn status_chip_style(base: Color, style: &CardStyle) -> Style {
-    let background = colors::mix_toward(style.background_bottom, base, 0.65);
-    Style::default()
-        .fg(colors::mix_toward(colors::text_bright(), background, 0.15))
-        .bg(background)
-        .add_modifier(Modifier::BOLD)
 }
