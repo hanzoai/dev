@@ -37,13 +37,14 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtyPair, PtySiz
 use ratatui::buffer::Buffer;
 use ratatui::CompletedFrame;
 use shlex::try_join;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender as StdSender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -82,6 +83,77 @@ struct TerminalRunState {
     pty: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
 }
 
+struct FrameTimer {
+    state: Mutex<FrameTimerState>,
+    cv: Condvar,
+}
+
+struct FrameTimerState {
+    deadlines: BinaryHeap<Reverse<Instant>>,
+    worker_running: bool,
+}
+
+impl FrameTimer {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(FrameTimerState {
+                deadlines: BinaryHeap::new(),
+                worker_running: false,
+            }),
+            cv: Condvar::new(),
+        }
+    }
+
+    fn schedule(self: &Arc<Self>, duration: Duration, tx: AppEventSender) {
+        let deadline = Instant::now() + duration;
+        let mut state = self.state.lock().unwrap();
+        state.deadlines.push(Reverse(deadline));
+        let should_spawn = if !state.worker_running {
+            state.worker_running = true;
+            true
+        } else {
+            false
+        };
+        self.cv.notify_one();
+        drop(state);
+
+        if should_spawn {
+            let timer = Arc::clone(self);
+            thread::spawn(move || timer.run(tx));
+        }
+    }
+
+    fn run(self: Arc<Self>, tx: AppEventSender) {
+        let mut state = self.state.lock().unwrap();
+        loop {
+            let deadline = match state.deadlines.peek().copied() {
+                Some(Reverse(deadline)) => deadline,
+                None => {
+                    state.worker_running = false;
+                    break;
+                }
+            };
+
+            let now = Instant::now();
+            if deadline <= now {
+                state.deadlines.pop();
+                drop(state);
+                tx.send(AppEvent::RequestRedraw);
+                state = self.state.lock().unwrap();
+                continue;
+            }
+
+            let wait_dur = deadline.saturating_duration_since(now);
+            let (new_state, result) = self.cv.wait_timeout(state, wait_dur).unwrap();
+            state = new_state;
+
+            if result.timed_out() {
+                continue;
+            }
+        }
+    }
+}
+
 struct LoginFlowState {
     shutdown: code_login::ShutdownHandle,
     join_handle: tokio::task::JoinHandle<()>,
@@ -111,10 +183,9 @@ pub(crate) struct App<'a> {
     /// Set if a redraw request arrived while another frame was in flight. Ensures we
     /// queue one more frame immediately after the current draw completes.
     post_frame_redraw: Arc<AtomicBool>,
-    /// True while a one-shot timer for a future animation frame is armed.
-    /// This prevents arming multiple timers at once, while allowing timers
-    /// to run independently of the short debounce used for immediate redraws.
-    scheduled_frame_armed: Arc<AtomicBool>,
+    /// Shared scheduler for future animation frames. Ensures the shortest
+    /// requested interval wins while preserving later deadlines.
+    frame_timer: Arc<FrameTimer>,
     /// Controls the input reader thread spawned at startup.
     input_running: Arc<AtomicBool>,
 
@@ -218,7 +289,7 @@ impl App<'_> {
         let pending_redraw = Arc::new(AtomicBool::new(false));
         let redraw_inflight = Arc::new(AtomicBool::new(false));
         let post_frame_redraw = Arc::new(AtomicBool::new(false));
-        let scheduled_frame_armed = Arc::new(AtomicBool::new(false));
+        let frame_timer = Arc::new(FrameTimer::new());
 
         let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
 
@@ -386,7 +457,7 @@ impl App<'_> {
             pending_redraw,
             redraw_inflight,
             post_frame_redraw,
-            scheduled_frame_armed,
+            frame_timer,
             input_running,
             enhanced_keys_supported,
             non_enhanced_pressed_keys: HashSet::new(),
@@ -513,24 +584,10 @@ impl App<'_> {
         }
     }
     
-    /// Schedule a redraw after the specified duration
+    /// Schedule a redraw after the specified duration.
     fn schedule_redraw_in(&self, duration: Duration) {
-        // Coalesce timers: only arm one future frame at a time. Crucially, do
-        // NOT gate this on the short debounce flag used for immediate redraws,
-        // otherwise animations can stall if the timer is suppressed by debounce.
-        if self
-            .scheduled_frame_armed
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        { return; }
-        let scheduled = self.scheduled_frame_armed.clone();
-        let tx = self.app_event_tx.clone();
-        thread::spawn(move || {
-            thread::sleep(duration);
-            // Allow a subsequent timer to be armed.
-            scheduled.store(false, Ordering::Release);
-            tx.send(AppEvent::RequestRedraw);
-        });
+        self.frame_timer
+            .schedule(duration, self.app_event_tx.clone());
     }
 
     fn handle_login_mode_change(&mut self, using_chatgpt_auth: bool) {

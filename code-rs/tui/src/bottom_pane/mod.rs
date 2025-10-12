@@ -3,6 +3,7 @@
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
+use crate::glitch_animation;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
 use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
@@ -11,8 +12,10 @@ use code_file_search::FileMatch;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::WidgetRef;
-use std::time::Duration;
+use std::cell::{Cell, RefCell};
+use std::time::{Duration, Instant};
 
 mod approval_modal_view;
 #[cfg(feature = "code-fork")]
@@ -101,6 +104,178 @@ enum ActiveViewKind {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutoDriveTransitionPhase {
+    Entering,
+    #[allow(dead_code)]
+    Exiting,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TransitionGeometry {
+    start: Rect,
+    target: Rect,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AutoDriveTransitionState {
+    phase: AutoDriveTransitionPhase,
+    started_at: Instant,
+    geometry: Option<TransitionGeometry>,
+    start_override: Option<Rect>,
+    variant: AnimationVariant,
+}
+
+impl AutoDriveTransitionState {
+    const ENTER_ANIMATION: Duration = Duration::from_millis(600);
+    const ENTER_FADE: Duration = Duration::from_millis(250);
+    const EXIT_BUILD: Duration = Duration::from_millis(320);
+    const EXIT_FADE: Duration = Duration::from_millis(500);
+
+    fn new(phase: AutoDriveTransitionPhase, start_override: Option<Rect>) -> Self {
+        Self {
+            phase,
+            started_at: Instant::now(),
+            geometry: None,
+            start_override,
+            variant: select_animation_variant(),
+        }
+    }
+
+    fn frame(&self) -> AutoDriveTransitionFrame {
+        match self.phase {
+            AutoDriveTransitionPhase::Entering => {
+                let elapsed = self.started_at.elapsed();
+                if elapsed < Self::ENTER_ANIMATION {
+                    let t = elapsed.as_secs_f32() / Self::ENTER_ANIMATION.as_secs_f32();
+                    AutoDriveTransitionFrame {
+                        t: t.clamp(0.0, 1.0),
+                        alpha: 1.0,
+                    }
+                } else if elapsed
+                    < Self::ENTER_ANIMATION.saturating_add(Self::ENTER_FADE)
+                {
+                    let fade_elapsed = elapsed - Self::ENTER_ANIMATION;
+                    let fade_ratio = fade_elapsed.as_secs_f32() / Self::ENTER_FADE.as_secs_f32();
+                    AutoDriveTransitionFrame {
+                        t: 1.0,
+                        alpha: (1.0 - fade_ratio).clamp(0.0, 1.0),
+                    }
+                } else {
+                    AutoDriveTransitionFrame::done()
+                }
+            }
+            AutoDriveTransitionPhase::Exiting => {
+                let elapsed = self.started_at.elapsed();
+                if elapsed < Self::EXIT_BUILD {
+                    let t = elapsed.as_secs_f32() / Self::EXIT_BUILD.as_secs_f32();
+                    AutoDriveTransitionFrame {
+                        t: t.clamp(0.0, 1.0),
+                        alpha: 1.0,
+                    }
+                } else if elapsed < Self::EXIT_BUILD.saturating_add(Self::EXIT_FADE) {
+                    let fade_elapsed = elapsed - Self::EXIT_BUILD;
+                    let fade_ratio = fade_elapsed.as_secs_f32() / Self::EXIT_FADE.as_secs_f32();
+                    AutoDriveTransitionFrame {
+                        t: 1.0,
+                        alpha: (1.0 - fade_ratio).clamp(0.0, 1.0),
+                    }
+                } else {
+                    AutoDriveTransitionFrame::done()
+                }
+            }
+        }
+    }
+
+    fn ensure_geometry(&mut self, mut geometry: TransitionGeometry) {
+        if self.geometry.is_none() {
+            let start = if let Some(override_rect) = self.start_override {
+                override_rect
+            } else {
+                geometry.start
+            };
+
+            let target = normalize_target_rect(geometry.target);
+
+            geometry.start = start;
+            geometry.target = target;
+            self.geometry = Some(geometry);
+        }
+    }
+
+    fn geometry(&self) -> Option<TransitionGeometry> {
+        self.geometry
+    }
+
+    fn variant(&self) -> AnimationVariant { self.variant }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AutoDriveTransitionFrame {
+    t: f32,
+    alpha: f32,
+}
+
+impl AutoDriveTransitionFrame {
+    fn done() -> Self {
+        Self {
+            t: 1.0,
+            alpha: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AnimationFrameCtx {
+    sweep: f32,
+    fade: f32,
+    elapsed: f32,
+    start_rect: Rect,
+    target_rect: Rect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnimationVariant {
+    Glide,
+    Wavefront,
+    Bloom,
+    Slide,
+    Fade,
+}
+
+impl AnimationVariant {
+    fn all() -> [Self; 5] {
+        [
+            AnimationVariant::Glide,
+            AnimationVariant::Wavefront,
+            AnimationVariant::Bloom,
+            AnimationVariant::Slide,
+            AnimationVariant::Fade,
+        ]
+    }
+}
+
+fn select_animation_variant() -> AnimationVariant {
+    let index = std::env::var("ANI_MODE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(0)
+        % AnimationVariant::all().len();
+    AnimationVariant::all()[index]
+}
+
+fn normalize_target_rect(target: Rect) -> Rect {
+    if target.width >= 3 && target.height >= 3 {
+        return target;
+    }
+
+    Rect {
+        width: target.width.max(3),
+        height: target.height.max(3),
+        ..target
+    }
+}
+
 /// Pane displayed in the lower half of the chat UI.
 pub(crate) struct BottomPane<'a> {
     /// Composer is retained even when a BottomPaneView is displayed so the
@@ -126,6 +301,9 @@ pub(crate) struct BottomPane<'a> {
     top_spacer_enabled: bool,
 
     pub(crate) using_chatgpt_auth: bool,
+
+    auto_transition: RefCell<Option<AutoDriveTransitionState>>,
+    last_composer_rect: Cell<Option<Rect>>,
 }
 
 pub(crate) struct BottomPaneParams {
@@ -156,7 +334,19 @@ impl BottomPane<'_> {
             status_view_active: false,
             top_spacer_enabled: true,
             using_chatgpt_auth: params.using_chatgpt_auth,
+            auto_transition: RefCell::new(None),
+            last_composer_rect: Cell::new(None),
         }
+    }
+
+    fn begin_auto_transition(&self, phase: AutoDriveTransitionPhase) {
+        let start_rect = self.last_composer_rect.get();
+        let state = AutoDriveTransitionState::new(phase, start_rect);
+        self.auto_transition.replace(Some(state));
+        self.request_redraw();
+        self
+            .app_event_tx
+            .send(AppEvent::ScheduleFrameIn(Duration::from_millis(16)));
     }
 
     /// Show Agents overview (Agents + Commands sections)
@@ -788,6 +978,9 @@ impl BottomPane<'_> {
     }
 
     pub(crate) fn show_auto_coordinator_view(&mut self, model: AutoCoordinatorViewModel) {
+        if self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            self.begin_auto_transition(AutoDriveTransitionPhase::Entering);
+        }
         if let Some(existing) = self.active_view.as_mut() {
             if self.active_view_kind == ActiveViewKind::AutoCoordinator {
                 if let Some(existing_any) = existing.as_any_mut() {
@@ -998,79 +1191,688 @@ impl WidgetRef for &BottomPane<'_> {
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
 
-        let mut y_offset = 0u16;
+        let composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+        let mut overlay_target = composer_rect;
+        let mut rendered = false;
 
-        // When a modal view is active and not yet complete, it owns the whole content area.
         if let Some(view) = &self.active_view {
-            if view.is_complete() {
-                // Modal finished—render composer instead on this frame.
-                // We intentionally avoid mutating state here; key handling will
-                // clear the view on the next interaction. This keeps render pure.
-            } else if y_offset < area.height {
-                if y_offset < area.height {
-                    // Reserve bottom padding lines; keep at least 1 line for the view.
-                    let mut avail = area.height - y_offset;
-                    let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-                    let horizontal_padding = 1u16;
-
-                    if is_auto && self.top_spacer_enabled && avail > 0 {
-                        y_offset = y_offset.saturating_add(1);
-                        avail = avail.saturating_sub(1);
-                    }
-
-                    if avail == 0 {
-                        return;
-                    }
-
+            if !view.is_complete() {
+                let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
+                let mut avail = area.height;
+                if is_auto && self.top_spacer_enabled && avail > 0 {
+                    avail = avail.saturating_sub(1);
+                }
+                if avail > 0 {
                     let pad = if is_auto {
                         BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
                     } else {
                         0
                     };
-
                     let view_height = avail.saturating_sub(pad);
-                    if view_height == 0 {
-                        return;
-                    }
-
-                    let view_rect = Rect {
-                        x: area.x + horizontal_padding,
-                        y: area.y + y_offset,
-                        width: area.width.saturating_sub(horizontal_padding * 2),
-                        height: view_height,
-                    };
-                    // Ensure view background is painted under its content
-                    let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
-                    fill_rect(buf, view_rect, None, view_bg);
-                    view.render_with_composer(view_rect, buf, &self.composer);
-
-                    if is_auto && pad > 0 {
-                        // Auto Drive view handles its own status footer inside the
-                        // container; leave the reserved padding empty.
+                    if view_height > 0 {
+                        let horizontal_padding = 1u16;
+                        let y_base = if is_auto && self.top_spacer_enabled {
+                            area.y + 1
+                        } else {
+                            area.y
+                        };
+                        let view_rect = Rect {
+                            x: area.x + horizontal_padding,
+                            y: y_base,
+                            width: area.width.saturating_sub(horizontal_padding * 2),
+                            height: view_height,
+                        };
+                        let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
+                        fill_rect(buf, view_rect, None, view_bg);
+                        view.render_with_composer(view_rect, buf, &self.composer);
+                        if is_auto {
+                            overlay_target = view_rect;
+                        }
+                        rendered = true;
                     }
                 }
-                return;
             }
-        } else if y_offset < area.height {
-            // Optionally add an empty line above the input box
-            if self.top_spacer_enabled {
-                y_offset = y_offset.saturating_add(1);
+        }
+
+        if !rendered {
+            let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
+            fill_rect(buf, composer_rect, None, comp_bg);
+            (&self.composer).render_ref(composer_rect, buf);
+            self.last_composer_rect.set(Some(composer_rect));
+        }
+
+        let transition_phase = self
+            .auto_transition
+            .borrow()
+            .as_ref()
+            .map(|state| state.phase);
+
+        if let Some(phase) = transition_phase {
+            let target = match phase {
+                AutoDriveTransitionPhase::Entering => overlay_target,
+                AutoDriveTransitionPhase::Exiting => composer_rect,
+            };
+            self.render_auto_drive_transition_overlay(area, buf, composer_rect, target);
+        }
+    }
+}
+
+impl BottomPane<'_> {
+    fn render_auto_drive_transition_overlay(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        composer_rect: Rect,
+        target_rect: Rect,
+    ) {
+        let mut slot = self.auto_transition.borrow_mut();
+        let Some(state) = slot.as_mut() else {
+            return;
+        };
+
+        if area.width < 4 || area.height < 3 {
+            slot.take();
+            return;
+        }
+
+        state.ensure_geometry(TransitionGeometry {
+            start: composer_rect,
+            target: target_rect,
+        });
+
+        let frame = state.frame();
+        let Some(geom) = state.geometry() else {
+            slot.take();
+            return;
+        };
+
+        let target = geom.target;
+        let sweep = frame.t.clamp(0.0, 1.0);
+        let fade = frame.alpha.clamp(0.0, 1.0);
+
+        let ctx = AnimationFrameCtx {
+            sweep,
+            fade,
+            elapsed: state.started_at.elapsed().as_secs_f32(),
+            start_rect: geom.start,
+            target_rect: target,
+        };
+
+        let variant = state.variant();
+        render_transition_frame(buf, area, &ctx, variant, &self.composer);
+
+        if sweep >= 1.0 && fade <= 0.0 {
+            slot.take();
+        } else {
+            self.request_redraw();
+            self
+                .app_event_tx
+                .send(AppEvent::ScheduleFrameIn(Duration::from_millis(16)));
+        }
+    }
+}
+
+fn compute_composer_rect(area: Rect, top_spacer_enabled: bool) -> Rect {
+    let horizontal_padding = 1u16;
+    let mut y_offset = 0u16;
+    if top_spacer_enabled {
+        y_offset = y_offset.saturating_add(1);
+    }
+    let height = (area.height - y_offset)
+        - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1));
+    Rect {
+        x: area.x + horizontal_padding,
+        y: area.y + y_offset,
+        width: area.width.saturating_sub(horizontal_padding * 2),
+        height,
+    }
+}
+
+fn render_transition_frame(
+    buf: &mut Buffer,
+    overlay_area: Rect,
+    ctx: &AnimationFrameCtx,
+    variant: AnimationVariant,
+    composer: &ChatComposer,
+) {
+    if ctx.target_rect.width < 3 || ctx.target_rect.height < 3 {
+        return;
+    }
+
+    let mut progress = ctx.sweep.clamp(0.0, 1.0);
+    if progress < 0.01 {
+        progress = 0.0;
+    }
+
+    const BORDER_STAGE: f32 = 0.30;
+    const FILL_STAGE: f32 = 0.80;
+
+    let border_phase = (progress / BORDER_STAGE).clamp(0.0, 1.0);
+    let fill_phase = ((progress - BORDER_STAGE) / (FILL_STAGE - BORDER_STAGE)).clamp(0.0, 1.0);
+    let clear_phase = ((progress - FILL_STAGE) / (1.0 - FILL_STAGE)).clamp(0.0, 1.0);
+
+    let growth_phase = if progress <= BORDER_STAGE {
+        0.0
+    } else {
+        let raw = ((progress - BORDER_STAGE) / (1.0 - BORDER_STAGE)).clamp(0.0, 1.0);
+        ease_in_out_cubic(raw)
+    };
+
+    let start_rect = normalize_target_rect(ctx.start_rect);
+    let target_rect = normalize_target_rect(ctx.target_rect);
+
+    let start_left = start_rect.x as f32;
+    let start_top = start_rect.y as f32;
+    let start_width = start_rect.width.max(3) as f32;
+    let start_height = start_rect.height.max(3) as f32;
+
+    let target_left = target_rect.x as f32;
+    let target_top = target_rect.y as f32;
+    let target_width = target_rect.width.max(3) as f32;
+    let target_height = target_rect.height.max(3) as f32;
+
+    let left_f = start_left + (target_left - start_left) * growth_phase;
+    let top_f = start_top + (target_top - start_top) * growth_phase;
+    let width_f = start_width + (target_width - start_width) * growth_phase;
+    let height_f = start_height + (target_height - start_height) * growth_phase;
+
+    let mut active_rect = Rect {
+        x: left_f.floor().max(overlay_area.x as f32) as u16,
+        y: top_f.floor().max(overlay_area.y as f32) as u16,
+        width: width_f.ceil().max(3.0) as u16,
+        height: height_f.ceil().max(3.0) as u16,
+    };
+
+    let overlay_right = overlay_area.x.saturating_add(overlay_area.width);
+    let overlay_bottom = overlay_area.y.saturating_add(overlay_area.height);
+    if active_rect.x + active_rect.width > overlay_right {
+        active_rect.width = overlay_right.saturating_sub(active_rect.x);
+    }
+    if active_rect.y + active_rect.height > overlay_bottom {
+        active_rect.height = overlay_bottom.saturating_sub(active_rect.y);
+    }
+
+    let start_right = start_rect.x.saturating_add(start_rect.width);
+    let start_bottom = start_rect.y.saturating_add(start_rect.height);
+    let target_right = target_rect.x.saturating_add(target_rect.width);
+    let target_bottom = target_rect.y.saturating_add(target_rect.height);
+
+    let union_left = start_rect.x.min(target_rect.x);
+    let union_top = start_rect.y.min(target_rect.y);
+    let union_right = start_right.max(target_right);
+    let union_bottom = start_bottom.max(target_bottom);
+
+    let cover_x0 = union_left.saturating_sub(1).max(overlay_area.x);
+    let cover_y0 = union_top.saturating_sub(1).max(overlay_area.y);
+    let cover_x1 = union_right.saturating_add(1).min(overlay_right);
+    let cover_y1 = union_bottom.saturating_add(1).min(overlay_bottom);
+
+    let width = cover_x1.saturating_sub(cover_x0);
+    let height = cover_y1.saturating_sub(cover_y0);
+    if width > 0 && height > 0 {
+        let coverage = Rect {
+            x: cover_x0,
+            y: cover_y0,
+            width,
+            height,
+        };
+
+        fill_rect(buf, coverage, Some(' '), Style::default().bg(crate::colors::background()));
+    }
+
+    let front_rect = shrink_rect_bottom(start_rect, 1).unwrap_or(start_rect);
+    composer.render_ref(front_rect, buf);
+
+    if progress <= 0.0 {
+        draw_box_outline(buf, start_rect);
+        return;
+    }
+
+    if border_phase > 0.0 {
+        render_start_border_trace(buf, target_rect, border_phase, ctx, variant);
+    }
+
+    if fill_phase > 0.0 {
+        render_fill_stage(buf, active_rect, front_rect, variant, ctx, fill_phase);
+    }
+
+    if clear_phase > 0.0 {
+        render_clear_stage(buf, target_rect, front_rect, clear_phase, ctx);
+    }
+
+    if clear_phase >= 1.0 || ctx.fade <= 0.01 {
+        draw_box_outline_with_style(
+            buf,
+            target_rect,
+            Style::default()
+                .fg(crate::colors::border_dim())
+                .bg(crate::colors::background())
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+
+    composer.render_ref(front_rect, buf);
+}
+
+fn set_cell(buf: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
+    let mut tmp = [0u8; 4];
+    let cell = &mut buf[(x, y)];
+    cell.set_symbol(ch.encode_utf8(&mut tmp));
+    cell.set_style(style);
+}
+
+fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
+    x >= rect.x
+        && x < rect.x.saturating_add(rect.width)
+        && y >= rect.y
+        && y < rect.y.saturating_add(rect.height)
+}
+
+fn shrink_rect_bottom(rect: Rect, rows: u16) -> Option<Rect> {
+    if rect.height == 0 || rect.height <= rows {
+        return None;
+    }
+    Some(Rect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height - rows,
+    })
+}
+
+fn render_start_border_trace(
+    buf: &mut Buffer,
+    rect: Rect,
+    phase: f32,
+    ctx: &AnimationFrameCtx,
+    variant: AnimationVariant,
+) {
+    if rect.width < 3 || rect.height < 3 {
+        return;
+    }
+
+    let bottom = rect.y + rect.height - 1;
+    let mut reveal_rows = (rect.height as f32 * phase).ceil() as u16;
+    if reveal_rows == 0 {
+        return;
+    }
+    reveal_rows = reveal_rows.min(rect.height);
+
+    let start_y = bottom.saturating_sub(reveal_rows.saturating_sub(1));
+    let profile = variant_profile(variant);
+    let frame = (ctx.elapsed * 72.0) as u32;
+    for y in start_y..=bottom {
+        let progress = 1.0 - ((bottom.saturating_sub(y)) as f32 / rect.height.max(1) as f32);
+        let hue = (profile.hue_shift + progress * 0.35 + ctx.elapsed * 0.22).fract();
+        let intensity = (phase * 0.65 + progress * 0.45).clamp(0.15, 1.0);
+        if y == bottom {
+            for x in rect.x..rect.x + rect.width {
+                if profile.outline_hole_stride > 0 {
+                    let idx = ((x as u32 + frame + y as u32 * 3) % profile.outline_hole_stride as u32)
+                        as u32;
+                    if idx == profile.outline_hole_offset as u32 {
+                        continue;
+                    }
+                }
+                let noise = ((x as u32 * 13 + y as u32 * 7 + frame * 3) % 17) as f32 / 16.0;
+                let ch = density_char(noise, &profile.outline_table);
+                let style = vivid_style(hue + noise * 0.08, intensity.max(0.35), ctx);
+                paint_outline_cell(buf, x, y, ch, style);
+            }
+        } else {
+            for &(edge_x, sign) in &[(rect.x, 1i16), (rect.x + rect.width - 1, -1i16)] {
+                if profile.outline_hole_stride > 0 {
+                    let idx = ((edge_x as u32 * 11 + y as u32 * 5 + frame) % profile.outline_hole_stride as u32)
+                        as u32;
+                    if idx == profile.outline_hole_offset as u32 {
+                        continue;
+                    }
+                }
+                let noise = ((edge_x as u32 * 5 + y as u32 * 19 + frame * 5) % 23) as f32 / 22.0;
+                let ch = density_char(noise, &profile.outline_table);
+                let hue_mod = hue + (sign as f32) * 0.05 * noise;
+                let style = vivid_style(hue_mod.fract(), (intensity * (0.8 + noise * 0.4)).clamp(0.2, 1.0), ctx);
+                paint_outline_cell(buf, edge_x, y, ch, style);
+            }
+        }
+    }
+
+    if reveal_rows >= rect.height {
+        let hue = (ctx.elapsed * 0.24).fract();
+        let top = rect.y;
+        for x in rect.x..rect.x + rect.width {
+            if profile.outline_hole_stride > 0 {
+                let idx = ((x as u32 + top as u32 * 17 + frame * 2) % profile.outline_hole_stride as u32) as u32;
+                if idx == profile.outline_hole_offset as u32 {
+                    continue;
+                }
+            }
+            let noise = ((x as u32 * 7 + top as u32 * 13 + frame) % 19) as f32 / 18.0;
+            let ch = density_char(noise, &profile.outline_table);
+            let style = vivid_style((hue + noise * 0.07).fract(), (0.85 + noise * 0.3).clamp(0.2, 1.0), ctx);
+            paint_outline_cell(buf, x, top, ch, style);
+        }
+    }
+}
+
+fn render_fill_stage(
+    buf: &mut Buffer,
+    rect: Rect,
+    start_rect: Rect,
+    variant: AnimationVariant,
+    ctx: &AnimationFrameCtx,
+    phase: f32,
+) {
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+
+    let mut filled_rows = (rect.height as f32 * phase).ceil() as u16;
+    if filled_rows == 0 {
+        return;
+    }
+    filled_rows = filled_rows.min(rect.height);
+
+    let profile = variant_profile(variant);
+    let bottom = rect.y + rect.height - 1;
+    let start_y = bottom.saturating_sub(filled_rows.saturating_sub(1));
+    let frame = (ctx.elapsed * 60.0) as u32;
+
+    for y in start_y..=bottom {
+        let row_ratio = (bottom.saturating_sub(y)) as f32 / rect.height.max(1) as f32;
+        for x in rect.x..rect.x + rect.width {
+            if point_in_rect(x, y, start_rect) {
+                continue;
+            }
+            if profile.hole_stride > 0 {
+                let idx = ((x as u32 + y as u32 + frame) % profile.hole_stride as u32) as u32;
+                if idx == profile.hole_offset as u32 {
+                    continue;
+                }
             }
 
-            // Add horizontal padding (2 chars on each side) for Message input
-            let horizontal_padding = 1u16;
-        let composer_rect = Rect {
-            x: area.x + horizontal_padding,
-            y: area.y + y_offset,
-            width: area.width.saturating_sub(horizontal_padding * 2),
-            // Reserve bottom padding
-            height: (area.height - y_offset)
-                - BottomPane::BOTTOM_PAD_LINES.min((area.height - y_offset).saturating_sub(1)),
-        };
-        // Paint the composer area background before rendering widgets
-        let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
-        fill_rect(buf, composer_rect, None, comp_bg);
-        (&self.composer).render_ref(composer_rect, buf);
+            let col_ratio = (x.saturating_sub(rect.x)) as f32 / rect.width.max(1) as f32;
+            let oscillation = ((ctx.elapsed * profile.time_speed)
+                + col_ratio * profile.horizontal_wave
+                + (1.0 - row_ratio) * profile.vertical_wave)
+                .sin()
+                * 0.5
+                + 0.5;
+
+            let intensity = clamp01(
+                phase * 0.55 + (1.0 - row_ratio) * 0.45 + oscillation * profile.jitter_scale,
+            );
+            let hue = (profile.hue_shift + col_ratio * 0.4 + (1.0 - row_ratio) * 0.35
+                + ctx.elapsed * profile.hue_time_speed)
+                .fract();
+
+            let ch = density_char(intensity, &profile.char_table);
+            let style = vivid_style(hue, intensity.max(0.2), ctx);
+            set_cell(buf, x, y, ch, style);
         }
+    }
+}
+
+fn render_clear_stage(
+    buf: &mut Buffer,
+    rect: Rect,
+    start_rect: Rect,
+    phase: f32,
+    ctx: &AnimationFrameCtx,
+) {
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+
+    let mut cleared_rows = (rect.height as f32 * phase).ceil() as u16;
+    if cleared_rows == 0 {
+        return;
+    }
+    cleared_rows = cleared_rows.min(rect.height);
+
+    let bottom = rect.y + rect.height - 1;
+    let start_y = bottom.saturating_sub(cleared_rows.saturating_sub(1));
+    let bg_style = Style::default().bg(crate::colors::background());
+
+    let allow_inner_release = phase >= 0.85;
+    for y in start_y..=bottom {
+        for x in rect.x..rect.x + rect.width {
+            if !allow_inner_release && point_in_rect(x, y, start_rect) {
+                continue;
+            }
+            set_cell(buf, x, y, ' ', bg_style);
+        }
+    }
+
+    draw_final_border_partial(buf, rect, phase, ctx);
+}
+
+fn draw_final_border_partial(
+    buf: &mut Buffer,
+    rect: Rect,
+    phase: f32,
+    ctx: &AnimationFrameCtx,
+) {
+
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+
+    let bottom = rect.y + rect.height - 1;
+    let mut reveal_rows = (rect.height as f32 * phase).ceil() as u16;
+    if reveal_rows == 0 {
+        return;
+    }
+    reveal_rows = reveal_rows.min(rect.height);
+
+    let start_y = bottom.saturating_sub(reveal_rows.saturating_sub(1));
+    let base_border = crate::colors::border_dim();
+
+    for y in start_y..=bottom {
+        let row_ratio = (bottom.saturating_sub(y)) as f32 / rect.height.max(1) as f32;
+        let hue = ((1.0 - row_ratio) * 0.3 + ctx.elapsed * 0.15).fract();
+        let accent = glitch_animation::gradient_multi(hue);
+        let fg = glitch_animation::blend_to_background(
+            glitch_animation::mix_rgb(base_border, accent, 0.2 + phase * 0.15),
+            ctx.fade.max(0.02),
+        );
+        let style = Style::default().fg(fg).bg(crate::colors::background()).add_modifier(Modifier::BOLD);
+
+        if y == bottom {
+            for x in rect.x..rect.x + rect.width {
+                let ch = if x == rect.x {
+                    '└'
+                } else if x + 1 == rect.x + rect.width {
+                    '┘'
+                } else {
+                    '─'
+                };
+                paint_outline_cell(buf, x, y, ch, style);
+            }
+        } else if y == rect.y {
+            for x in rect.x..rect.x + rect.width {
+                let ch = if x == rect.x {
+                    '┌'
+                } else if x + 1 == rect.x + rect.width {
+                    '┐'
+                } else {
+                    '─'
+                };
+                paint_outline_cell(buf, x, y, ch, style);
+            }
+        } else {
+            paint_outline_cell(buf, rect.x, y, '│', style);
+            paint_outline_cell(buf, rect.x + rect.width - 1, y, '│', style);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct VariantProfile {
+    char_table: [char; 5],
+    outline_table: [char; 4],
+    hue_shift: f32,
+    hue_time_speed: f32,
+    time_speed: f32,
+    horizontal_wave: f32,
+    vertical_wave: f32,
+    jitter_scale: f32,
+    hole_stride: u16,
+    hole_offset: u16,
+    outline_hole_stride: u16,
+    outline_hole_offset: u16,
+}
+
+fn variant_profile(variant: AnimationVariant) -> VariantProfile {
+    match variant {
+        AnimationVariant::Glide => VariantProfile {
+            char_table: ['░', '▒', '▓', '▓', '█'],
+            outline_table: ['░', '▒', '▓', '█'],
+            hue_shift: 0.33,
+            hue_time_speed: 0.24,
+            time_speed: 2.6,
+            horizontal_wave: 6.0,
+            vertical_wave: 3.8,
+            jitter_scale: 0.30,
+            hole_stride: 0,
+            hole_offset: 0,
+            outline_hole_stride: 6,
+            outline_hole_offset: 2,
+        },
+        AnimationVariant::Wavefront => VariantProfile {
+            char_table: ['·', '░', '▒', '▓', '█'],
+            outline_table: ['·', '░', '▒', '▓'],
+            hue_shift: 0.35,
+            hue_time_speed: 0.26,
+            time_speed: 3.8,
+            horizontal_wave: 9.5,
+            vertical_wave: 6.0,
+            jitter_scale: 0.36,
+            hole_stride: 9,
+            hole_offset: 3,
+            outline_hole_stride: 5,
+            outline_hole_offset: 1,
+        },
+        AnimationVariant::Bloom => VariantProfile {
+            char_table: ['░', '▒', '▓', '█', '█'],
+            outline_table: ['░', '▒', '▓', '█'],
+            hue_shift: 0.34,
+            hue_time_speed: 0.22,
+            time_speed: 4.4,
+            horizontal_wave: 5.6,
+            vertical_wave: 7.2,
+            jitter_scale: 0.34,
+            hole_stride: 7,
+            hole_offset: 2,
+            outline_hole_stride: 4,
+            outline_hole_offset: 1,
+        },
+        AnimationVariant::Slide => VariantProfile {
+            char_table: ['·', '░', '▒', '▓', '█'],
+            outline_table: ['░', '▒', '▓', '█'],
+            hue_shift: 0.36,
+            hue_time_speed: 0.25,
+            time_speed: 3.6,
+            horizontal_wave: 10.2,
+            vertical_wave: 4.6,
+            jitter_scale: 0.32,
+            hole_stride: 5,
+            hole_offset: 1,
+            outline_hole_stride: 8,
+            outline_hole_offset: 3,
+        },
+        AnimationVariant::Fade => VariantProfile {
+            char_table: ['░', '▒', '▒', '▓', '█'],
+            outline_table: ['░', '▒', '▓', '█'],
+            hue_shift: 0.35,
+            hue_time_speed: 0.26,
+            time_speed: 4.6,
+            horizontal_wave: 7.2,
+            vertical_wave: 7.8,
+            jitter_scale: 0.36,
+            hole_stride: 10,
+            hole_offset: 4,
+            outline_hole_stride: 3,
+            outline_hole_offset: 1,
+        },
+    }
+}
+
+fn vivid_style(hue: f32, intensity: f32, ctx: &AnimationFrameCtx) -> Style {
+    use ratatui::style::Color;
+    let base = glitch_animation::gradient_multi(hue);
+    let bright = glitch_animation::mix_rgb(base, Color::Rgb(255, 255, 255), 0.25 + intensity * 0.4);
+    let fg = glitch_animation::blend_to_background(bright, ctx.fade.max(0.05));
+    Style::default()
+        .fg(fg)
+        .bg(crate::colors::background())
+        .add_modifier(Modifier::BOLD)
+}
+
+fn density_char(intensity: f32, table: &[char]) -> char {
+    let clamped = intensity.clamp(0.0, 0.9999);
+    let len = table.len().max(1);
+    let idx = (clamped * len as f32).floor() as usize;
+    table[idx.min(len - 1)]
+}
+
+fn clamp01(v: f32) -> f32 {
+    v.clamp(0.0, 1.0)
+}
+
+fn draw_box_outline(buf: &mut Buffer, rect: Rect) {
+    let style = Style::default()
+        .fg(crate::colors::border())
+        .bg(crate::colors::background())
+        .add_modifier(Modifier::BOLD);
+    draw_box_outline_with_style(buf, rect, style);
+}
+
+fn draw_box_outline_with_style(buf: &mut Buffer, rect: Rect, style: Style) {
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+
+    let top_y = rect.y;
+    let bottom_y = rect.y + rect.height - 1;
+    for x in rect.x..rect.x + rect.width {
+        let ch_top = if x == rect.x {
+            '┌'
+        } else if x + 1 == rect.x + rect.width {
+            '┐'
+        } else {
+            '─'
+        };
+        let ch_bottom = if x == rect.x {
+            '└'
+        } else if x + 1 == rect.x + rect.width {
+            '┘'
+        } else {
+            '─'
+        };
+
+        paint_outline_cell(buf, x, top_y, ch_top, style);
+        paint_outline_cell(buf, x, bottom_y, ch_bottom, style);
+    }
+
+    for y in (rect.y + 1)..(rect.y + rect.height - 1) {
+        paint_outline_cell(buf, rect.x, y, '│', style);
+        paint_outline_cell(buf, rect.x + rect.width - 1, y, '│', style);
+    }
+}
+
+fn paint_outline_cell(buf: &mut Buffer, x: u16, y: u16, ch: char, style: Style) {
+    let mut tmp = [0u8; 4];
+    let cell = &mut buf[(x, y)];
+    cell.set_symbol(ch.encode_utf8(&mut tmp));
+    cell.set_style(style);
+}
+
+fn ease_in_out_cubic(t: f32) -> f32 {
+    let v = t.clamp(0.0, 1.0);
+    if v < 0.5 {
+        4.0 * v * v * v
+    } else {
+        1.0 - (-2.0 * v + 2.0).powf(3.0) / 2.0
     }
 }
