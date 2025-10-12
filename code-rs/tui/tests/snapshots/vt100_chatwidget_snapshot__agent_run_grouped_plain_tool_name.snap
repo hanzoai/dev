@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 856
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
@@ -8,16 +9,16 @@ expression: output
  ┌ Agents ────────────────────────────────────────────────────────────────────┐
  │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
  └────────────────────────────────────────────────────────────────────────────┘
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+
  › Kick off QA bot regression run
 
  ✔ ╭─ BATCH #001 · “Run targeted regression suite” · 1 agents · ▶1 · COMPLET...
    │
    │   TASK Run targeted regression suite
-   │
-   │   PLAN
-   │   1. Init workspace
-   │   2. Nextest smoke
-   │   3. Summarize
    │
    │  #  STATE AGENT           MODEL    STEPS ELAP  TOK   LAST
    │   1 ▶     QA Bot          claude       — 00:18 8,900 Executing smoke tests
