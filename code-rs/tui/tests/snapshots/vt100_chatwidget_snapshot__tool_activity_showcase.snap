@@ -1,11 +1,17 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 474
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
+
  › Can you gather details from the latest docs update?
 
  ✔ Web Search, duration: 0ms
@@ -24,11 +30,6 @@ expression: output
  ✔ ╭─ AGENTS · “Run targeted regression suite” · 0 agents · COMPLETED 01:34
    │
    │   TASK Run targeted regression suite
-   │
-   │   PLAN
-   │   1. Init workspace
-   │   2. Nextest smoke
-   │   3. Summarize
    │
    │   SUMMARY
    │  Regression sweep complete
