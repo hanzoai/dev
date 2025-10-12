@@ -7,16 +7,32 @@ use ratatui::widgets::Widget;
 pub fn render_intro_animation(area: Rect, buf: &mut Buffer, t: f32) {
     // Avoid per-frame debug logging here to keep animation smooth.
     // (Heavy logging can starve the render loop on slower terminals.)
-    render_intro_outline_fill(area, buf, t)
+    render_intro_animation_for_word(area, buf, t, "CODE")
 }
 
 // Render the outline-fill animation with alpha blending for fade-out
 pub fn render_intro_animation_with_alpha(area: Rect, buf: &mut Buffer, t: f32, alpha: f32) {
-    render_intro_outline_fill_with_alpha(area, buf, t, alpha)
+    render_intro_animation_with_alpha_for_word(area, buf, t, alpha, "CODE")
+}
+
+// Public helper that allows callers to choose the rendered glyph string.
+pub fn render_intro_animation_for_word(area: Rect, buf: &mut Buffer, t: f32, word: &str) {
+    render_intro_outline_fill(area, buf, t, word)
+}
+
+// Public helper that allows callers to choose the rendered glyph string with alpha blending.
+pub fn render_intro_animation_with_alpha_for_word(
+    area: Rect,
+    buf: &mut Buffer,
+    t: f32,
+    alpha: f32,
+    word: &str,
+) {
+    render_intro_outline_fill_with_alpha(area, buf, t, alpha, word)
 }
 
 // Outline fill animation - inline, no borders
-pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
+pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32, word: &str) {
     // Compute the final render rect first (including our 1‑col right shift)
     let mut r = area;
     if r.width > 0 {
@@ -24,8 +40,8 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
         r.width = r.width.saturating_sub(1);
     }
     // Bail out early if the effective render rect is too small
-    if r.width < 40 || r.height < 10 {
-        tracing::warn!("!!! Area too small for animation: {}x{} (need 40x10)", r.width, r.height);
+    if r.width < 20 || r.height < 5 {
+        tracing::warn!("!!! Area too small for animation: {}x{} (need 20x5)", r.width, r.height);
         return;
     }
 
@@ -38,7 +54,7 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
     let frame = (t * 60.0) as u32;
 
     // Build scaled mask + border map using the actual render rect size
-    let (scale, mask, w, h) = scaled_mask("CODE", r.width, r.height);
+    let (scale, mask, w, h) = scaled_mask(word, r.width, r.height);
     let border = compute_border(&mask);
 
     // Restrict height to the scaled glyph height
@@ -78,14 +94,20 @@ pub fn render_intro_outline_fill(area: Rect, buf: &mut Buffer, t: f32) {
 }
 
 // Outline fill animation with alpha blending - inline, no borders
-pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32, alpha: f32) {
+pub fn render_intro_outline_fill_with_alpha(
+    area: Rect,
+    buf: &mut Buffer,
+    t: f32,
+    alpha: f32,
+    word: &str,
+) {
     // Compute the final render rect first (including our 1‑col right shift)
     let mut r = area;
     if r.width > 0 {
         r.x = r.x.saturating_add(1);
         r.width = r.width.saturating_sub(1);
     }
-    if r.width < 40 || r.height < 10 {
+    if r.width < 20 || r.height < 5 {
         return;
     }
 
@@ -99,7 +121,7 @@ pub fn render_intro_outline_fill_with_alpha(area: Rect, buf: &mut Buffer, t: f32
     let frame = (t * 60.0) as u32;
 
     // Build scaled mask + border map using the actual render rect size
-    let (scale, mask, w, h) = scaled_mask("CODE", r.width, r.height);
+    let (scale, mask, w, h) = scaled_mask(word, r.width, r.height);
     let border = compute_border(&mask);
 
     // Restrict height to the scaled glyph height
@@ -265,7 +287,7 @@ fn mask_to_outline_fill_lines_with_alpha(
 }
 
 // Helper function to blend colors towards background
-fn blend_to_background(color: Color, alpha: f32) -> Color {
+pub(crate) fn blend_to_background(color: Color, alpha: f32) -> Color {
     if alpha >= 1.0 {
         return color;
     }
@@ -326,7 +348,7 @@ fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
     (a as f32 + (b as f32 - a as f32) * t).round() as u8
 }
 
-fn mix_rgb(a: Color, b: Color, t: f32) -> Color {
+pub(crate) fn mix_rgb(a: Color, b: Color, t: f32) -> Color {
     match (a, b) {
         (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) => {
             Color::Rgb(lerp_u8(ar, br, t), lerp_u8(ag, bg, t), lerp_u8(ab, bb, t))
@@ -336,7 +358,7 @@ fn mix_rgb(a: Color, b: Color, t: f32) -> Color {
 }
 
 // vibrant cyan -> magenta -> amber across the word
-fn gradient_multi(t: f32) -> Color {
+pub(crate) fn gradient_multi(t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
     let (r1, g1, b1) = (0u8, 224u8, 255u8); // #00E0FF
     let (r2, g2, b2) = (255u8, 78u8, 205u8); // #FF4ECD
@@ -404,14 +426,41 @@ fn scaled_mask(word: &str, max_w: u16, max_h: u16) -> (usize, Vec<Vec<bool>>, us
     (scale, grid, cols * scale, rows * scale)
 }
 
-// 5×7 glyphs for C O D E R
+// 5×7 glyphs for supported characters (capital letters + space)
 fn glyph_5x7(ch: char) -> [&'static str; 7] {
     match ch {
+        'A' => [
+            " ### ",
+            "#   #",
+            "#   #",
+            "#####",
+            "#   #",
+            "#   #",
+            "#   #",
+        ],
         'C' => [
             " ### ", "#   #", "#    ", "#    ", "#    ", "#   #", " ### ",
         ],
         'O' => [
             " ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### ",
+        ],
+        'U' => [
+            "#   #",
+            "#   #",
+            "#   #",
+            "#   #",
+            "#   #",
+            "#   #",
+            " ### ",
+        ],
+        'T' => [
+            "#####",
+            "  #  ",
+            "  #  ",
+            "  #  ",
+            "  #  ",
+            "  #  ",
+            "  #  ",
         ],
         'D' => [
             "#### ", "#   #", "#   #", "#   #", "#   #", "#   #", "#### ",
@@ -421,6 +470,33 @@ fn glyph_5x7(ch: char) -> [&'static str; 7] {
         ],
         'R' => [
             "#### ", "#   #", "#   #", "#### ", "# #  ", "#  # ", "#   #",
+        ],
+        'I' => [
+            "#####",
+            "  #  ",
+            "  #  ",
+            "  #  ",
+            "  #  ",
+            "  #  ",
+            "#####",
+        ],
+        'V' => [
+            "#   #",
+            "#   #",
+            "#   #",
+            "#   #",
+            " # # ",
+            " # # ",
+            "  #  ",
+        ],
+        ' ' => [
+            "     ",
+            "     ",
+            "     ",
+            "     ",
+            "     ",
+            "     ",
+            "     ",
         ],
         _ => [
             "#####", "#####", "#####", "#####", "#####", "#####", "#####",
