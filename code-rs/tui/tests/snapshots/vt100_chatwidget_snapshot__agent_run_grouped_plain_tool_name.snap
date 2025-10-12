@@ -9,6 +9,10 @@ expression: output
  ┌ Agents ────────────────────────────────────────────────────────────────────┐
  │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
  └────────────────────────────────────────────────────────────────────────────┘
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+   /branch - work in an isolated /branch then /merge when done (great for
+   parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
@@ -16,19 +20,15 @@ expression: output
 
  › Kick off QA bot regression run
 
- ✔ ╭─ BATCH #001 · “Run targeted regression suite” · 1 agents · ▶1 · COMPLET...
+ ✔ ╭─ qa-bot
    │
-   │   TASK Run targeted regression suite
+   │   Context: regression sweep
    │
-   │  #  STATE AGENT           MODEL    STEPS ELAP  TOK   LAST
-   │   1 ▶     QA Bot          claude       — 00:18 8,900 Executing smoke tests
+   │   Run targeted regression suite
    │
-   │   SUMMARY
-   │  Regression sweep complete
-   │  - 58 tests passed
-   │  - 0 failures
+   │   • claude running (18s)
    │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   ╰─ [Ctrl+A] Expand · [Esc] Stop
 
  ┌───────────────────────────── ✶ Responding... ──────────────────────────────┐
  │ What can I code for you today?                                             │

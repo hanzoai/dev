@@ -128,8 +128,10 @@ pub(super) struct AgentRunTracker {
     pub slot: ToolCardSlot,
     pub cell: AgentRunCell,
     pub batch_id: Option<String>,
+    pub batch_label: Option<String>,
     agent_ids: HashSet<String>,
     task: Option<String>,
+    context: Option<String>,
     has_custom_name: bool,
     call_ids: HashSet<String>,
     agent_started_at: HashMap<String, Instant>,
@@ -143,8 +145,10 @@ impl AgentRunTracker {
             slot: ToolCardSlot::new(order_key),
             cell: AgentRunCell::new("(pending)".to_string()),
             batch_id: None,
+            batch_label: None,
             agent_ids: HashSet::new(),
             task: None,
+            context: None,
             has_custom_name: false,
             call_ids: HashSet::new(),
             agent_started_at: HashMap::new(),
@@ -169,6 +173,13 @@ impl AgentRunTracker {
         self.cell.set_task(self.task.clone());
     }
 
+    fn set_context(&mut self, context: Option<String>) {
+        if let Some(value) = context {
+            self.context = Some(value);
+        }
+        self.cell.set_context(self.context.clone());
+    }
+
     fn set_agent_name(&mut self, name: Option<String>, override_existing: bool) {
         if let Some(name) = name {
             if override_existing || !self.has_custom_name {
@@ -187,6 +198,7 @@ struct InvocationMetadata {
     plan: Vec<String>,
     label: Option<String>,
     action: Option<String>,
+    context: Option<String>,
 }
 
 impl InvocationMetadata {
@@ -207,6 +219,9 @@ impl InvocationMetadata {
             }
             if let Some(task) = map.get("task").and_then(|v| v.as_str()) {
                 meta.task = Some(task.to_string());
+            }
+            if let Some(context) = map.get("context").and_then(|v| v.as_str()) {
+                meta.context = Some(context.to_string());
             }
             if let Some(plan) = map.get("plan").and_then(|v| v.as_array()) {
                 meta.plan = plan
@@ -241,9 +256,12 @@ impl InvocationMetadata {
                         meta.task = Some(task.to_string());
                     }
                 }
-                if meta.label.is_none() {
-                    if let Some(name) = create.get("name").and_then(|v| v.as_str()) {
-                        meta.label = Some(name.to_string());
+                if let Some(name) = create.get("name").and_then(|v| v.as_str()) {
+                    meta.label = Some(name.to_string());
+                }
+                if meta.context.is_none() {
+                    if let Some(context) = create.get("context").and_then(|v| v.as_str()) {
+                        meta.context = Some(context.to_string());
                     }
                 }
                 if meta.plan.is_empty() {
@@ -389,14 +407,26 @@ pub(super) fn handle_custom_tool_begin(
     if let Some(batch) = metadata.batch_id.clone() {
         tracker.batch_id.get_or_insert(batch);
     }
-    tracker.cell.set_batch_label(tracker.batch_id.clone());
-    tracker.cell.set_batch_label(tracker.batch_id.clone());
+
+    let label_opt = metadata.label.as_ref().map(|value| value.to_string());
+    if let Some(label) = label_opt.as_ref() {
+        tracker.batch_label = Some(label.clone());
+    }
+
     tracker.merge_agent_ids(metadata.agent_ids.clone());
 
-    tracker.set_agent_name(metadata.label.clone(), true);
+    tracker.set_agent_name(label_opt, true);
+
+    let header_label = tracker
+        .batch_label
+        .as_ref()
+        .map(|value| value.clone())
+        .or_else(|| tracker.batch_id.clone());
+    tracker.cell.set_batch_label(header_label);
     if !metadata.plan.is_empty() {
         tracker.cell.set_plan(metadata.plan.clone());
     }
+    tracker.set_context(metadata.context.clone());
     tracker.set_task(metadata.task.clone());
 
     if let Some(action) = begin_action_for(tool_name, &metadata) {
@@ -413,6 +443,12 @@ pub(super) fn handle_custom_tool_begin(
         &mut tracker,
     );
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
+    let header_label = tracker
+        .batch_label
+        .as_ref()
+        .map(|value| value.clone())
+        .or_else(|| tracker.batch_id.clone());
+    tracker.cell.set_batch_label(header_label);
     tool_cards::replace_tool_card::<AgentRunCell>(chat, &mut tracker.slot, &tracker.cell);
     chat.tools_state.agent_last_key = Some(key.clone());
     chat.tools_state.agent_runs.insert(key, tracker);
@@ -446,12 +482,19 @@ pub(super) fn handle_custom_tool_end(
     if let Some(batch) = metadata.batch_id.clone() {
         tracker.batch_id.get_or_insert(batch);
     }
+
+    let label_opt = metadata.label.as_ref().map(|value| value.to_string());
+    if let Some(label) = label_opt.as_ref() {
+        tracker.batch_label = Some(label.clone());
+    }
+
     tracker.merge_agent_ids(metadata.agent_ids.clone());
 
-    tracker.set_agent_name(metadata.label.clone(), true);
+    tracker.set_agent_name(label_opt, true);
     if !metadata.plan.is_empty() {
         tracker.cell.set_plan(metadata.plan.clone());
     }
+    tracker.set_context(metadata.context.clone());
     tracker.set_task(metadata.task.clone());
 
     tracker.cell.set_duration(Some(duration));
@@ -538,6 +581,12 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
         };
 
         let mut current_key = key;
+
+        if let Some(context) = event.context.clone() {
+            tracker.set_context(Some(context));
+        } else {
+            tracker.set_context(tracker.context.clone());
+        }
 
         if let Some(task) = event.task.clone() {
             tracker.set_task(Some(task));
@@ -633,6 +682,7 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
                 agent.elapsed_ms,
                 phase,
             );
+            let elapsed_updated_at = elapsed.map(|_| Instant::now());
             let token_count = resolve_agent_token_count(
                 &mut tracker,
                 agent.id.as_str(),
@@ -641,6 +691,7 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
             );
 
             let preview = AgentStatusPreview {
+                id: agent.id.clone(),
                 name: agent.name.clone(),
                 status: agent.status.clone(),
                 model: agent.model.clone(),
@@ -650,6 +701,7 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
                 elapsed,
                 token_count,
                 last_update,
+                elapsed_updated_at,
             };
             previews.push(preview);
 
@@ -659,7 +711,12 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
         }
 
         tracker.cell.set_agent_overview(previews.clone());
-        tracker.cell.set_batch_label(tracker.batch_id.clone());
+        let header_label = tracker
+            .batch_label
+            .as_ref()
+            .map(|value| value.clone())
+            .or_else(|| tracker.batch_id.clone());
+        tracker.cell.set_batch_label(header_label);
         status_collect.apply(&mut tracker.cell);
 
         if let Some(lines) = summary_lines {
