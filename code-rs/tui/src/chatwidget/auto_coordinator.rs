@@ -222,14 +222,35 @@ mod tests {
         assert!(props.contains_key("cli"), "cli property missing");
         assert!(props.contains_key("agents"), "agents property missing");
         assert!(props.contains_key("review"), "review property missing");
-
-        let defs = schema
-            .get("$defs")
+        let cli_required = props
+            .get("cli")
             .and_then(|v| v.as_object())
-            .expect("schema defs");
-        assert!(defs.contains_key("cli"));
-        assert!(defs.contains_key("agents"));
-        assert!(defs.contains_key("review"));
+            .and_then(|obj| obj.get("required"))
+            .and_then(|v| v.as_array())
+            .expect("cli required");
+        assert!(cli_required.contains(&json!("prompt")));
+        assert!(cli_required.contains(&json!("context")));
+
+        let agents_obj = props
+            .get("agents")
+            .and_then(|v| v.as_object())
+            .expect("agents schema object");
+        let agents_required = agents_obj
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("agents required");
+        assert!(agents_required.contains(&json!("timing")));
+        assert!(agents_required.contains(&json!("list")));
+
+        let review_required = props
+            .get("review")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("required"))
+            .and_then(|v| v.as_array())
+            .expect("review required");
+        assert!(review_required.contains(&json!("source")));
+        assert!(review_required.contains(&json!("sha")));
+        assert!(review_required.contains(&json!("summary")));
     }
 
     #[test]
@@ -904,89 +925,6 @@ fn build_schema() -> Value {
         "title": "Coordinator Turn (CLI-first; agents + review background)",
         "type": "object",
         "additionalProperties": false,
-        "$defs": {
-            "cli": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "context": {
-                        "type": ["string", "null"],
-                        "maxLength": 1500,
-                        "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "minLength": 4,
-                        "maxLength": 240,
-                        "description": "Exactly one objective in 1–2 sentences. No step lists."
-                    }
-                },
-                "required": ["prompt", "context"]
-            },
-            "agent": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "write": {
-                        "type": "boolean",
-                        "description": "Allow writes in isolated worktree. Default false."
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "minLength": 8,
-                        "maxLength": 400,
-                        "description": "Outcome-oriented instruction (what to produce)."
-                    },
-                    "context": {
-                        "type": ["string", "null"],
-                        "maxLength": 1500,
-                        "description": "Optional concrete details (paths, commands, constraints)."
-                    }
-                },
-                "required": ["prompt", "context", "write"]
-            },
-            "agents": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "timing": {
-                        "type": ["string", "null"],
-                        "enum": ["parallel", "blocking"],
-                        "description": "Parallel: run agents while the CLI continues. Blocking: wait for results before the CLI proceeds."
-                    },
-                    "list": {
-                        "type": "array",
-                        "maxItems": 3,
-                        "items": {"$ref": "#/$defs/agent"},
-                        "description": "Helper agents to launch this turn (<=3)."
-                    }
-                },
-                "required": ["timing", "list"]
-            },
-            "review": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "enum": ["staged", "commit"],
-                        "description": "What to review."
-                    },
-                    "sha": {
-                        "type": ["string", "null"],
-                        "minLength": 7,
-                        "maxLength": 64,
-                        "description": "Required when source='commit'; otherwise null."
-                    },
-                    "summary": {
-                        "type": ["string", "null"],
-                        "maxLength": 200,
-                        "description": "Optional focus/risks/acceptance criteria."
-                    }
-                },
-                "required": ["source", "sha", "summary"]
-            }
-        },
         "properties": {
             "finish_status": {
                 "type": "string",
@@ -1013,25 +951,87 @@ fn build_schema() -> Value {
                 "required": ["past", "current"]
             },
             "cli": {
-                "oneOf": [
-                    {"type": "null"},
-                    {"$ref": "#/$defs/cli"}
-                ],
+                "type": ["object", "null"],
+                "additionalProperties": false,
                 "description": "The single atomic instruction for the CLI this turn. Set to null when finish_status != 'continue'.",
+                "properties": {
+                    "context": {
+                        "type": ["string", "null"],
+                        "maxLength": 1500,
+                        "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "minLength": 4,
+                        "maxLength": 240,
+                        "description": "Exactly one objective in 1–2 sentences. No step lists."
+                    }
+                },
+                "required": ["prompt", "context"]
             },
             "agents": {
-                "oneOf": [
-                    {"type": "null"},
-                    {"$ref": "#/$defs/agents"}
-                ],
-                "description": "Optional parallel helper agents for the CLI to spawn."
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Optional parallel helper agents for the CLI to spawn.",
+                "properties": {
+                    "timing": {
+                        "type": "string",
+                        "enum": ["parallel", "blocking"],
+                        "description": "Parallel: run agents while the CLI continues. Blocking: wait for results before the CLI proceeds."
+                    },
+                    "list": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "write": {
+                                    "type": "boolean",
+                                    "description": "Allow writes in isolated worktree. Default false."
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "minLength": 8,
+                                    "maxLength": 400,
+                                    "description": "Outcome-oriented instruction (what to produce)."
+                                },
+                                "context": {
+                                    "type": ["string", "null"],
+                                    "maxLength": 1500,
+                                    "description": "Optional concrete details (paths, commands, constraints)."
+                                }
+                            },
+                            "required": ["prompt", "context", "write"]
+                        },
+                        "description": "Helper agents to launch this turn (<=3)."
+                    }
+                },
+                "required": ["timing", "list"]
             },
             "review": {
-                "oneOf": [
-                    {"type": "null"},
-                    {"$ref": "#/$defs/review"}
-                ],
-                "description": "Optional background review thread to start/update this turn."
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Optional background review thread to start/update this turn.",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "enum": ["staged", "commit"],
+                        "description": "What to review."
+                    },
+                    "sha": {
+                        "type": ["string", "null"],
+                        "minLength": 7,
+                        "maxLength": 64,
+                        "description": "Required when source='commit'; otherwise null."
+                    },
+                    "summary": {
+                        "type": ["string", "null"],
+                        "maxLength": 200,
+                        "description": "Optional focus/risks/acceptance criteria."
+                    }
+                },
+                "required": ["source", "sha", "summary"]
             }
         },
         "required": ["finish_status", "progress", "cli", "agents", "review"]
