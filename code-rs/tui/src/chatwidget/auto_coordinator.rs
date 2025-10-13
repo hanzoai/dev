@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn schema_includes_cli_agents_review() {
-        let schema = build_schema();
+        let schema = build_schema(&[]);
         let props = schema
             .get("properties")
             .and_then(|v| v.as_object())

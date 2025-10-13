@@ -84,7 +84,6 @@ pub(crate) use login_accounts_view::{
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSettingsView};
 
-use code_core::protocol::Op;
 use approval_modal_view::ApprovalModalView;
 #[cfg(feature = "code-fork")]
 use approval_ui::ApprovalUi;
@@ -640,13 +639,6 @@ impl BottomPane<'_> {
     }
 
     fn handle_composer_key_event(&mut self, key_event: KeyEvent) -> InputResult {
-        if matches!(key_event.code, crossterm::event::KeyCode::Esc) && self.is_task_running {
-            // Send Op::Interrupt directly when a task is running so Esc can cancel.
-            self.app_event_tx.send(AppEvent::CodexOp(Op::Interrupt));
-            self.request_redraw();
-            return InputResult::None;
-        }
-
         let (input_result, needs_redraw) = self.composer.handle_key_event(key_event);
         if needs_redraw {
             // Route input updates through the app's debounced redraw path so typing
@@ -747,6 +739,10 @@ impl BottomPane<'_> {
         let closed = self.composer.close_file_popup_if_active();
         if closed { self.request_redraw(); }
         closed
+    }
+
+    pub(crate) fn file_popup_visible(&self) -> bool {
+        self.composer.file_popup_visible()
     }
 
     /// True if a modal/overlay view is currently displayed (not the composer popup).

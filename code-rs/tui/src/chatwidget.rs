@@ -148,6 +148,40 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::tui_event_extensions::handle_browser_screenshot;
 
 pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EscIntent {
+    DismissModal,
+    CloseFilePopup,
+    AutoPauseCountdown,
+    AutoStopDuringApproval,
+    AutoStopActive,
+    AutoDismissSummary,
+    DiffConfirm,
+    AgentsTerminal,
+    CancelTask,
+    ClearComposer,
+    ShowUndoHint,
+    OpenUndoTimeline,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EscRoute {
+    pub intent: EscIntent,
+    pub consume: bool,
+    pub allows_double_esc: bool,
+}
+
+impl EscRoute {
+    const fn new(intent: EscIntent, consume: bool, allows_double_esc: bool) -> Self {
+        Self {
+            intent,
+            consume,
+            allows_double_esc,
+        }
+    }
+}
 use code_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -4501,37 +4535,6 @@ impl ChatWidget<'_> {
         }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
-        }
-
-        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            && matches!(key_event.code, crossterm::event::KeyCode::Esc)
-        {
-            if self.auto_state.active {
-                if self.auto_state.countdown_active() {
-                    self.auto_pause_for_manual_edit();
-                    return;
-                }
-                if self.auto_state.awaiting_submission {
-                    self.auto_stop(Some("Auto Drive stopped during approval.".to_string()));
-                } else {
-                    self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
-                }
-                return;
-            }
-        }
-
-        if matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            && matches!(key_event.code, KeyCode::Esc)
-            && !self.auto_state.active
-            && self.auto_state.last_run_summary.is_some()
-        {
-            self.auto_state.last_run_summary = None;
-            self.bottom_pane.clear_auto_coordinator_view(true);
-            self.bottom_pane.clear_live_ring();
-            self.bottom_pane.set_standard_terminal_hint(None);
-            self.bottom_pane.ensure_input_focus();
-            self.request_redraw();
-            return;
         }
 
         if self.auto_state.awaiting_submission
@@ -15799,21 +15802,114 @@ fi\n\
             .flash_footer_notice(format!("Esc {}", Self::double_esc_hint_label()));
     }
 
-    /// Returns true when the global Esc handler should defer to the Auto Drive
-    /// key path so that a subsequent Esc will fully stop the run instead of
-    /// routing through the generic interrupt logic.
-    pub(crate) fn auto_should_handle_global_esc(&self) -> bool {
-        self.auto_state.active
-            && (
-                self.auto_state.awaiting_submission
-                    || self.auto_state.waiting_for_response
-                    || self.auto_state.coordinator_waiting
-            )
-    }
-
     pub(crate) fn auto_manual_entry_active(&self) -> bool {
         self.auto_state.awaiting_goal_input
             || (self.auto_state.active && self.auto_state.awaiting_submission)
+    }
+
+    pub(crate) fn describe_esc_context(&self) -> EscRoute {
+        if self.diffs.confirm.is_some() {
+            return EscRoute::new(EscIntent::DiffConfirm, true, false);
+        }
+
+        if self.has_active_modal_view() {
+            return EscRoute::new(EscIntent::DismissModal, true, false);
+        }
+
+        if self.agents_terminal.active {
+            return EscRoute::new(EscIntent::AgentsTerminal, true, false);
+        }
+
+        if self.bottom_pane.file_popup_visible() {
+            return EscRoute::new(EscIntent::CloseFilePopup, false, false);
+        }
+
+        if self.auto_state.active {
+            if self.auto_state.countdown_active() {
+                return EscRoute::new(EscIntent::AutoPauseCountdown, true, false);
+            }
+
+            if self.auto_state.awaiting_submission {
+                return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
+            }
+
+            return EscRoute::new(EscIntent::AutoStopActive, true, false);
+        }
+
+        if self.auto_state.last_run_summary.is_some() {
+            return EscRoute::new(EscIntent::AutoDismissSummary, true, false);
+        }
+
+        if self.auto_manual_entry_active() && !self.composer_is_empty() {
+            return EscRoute::new(EscIntent::ClearComposer, true, false);
+        }
+
+        if self.is_task_running() {
+            return EscRoute::new(EscIntent::CancelTask, true, false);
+        }
+
+        if !self.composer_is_empty() {
+            return EscRoute::new(EscIntent::ClearComposer, true, false);
+        }
+
+        EscRoute::new(EscIntent::ShowUndoHint, true, true)
+    }
+
+    pub(crate) fn execute_esc_intent(&mut self, intent: EscIntent, key_event: KeyEvent) -> bool {
+        match intent {
+            EscIntent::DismissModal => {
+                self.handle_key_event(key_event);
+                true
+            }
+            EscIntent::CloseFilePopup => self.close_file_popup_if_active(),
+            EscIntent::AutoPauseCountdown => {
+                self.auto_pause_for_manual_edit();
+                true
+            }
+            EscIntent::AutoStopDuringApproval => {
+                self.auto_stop(Some("Auto Drive stopped during approval.".to_string()));
+                true
+            }
+            EscIntent::AutoStopActive => {
+                self.auto_stop(Some("Auto Drive stopped by user.".to_string()));
+                true
+            }
+            EscIntent::AutoDismissSummary => {
+                self.auto_state.last_run_summary = None;
+                self.bottom_pane.clear_auto_coordinator_view(true);
+                self.bottom_pane.clear_live_ring();
+                self.bottom_pane.set_standard_terminal_hint(None);
+                self.bottom_pane.ensure_input_focus();
+                self.request_redraw();
+                true
+            }
+            EscIntent::DiffConfirm => {
+                self.diffs.confirm = None;
+                self.request_redraw();
+                true
+            }
+            EscIntent::AgentsTerminal => {
+                self.handle_key_event(key_event);
+                true
+            }
+            EscIntent::CancelTask => {
+                let _ = self.on_ctrl_c();
+                true
+            }
+            EscIntent::ClearComposer => {
+                self.clear_composer();
+                true
+            }
+            EscIntent::ShowUndoHint => {
+                self.show_esc_undo_hint();
+                true
+            }
+            EscIntent::OpenUndoTimeline => {
+                self.handle_undo_command();
+                true
+            }
+            EscIntent::None => false,
+        }
     }
 
     pub(crate) fn is_task_running(&self) -> bool {
@@ -19743,10 +19839,10 @@ mod tests {
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use crate::chatwidget::auto_coordinator::{
-        AgentPreferences,
         TurnComplexity,
         TurnMode,
     };
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use code_core::history::state::{
         AssistantStreamDelta,
         AssistantStreamState,
@@ -19938,6 +20034,81 @@ mod tests {
             overall_explanation: "needs fixes".to_string(),
             overall_confidence_score: 0.5,
         }
+    }
+
+    #[test]
+    fn esc_router_prioritizes_auto_stop_when_waiting_for_review() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.waiting_for_review = true;
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AutoStopActive);
+        assert!(!route.allows_double_esc);
+    }
+
+    #[test]
+    fn esc_router_cancels_running_task() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.bottom_pane.set_task_running(true);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelTask);
+    }
+
+    #[test]
+    fn esc_router_handles_diff_confirm_prompt() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.diffs.confirm = Some(crate::chatwidget::diff_ui::DiffConfirm {
+            text_to_submit: "Please undo".to_string(),
+        });
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::DiffConfirm);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(chat.execute_esc_intent(route.intent, esc_event));
+        assert!(chat.diffs.confirm.is_none(), "diff confirm should clear after Esc");
+    }
+
+    #[test]
+    fn esc_router_handles_agents_terminal_overlay() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.agents_terminal.active = true;
+        chat.agents_terminal.focus_detail();
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::AgentsTerminal);
+    }
+
+    #[test]
+    fn esc_router_clears_manual_entry_input() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.awaiting_goal_input = true;
+        chat.bottom_pane.insert_str("draft goal");
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::ClearComposer);
+    }
+
+    #[test]
+    fn esc_router_defaults_to_show_hint_when_idle() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::ShowUndoHint);
+        assert!(route.allows_double_esc);
     }
 
     #[test]
@@ -20259,7 +20430,6 @@ mod tests {
         assert!(skip_present, "skip banner should appear after review skip");
     }
 
-    #[test]
     #[test]
     fn finalize_explore_updates_even_with_stale_index() {
         let mut harness = ChatWidgetHarness::new();
