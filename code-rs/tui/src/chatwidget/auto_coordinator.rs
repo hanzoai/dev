@@ -961,7 +961,7 @@ fn build_schema() -> Value {
                         "description": "Helper agents to launch this turn (<=3)."
                     }
                 },
-                "required": ["list"]
+                "required": ["timing", "list"]
             },
             "review": {
                 "type": "object",
