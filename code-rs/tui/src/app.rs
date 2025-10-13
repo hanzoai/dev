@@ -2499,6 +2499,12 @@ impl App<'_> {
                     }
                     self.schedule_redraw();
                 }
+                AppEvent::CycleAutoDriveVariant => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.cycle_auto_drive_variant();
+                    }
+                    self.schedule_redraw();
+                }
                 AppEvent::LoginStartChatGpt => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         if !widget.login_add_view_active() {

@@ -820,6 +820,10 @@ impl HistoryCell for AgentRunCell {
         self
     }
 
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        None
+    }
+
     fn kind(&self) -> HistoryCellType {
         let status = if self.completed {
             if self.status_label == "Failed" {
