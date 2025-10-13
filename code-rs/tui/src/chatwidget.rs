@@ -12945,6 +12945,13 @@ fi\n\
                 {
                     line.push_str(&format!(" Context: {}.", ctx.replace('\n', " ")));
                 }
+                if let Some(models) = action
+                    .models
+                    .as_ref()
+                    .filter(|list| !list.is_empty())
+                {
+                    line.push_str(&format!(" Models: [{}].", models.join(", ")));
+                }
                 agent_lines.push(line);
             }
             let timing_line = match agent_timing {
@@ -20118,6 +20125,7 @@ mod tests {
                 prompt: "Draft alternative fix".to_string(),
                 context: None,
                 write: false,
+                models: None,
             }],
             Some(AutoTurnReviewAction {
                 commit: AutoReviewCommit {
@@ -20154,6 +20162,7 @@ mod tests {
             prompt: "Draft alternative fix".to_string(),
             context: Some("Focus on parser module".to_string()),
             write: false,
+            models: Some(vec!["claude".to_string(), "gemini".to_string()]),
         }];
         chat.auto_state.pending_agent_timing = Some(AutoTurnAgentsTiming::Blocking);
 
@@ -20166,6 +20175,7 @@ mod tests {
         assert!(message.contains("Run diagnostics"));
         assert!(message.contains("Please run agent.create"));
         assert!(message.contains("read_only: true"));
+        assert!(message.contains("Models: [claude, gemini]"));
         assert!(message.contains("Draft alternative fix"));
         assert!(message.contains("Focus on parser module"));
         assert!(message.contains("agent.wait"));

@@ -109,6 +109,7 @@ pub(crate) struct AutoTurnAgentsAction {
     pub prompt: String,
     pub context: Option<String>,
     pub write: bool,
+    pub models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
