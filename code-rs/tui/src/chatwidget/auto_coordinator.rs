@@ -10,6 +10,7 @@ use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
+use code_core::slash_commands::get_enabled_agents;
 use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
 use code_core::error::CodexErr;
 use code_protocol::models::{ContentItem, ReasoningItemContent, ResponseItem};
@@ -374,6 +375,8 @@ struct AgentPayload {
     context: Option<String>,
     #[serde(default)]
     write: bool,
+    #[serde(default)]
+    models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -387,6 +390,8 @@ enum AgentsField {
 struct AgentsPayload {
     #[serde(default)]
     timing: Option<AgentsTimingValue>,
+    #[serde(default)]
+    models: Option<Vec<String>>,
     #[serde(
         default,
         alias = "list",
@@ -468,6 +473,7 @@ struct AgentAction {
     prompt: String,
     context: Option<String>,
     write: bool,
+    models: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -539,6 +545,7 @@ fn run_auto_loop(
     let model_text_verbosity = config.model_text_verbosity;
     let sandbox_policy = config.sandbox_policy.clone();
     let config = Arc::new(config);
+    let active_agent_names = get_enabled_agents(&config.agents);
     let client = Arc::new(ModelClient::new(
         config.clone(),
         Some(auth_mgr),
@@ -583,7 +590,7 @@ fn run_auto_loop(
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
     let (base_developer_intro, primary_goal_message) =
         build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
-    let schema = build_schema();
+    let schema = build_schema(&active_agent_names);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
 
@@ -919,7 +926,40 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
         .map(|text| text.trim_end().to_string())
 }
 
-fn build_schema() -> Value {
+fn build_schema(active_agents: &[String]) -> Value {
+    let models_enum_values: Vec<Value> = active_agents
+        .iter()
+        .map(|name| Value::String(name.clone()))
+        .collect();
+
+    let models_items_schema = {
+        let mut schema = json!({
+            "type": "string",
+        });
+        if !models_enum_values.is_empty() {
+            schema["enum"] = Value::Array(models_enum_values.clone());
+        }
+        schema
+    };
+
+    let models_batch_property = {
+        let schema = json!({
+            "type": ["array", "null"],
+            "description": "Preferred agent models for this batch (null => let the CLI choose).",
+            "items": models_items_schema.clone(),
+        });
+        schema
+    };
+
+    let models_request_property = {
+        let schema = json!({
+            "type": ["array", "null"],
+            "description": "Agent-specific model overrides (null inherits the batch selection).",
+            "items": models_items_schema,
+        });
+        schema
+    };
+
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Coordinator Turn (CLI-first; agents + review background)",
@@ -1000,14 +1040,16 @@ fn build_schema() -> Value {
                                     "type": ["string", "null"],
                                     "maxLength": 1500,
                                     "description": "Optional concrete details (paths, commands, constraints)."
-                                }
+                                },
+                                "models": models_request_property
                             },
-                            "required": ["prompt", "context", "write"]
+                            "required": ["prompt", "context", "write", "models"]
                         },
                         "description": "Helper agents to launch this turn (<=3)."
-                    }
+                    },
+                    "models": models_batch_property
                 },
-                "required": ["timing", "list"]
+                "required": ["timing", "list", "models"]
             },
             "review": {
                 "type": ["object", "null"],
@@ -1643,24 +1685,45 @@ fn convert_decision_new(
         match payloads {
             AgentsField::List(list) => {
                 for payload in list {
-                    let prompt = clean_required(&payload.prompt, "agents[*].prompt")?;
+                    let AgentPayload {
+                        prompt,
+                        context,
+                        write,
+                        models,
+                    } = payload;
+                    let prompt = clean_required(&prompt, "agents[*].prompt")?;
                     agent_actions.push(AgentAction {
                         prompt,
-                        context: clean_optional(payload.context),
-                        write: payload.write,
+                        context: clean_optional(context),
+                        write,
+                        models: clean_models(models),
                     });
                 }
             }
             AgentsField::Object(plan) => {
-                if let Some(timing_value) = plan.timing {
+                let AgentsPayload {
+                    timing,
+                    models,
+                    requests,
+                } = plan;
+                if let Some(timing_value) = timing {
                     agents_timing = Some(timing_value.into());
                 }
-                for payload in plan.requests {
-                    let prompt = clean_required(&payload.prompt, "agents.requests[*].prompt")?;
+                let batch_models = clean_models(models);
+                for payload in requests {
+                    let AgentPayload {
+                        prompt,
+                        context,
+                        write,
+                        models,
+                    } = payload;
+                    let prompt = clean_required(&prompt, "agents.requests[*].prompt")?;
+                    let models = clean_models(models).or_else(|| batch_models.clone());
                     agent_actions.push(AgentAction {
                         prompt,
-                        context: clean_optional(payload.context),
-                        write: payload.write,
+                        context: clean_optional(context),
+                        write,
+                        models,
                     });
                 }
             }
@@ -1754,6 +1817,28 @@ fn clean_optional(input: Option<String>) -> Option<String> {
     })
 }
 
+fn clean_models(models: Option<Vec<String>>) -> Option<Vec<String>> {
+    let mut cleaned: Vec<String> = models?
+        .into_iter()
+        .filter_map(|model| {
+            let trimmed = model.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect();
+
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    cleaned.sort();
+    cleaned.dedup();
+    Some(cleaned)
+}
+
 fn clean_required(value: &str, field: &str) -> Result<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -1810,6 +1895,7 @@ fn agent_action_to_event(action: &AgentAction) -> AutoTurnAgentsAction {
         prompt: action.prompt.clone(),
         context: action.context.clone(),
         write: action.write,
+        models: action.models.clone(),
     }
 }
 
