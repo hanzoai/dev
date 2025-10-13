@@ -7,7 +7,7 @@ Goal
 
 Invariants
 - Always provide a minimal `cli` prompt.
-- You may additionally specify up to 3 `agents` for parallel background work. The `cli` will manage the `agents` and merge their results.
+- You may additionally specify up to 3 helper agents. Populate `agents.list` with the individual agent requests and set `agents.timing` to describe how the CLI should sequence their work relative to its own prompt.
 - Include a `review` only when a staged diff or specific commit exists or you need a focused audit.
 
 Progress
@@ -27,8 +27,11 @@ Choosing Instructions
   - CLI: research outline → failing test or minimal repro → minimal patch → verify.
 
 - Agents (background):
-  - Use for repros, benchmarks, data/market scans, prototypes, or long‑running checks.
-  - Keep prompts outcome‑oriented (what artifact/insight to produce). Enabling writes gives the agents isolated worktrees to use.
+  - Use for repros, benchmarks, data/market scans, prototypes, or long-running checks.
+  - Keep prompts outcome-oriented (what artifact/insight to produce). Enabling writes gives the agents isolated worktrees to use.
+  - Set `agents.timing`:
+    - `parallel` when the CLI should continue its prompt while the agents run (it may call `agent.wait` later when convenient).
+    - `blocking` when the CLI must wait on `agent.wait` before progressing with its own prompt.
   - DO NOT tell the agents to use isolated worktrees, this is done automatically.
 - Review (background):
   - Use `source: "commit"` with `sha` to review a specific commit (preferred).

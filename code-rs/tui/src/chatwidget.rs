@@ -259,6 +259,7 @@ use crate::app_event::{
     AutoReviewCommit,
     AutoReviewCommitSource,
     AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
     AutoTurnCliAction,
     AutoTurnReviewAction,
     BackgroundPlacement,
@@ -570,6 +571,7 @@ struct AutoCoordinatorUiState {
     review_enabled: bool,
     subagents_enabled: bool,
     pending_agent_actions: Vec<AutoTurnAgentsAction>,
+    pending_agent_timing: Option<AutoTurnAgentsTiming>,
     continue_mode: AutoContinueMode,
     started_at: Option<Instant>,
     turns_completed: usize,
@@ -637,6 +639,7 @@ impl Default for AutoCoordinatorUiState {
             review_enabled: false,
             subagents_enabled: false,
             pending_agent_actions: Vec::new(),
+            pending_agent_timing: None,
             continue_mode,
             started_at: None,
             turns_completed: 0,
@@ -12265,6 +12268,7 @@ fi\n\
         progress_past: Option<String>,
         progress_current: Option<String>,
         cli: Option<AutoTurnCliAction>,
+        agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
         review: Option<AutoTurnReviewAction>,
         transcript: Vec<code_protocol::models::ResponseItem>,
@@ -12310,8 +12314,11 @@ fi\n\
         self.pending_auto_turn_config = None;
         if matches!(status, AutoCoordinatorStatus::Continue) {
             self.auto_state.pending_agent_actions = agents.clone();
+            self.auto_state.pending_agent_timing =
+                agents_timing.filter(|_| !self.auto_state.pending_agent_actions.is_empty());
         } else {
             self.auto_state.pending_agent_actions.clear();
+            self.auto_state.pending_agent_timing = None;
         }
 
         if let Some(review_action) = review {
@@ -12848,6 +12855,7 @@ fi\n\
         self.bottom_pane.set_task_running(false);
         self.submit_text_message(full_prompt);
         self.auto_state.pending_agent_actions.clear();
+        self.auto_state.pending_agent_timing = None;
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -12903,6 +12911,7 @@ fi\n\
 
         let agent_actions = &self.auto_state.pending_agent_actions;
         if !agent_actions.is_empty() {
+            let agent_timing = self.auto_state.pending_agent_timing;
             let mut agent_lines = Vec::with_capacity(agent_actions.len() + 1);
             for action in agent_actions {
                 let prompt = action
@@ -12924,9 +12933,15 @@ fi\n\
                 }
                 agent_lines.push(line);
             }
-            agent_lines.push(
-                "After launching the agents, wait with agent.wait (use the batch_id returned by agent.create) and fold their output into your plan.".to_string(),
-            );
+            let timing_line = match agent_timing {
+                Some(AutoTurnAgentsTiming::Parallel) =>
+                    "Timing (parallel): Launch these agents in the background while you continue the CLI prompt. Call agent.wait with the batch_id when you are ready to merge their results.".to_string(),
+                Some(AutoTurnAgentsTiming::Blocking) =>
+                    "Timing (blocking): Launch these agents first, then wait with agent.wait (use the batch_id from agent.create) and only continue the CLI prompt once their results are ready.".to_string(),
+                None =>
+                    "Timing (default blocking): After launching the agents, wait with agent.wait (use the batch_id returned by agent.create) and fold their output into your plan.".to_string(),
+            };
+            agent_lines.push(timing_line);
             sections.push(agent_lines.join("\n"));
         }
 
@@ -20072,6 +20087,7 @@ mod tests {
                 prompt: "Run cargo test".to_string(),
                 context: Some("use --all-features".to_string()),
             }),
+            Some(AutoTurnAgentsTiming::Parallel),
             vec![AutoTurnAgentsAction {
                 prompt: "Draft alternative fix".to_string(),
                 context: None,
@@ -20093,6 +20109,10 @@ mod tests {
         );
         assert!(chat.auto_state.waiting_for_review);
         assert_eq!(chat.auto_state.pending_agent_actions.len(), 1);
+        assert_eq!(
+            chat.auto_state.pending_agent_timing,
+            Some(AutoTurnAgentsTiming::Parallel)
+        );
         let action = &chat.auto_state.pending_agent_actions[0];
         assert_eq!(action.prompt, "Draft alternative fix");
         assert!(!action.write);
@@ -20109,6 +20129,7 @@ mod tests {
             context: Some("Focus on parser module".to_string()),
             write: false,
         }];
+        chat.auto_state.pending_agent_timing = Some(AutoTurnAgentsTiming::Blocking);
 
         chat.auto_state.current_cli_context = Some("Workspace root: /tmp".to_string());
 
@@ -20122,6 +20143,8 @@ mod tests {
         assert!(message.contains("Draft alternative fix"));
         assert!(message.contains("Focus on parser module"));
         assert!(message.contains("agent.wait"));
+        assert!(message.contains("Timing (blocking)"));
+        assert!(message.contains("Launch these agents first"));
         assert!(!message.contains("agent {\"action\""), "message should not include raw agent JSON");
     }
 
