@@ -15,7 +15,7 @@ expression: output
 
  › Open docs and find login button
 
- ⚙ ╭─ BROWSER (headless): example.com · 4 actions · 65.0s
+   ╭─ BROWSER (headless): example.com · 4 actions · 65.0s
    │
    │  #  ACTION       TARGET                   VALUE         RESULT       t
    │   1 Nav          https://example.com/docs —             ok            5.0s
