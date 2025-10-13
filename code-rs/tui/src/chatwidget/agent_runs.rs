@@ -5,8 +5,11 @@ use crate::history_cell::{
     AgentRunCell,
     AgentStatusKind,
     AgentStatusPreview,
+    PlainHistoryCell,
     StepProgress,
+    plain_message_state_from_paragraphs,
 };
+use crate::history::state::{PlainMessageKind, PlainMessageRole};
 use code_core::protocol::{AgentStatusUpdateEvent, OrderMeta};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -137,6 +140,7 @@ pub(super) struct AgentRunTracker {
     agent_started_at: HashMap<String, Instant>,
     agent_elapsed: HashMap<String, Duration>,
     agent_token_counts: HashMap<String, u64>,
+    anchor_inserted: bool,
 }
 
 impl AgentRunTracker {
@@ -154,6 +158,7 @@ impl AgentRunTracker {
             agent_started_at: HashMap::new(),
             agent_elapsed: HashMap::new(),
             agent_token_counts: HashMap::new(),
+            anchor_inserted: false,
         }
     }
 
@@ -188,6 +193,37 @@ impl AgentRunTracker {
             }
         }
     }
+}
+
+fn insert_agent_anchor(chat: &mut ChatWidget<'_>, order_key: OrderKey, tracker: &AgentRunTracker) {
+    let message = agent_anchor_text(tracker);
+    let state = plain_message_state_from_paragraphs(
+        PlainMessageKind::Plain,
+        PlainMessageRole::System,
+        [message],
+    );
+    let cell = PlainHistoryCell::from_state(state);
+    let _ = chat.history_insert_with_key_global(Box::new(cell), order_key);
+}
+
+fn agent_anchor_text(tracker: &AgentRunTracker) -> String {
+    if let Some(label) = tracker.cell.summary_label() {
+        if !label.is_empty() {
+            return format!(
+                "Agent batch \"{}\" started here; latest status is shown below.",
+                label
+            );
+        }
+    }
+    if let Some(batch) = tracker.batch_id.as_ref() {
+        if !batch.is_empty() {
+            return format!(
+                "Agent batch {} started here; latest status is shown below.",
+                batch
+            );
+        }
+    }
+    "Agent activity started here; latest status is shown below.".to_string()
 }
 
 #[derive(Default)]
@@ -385,7 +421,11 @@ pub(super) fn handle_custom_tool_begin(
         }
     }
 
-    if reuse_key.is_none() {
+    if reuse_key.is_none()
+        && metadata.batch_id.is_none()
+        && metadata.agent_ids.is_empty()
+        && ordinal.is_none()
+    {
         reuse_key = chat.tools_state.agent_last_key.clone();
     }
 
@@ -429,6 +469,13 @@ pub(super) fn handle_custom_tool_begin(
     tracker.set_context(metadata.context.clone());
     tracker.set_task(metadata.task.clone());
 
+    if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+        if let Some(previous) = tracker.slot.last_inserted_order() {
+            insert_agent_anchor(chat, previous, &tracker);
+            tracker.anchor_inserted = true;
+        }
+    }
+
     if let Some(action) = begin_action_for(tool_name, &metadata) {
         tracker.cell.record_action(action);
     }
@@ -470,6 +517,9 @@ pub(super) fn handle_custom_tool_end(
     }
 
     let metadata = InvocationMetadata::from(tool_name, params.as_ref());
+    let order_key = order
+        .map(|meta| chat.provider_order_key_from_order_meta(meta))
+        .unwrap_or_else(|| chat.next_internal_key());
     let ordinal = order.map(|m| m.request_ordinal);
     let mut key = lookup_key(chat, order, call_id)
         .unwrap_or_else(|| agent_key(order, call_id, tool_name, &metadata));
@@ -478,6 +528,8 @@ pub(super) fn handle_custom_tool_end(
         Some(existing) => existing,
         None => return false,
     };
+
+    tracker.slot.set_order_key(order_key);
 
     if let Some(batch) = metadata.batch_id.clone() {
         tracker.batch_id.get_or_insert(batch);
@@ -496,6 +548,13 @@ pub(super) fn handle_custom_tool_end(
     }
     tracker.set_context(metadata.context.clone());
     tracker.set_task(metadata.task.clone());
+
+    if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+        if let Some(previous) = tracker.slot.last_inserted_order() {
+            insert_agent_anchor(chat, previous, &tracker);
+            tracker.anchor_inserted = true;
+        }
+    }
 
     tracker.cell.set_duration(Some(duration));
     match result {
@@ -581,6 +640,9 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
         };
 
         let mut current_key = key;
+
+        let order_key = chat.next_internal_key();
+        tracker.slot.set_order_key(order_key);
 
         if let Some(context) = event.context.clone() {
             tracker.set_context(Some(context));
@@ -723,6 +785,13 @@ pub(super) fn handle_status_update(chat: &mut ChatWidget<'_>, event: &AgentStatu
             tracker.cell.set_latest_result(lines);
         } else {
             tracker.cell.set_latest_result(Vec::new());
+        }
+
+        if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+            if let Some(previous) = tracker.slot.last_inserted_order() {
+                insert_agent_anchor(chat, previous, &tracker);
+                tracker.anchor_inserted = true;
+            }
         }
 
         if !previews.is_empty() {

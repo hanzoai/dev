@@ -9,6 +9,7 @@ pub(super) struct ToolCardSlot {
     pub cell_key: Option<String>,
     previous_key: Option<String>,
     signature: Option<String>,
+    last_order_key: Option<OrderKey>,
 }
 
 impl ToolCardSlot {
@@ -20,11 +21,23 @@ impl ToolCardSlot {
             cell_key: None,
             previous_key: None,
             signature: None,
+            last_order_key: None,
         }
     }
 
     pub fn set_order_key(&mut self, order_key: OrderKey) {
         self.order_key = order_key;
+    }
+
+    pub fn last_inserted_order(&self) -> Option<OrderKey> {
+        self.last_order_key
+    }
+
+    pub fn has_order_change(&self) -> bool {
+        match self.last_order_key {
+            Some(last) => last != self.order_key,
+            None => false,
+        }
     }
 
     pub fn set_key(&mut self, key: Option<String>) {
@@ -103,6 +116,7 @@ pub(super) fn ensure_tool_card<C: ToolCardCell>(
     let idx = chat.history_insert_with_key_global(Box::new(cell.clone()), slot.order_key);
     slot.cell_index = Some(idx);
     slot.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+    slot.last_order_key = Some(slot.order_key);
     idx
 }
 
@@ -111,13 +125,43 @@ pub(super) fn replace_tool_card<C: ToolCardCell>(
     slot: &mut ToolCardSlot,
     cell: &C,
 ) -> usize {
+    if slot.has_order_change() {
+        remove_existing_card(chat, slot);
+    }
+
     let idx = ensure_tool_card(chat, slot, cell);
     chat.history_replace_at(idx, Box::new(cell.clone()));
     slot.cell_index = Some(idx);
     slot.history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+    slot.last_order_key = Some(slot.order_key);
     let signature = slot.signature().map(|s| s.to_string());
     prune_tool_card_duplicates::<C>(chat, slot, idx, signature.as_deref());
     idx
+}
+
+fn remove_existing_card(chat: &mut ChatWidget<'_>, slot: &mut ToolCardSlot) {
+    let mut removed = false;
+
+    if let Some(id) = slot.history_id {
+        if let Some(idx) = chat.cell_index_for_history_id(id) {
+            chat.history_remove_at(idx);
+            removed = true;
+        }
+    }
+
+    if !removed {
+        if let Some(idx) = slot.cell_index {
+            if idx < chat.history_cells.len() {
+                chat.history_remove_at(idx);
+                removed = true;
+            }
+        }
+    }
+
+    if removed {
+        slot.cell_index = None;
+        slot.history_id = None;
+    }
 }
 
 fn prune_tool_card_duplicates<C: ToolCardCell>(
