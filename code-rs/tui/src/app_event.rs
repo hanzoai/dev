@@ -96,6 +96,14 @@ pub(crate) struct AutoTurnCliAction {
     pub context: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutoTurnAgentsTiming {
+    /// Launch agents and continue executing the CLI prompt while they run.
+    Parallel,
+    /// Launch agents and wait for their results before progressing.
+    Blocking,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct AutoTurnAgentsAction {
     pub prompt: String,
@@ -238,6 +246,7 @@ pub(crate) enum AppEvent {
         progress_past: Option<String>,
         progress_current: Option<String>,
         cli: Option<AutoTurnCliAction>,
+        agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
         review: Option<AutoTurnReviewAction>,
         transcript: Vec<ResponseItem>,
