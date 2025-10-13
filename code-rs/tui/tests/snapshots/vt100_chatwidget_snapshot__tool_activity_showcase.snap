@@ -24,13 +24,13 @@ expression: output
  ⚙ Web Search... (1m 15s)
    └ query: async rust tui example
 
- ⚙ ╭─ Browser (headless): Browser Session
+   ╭─ Browser (headless): Browser Session
    │
    │   Clicked  #login-button
    │
    ╰─ [Ctrl+B] Expand · [Esc] Stop
 
- ✔ ╭─ deploy-helper
+   ╭─ deploy-helper
    │
    │   Run targeted regression suite
    │
