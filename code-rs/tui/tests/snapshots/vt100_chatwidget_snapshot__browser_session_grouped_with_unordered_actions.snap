@@ -18,7 +18,7 @@ expression: output
 
  › Handle captcha gracefully
 
- ⚙ ╭─ BROWSER (headless): example.com · 3 actions · 6.0s
+   ╭─ BROWSER (headless): example.com · 3 actions · 6.0s
    │
    │  #  ACTION               TARGET              VALUE      RESULT       t
    │   1 Nav                  https://example.com —          ok            3.0s

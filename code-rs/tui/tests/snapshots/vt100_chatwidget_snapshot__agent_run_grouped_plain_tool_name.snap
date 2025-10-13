@@ -20,7 +20,7 @@ expression: output
 
  › Kick off QA bot regression run
 
- ✔ ╭─ qa-bot
+   ╭─ qa-bot
    │
    │   Context: regression sweep
    │
