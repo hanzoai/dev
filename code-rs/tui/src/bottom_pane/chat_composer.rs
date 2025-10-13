@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, StatefulWidgetRef, WidgetRef};
+use ratatui::widgets::{Block, BorderType, Borders, StatefulWidgetRef, WidgetRef};
 use code_core::protocol::TokenUsage;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -19,6 +19,7 @@ use code_protocol::custom_prompts::CustomPrompt;
 use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 
 use crate::app_event_sender::AppEventSender;
+use crate::auto_drive_style::ComposerStyle;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
@@ -148,6 +149,8 @@ pub(crate) struct ChatComposer {
     post_paste_space_guard: Option<PostPasteSpaceGuard>,
     footer_hint_override: Option<Vec<(String, String)>>,
     embedded_mode: bool,
+    auto_drive_active: bool,
+    auto_drive_style: Option<ComposerStyle>,
 }
 
 /// Popup state – at most one can be visible at any time.
@@ -206,6 +209,8 @@ impl ChatComposer {
             post_paste_space_guard: None,
             footer_hint_override: None,
             embedded_mode: false,
+            auto_drive_active: false,
+            auto_drive_style: None,
         }
     }
 
@@ -323,6 +328,14 @@ impl ChatComposer {
         if self.embedded_mode != enabled {
             self.embedded_mode = enabled;
         }
+    }
+
+    pub(crate) fn set_auto_drive_active(&mut self, active: bool) {
+        self.auto_drive_active = active;
+    }
+
+    pub(crate) fn set_auto_drive_style(&mut self, style: Option<ComposerStyle>) {
+        self.auto_drive_style = style;
     }
 
     /// Override the footer hint line with a simple key/label list.
@@ -1395,6 +1408,16 @@ impl ChatComposer {
                 self.app_event_tx.send(crate::app_event::AppEvent::CycleAccessMode);
                 (InputResult::None, true)
             }
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } if self.auto_drive_active && self.has_focus => {
+                self
+                    .app_event_tx
+                    .send(crate::app_event::AppEvent::CycleAutoDriveVariant);
+                (InputResult::None, true)
+            }
             // -------------------------------------------------------------
             // Tab-press file search when not using @ or ./ and not in slash cmd
             // -------------------------------------------------------------
@@ -2187,34 +2210,47 @@ impl WidgetRef for ChatComposer {
                 }
             }
         }
-        // Draw border around input area with optional "Coding" title when task is running
-        let mut input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            // Fill input block with theme background so underlying content
-            // never shows through when the composer grows/shrinks.
-            .style(Style::default().bg(crate::colors::background()));
+        // Draw border around input area with optional variant title when task is running
+        let mut input_block = Block::default().borders(Borders::ALL);
+        if let Some(style) = self
+            .auto_drive_style
+            .as_ref()
+            .filter(|_| self.auto_drive_active)
+        {
+            input_block = input_block
+                .border_style(style.border_style.clone())
+                .border_type(style.border_type)
+                .style(style.background_style.clone());
+        } else {
+            input_block = input_block
+                .border_style(Style::default().fg(crate::colors::border()))
+                .border_type(BorderType::Plain)
+                .style(Style::default().bg(crate::colors::background()));
+        }
 
         if self.is_task_running && !self.embedded_mode {
-            if self.status_message.eq_ignore_ascii_case("auto drive") {
-                let title_line = Line::from(Span::styled(
-                    " Auto Drive ",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
-                input_block = input_block.title(title_line);
-            } else if self.status_message.eq_ignore_ascii_case("auto drive goal") {
-                let title_line = Line::from(Span::styled(
-                    " Auto Drive Goal ",
-                    Style::default()
-                        .fg(crate::colors::text())
-                        .add_modifier(Modifier::BOLD),
-                ));
-                input_block = input_block.title(title_line);
+            if self.auto_drive_active {
+                if let Some(style) = self.auto_drive_style.as_ref() {
+                    let title_text = if self
+                        .status_message
+                        .eq_ignore_ascii_case("auto drive goal")
+                    {
+                        format!(
+                            "{}Auto Drive Goal{}",
+                            style.goal_title_prefix, style.goal_title_suffix
+                        )
+                    } else {
+                        format!(
+                            "{}Auto Drive{}",
+                            style.auto_title_prefix, style.auto_title_suffix
+                        )
+                    };
+                    let title_line =
+                        Line::from(Span::styled(title_text, style.title_style.clone()));
+                    input_block = input_block.title(title_line);
+                }
             } else {
                 use std::time::{SystemTime, UNIX_EPOCH};
-                // Use selected spinner style
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -2222,14 +2258,13 @@ impl WidgetRef for ChatComposer {
                 let def = crate::spinner::current_spinner();
                 let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
-                // Create centered title with spinner and spaces
                 let title_line = Line::from(vec![
-                    Span::raw(" "), // Space before spinner
+                    Span::raw(" "),
                     Span::styled(spinner_str, Style::default().fg(crate::colors::info())),
                     Span::styled(
                         format!(" {}... ", self.status_message),
                         Style::default().fg(crate::colors::info()),
-                    ), // Space after spinner and after text
+                    ),
                 ])
                 .centered();
                 input_block = input_block.title(title_line);
