@@ -414,6 +414,8 @@ pub(crate) enum AppEvent {
     PreviewSpinner(String),
     /// Rotate access/safety preset (Read Only → Write with Approval → Full Access)
     CycleAccessMode,
+    /// Cycle Auto Drive composer styling variants (Sentinel → Whisper → …)
+    CycleAutoDriveVariant,
     /// Bottom composer expanded (e.g., slash command popup opened)
     ComposerExpanded,
 

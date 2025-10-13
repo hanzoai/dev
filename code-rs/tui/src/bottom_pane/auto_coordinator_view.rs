@@ -1,6 +1,7 @@
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
+use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
 use crate::colors;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
@@ -74,22 +75,32 @@ pub(crate) struct AutoCoordinatorView {
     model: AutoCoordinatorViewModel,
     app_event_tx: AppEventSender,
     status_message: Option<String>,
+    style: AutoDriveStyle,
 }
 
 impl AutoCoordinatorView {
     const DEFAULT_COMPOSER_BLOCK: u16 = 5;
     const MIN_COMPOSER_VIEWPORT: u16 = 3;
 
-    pub fn new(model: AutoCoordinatorViewModel, app_event_tx: AppEventSender) -> Self {
+    pub fn new(
+        model: AutoCoordinatorViewModel,
+        app_event_tx: AppEventSender,
+        style: AutoDriveStyle,
+    ) -> Self {
         Self {
             model,
             app_event_tx,
             status_message: None,
+            style,
         }
     }
 
     pub fn update_model(&mut self, model: AutoCoordinatorViewModel) {
         self.model = model;
+    }
+
+    pub fn set_style(&mut self, style: AutoDriveStyle) {
+        self.style = style;
     }
 
     pub(crate) fn desired_height_with_composer(&self, width: u16, composer: &ChatComposer) -> u16 {
@@ -178,28 +189,79 @@ impl AutoCoordinatorView {
         matches!(key_event.code, KeyCode::Up | KeyCode::Down)
     }
 
-    fn render_frame(&self, area: Rect, buf: &mut Buffer) -> Option<Rect> {
-        const BASE_TITLE: &str = " Auto Drive ";
+    fn render_frame(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        frame_style: &FrameStyle,
+    ) -> Option<Rect> {
         if area.width < 3 || area.height < 3 {
             return None;
         }
-        let title_span = Span::styled(
-            BASE_TITLE,
-            Style::default()
-                .fg(colors::text())
-                .add_modifier(Modifier::BOLD),
+
+        let title_content = format!(
+            "{}{}{}",
+            frame_style.title_prefix, frame_style.title_text, frame_style.title_suffix
         );
+        let title_line = Line::from(Span::styled(title_content, frame_style.title_style));
+
         Block::default()
-            .title(title_span)
+            .title(title_line)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(colors::border()))
+            .border_style(frame_style.border_style)
+            .border_type(frame_style.border_type)
             .render(area, buf);
-        Some(Rect {
+
+        let mut inner = Rect {
             x: area.x + 1,
             y: area.y + 1,
             width: area.width.saturating_sub(2),
             height: area.height.saturating_sub(2),
-        })
+        };
+
+        if let Some(accent) = &frame_style.accent {
+            if inner.width > 0 {
+                let width = accent.width.min(inner.width);
+                for dx in 0..width {
+                    let x = inner.x + dx;
+                    for y in inner.y..inner.y.saturating_add(inner.height) {
+                        let cell = &mut buf[(x, y)];
+                        cell.set_symbol(&accent.symbol.to_string());
+                        cell.set_style(accent.style);
+                    }
+                }
+                inner.x = inner.x.saturating_add(width);
+                inner.width = inner.width.saturating_sub(width);
+            }
+        }
+
+        Some(inner)
+    }
+
+    fn frame_style_for_model(&self, model: &AutoActiveViewModel) -> FrameStyle {
+        let mut style = self.style.frame.clone();
+        if self.style.variant == AutoDriveVariant::Beacon {
+            if let Some(accent) = style.accent.as_mut() {
+                accent.style = if model.awaiting_submission {
+                    Style::default()
+                        .fg(colors::warning())
+                        .add_modifier(Modifier::BOLD)
+                } else if model.waiting_for_review {
+                    Style::default()
+                        .fg(colors::info())
+                        .add_modifier(Modifier::BOLD)
+                } else if model.cli_running || model.waiting_for_response {
+                    Style::default()
+                        .fg(colors::primary())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(colors::success())
+                        .add_modifier(Modifier::BOLD)
+                };
+            }
+        }
+        style
     }
 
     fn derived_status_entries(&self, model: &AutoActiveViewModel) -> Vec<(String, Style)> {
@@ -391,25 +453,33 @@ impl AutoCoordinatorView {
             return None;
         }
 
+        let glyphs = self.style.button.glyphs;
         let inner = format!(" {label} ");
         let inner_width = UnicodeWidthStr::width(inner.as_str());
-        let horizontal = "─".repeat(inner_width);
-        let top = format!("╭{horizontal}╮");
-        let middle = format!("│{inner}│");
-        let bottom = format!("╰{horizontal}╯");
+        let horizontal = glyphs.horizontal.to_string().repeat(inner_width);
+        let top = format!(
+            "{}{}{}",
+            glyphs.top_left, horizontal, glyphs.top_right
+        );
+        let middle = format!(
+            "{}{}{}",
+            glyphs.vertical, inner, glyphs.vertical
+        );
+        let bottom = format!(
+            "{}{}{}",
+            glyphs.bottom_left, horizontal, glyphs.bottom_right
+        );
 
-        let base_style = if button.enabled {
-            Style::default()
-                .fg(colors::primary())
-                .add_modifier(Modifier::BOLD)
+        let button_style = if button.enabled {
+            self.style.button.enabled_style.clone()
         } else {
-            Style::default().fg(colors::text_dim())
+            self.style.button.disabled_style.clone()
         };
 
         let mut lines = Vec::with_capacity(3);
-        lines.push(Line::from(Span::styled(top, base_style)));
+        lines.push(Line::from(Span::styled(top, button_style.clone())));
 
-        let mut middle_spans: Vec<Span<'static>> = vec![Span::styled(middle, base_style)];
+        let mut middle_spans: Vec<Span<'static>> = vec![Span::styled(middle, button_style.clone())];
         if let Some(mut hint_spans) = Self::ctrl_hint_spans(ctx.ctrl_hint.as_str()) {
             if !hint_spans.is_empty() {
                 middle_spans.push(Span::raw("   "));
@@ -418,7 +488,7 @@ impl AutoCoordinatorView {
         }
         lines.push(Line::from(middle_spans));
 
-        lines.push(Line::from(Span::styled(bottom, base_style)));
+        lines.push(Line::from(Span::styled(bottom, button_style)));
         Some(lines)
     }
 
@@ -572,7 +642,8 @@ impl AutoCoordinatorView {
         model: &AutoActiveViewModel,
         composer: &ChatComposer,
     ) {
-        let Some(inner) = self.render_frame(area, buf) else {
+        let frame_style = self.frame_style_for_model(model);
+        let Some(inner) = self.render_frame(area, buf, &frame_style) else {
             return;
         };
         let inner = self.apply_left_padding(inner, buf);
@@ -849,14 +920,10 @@ impl AutoCoordinatorView {
         }
 
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled(
-            primary,
-            Style::default()
-                .fg(colors::text())
-                .add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(primary, self.style.summary_style.clone()));
 
         let secondary_style = Style::default().fg(colors::text_dim());
+        let separator = self.style.footer_separator.to_string();
 
         let agents_text = if model.agents_enabled {
             "Agents Enabled"
@@ -869,10 +936,16 @@ impl AutoCoordinatorView {
             "Review Disabled"
         };
 
-        spans.push(Span::styled("  •  ", secondary_style));
+        spans.push(Span::styled(separator.clone(), secondary_style.clone()));
         spans.push(Span::styled(agents_text.to_string(), secondary_style));
-        spans.push(Span::styled("  •  ", secondary_style));
-        spans.push(Span::styled(review_text.to_string(), secondary_style));
+        spans.push(Span::styled(
+            separator,
+            Style::default().fg(colors::text_dim()),
+        ));
+        spans.push(Span::styled(
+            review_text.to_string(),
+            Style::default().fg(colors::text_dim()),
+        ));
 
         Some(Line::from(spans))
     }
@@ -979,7 +1052,8 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
 
         // Fallback path when the composer is not available: draw the outer
         // frame so the layout remains stable.
-        let _ = self.render_frame(area, buf);
+        let frame_style = self.style.frame.clone();
+        let _ = self.render_frame(area, buf, &frame_style);
     }
 
     fn render_with_composer(

@@ -2,6 +2,7 @@
 
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
+use crate::auto_drive_style::AutoDriveVariant;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::glitch_animation;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
@@ -302,6 +303,9 @@ pub(crate) struct BottomPane<'a> {
 
     pub(crate) using_chatgpt_auth: bool,
 
+    auto_drive_variant: AutoDriveVariant,
+    auto_drive_active: bool,
+
     auto_transition: RefCell<Option<AutoDriveTransitionState>>,
     last_composer_rect: Cell<Option<Rect>>,
 }
@@ -311,6 +315,7 @@ pub(crate) struct BottomPaneParams {
     pub(crate) has_input_focus: bool,
     pub(crate) enhanced_keys_supported: bool,
     pub(crate) using_chatgpt_auth: bool,
+    pub(crate) auto_drive_variant: AutoDriveVariant,
 }
 
 impl BottomPane<'_> {
@@ -318,13 +323,15 @@ impl BottomPane<'_> {
     const BOTTOM_PAD_LINES: u16 = 1;
     pub fn new(params: BottomPaneParams) -> Self {
         let enhanced_keys_supported = params.enhanced_keys_supported;
+        let composer = ChatComposer::new(
+            params.has_input_focus,
+            params.app_event_tx.clone(),
+            enhanced_keys_supported,
+            params.using_chatgpt_auth,
+        );
+
         Self {
-            composer: ChatComposer::new(
-                params.has_input_focus,
-                params.app_event_tx.clone(),
-                enhanced_keys_supported,
-                params.using_chatgpt_auth,
-            ),
+            composer,
             active_view: None,
             active_view_kind: ActiveViewKind::None,
             app_event_tx: params.app_event_tx,
@@ -334,8 +341,69 @@ impl BottomPane<'_> {
             status_view_active: false,
             top_spacer_enabled: true,
             using_chatgpt_auth: params.using_chatgpt_auth,
+            auto_drive_variant: params.auto_drive_variant,
+            auto_drive_active: false,
             auto_transition: RefCell::new(None),
             last_composer_rect: Cell::new(None),
+        }
+    }
+
+    fn auto_view_mut(&mut self) -> Option<&mut AutoCoordinatorView> {
+        if self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            return None;
+        }
+        self.active_view
+            .as_mut()
+            .and_then(|view| view.as_any_mut())
+            .and_then(|any| any.downcast_mut::<AutoCoordinatorView>())
+    }
+
+    fn apply_auto_drive_style(&mut self) {
+        if !self.auto_drive_active {
+            self.composer.set_auto_drive_style(None);
+            return;
+        }
+
+        let style = self.auto_drive_variant.style();
+        self.composer.set_auto_drive_active(true);
+        self.composer
+            .set_auto_drive_style(Some(style.composer.clone()));
+        if let Some(view) = self.auto_view_mut() {
+            view.set_style(style.clone());
+        }
+
+        self.request_redraw();
+    }
+
+    fn enable_auto_drive_style(&mut self) {
+        if !self.auto_drive_active {
+            self.auto_drive_active = true;
+            self.composer.set_auto_drive_active(true);
+        }
+        self.apply_auto_drive_style();
+    }
+
+    fn disable_auto_drive_style(&mut self) {
+        if !self.auto_drive_active {
+            return;
+        }
+        self.auto_drive_active = false;
+        self.composer.set_auto_drive_active(false);
+        self.composer.set_auto_drive_style(None);
+        let style = self.auto_drive_variant.style();
+        if let Some(view) = self.auto_view_mut() {
+            view.set_style(style);
+        }
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_auto_drive_variant(&mut self, variant: AutoDriveVariant) {
+        if self.auto_drive_variant == variant {
+            return;
+        }
+        self.auto_drive_variant = variant;
+        if self.auto_drive_active {
+            self.apply_auto_drive_style();
         }
     }
 
@@ -1006,6 +1074,7 @@ impl BottomPane<'_> {
                 if let Some(existing_any) = existing.as_any_mut() {
                     if let Some(auto_view) = existing_any.downcast_mut::<AutoCoordinatorView>() {
                         auto_view.update_model(model);
+                        auto_view.set_style(self.auto_drive_variant.style());
                         let status_text = self
                             .composer
                             .status_message()
@@ -1013,6 +1082,7 @@ impl BottomPane<'_> {
                         let _ = auto_view.update_status_text(status_text);
                         self.status_view_active = false;
                         self.composer.set_embedded_mode(true);
+                        self.enable_auto_drive_style();
                         self.request_redraw();
                         return;
                     }
@@ -1024,7 +1094,11 @@ impl BottomPane<'_> {
             return;
         }
 
-        let mut view = AutoCoordinatorView::new(model, self.app_event_tx.clone());
+        let mut view = AutoCoordinatorView::new(
+            model,
+            self.app_event_tx.clone(),
+            self.auto_drive_variant.style(),
+        );
         let status_text = self
             .composer
             .status_message()
@@ -1034,15 +1108,21 @@ impl BottomPane<'_> {
         self.active_view_kind = ActiveViewKind::AutoCoordinator;
         self.status_view_active = false;
         self.composer.set_embedded_mode(true);
+        self.enable_auto_drive_style();
         self.request_redraw();
     }
 
-    pub(crate) fn clear_auto_coordinator_view(&mut self) {
+    pub(crate) fn clear_auto_coordinator_view(&mut self, disable_style: bool) {
         if self.active_view_kind == ActiveViewKind::AutoCoordinator {
             self.active_view = None;
             self.active_view_kind = ActiveViewKind::None;
             self.status_view_active = false;
             self.composer.set_embedded_mode(false);
+            if disable_style {
+                self.disable_auto_drive_style();
+            } else if self.auto_drive_active {
+                self.apply_auto_drive_style();
+            }
             self.request_redraw();
         }
     }
