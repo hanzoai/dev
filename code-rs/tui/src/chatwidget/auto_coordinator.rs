@@ -29,6 +29,7 @@ use crate::app_event::{
     AutoReviewCommit,
     AutoReviewCommitSource,
     AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
     AutoTurnCliAction,
     AutoTurnReviewAction,
 };
@@ -237,9 +238,12 @@ mod tests {
             "finish_status": "continue",
             "progress": {"past": "Ran smoke tests", "current": "Dispatching fix"},
             "cli": {"prompt": "Apply the patch for the failing test", "context": "tests/failing.rs"},
-            "agents": [
-                {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B"}
-            ],
+            "agents": {
+                "timing": "blocking",
+                "list": [
+                    {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B"}
+                ]
+            },
             "review": {"source": "staged", "summary": "Pre-merge sanity"}
         }"#;
 
@@ -252,6 +256,10 @@ mod tests {
         assert_eq!(cli.prompt, "Apply the patch for the failing test");
         assert_eq!(cli.context.as_deref(), Some("tests/failing.rs"));
 
+        assert_eq!(
+            decision.agents_timing,
+            Some(AutoTurnAgentsTiming::Blocking)
+        );
         assert_eq!(decision.agents.len(), 1);
         let agent = &decision.agents[0];
         assert_eq!(agent.prompt, "Draft alternative fix");
@@ -260,6 +268,24 @@ mod tests {
         let review = decision.review.expect("review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
         assert_eq!(review.commit.summary.as_deref(), Some("Pre-merge sanity"));
+    }
+
+    #[test]
+    fn parse_decision_new_schema_array_backcompat() {
+        let raw = r#"{
+            "finish_status": "continue",
+            "progress": {"past": "Outlined fix", "current": "Running tests"},
+            "cli": {"prompt": "Run cargo test", "context": null},
+            "agents": [
+                {"prompt": "Investigate benchmark", "write": false}
+            ]
+        }"#;
+
+        let (decision, _) = parse_decision(raw).expect("parse array-style agents");
+        assert_eq!(decision.status, AutoCoordinatorStatus::Continue);
+        assert!(decision.cli.is_some());
+        assert_eq!(decision.agents.len(), 1);
+        assert!(decision.agents_timing.is_none());
     }
 
     #[test]
@@ -287,6 +313,7 @@ mod tests {
         assert_eq!(cli.context.as_deref(), Some("Focus on flaky suite"));
 
         assert!(decision.agents.is_empty());
+        assert!(decision.agents_timing.is_none());
         let review = decision.review.expect("review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
     }
@@ -299,7 +326,7 @@ struct CoordinatorDecisionNew {
     #[serde(default)]
     cli: Option<CliPayload>,
     #[serde(default)]
-    agents: Option<Vec<AgentPayload>>,
+    agents: Option<AgentsField>,
     #[serde(default)]
     review: Option<ReviewPayload>,
 }
@@ -326,6 +353,43 @@ struct AgentPayload {
     context: Option<String>,
     #[serde(default)]
     write: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AgentsField {
+    List(Vec<AgentPayload>),
+    Object(AgentsPayload),
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentsPayload {
+    #[serde(default)]
+    timing: Option<AgentsTimingValue>,
+    #[serde(
+        default,
+        alias = "list",
+        alias = "agents",
+        alias = "entries",
+        alias = "requests"
+    )]
+    requests: Vec<AgentPayload>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AgentsTimingValue {
+    Parallel,
+    Blocking,
+}
+
+impl From<AgentsTimingValue> for AutoTurnAgentsTiming {
+    fn from(value: AgentsTimingValue) -> Self {
+        match value {
+            AgentsTimingValue::Parallel => AutoTurnAgentsTiming::Parallel,
+            AgentsTimingValue::Blocking => AutoTurnAgentsTiming::Blocking,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -366,6 +430,7 @@ struct ParsedCoordinatorDecision {
     progress_past: Option<String>,
     progress_current: Option<String>,
     cli: Option<CliAction>,
+    agents_timing: Option<AutoTurnAgentsTiming>,
     agents: Vec<AgentAction>,
     review: Option<ReviewAction>,
     response_items: Vec<ResponseItem>,
@@ -551,6 +616,7 @@ fn run_auto_loop(
                     progress_past,
                     progress_current,
                     cli,
+                    agents_timing,
                     agents,
                     review,
                     mut response_items,
@@ -583,6 +649,7 @@ fn run_auto_loop(
                             progress_past,
                             progress_current,
                             cli: cli.as_ref().map(cli_action_to_event),
+                            agents_timing,
                             agents: agents.iter().map(agent_action_to_event).collect(),
                             review: review.as_ref().map(review_action_to_event),
                             transcript: std::mem::take(&mut response_items),
@@ -644,6 +711,7 @@ fn run_auto_loop(
                         progress_past,
                         progress_current,
                         cli: cli.as_ref().map(cli_action_to_event),
+                        agents_timing,
                         agents: agents.iter().map(agent_action_to_event).collect(),
                         review: review.as_ref().map(review_action_to_event),
                         transcript: response_items,
@@ -662,6 +730,7 @@ fn run_auto_loop(
                         progress_past: None,
                         progress_current: Some(format!("Coordinator error: {err}")),
                         cli: None,
+                        agents_timing: None,
                         agents: Vec::new(),
                         review: None,
                         transcript: Vec::new(),
@@ -835,6 +904,89 @@ fn build_schema() -> Value {
         "title": "Coordinator Turn (CLI-first; agents + review background)",
         "type": "object",
         "additionalProperties": false,
+        "$defs": {
+            "cli": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "context": {
+                        "type": ["string", "null"],
+                        "maxLength": 1500,
+                        "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "minLength": 4,
+                        "maxLength": 240,
+                        "description": "Exactly one objective in 1–2 sentences. No step lists."
+                    }
+                },
+                "required": ["prompt", "context"]
+            },
+            "agent": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "write": {
+                        "type": "boolean",
+                        "description": "Allow writes in isolated worktree. Default false."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "minLength": 8,
+                        "maxLength": 400,
+                        "description": "Outcome-oriented instruction (what to produce)."
+                    },
+                    "context": {
+                        "type": ["string", "null"],
+                        "maxLength": 1500,
+                        "description": "Optional concrete details (paths, commands, constraints)."
+                    }
+                },
+                "required": ["prompt", "context", "write"]
+            },
+            "agents": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "timing": {
+                        "type": ["string", "null"],
+                        "enum": ["parallel", "blocking"],
+                        "description": "Parallel: run agents while the CLI continues. Blocking: wait for results before the CLI proceeds."
+                    },
+                    "list": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "items": {"$ref": "#/$defs/agent"},
+                        "description": "Helper agents to launch this turn (<=3)."
+                    }
+                },
+                "required": ["list"]
+            },
+            "review": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "enum": ["staged", "commit"],
+                        "description": "What to review."
+                    },
+                    "sha": {
+                        "type": ["string", "null"],
+                        "minLength": 7,
+                        "maxLength": 64,
+                        "description": "Required when source='commit'; otherwise null."
+                    },
+                    "summary": {
+                        "type": ["string", "null"],
+                        "maxLength": 200,
+                        "description": "Optional focus/risks/acceptance criteria."
+                    }
+                },
+                "required": ["source", "sha", "summary"]
+            }
+        },
         "properties": {
             "finish_status": {
                 "type": "string",
@@ -861,74 +1013,25 @@ fn build_schema() -> Value {
                 "required": ["past", "current"]
             },
             "cli": {
-                "type": ["object", "null"],
-                "additionalProperties": false,
+                "oneOf": [
+                    {"type": "null"},
+                    {"$ref": "#/$defs/cli"}
+                ],
                 "description": "The single atomic instruction for the CLI this turn. Set to null when finish_status != 'continue'.",
-                "properties": {
-                    "context": {
-                        "type": ["string", "null"],
-                        "maxLength": 1500,
-                        "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "minLength": 4,
-                        "maxLength": 240,
-                        "description": "Exactly one objective in 1–2 sentences. No step lists."
-                    }
-                },
-                "required": ["prompt", "context"]
             },
             "agents": {
-                "type": ["array", "null"],
-                "description": "Optional parallel helper agents for the CLI to spawn (background).",
-                "maxItems": 3,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "write": {
-                            "type": "boolean",
-                            "description": "Allow writes in isolated worktree. Default false."
-                        },
-                        "prompt": {
-                            "type": "string",
-                            "minLength": 8,
-                            "maxLength": 400,
-                            "description": "Outcome-oriented instruction (what to produce)."
-                        },
-                        "context": {
-                            "type": ["string", "null"],
-                            "maxLength": 1500,
-                            "description": "Optional concrete details (paths, commands, constraints)."
-                        }
-                    },
-                    "required": ["prompt", "context", "write"]
-                }
+                "oneOf": [
+                    {"type": "null"},
+                    {"$ref": "#/$defs/agents"}
+                ],
+                "description": "Optional parallel helper agents for the CLI to spawn."
             },
             "review": {
-                "type": ["object", "null"],
-                "additionalProperties": false,
-                "description": "Optional background review thread to start/update this turn.",
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "enum": ["staged", "commit"],
-                        "description": "What to review."
-                    },
-                    "sha": {
-                        "type": ["string", "null"],
-                        "minLength": 7,
-                        "maxLength": 64,
-                        "description": "Required when source='commit'; otherwise null."
-                    },
-                    "summary": {
-                        "type": ["string", "null"],
-                        "maxLength": 200,
-                        "description": "Optional focus/risks/acceptance criteria."
-                    }
-                },
-                "required": ["source", "sha", "summary"]
+                "oneOf": [
+                    {"type": "null"},
+                    {"$ref": "#/$defs/review"}
+                ],
+                "description": "Optional background review thread to start/update this turn."
             }
         },
         "required": ["finish_status", "progress", "cli", "agents", "review"]
@@ -1535,14 +1638,32 @@ fn convert_decision_new(
     };
 
     let mut agent_actions: Vec<AgentAction> = Vec::new();
+    let mut agents_timing: Option<AutoTurnAgentsTiming> = None;
     if let Some(payloads) = agent_payloads {
-        for payload in payloads {
-            let prompt = clean_required(&payload.prompt, "agents[*].prompt")?;
-            agent_actions.push(AgentAction {
-                prompt,
-                context: clean_optional(payload.context),
-                write: payload.write,
-            });
+        match payloads {
+            AgentsField::List(list) => {
+                for payload in list {
+                    let prompt = clean_required(&payload.prompt, "agents[*].prompt")?;
+                    agent_actions.push(AgentAction {
+                        prompt,
+                        context: clean_optional(payload.context),
+                        write: payload.write,
+                    });
+                }
+            }
+            AgentsField::Object(plan) => {
+                if let Some(timing_value) = plan.timing {
+                    agents_timing = Some(timing_value.into());
+                }
+                for payload in plan.requests {
+                    let prompt = clean_required(&payload.prompt, "agents.requests[*].prompt")?;
+                    agent_actions.push(AgentAction {
+                        prompt,
+                        context: clean_optional(payload.context),
+                        write: payload.write,
+                    });
+                }
+            }
         }
     }
 
@@ -1558,6 +1679,7 @@ fn convert_decision_new(
         progress_past,
         progress_current,
         cli,
+        agents_timing,
         agents: agent_actions,
         review,
         response_items: Vec::new(),
@@ -1608,6 +1730,7 @@ fn convert_decision_legacy(
         progress_past,
         progress_current,
         cli,
+        agents_timing: None,
         agents: Vec::new(),
         review,
         response_items: Vec::new(),
