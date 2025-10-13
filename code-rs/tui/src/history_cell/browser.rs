@@ -808,6 +808,14 @@ impl HistoryCell for BrowserSessionCell {
         self
     }
 
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if self.completed {
+            Some("✔")
+        } else {
+            None
+        }
+    }
+
     fn kind(&self) -> HistoryCellType {
         let status = if self.completed {
             ToolCellStatus::Success
