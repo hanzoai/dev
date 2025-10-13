@@ -13545,6 +13545,8 @@ fi\n\
             return;
         }
 
+        let mut needs_refresh = false;
+
         if let Some(idx) = summary_index {
             if self.auto_state.current_summary_index != Some(idx) {
                 self.auto_state.current_summary_index = Some(idx);
@@ -13555,8 +13557,7 @@ fi\n\
                 self.auto_state.current_display_is_summary = false;
                 self.auto_state.placeholder_phrase =
                     Some(auto_drive_strings::next_auto_drive_phrase().to_string());
-                self.auto_rebuild_live_ring();
-                self.request_redraw();
+                needs_refresh = true;
             }
         }
 
@@ -13586,6 +13587,8 @@ fi\n\
 
             entry.push_str(&cleaned_delta);
 
+            let mut display_updated = false;
+
             if let Some(title) = extract_latest_bold_title(entry) {
                 let needs_update = self
                     .auto_state
@@ -13598,10 +13601,29 @@ fi\n\
                     self.auto_state.current_display_line = Some(title);
                     self.auto_state.current_display_is_summary = false;
                     self.auto_state.placeholder_phrase = None;
-                    self.auto_rebuild_live_ring();
-                    self.request_redraw();
+                    display_updated = true;
+                }
+            } else if self.auto_state.current_reasoning_title.is_none() {
+                let previous_line = self.auto_state.current_display_line.clone();
+                let previous_is_summary = self.auto_state.current_display_is_summary;
+                self.auto_update_display_title();
+                let updated_line = self.auto_state.current_display_line.clone();
+                let updated_is_summary = self.auto_state.current_display_is_summary;
+                if updated_is_summary
+                    && (updated_line != previous_line || !previous_is_summary)
+                {
+                    display_updated = true;
                 }
             }
+
+            if display_updated {
+                needs_refresh = true;
+            }
+        }
+
+        if needs_refresh {
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
         }
     }
 
