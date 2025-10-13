@@ -882,6 +882,10 @@ impl ChatComposer {
         }
     }
 
+    pub(crate) fn file_popup_visible(&self) -> bool {
+        matches!(self.active_popup, ActivePopup::File(_))
+    }
+
     /// Handle a key event coming from the main UI.
     pub fn handle_key_event(&mut self, key_event: KeyEvent) -> (InputResult, bool) {
         // Any non-Down key clears the sticky flag; handled before popup routing
