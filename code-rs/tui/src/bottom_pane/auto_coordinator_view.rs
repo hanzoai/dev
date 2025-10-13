@@ -250,6 +250,38 @@ impl AutoCoordinatorView {
         lines
     }
 
+    fn status_message_line(&self) -> Option<Line<'static>> {
+        let message = self.status_message.as_ref()?;
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let style = Style::default()
+            .fg(colors::info())
+            .add_modifier(Modifier::ITALIC);
+
+        Some(Line::from(vec![
+            Span::raw("   "),
+            Span::styled(trimmed.to_string(), style),
+        ]))
+    }
+
+    fn status_message_wrap_count(&self, width: u16) -> usize {
+        if width == 0 {
+            return 0;
+        }
+        let Some(message) = self.status_message.as_ref() else {
+            return 0;
+        };
+        let trimmed = message.trim();
+        if trimmed.is_empty() {
+            return 0;
+        }
+        let display = format!("   {trimmed}");
+        Self::wrap_count(display.as_str(), width)
+    }
+
     fn cli_prompt_lines(&self, model: &AutoActiveViewModel) -> Option<Vec<Line<'static>>> {
         let prompt = model
             .cli_prompt
@@ -480,7 +512,7 @@ impl AutoCoordinatorView {
             Self::wrap_count(ctrl_hint, inner_width)
         };
 
-        let mut total = 0usize;
+        let mut total = self.status_message_wrap_count(inner_width);
 
         if model.awaiting_submission {
             if let Some(prompt_lines) = self.cli_prompt_lines(model) {
@@ -608,6 +640,14 @@ impl AutoCoordinatorView {
                 } else {
                     top_lines.insert(0, line);
                 }
+            }
+        }
+
+        if let Some(line) = self.status_message_line() {
+            if top_lines.is_empty() {
+                top_lines.push(line);
+            } else {
+                top_lines.insert(0, line);
             }
         }
 
