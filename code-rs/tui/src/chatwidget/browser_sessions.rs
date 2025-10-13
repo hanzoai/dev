@@ -1,6 +1,11 @@
 use super::{tool_cards, ChatWidget, OrderKey};
 use super::tool_cards::ToolCardSlot;
-use crate::history_cell::BrowserSessionCell;
+use crate::history_cell::{
+    BrowserSessionCell,
+    PlainHistoryCell,
+    plain_message_state_from_paragraphs,
+};
+use crate::history::state::{PlainMessageKind, PlainMessageRole};
 use code_core::protocol::OrderMeta;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -10,6 +15,7 @@ pub(super) struct BrowserSessionTracker {
     pub slot: ToolCardSlot,
     pub cell: BrowserSessionCell,
     pub elapsed: Duration,
+    pub anchor_inserted: bool,
 }
 
 struct BrowserActionSummary {
@@ -27,6 +33,49 @@ impl BrowserSessionTracker {
             slot: ToolCardSlot::new(order_key),
             cell: BrowserSessionCell::new(),
             elapsed: Duration::default(),
+            anchor_inserted: false,
+        }
+    }
+}
+
+fn insert_browser_anchor(
+    chat: &mut ChatWidget<'_>,
+    order_key: OrderKey,
+    tracker: &BrowserSessionTracker,
+) {
+    let message = browser_anchor_text(tracker);
+    let state = plain_message_state_from_paragraphs(
+        PlainMessageKind::Plain,
+        PlainMessageRole::System,
+        [message],
+    );
+    let cell = PlainHistoryCell::from_state(state);
+    let _ = chat.history_insert_with_key_global(Box::new(cell), order_key);
+}
+
+fn browser_anchor_text(tracker: &BrowserSessionTracker) -> String {
+    let label = tracker.cell.summary_label();
+    let url = tracker.cell.current_url();
+
+    match url {
+        Some(url) if url == label => format!(
+            "Browser session {} started here; latest view is shown below.",
+            url
+        ),
+        Some(url) => format!(
+            "Browser session \"{}\" ({}) started here; latest view is shown below.",
+            label,
+            url
+        ),
+        None => {
+            if label.is_empty() {
+                "Browser session started here; latest view is shown below.".to_string()
+            } else {
+                format!(
+                    "Browser session \"{}\" started here; latest view is shown below.",
+                    label
+                )
+            }
         }
     }
 }
@@ -69,6 +118,12 @@ pub(super) fn handle_custom_tool_begin(
     }
 
     ensure_cell_picker(chat, &tracker.cell);
+    if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+        if let Some(previous) = tracker.slot.last_inserted_order() {
+            insert_browser_anchor(chat, previous, &tracker);
+            tracker.anchor_inserted = true;
+        }
+    }
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::ensure_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
@@ -105,6 +160,10 @@ pub(super) fn handle_custom_tool_end(
         return false;
     }
 
+    let order_key = order
+        .map(|meta| chat.provider_order_key_from_order_meta(meta))
+        .unwrap_or_else(|| chat.next_internal_key());
+
     let key = chat
         .tools_state
         .browser_session_by_call
@@ -116,6 +175,8 @@ pub(super) fn handle_custom_tool_end(
         Some(tracker) => tracker,
         None => return false,
     };
+
+    tracker.slot.set_order_key(order_key);
 
     let params_to_use = params.as_ref();
     if tool_name == "browser_open" {
@@ -145,6 +206,12 @@ pub(super) fn handle_custom_tool_end(
     tracker.elapsed = tracker.elapsed.saturating_add(duration);
 
     ensure_cell_picker(chat, &tracker.cell);
+    if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+        if let Some(previous) = tracker.slot.last_inserted_order() {
+            insert_browser_anchor(chat, previous, &tracker);
+            tracker.anchor_inserted = true;
+        }
+    }
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
@@ -179,6 +246,11 @@ pub(super) fn handle_background_event(
         None => return false,
     };
 
+    let order_key = order
+        .map(|meta| chat.provider_order_key_from_order_meta(meta))
+        .unwrap_or_else(|| chat.next_internal_key());
+    tracker.slot.set_order_key(order_key);
+
     let console_line = if message.starts_with("⚠️") {
         message.to_string()
     } else {
@@ -187,6 +259,12 @@ pub(super) fn handle_background_event(
     tracker.cell.add_console_message(console_line);
 
     ensure_cell_picker(chat, &tracker.cell);
+    if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+        if let Some(previous) = tracker.slot.last_inserted_order() {
+            insert_browser_anchor(chat, previous, &tracker);
+            tracker.anchor_inserted = true;
+        }
+    }
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
@@ -216,10 +294,21 @@ pub(super) fn handle_screenshot_update(
         None => return false,
     };
 
+    let order_key = order
+        .map(|meta| chat.provider_order_key_from_order_meta(meta))
+        .unwrap_or_else(|| chat.next_internal_key());
+    tracker.slot.set_order_key(order_key);
+
     tracker.cell.set_url(url.to_string());
     tracker.cell.set_screenshot(screenshot_path.clone());
 
     ensure_cell_picker(chat, &tracker.cell);
+    if tracker.slot.has_order_change() && !tracker.anchor_inserted {
+        if let Some(previous) = tracker.slot.last_inserted_order() {
+            insert_browser_anchor(chat, previous, &tracker);
+            tracker.anchor_inserted = true;
+        }
+    }
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
