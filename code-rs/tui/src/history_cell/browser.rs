@@ -150,6 +150,14 @@ impl BrowserSessionCell {
         self.url = Some(url.into());
     }
 
+    pub(crate) fn summary_label(&self) -> String {
+        self.display_label()
+    }
+
+    pub(crate) fn current_url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
     pub(crate) fn record_action(
         &mut self,
         timestamp: Duration,
