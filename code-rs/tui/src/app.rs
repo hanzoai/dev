@@ -1,6 +1,6 @@
 use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::{ChatWidget, GhostState};
+use crate::chatwidget::{ChatWidget, EscIntent, GhostState};
 use crate::cloud_tasks_service;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::file_search::FileSearchManager;
@@ -1188,65 +1188,73 @@ impl App<'_> {
 
                     match key_event {
                         KeyEvent { code: KeyCode::Esc, kind: KeyEventKind::Press | KeyEventKind::Repeat, .. } => {
-                            // Unified Esc policy with modal-first handling:
-                            // - If any modal is active, forward Esc to the widget so the modal can close itself.
-                            // - Otherwise apply global Esc ordering:
-                            //   1) If agent is running, stop it (even if the composer has text).
-                            //   2) Else if there's text, clear it.
-                            //   3) Else double‑Esc opens the undo timeline.
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                // Modal-first: give active modal views priority to handle Esc.
-                                if widget.has_active_modal_view() {
-                                    widget.handle_key_event(key_event);
-                                    continue;
-                                }
+                                let now = Instant::now();
+                                const THRESHOLD: Duration = Duration::from_millis(600);
+                                let double_ready = self
+                                    .last_esc_time
+                                    .is_some_and(|prev| now.duration_since(prev) <= THRESHOLD);
 
-                                // If a file-search popup is visible, close it first
-                                // then continue with global Esc policy in the same keypress.
-                                let _closed_file_popup = widget.close_file_popup_if_active();
-                                if widget.auto_should_handle_global_esc() {
-                                    widget.handle_key_event(key_event);
-                                    continue;
-                                }
-                                {
-                                    let now = Instant::now();
-                                    const THRESHOLD: Duration = Duration::from_millis(600);
+                                let mut handled = false;
+                                let mut attempts = 0;
+                                let esc_event = key_event;
 
-                                    if widget.auto_manual_entry_active()
-                                        && !widget.composer_is_empty()
+                                while attempts < 8 {
+                                    attempts += 1;
+                                    let route = widget.describe_esc_context();
+                                    let mut intent = route.intent;
+
+                                    if intent == EscIntent::None {
+                                        break;
+                                    }
+
+                                    if intent == EscIntent::ShowUndoHint
+                                        && route.allows_double_esc
+                                        && double_ready
                                     {
-                                        widget.clear_composer();
-                                        self.last_esc_time = Some(now);
-                                        continue;
+                                        intent = EscIntent::OpenUndoTimeline;
                                     }
 
-                                    // Step 1: stop agent if running, regardless of composer content.
-                                    if widget.is_task_running() {
-                                        let _ = widget.on_ctrl_c();
-                                        // Arm double‑Esc so next Esc can trigger backtrack.
-                                        self.last_esc_time = Some(now);
-                                        continue;
-                                    }
+                                    let performed = widget.execute_esc_intent(intent, esc_event);
 
-                                    // Step 2: clear composer text if present.
-                                    if !widget.composer_is_empty() {
-                                        widget.clear_composer();
-                                        // Arm double‑Esc so a quick second Esc proceeds to step 3.
-                                        self.last_esc_time = Some(now);
-                                        continue;
-                                    }
-
-                                    // Step 3: double‑Esc opens the undo timeline.
-                                    if let Some(prev) = self.last_esc_time {
-                                        if now.duration_since(prev) <= THRESHOLD {
-                                            self.last_esc_time = None;
-                                            widget.handle_undo_command();
+                                    match intent {
+                                        EscIntent::CloseFilePopup if !route.consume => {
+                                            if !performed {
+                                                break;
+                                            }
                                             continue;
                                         }
+                                        EscIntent::CloseFilePopup => {
+                                            handled = true;
+                                            break;
+                                        }
+                                        EscIntent::ShowUndoHint => {
+                                            if route.allows_double_esc && !double_ready {
+                                                self.last_esc_time = Some(now);
+                                            } else {
+                                                self.last_esc_time = None;
+                                            }
+                                            handled = true;
+                                            break;
+                                        }
+                                        EscIntent::OpenUndoTimeline => {
+                                            self.last_esc_time = None;
+                                            handled = true;
+                                            break;
+                                        }
+                                        EscIntent::CancelTask | EscIntent::ClearComposer => {
+                                            self.last_esc_time = Some(now);
+                                            handled = true;
+                                            break;
+                                        }
+                                        _ => {
+                                            handled = true;
+                                            break;
+                                        }
                                     }
-                                    // First Esc in empty/idle state: show hint and arm timer.
-                                    self.last_esc_time = Some(now);
-                                    widget.show_esc_undo_hint();
+                                }
+
+                                if handled {
                                     continue;
                                 }
                             }
