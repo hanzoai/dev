@@ -20,6 +20,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::auto_drive_strings;
+use crate::auto_drive_style::AutoDriveVariant;
 
 use code_common::elapsed::format_duration;
 use code_common::model_presets::ModelPreset;
@@ -897,6 +898,7 @@ pub(crate) struct ChatWidget<'a> {
     next_ghost_snapshot_id: u64,
     pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
+    auto_drive_variant: AutoDriveVariant,
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
     auto_history: AutoDriveHistory,
@@ -3544,15 +3546,20 @@ impl ChatWidget<'_> {
 
         // Initialize image protocol for rendering screenshots
 
+        let auto_drive_variant = AutoDriveVariant::from_env();
+
+        let bottom_pane = BottomPane::new(BottomPaneParams {
+            app_event_tx: app_event_tx.clone(),
+            has_input_focus: true,
+            enhanced_keys_supported,
+            using_chatgpt_auth: config.using_chatgpt_auth,
+            auto_drive_variant,
+        });
+
         let mut new_widget = Self {
             app_event_tx: app_event_tx.clone(),
             code_op_tx,
-            bottom_pane: BottomPane::new(BottomPaneParams {
-                app_event_tx,
-                has_input_focus: true,
-                enhanced_keys_supported,
-                using_chatgpt_auth: config.using_chatgpt_auth,
-            }),
+            bottom_pane,
             auth_manager: auth_manager.clone(),
             login_view_state: None,
             login_add_view_state: None,
@@ -3698,6 +3705,7 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_drive_variant,
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
@@ -3804,6 +3812,8 @@ impl ChatWidget<'_> {
     ) -> Self {
         let (code_op_tx, mut code_op_rx) = unbounded_channel::<Op>();
 
+        let auto_drive_variant = AutoDriveVariant::from_env();
+
         // Forward events from existing conversation
         let app_event_tx_clone = app_event_tx.clone();
         tokio::spawn(async move {
@@ -3834,15 +3844,18 @@ impl ChatWidget<'_> {
         // Basic widget state mirrors `new`
         let history_cells: Vec<Box<dyn HistoryCell>> = Vec::new();
 
+        let bottom_pane = BottomPane::new(BottomPaneParams {
+            app_event_tx: app_event_tx.clone(),
+            has_input_focus: true,
+            enhanced_keys_supported,
+            using_chatgpt_auth: config.using_chatgpt_auth,
+            auto_drive_variant,
+        });
+
         let mut w = Self {
             app_event_tx: app_event_tx.clone(),
             code_op_tx,
-            bottom_pane: BottomPane::new(BottomPaneParams {
-                app_event_tx,
-                has_input_focus: true,
-                enhanced_keys_supported,
-                using_chatgpt_auth: config.using_chatgpt_auth,
-            }),
+            bottom_pane,
             auth_manager: auth_manager.clone(),
             login_view_state: None,
             login_add_view_state: None,
@@ -3998,6 +4011,7 @@ impl ChatWidget<'_> {
             active_ghost_snapshot: None,
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
+            auto_drive_variant,
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
@@ -4512,7 +4526,7 @@ impl ChatWidget<'_> {
             && self.auto_state.last_run_summary.is_some()
         {
             self.auto_state.last_run_summary = None;
-            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_auto_coordinator_view(true);
             self.bottom_pane.clear_live_ring();
             self.bottom_pane.set_standard_terminal_hint(None);
             self.bottom_pane.ensure_input_focus();
@@ -12931,6 +12945,13 @@ fi\n\
                 {
                     line.push_str(&format!(" Context: {}.", ctx.replace('\n', " ")));
                 }
+                if let Some(models) = action
+                    .models
+                    .as_ref()
+                    .filter(|list| !list.is_empty())
+                {
+                    line.push_str(&format!(" Models: [{}].", models.join(", ")));
+                }
                 agent_lines.push(line);
             }
             let timing_line = match agent_timing {
@@ -13231,13 +13252,13 @@ fi\n\
                 return;
             }
 
-            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_auto_coordinator_view(true);
             self.bottom_pane.clear_live_ring();
             return;
         }
 
         if self.auto_state.paused_for_manual_edit {
-            self.bottom_pane.clear_auto_coordinator_view();
+            self.bottom_pane.clear_auto_coordinator_view(false);
             self.bottom_pane.clear_live_ring();
             return;
         }
@@ -15603,6 +15624,18 @@ fi\n\
             _ => "System: access mode changed to Full Access. Writes and network are allowed.",
         };
         self.queue_agent_note(agent_note);
+    }
+
+    pub(crate) fn cycle_auto_drive_variant(&mut self) {
+        self.auto_drive_variant = self.auto_drive_variant.next();
+        self
+            .bottom_pane
+            .set_auto_drive_variant(self.auto_drive_variant);
+        let notice = format!(
+            "Auto Drive style: {}",
+            self.auto_drive_variant.name()
+        );
+        self.bottom_pane.flash_footer_notice(notice);
     }
 
     /// Insert or replace the access-mode status background event. Uses a near-time
@@ -20092,6 +20125,7 @@ mod tests {
                 prompt: "Draft alternative fix".to_string(),
                 context: None,
                 write: false,
+                models: None,
             }],
             Some(AutoTurnReviewAction {
                 commit: AutoReviewCommit {
@@ -20128,6 +20162,7 @@ mod tests {
             prompt: "Draft alternative fix".to_string(),
             context: Some("Focus on parser module".to_string()),
             write: false,
+            models: Some(vec!["claude".to_string(), "gemini".to_string()]),
         }];
         chat.auto_state.pending_agent_timing = Some(AutoTurnAgentsTiming::Blocking);
 
@@ -20140,6 +20175,7 @@ mod tests {
         assert!(message.contains("Run diagnostics"));
         assert!(message.contains("Please run agent.create"));
         assert!(message.contains("read_only: true"));
+        assert!(message.contains("Models: [claude, gemini]"));
         assert!(message.contains("Draft alternative fix"));
         assert!(message.contains("Focus on parser module"));
         assert!(message.contains("agent.wait"));
