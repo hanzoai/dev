@@ -334,7 +334,7 @@ fn create_shell_tool() -> OpenAiTool {
     properties.insert(
         "timeout".to_string(),
         JsonSchema::Number {
-            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
+            description: Some("Optional hard timeout in milliseconds (minimum 1,800,000 / 30 minutes). By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 
@@ -372,7 +372,7 @@ fn create_shell_tool_for_sandbox(sandbox_policy: &SandboxPolicy) -> OpenAiTool {
     properties.insert(
         "timeout_ms".to_string(),
         JsonSchema::Number {
-            description: Some("Optional hard timeout in milliseconds. By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
+            description: Some("Optional hard timeout in milliseconds (minimum 1,800,000 / 30 minutes). By default, commands have no hard timeout; long runs are streamed and may be backgrounded by the agent.".to_string()),
         },
     );
 

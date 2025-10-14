@@ -73,6 +73,7 @@ use self::compact::collect_user_messages;
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 const HOOK_OUTPUT_LIMIT: usize = 2048;
 const PENDING_ONLY_SENTINEL: &str = "__code_pending_only__";
+const MIN_SHELL_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
 #[derive(Clone, Default)]
 struct ConfirmGuardRuntime {
@@ -6348,10 +6349,13 @@ async fn handle_kill(
 }
 
 fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
+    let timeout_ms = params
+        .timeout_ms
+        .map(|ms| ms.max(MIN_SHELL_TIMEOUT_MS));
     ExecParams {
         command: params.command,
         cwd: sess.resolve_path(params.workdir.clone()),
-        timeout_ms: params.timeout_ms,
+        timeout_ms,
         env: create_env(&sess.shell_environment_policy),
         with_escalated_permissions: params.with_escalated_permissions,
         justification: params.justification,
