@@ -36,6 +36,7 @@ use crate::app_event::{
 };
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
+use crate::thread_spawner;
 #[cfg(feature = "dev-faults")]
 use crate::chatwidget::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
 use code_common::elapsed::format_duration;
@@ -532,7 +533,7 @@ pub(super) fn start_auto_coordinator(
     let cancel_token = CancellationToken::new();
     let thread_cancel = cancel_token.clone();
 
-    std::thread::spawn(move || {
+    if thread_spawner::spawn_lightweight("auto-coordinator", move || {
         if let Err(err) = run_auto_loop(
             app_event_tx,
             goal_text,
@@ -546,7 +547,12 @@ pub(super) fn start_auto_coordinator(
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
         }
-    });
+    })
+    .is_none()
+    {
+        tracing::error!("auto coordinator spawn rejected: background thread limit reached");
+        return Err(anyhow!("auto coordinator worker unavailable"));
+    }
 
     Ok(AutoCoordinatorHandle {
         tx: thread_tx,

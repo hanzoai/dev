@@ -12,6 +12,7 @@ use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::OnboardingScreen;
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::slash_command::SlashCommand;
+use crate::thread_spawner;
 use crate::tui;
 use crate::tui::TerminalInfo;
 use code_core::config::add_project_allowed_command;
@@ -119,7 +120,21 @@ impl FrameTimer {
 
         if should_spawn {
             let timer = Arc::clone(self);
-            thread::spawn(move || timer.run(tx));
+            let tx_for_thread = tx.clone();
+            if thread_spawner::spawn_lightweight("frame-timer", move || timer.run(tx_for_thread)).is_none() {
+                let mut state = self.state.lock().unwrap();
+                state.worker_running = false;
+                let drained = state.deadlines.len();
+                state.deadlines.clear();
+                drop(state);
+                for _ in 0..drained.max(1) {
+                    tx.send(AppEvent::RequestRedraw);
+                }
+                tracing::warn!(
+                    drained_deadlines = drained,
+                    "frame timer spawn rejected: background thread limit reached; flushed deadlines"
+                );
+            }
         }
     }
 
@@ -577,10 +592,15 @@ impl App<'_> {
             .is_ok()
         {
             let pending_redraw = self.pending_redraw.clone();
-            thread::spawn(move || {
+            let pending_redraw_for_thread = pending_redraw.clone();
+            if thread_spawner::spawn_lightweight("redraw-debounce", move || {
                 thread::sleep(REDRAW_DEBOUNCE);
+                pending_redraw_for_thread.store(false, Ordering::Release);
+            })
+            .is_none()
+            {
                 pending_redraw.store(false, Ordering::Release);
-            });
+            }
         }
     }
     
@@ -1108,6 +1128,7 @@ impl App<'_> {
                     {
                         let tx = self.app_event_tx.clone();
                         let running = self.commit_anim_running.clone();
+                        let running_for_thread = running.clone();
                         let tick_ms: u64 = self
                             .config
                             .tui
@@ -1115,12 +1136,16 @@ impl App<'_> {
                             .commit_tick_ms
                             .or(if self.config.tui.stream.responsive { Some(30) } else { None })
                             .unwrap_or(50);
-                        thread::spawn(move || {
-                            while running.load(Ordering::Relaxed) {
+                        if thread_spawner::spawn_lightweight("commit-anim", move || {
+                            while running_for_thread.load(Ordering::Relaxed) {
                                 thread::sleep(Duration::from_millis(tick_ms));
                                 tx.send(AppEvent::CommitTick);
                             }
-                        });
+                        })
+                        .is_none()
+                        {
+                            running.store(false, Ordering::Release);
+                        }
                     }
                 }
                 AppEvent::StopCommitAnimation => {

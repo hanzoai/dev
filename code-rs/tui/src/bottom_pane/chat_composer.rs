@@ -20,6 +20,7 @@ use code_protocol::custom_prompts::PROMPTS_CMD_PREFIX;
 
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_style::ComposerStyle;
+use crate::thread_spawner;
 use crate::bottom_pane::textarea::TextArea;
 use crate::bottom_pane::textarea::TextAreaState;
 use crate::clipboard_paste::normalize_pasted_path;
@@ -255,7 +256,8 @@ impl ChatComposer {
                 // phase‑aligned, monotonic scheduler to minimize drift and
                 // reduce perceived frame skipping under load. We purposely
                 // avoid very small intervals to keep CPU impact low.
-                thread::spawn(move || {
+                let fallback_tx = self.app_event_tx.clone();
+                if thread_spawner::spawn_lightweight("composer-anim", move || {
                     use std::time::Instant;
                     // Default to ~120ms if spinner state is not yet initialized
                     let default_ms: u64 = 120;
@@ -294,9 +296,14 @@ impl ChatComposer {
                             next = target;
                         }
                     }
-                });
-
-                self.animation_running = Some(animation_flag);
+                })
+                .is_none()
+                {
+                    animation_flag.store(false, Ordering::Relaxed);
+                    fallback_tx.send(crate::app_event::AppEvent::RequestRedraw);
+                } else {
+                    self.animation_running = Some(animation_flag);
+                }
             }
         } else {
             // Stop animation thread
