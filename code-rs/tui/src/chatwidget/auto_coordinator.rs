@@ -57,6 +57,7 @@ use super::auto_observer::{
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
 const MAX_RETRY_ELAPSED: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const MAX_DECISION_RECOVERY_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 #[error("auto coordinator cancelled")]
@@ -201,6 +202,7 @@ impl Default for TurnDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
     use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
     use serde_json::json;
 
@@ -418,6 +420,42 @@ mod tests {
         assert!(decision.agents_timing.is_none());
         let review = decision.review.expect("review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
+    }
+
+    #[test]
+    fn classify_missing_cli_prompt_is_recoverable() {
+        let err = anyhow!("model response missing cli prompt for continue");
+        let info = classify_recoverable_decision_error(&err).expect("recoverable error");
+        assert!(info.summary.contains("missing CLI prompt"));
+        assert!(
+            info
+                .guidance
+                .as_ref()
+                .expect("guidance")
+                .contains("cli.prompt")
+        );
+    }
+
+    #[test]
+    fn classify_empty_field_is_recoverable() {
+        let err = anyhow!("agents[*].prompt is empty");
+        let info = classify_recoverable_decision_error(&err).expect("recoverable error");
+        assert!(info.summary.contains("agents[*].prompt"));
+        assert!(info
+            .guidance
+            .as_ref()
+            .expect("guidance")
+            .contains("agents[*].prompt"));
+    }
+
+    #[test]
+    fn push_unique_guidance_trims_and_dedupes() {
+        let mut guidance = vec!["Keep CLI prompts short".to_string()];
+        push_unique_guidance(&mut guidance, "  keep cli prompts short  ");
+        assert_eq!(guidance.len(), 1, "duplicate hint should not be added");
+        push_unique_guidance(&mut guidance, "Respond with JSON only");
+        assert_eq!(guidance.len(), 2);
+        assert!(guidance.iter().any(|hint| hint == "Respond with JSON only"));
     }
 }
 
@@ -682,6 +720,7 @@ fn run_auto_loop(
     let mut pending_conversation = Some(initial_conversation);
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
+    let mut consecutive_decision_failures: u32 = 0;
     let mut observer_guidance: Vec<String> = Vec::new();
     let mut observer_telemetry = AutoObserverTelemetry::default();
     let mut observer_handle = if observer_cadence == 0 {
@@ -734,6 +773,7 @@ fn run_auto_loop(
                     review,
                     mut response_items,
                 }) => {
+                    consecutive_decision_failures = 0;
                     let cli_prompt_for_observer = cli.as_ref().map(|action| action.prompt.as_str());
 
                     if matches!(status, AutoCoordinatorStatus::Continue) {
@@ -752,7 +792,7 @@ fn run_auto_loop(
                                     reason: ObserverReason::Cadence,
                                 };
                                 if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
-                                    tracing::warn!("failed to trigger auto observer");
+                                    warn!("failed to trigger auto observer");
                                 }
                             }
                         }
@@ -803,20 +843,14 @@ fn run_auto_loop(
                         app_event_tx.send(observer_event);
 
                         if matches!(observer_status, AutoObserverStatus::Failing) {
-                            if let Some(instr) = additional_instructions
-                                .as_deref()
-                                .map(str::trim)
-                                .filter(|s| !s.is_empty())
-                            {
-                                if !observer_guidance.iter().any(|existing| existing == instr) {
-                                    observer_guidance.push(instr.to_string());
-                                }
+                            if let Some(instr) = additional_instructions.as_deref() {
+                                push_unique_guidance(&mut observer_guidance, instr);
                             }
                             pending_conversation = Some(conv_for_observer);
                             continue;
                         }
                     } else if let Err(err) = validation_result {
-                        tracing::warn!("final observer validation failed: {err:#}");
+                        warn!("final observer validation failed: {err:#}");
                     }
 
                     let event = AppEvent::AutoCoordinatorDecision {
@@ -838,6 +872,38 @@ fn run_auto_loop(
                         stopped = true;
                         continue;
                     }
+                    if let Some(recoverable) = classify_recoverable_decision_error(&err) {
+                        consecutive_decision_failures =
+                            consecutive_decision_failures.saturating_add(1);
+                        if consecutive_decision_failures <= MAX_DECISION_RECOVERY_ATTEMPTS {
+                            let attempt = consecutive_decision_failures;
+                            warn!(
+                                "auto coordinator decision validation failed (attempt {}/{}): {:#}",
+                                attempt,
+                                MAX_DECISION_RECOVERY_ATTEMPTS,
+                                err
+                            );
+                            if let Some(hint) = recoverable.guidance.as_deref() {
+                                push_unique_guidance(&mut observer_guidance, hint);
+                            }
+                            let message = format!(
+                                "Coordinator response invalid (attempt {attempt}/{MAX_DECISION_RECOVERY_ATTEMPTS}): {}. Retrying…",
+                                recoverable.summary
+                            );
+                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
+                                delta: message,
+                                summary_index: None,
+                            });
+                            pending_conversation = Some(conv_for_observer);
+                            continue;
+                        }
+                        warn!(
+                            "auto coordinator validation retry limit exceeded after {} attempts: {:#}",
+                            MAX_DECISION_RECOVERY_ATTEMPTS,
+                            err
+                        );
+                    }
+                    consecutive_decision_failures = 0;
                     let event = AppEvent::AutoCoordinatorDecision {
                         status: AutoCoordinatorStatus::Failed,
                         progress_past: None,
@@ -858,6 +924,7 @@ fn run_auto_loop(
         match cmd_rx.recv() {
             Ok(AutoCoordinatorCommand::UpdateConversation(conv)) => {
                 requests_completed = requests_completed.saturating_add(1);
+                consecutive_decision_failures = 0;
                 pending_conversation = Some(conv);
             }
             Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
@@ -868,14 +935,8 @@ fn run_auto_loop(
                     telemetry,
                 } = outcome;
 
-                if let Some(instr) = additional_instructions
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    if !observer_guidance.iter().any(|existing| existing == instr) {
-                        observer_guidance.push(instr.to_string());
-                    }
+                if let Some(instr) = additional_instructions.as_deref() {
+                    push_unique_guidance(&mut observer_guidance, instr);
                 }
 
                 observer_telemetry = telemetry.clone();
@@ -1680,6 +1741,122 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
         }
     }
     None
+}
+
+
+struct RecoverableDecisionError {
+    summary: String,
+    guidance: Option<String>,
+}
+
+fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<RecoverableDecisionError> {
+    let text = err.to_string();
+    let lower = text.to_ascii_lowercase();
+
+    if lower.contains("missing cli prompt for continue") {
+        return Some(RecoverableDecisionError {
+            summary: "missing CLI prompt for `finish_status: \"continue\"`".to_string(),
+            guidance: Some(
+                "Include a non-empty `cli.prompt` (and optional context) whenever `finish_status` is `\"continue\"`."
+                    .to_string(),
+            ),
+        });
+    }
+
+    if lower.contains("legacy model response missing cli_prompt for continue") {
+        return Some(RecoverableDecisionError {
+            summary: "legacy response omitted `cli_prompt` for continue turn".to_string(),
+            guidance: Some(
+                "Legacy coordinator responses must populate `cli_prompt` when the turn continues."
+                    .to_string(),
+            ),
+        });
+    }
+
+    if lower.contains(" is empty") {
+        if let Some((field, _)) = text.split_once(" is empty") {
+            let field_trimmed = field.trim().trim_matches('`');
+            if !field_trimmed.is_empty() {
+                let summary = format!("`{field_trimmed}` was empty");
+                let guidance = format!(
+                    "Provide a meaningful value for `{field_trimmed}` instead of leaving it blank."
+                );
+                return Some(RecoverableDecisionError {
+                    summary,
+                    guidance: Some(guidance),
+                });
+            }
+        }
+    }
+
+    if lower.contains("unexpected finish_status") {
+        let extracted = text
+            .split('\'')
+            .nth(1)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("unexpected finish_status '{value}'"))
+            .unwrap_or_else(|| "unexpected finish_status".to_string());
+        return Some(RecoverableDecisionError {
+            summary: extracted,
+            guidance: Some(
+                "Use `finish_status` values: `continue`, `finish_success`, or `finish_failed`."
+                    .to_string(),
+            ),
+        });
+    }
+
+    if lower.contains("model response was not valid json") || lower.contains("parsing json from model output") {
+        return Some(RecoverableDecisionError {
+            summary: "response was not valid JSON".to_string(),
+            guidance: Some(
+                "Return strictly valid JSON that matches the `auto_coordinator_flow` schema without extra prose."
+                    .to_string(),
+            ),
+        });
+    }
+
+    if lower.contains("decoding coordinator decision failed") {
+        return Some(RecoverableDecisionError {
+            summary: "response did not match the coordinator schema".to_string(),
+            guidance: Some(
+                "Ensure every required field is present and spelled correctly per the coordinator schema."
+                    .to_string(),
+            ),
+        });
+    }
+
+    if lower.contains("invalid review source") {
+        return Some(RecoverableDecisionError {
+            summary: "invalid review source".to_string(),
+            guidance: Some(
+                "Set `review.source` to `\"staged\"` or `\"commit\"` only, matching the documented schema."
+                    .to_string(),
+            ),
+        });
+    }
+
+    if lower.contains("review requires sha when source='commit'") {
+        return Some(RecoverableDecisionError {
+            summary: "commit review missing sha".to_string(),
+            guidance: Some(
+                "When `review.source` is `\"commit\"`, include a non-empty commit SHA in `review.sha`."
+                    .to_string(),
+            ),
+        });
+    }
+
+    None
+}
+
+fn push_unique_guidance(guidance: &mut Vec<String>, message: &str) {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if guidance.iter().any(|existing| existing == trimmed) {
+        return;
+    }
+    guidance.push(trimmed.to_string());
 }
 
 
