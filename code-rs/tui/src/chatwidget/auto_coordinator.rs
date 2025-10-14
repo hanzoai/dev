@@ -32,7 +32,8 @@ use crate::app_event::{
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
     AutoTurnCliAction,
-    AutoTurnReviewAction,
+    AutoTurnCodeReviewAction,
+    AutoTurnCrossCheckAction,
 };
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
@@ -47,6 +48,7 @@ use super::auto_observer::{
     build_observer_conversation,
     run_observer_once,
     start_auto_observer,
+    AutoObserverHandle,
     AutoObserverCommand,
     ObserverOutcome,
     ObserverReason,
@@ -218,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_includes_cli_agents_review() {
+    fn schema_includes_cli_agents_code_review_and_cross_check() {
         let active_agents = vec![
             "codex-plan".to_string(),
             "codex-research".to_string(),
@@ -230,7 +232,8 @@ mod tests {
             .expect("schema properties");
         assert!(props.contains_key("cli"), "cli property missing");
         assert!(props.contains_key("agents"), "agents property missing");
-        assert!(props.contains_key("review"), "review property missing");
+        assert!(props.contains_key("code_review"), "code_review property missing");
+        assert!(props.contains_key("cross_check"), "cross_check property missing");
 
         let cli_required = props
             .get("cli")
@@ -283,7 +286,7 @@ mod tests {
         assert_eq!(*enum_values, expected_enum);
 
         let review_required = props
-            .get("review")
+            .get("code_review")
             .and_then(|v| v.as_object())
             .and_then(|obj| obj.get("required"))
             .and_then(|v| v.as_array())
@@ -291,6 +294,15 @@ mod tests {
         assert!(review_required.contains(&json!("source")));
         assert!(review_required.contains(&json!("sha")));
         assert!(review_required.contains(&json!("summary")));
+
+        let cross_check_props = props
+            .get("cross_check")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("properties"))
+            .and_then(|v| v.as_object())
+            .expect("cross_check properties");
+        assert!(cross_check_props.contains_key("summary"));
+        assert!(cross_check_props.contains_key("focus"));
     }
 
     #[test]
@@ -344,7 +356,8 @@ mod tests {
                     {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B", "models": ["codex-plan"]}
                 ]
             },
-            "review": {"source": "staged", "summary": "Pre-merge sanity"}
+            "code_review": {"source": "staged", "summary": "Pre-merge sanity"},
+            "cross_check": {"summary": "Verify database wiring", "focus": "CRUD paths"}
         }"#;
 
         let (decision, _) = parse_decision(raw).expect("parse new schema decision");
@@ -369,9 +382,14 @@ mod tests {
             Some(vec!["codex-plan".to_string()])
         );
 
-        let review = decision.review.expect("review action expected");
+        let review = decision
+            .code_review
+            .expect("code_review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
         assert_eq!(review.commit.summary.as_deref(), Some("Pre-merge sanity"));
+        let cross_check = decision.cross_check.expect("cross_check action expected");
+        assert_eq!(cross_check.summary.as_deref(), Some("Verify database wiring"));
+        assert_eq!(cross_check.focus.as_deref(), Some("CRUD paths"));
     }
 
     #[test]
@@ -418,7 +436,9 @@ mod tests {
 
         assert!(decision.agents.is_empty());
         assert!(decision.agents_timing.is_none());
-        let review = decision.review.expect("review action expected");
+        let review = decision
+            .code_review
+            .expect("code_review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
     }
 
@@ -468,7 +488,9 @@ struct CoordinatorDecisionNew {
     #[serde(default)]
     agents: Option<AgentsField>,
     #[serde(default)]
-    review: Option<ReviewPayload>,
+    code_review: Option<ReviewPayload>,
+    #[serde(default)]
+    cross_check: Option<CrossCheckPayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -546,6 +568,14 @@ struct ReviewPayload {
 }
 
 #[derive(Debug, Deserialize)]
+struct CrossCheckPayload {
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    focus: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct CoordinatorDecisionLegacy {
     finish_status: String,
     #[serde(default)]
@@ -576,7 +606,8 @@ struct ParsedCoordinatorDecision {
     cli: Option<CliAction>,
     agents_timing: Option<AutoTurnAgentsTiming>,
     agents: Vec<AgentAction>,
-    review: Option<ReviewAction>,
+    code_review: Option<CodeReviewAction>,
+    cross_check: Option<CrossCheckAction>,
     response_items: Vec<ResponseItem>,
 }
 
@@ -595,8 +626,15 @@ struct AgentAction {
 }
 
 #[derive(Debug, Clone)]
-struct ReviewAction {
+struct CodeReviewAction {
     commit: AutoReviewCommit,
+}
+
+#[derive(Debug, Clone)]
+struct CrossCheckAction {
+    summary: Option<String>,
+    focus: Option<String>,
+    forced: bool,
 }
 
 pub(super) fn start_auto_coordinator(
@@ -723,20 +761,20 @@ fn run_auto_loop(
     let mut consecutive_decision_failures: u32 = 0;
     let mut observer_guidance: Vec<String> = Vec::new();
     let mut observer_telemetry = AutoObserverTelemetry::default();
-    let mut observer_handle = if observer_cadence == 0 {
-        None
-    } else {
-        match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
-            Ok(handle) => Some(handle),
-            Err(err) => {
-                tracing::error!("failed to start auto observer: {err:#}");
-                None
-            }
+    let mut observer_handle = match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
+        Ok(handle) => Some(handle),
+        Err(err) => {
+            tracing::error!("failed to start auto observer: {err:#}");
+            None
         }
     };
-    let observer_cadence = observer_handle
-        .as_ref()
-        .map(|handle| handle.cadence() as u64);
+    let observer_cadence_interval = if observer_cadence == 0 {
+        None
+    } else {
+        observer_handle
+            .as_ref()
+            .map(|handle| handle.cadence() as u64)
+    };
 
     loop {
         if stopped {
@@ -770,15 +808,31 @@ fn run_auto_loop(
                     cli,
                     agents_timing,
                     agents,
-                    review,
+                    code_review,
+                    cross_check,
                     mut response_items,
                 }) => {
                     consecutive_decision_failures = 0;
                     let cli_prompt_for_observer = cli.as_ref().map(|action| action.prompt.as_str());
 
                     if matches!(status, AutoCoordinatorStatus::Continue) {
+                        if let Some(cross) = cross_check.clone() {
+                            dispatch_cross_check(
+                                observer_handle.as_ref(),
+                                &runtime,
+                                client.clone(),
+                                &cmd_tx,
+                                conv_for_observer.clone(),
+                                goal_text.clone(),
+                                environment_details.clone(),
+                                cross.summary.clone(),
+                                cross.focus.clone(),
+                                false,
+                            );
+                        }
+
                         if let (Some(handle), Some(cadence)) =
-                            (observer_handle.as_ref(), observer_cadence)
+                            (observer_handle.as_ref(), observer_cadence_interval)
                         {
                             if should_trigger_observer(requests_completed, cadence) {
                                 let conversation = build_observer_conversation(
@@ -797,6 +851,9 @@ fn run_auto_loop(
                             }
                         }
 
+                        let cross_check_event = cross_check
+                            .as_ref()
+                            .map(|action| cross_check_action_to_event(action));
                         let event = AppEvent::AutoCoordinatorDecision {
                             status,
                             progress_past,
@@ -804,7 +861,8 @@ fn run_auto_loop(
                             cli: cli.as_ref().map(cli_action_to_event),
                             agents_timing,
                             agents: agents.iter().map(agent_action_to_event).collect(),
-                            review: review.as_ref().map(review_action_to_event),
+                            code_review: code_review.as_ref().map(code_review_action_to_event),
+                            cross_check: cross_check_event,
                             transcript: std::mem::take(&mut response_items),
                         };
                         app_event_tx.send(event);
@@ -813,13 +871,21 @@ fn run_auto_loop(
 
                     let observer_conversation =
                         build_observer_conversation(conv_for_observer.clone(), None);
-                    let validation_result = run_final_observer_validation(
+                    let final_summary = cross_check
+                        .as_ref()
+                        .and_then(|data| data.summary.clone());
+                    let final_focus = cross_check
+                        .as_ref()
+                        .and_then(|data| data.focus.clone());
+
+                    let validation_result = run_final_cross_check(
                         &runtime,
                         client.clone(),
                         observer_conversation,
                         &goal_text,
                         &environment_details,
-                        status,
+                        final_summary,
+                        final_focus,
                     );
 
                     if let Ok((observer_status, replace_message, additional_instructions)) =
@@ -860,7 +926,8 @@ fn run_auto_loop(
                         cli: cli.as_ref().map(cli_action_to_event),
                         agents_timing,
                         agents: agents.iter().map(agent_action_to_event).collect(),
-                        review: review.as_ref().map(review_action_to_event),
+                        code_review: code_review.as_ref().map(code_review_action_to_event),
+                        cross_check: None,
                         transcript: response_items,
                     };
                     app_event_tx.send(event);
@@ -911,7 +978,8 @@ fn run_auto_loop(
                         cli: None,
                         agents_timing: None,
                         agents: Vec::new(),
-                        review: None,
+                        code_review: None,
+                        cross_check: None,
                         transcript: Vec::new(),
                     };
                     app_event_tx.send(event);
@@ -933,6 +1001,8 @@ fn run_auto_loop(
                     replace_message,
                     additional_instructions,
                     telemetry,
+                    reason,
+                    conversation,
                 } = outcome;
 
                 if let Some(instr) = additional_instructions.as_deref() {
@@ -947,6 +1017,16 @@ fn run_auto_loop(
                     additional_instructions,
                 };
                 app_event_tx.send(event);
+
+                if let ObserverReason::CrossCheck { .. } = reason {
+                    if matches!(status, AutoObserverStatus::Failing) {
+                        if !conversation.is_empty() {
+                            pending_conversation = Some(conversation);
+                        }
+                        consecutive_decision_failures = 0;
+                        continue;
+                    }
+                }
             }
             Ok(AutoCoordinatorCommand::Stop) | Err(_) => {
                 stopped = true;
@@ -981,23 +1061,76 @@ fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
     intro
 }
 
+fn dispatch_cross_check(
+    observer_handle: Option<&AutoObserverHandle>,
+    runtime: &tokio::runtime::Runtime,
+    client: Arc<ModelClient>,
+    coordinator_tx: &Sender<AutoCoordinatorCommand>,
+    conversation: Vec<ResponseItem>,
+    goal_text: String,
+    environment_details: String,
+    summary: Option<String>,
+    focus: Option<String>,
+    forced: bool,
+) {
+    let reason = ObserverReason::CrossCheck {
+        forced,
+        summary: summary.clone(),
+        focus: focus.clone(),
+    };
+    let trigger = ObserverTrigger {
+        conversation: conversation.clone(),
+        goal_text,
+        environment_details,
+        reason: reason.clone(),
+    };
+
+    if let Some(handle) = observer_handle {
+        if handle.tx.send(AutoObserverCommand::Trigger(trigger.clone())).is_ok() {
+            return;
+        }
+    }
+
+    match run_observer_once(runtime, client, trigger.clone()) {
+        Ok((status, replace_message, additional_instructions)) => {
+            let outcome = ObserverOutcome {
+                status,
+                replace_message,
+                additional_instructions,
+                telemetry: AutoObserverTelemetry::default(),
+                reason,
+                conversation,
+            };
+            let _ = coordinator_tx.send(AutoCoordinatorCommand::ObserverResult(outcome));
+        }
+        Err(err) => {
+            warn!("cross-check fallback evaluation failed: {err:#}");
+        }
+    }
+}
+
 fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
     cadence != 0 && requests_completed > 0 && requests_completed % cadence == 0
 }
 
-fn run_final_observer_validation(
+fn run_final_cross_check(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     conversation: Vec<ResponseItem>,
     goal_text: &str,
     environment_details: &str,
-    finish_status: AutoCoordinatorStatus,
+    summary: Option<String>,
+    focus: Option<String>,
 ) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
     let trigger = ObserverTrigger {
         conversation,
         goal_text: goal_text.to_string(),
         environment_details: environment_details.to_string(),
-        reason: ObserverReason::FinalCheck { finish_status },
+        reason: ObserverReason::CrossCheck {
+            forced: true,
+            summary,
+            focus,
+        },
     };
     run_observer_once(runtime, client, trigger)
 }
@@ -1241,10 +1374,10 @@ fn build_schema(active_agents: &[String]) -> Value {
                 },
                 "required": ["timing", "list"]
             },
-            "review": {
+            "code_review": {
                 "type": ["object", "null"],
                 "additionalProperties": false,
-                "description": "Starts an optional review at the start of the turn. Use whenever substainal code has changed. Confirms there are no errors in the implementation using a specalized review model.",
+                "description": "Starts an optional code review at the start of the turn. Use whenever substantial code has changed. Confirms there are no errors in the implementation using a specialized review model.",
                 "properties": {
                     "source": {
                         "type": "string",
@@ -1264,9 +1397,26 @@ fn build_schema(active_agents: &[String]) -> Value {
                     }
                 },
                 "required": ["source", "sha", "summary"]
+            },
+            "cross_check": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Optional QA-style cross check to validate the turn outcome. Runs alongside the CLI and prefers failing when anything looks incomplete.",
+                "properties": {
+                    "summary": {
+                        "type": ["string", "null"],
+                        "maxLength": 300,
+                        "description": "One-line reminder of what the cross check should confirm."
+                    },
+                    "focus": {
+                        "type": ["string", "null"],
+                        "maxLength": 400,
+                        "description": "Specific risks, flows, or acceptance criteria the cross check must probe."
+                    }
+                }
             }
         },
-        "required": ["finish_status", "progress", "cli", "agents", "review"]
+        "required": ["finish_status", "progress", "cli", "agents", "code_review"]
     })
 }
 
@@ -1880,21 +2030,23 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
         });
     }
 
-    if lower.contains("invalid review source") {
+    if lower.contains("invalid code_review source") || lower.contains("invalid review source") {
         return Some(RecoverableDecisionError {
-            summary: "invalid review source".to_string(),
+            summary: "invalid code_review source".to_string(),
             guidance: Some(
-                "Set `review.source` to `\"staged\"` or `\"commit\"` only, matching the documented schema."
+                "Set `code_review.source` to `\"staged\"` or `\"commit\"` only, matching the documented schema."
                     .to_string(),
             ),
         });
     }
 
-    if lower.contains("review requires sha when source='commit'") {
+    if lower.contains("code_review requires sha when source='commit'")
+        || lower.contains("review requires sha when source='commit'")
+    {
         return Some(RecoverableDecisionError {
-            summary: "commit review missing sha".to_string(),
+            summary: "commit code_review missing sha".to_string(),
             guidance: Some(
-                "When `review.source` is `\"commit\"`, include a non-empty commit SHA in `review.sha`."
+                "When `code_review.source` is `\"commit\"`, include a non-empty commit SHA in `code_review.sha`."
                     .to_string(),
             ),
         });
@@ -1967,7 +2119,8 @@ fn convert_decision_new(
         progress,
         cli,
         agents: agent_payloads,
-        review,
+        code_review,
+        cross_check,
     } = decision;
 
     let progress_past = clean_optional(progress.past);
@@ -2036,9 +2189,18 @@ fn convert_decision_new(
         }
     }
 
-    let review = match review {
-        Some(payload) => Some(ReviewAction {
+    let code_review = match code_review {
+        Some(payload) => Some(CodeReviewAction {
             commit: build_review_commit(payload.source, payload.sha, payload.summary)?,
+        }),
+        None => None,
+    };
+
+    let cross_check = match cross_check {
+        Some(payload) => Some(CrossCheckAction {
+            summary: clean_optional(payload.summary),
+            focus: clean_optional(payload.focus),
+            forced: false,
         }),
         None => None,
     };
@@ -2050,7 +2212,8 @@ fn convert_decision_new(
         cli,
         agents_timing,
         agents: agent_actions,
-        review,
+        code_review,
+        cross_check,
         response_items: Vec::new(),
     })
 }
@@ -2087,8 +2250,8 @@ fn convert_decision_legacy(
         (_, None) => None,
     };
 
-    let review = match review_commit {
-        Some(payload) => Some(ReviewAction {
+    let code_review = match review_commit {
+        Some(payload) => Some(CodeReviewAction {
             commit: payload.try_into_commit()?,
         }),
         None => None,
@@ -2101,7 +2264,8 @@ fn convert_decision_legacy(
         cli,
         agents_timing: None,
         agents: Vec::new(),
-        review,
+        code_review,
+        cross_check: None,
         response_items: Vec::new(),
     })
 }
@@ -2168,12 +2332,12 @@ fn build_review_commit(
     let source_enum = match source.trim().to_ascii_lowercase().as_str() {
         "staged" => AutoReviewCommitSource::Staged,
         "commit" => AutoReviewCommitSource::Commit,
-        other => return Err(anyhow!("invalid review source '{other}'")),
+        other => return Err(anyhow!("invalid code_review source '{other}'")),
     };
 
     let sha_clean = clean_optional(sha);
     if matches!(source_enum, AutoReviewCommitSource::Commit) && sha_clean.is_none() {
-        return Err(anyhow!("review requires sha when source='commit'"));
+        return Err(anyhow!("code_review requires sha when source='commit'"));
     }
 
     Ok(AutoReviewCommit {
@@ -2205,9 +2369,17 @@ fn agent_action_to_event(action: &AgentAction) -> AutoTurnAgentsAction {
     }
 }
 
-fn review_action_to_event(action: &ReviewAction) -> AutoTurnReviewAction {
-    AutoTurnReviewAction {
+fn code_review_action_to_event(action: &CodeReviewAction) -> AutoTurnCodeReviewAction {
+    AutoTurnCodeReviewAction {
         commit: action.commit.clone(),
+    }
+}
+
+fn cross_check_action_to_event(action: &CrossCheckAction) -> AutoTurnCrossCheckAction {
+    AutoTurnCrossCheckAction {
+        summary: action.summary.clone(),
+        focus: action.focus.clone(),
+        forced: action.forced,
     }
 }
 

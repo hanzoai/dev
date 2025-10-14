@@ -1,6 +1,7 @@
 #![cfg(feature = "dev-faults")]
 
 use anyhow::anyhow;
+use chrono::{Duration as ChronoDuration, Utc};
 use code_core::error::{CodexErr, UnexpectedResponseError, UsageLimitReachedError};
 use once_cell::sync::OnceCell;
 use rand::Rng;
@@ -8,6 +9,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use reqwest::StatusCode;
+use serde_json::json;
 
 /// Scope flag – currently only `auto_drive` is recognised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,7 +63,7 @@ fn init_config() -> HashMap<FaultScope, FaultConfig> {
     let mut map = HashMap::new();
     if let Some(scope) = parse_fault_scope() {
         if let Ok(spec) = std::env::var("CODEX_FAULTS") {
-            let mut cfg = FaultConfig::default();
+            let cfg = FaultConfig::default();
             for entry in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 if let Some((label, count)) = entry.split_once(':') {
                     if let Ok(num) = count.parse::<usize>() {
@@ -152,4 +155,3 @@ pub fn fault_to_error(fault: InjectedFault) -> anyhow::Error {
         },
     }
 }
-

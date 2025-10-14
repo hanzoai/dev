@@ -297,7 +297,8 @@ use crate::app_event::{
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
     AutoTurnCliAction,
-    AutoTurnReviewAction,
+    AutoTurnCodeReviewAction,
+    AutoTurnCrossCheckAction,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -12324,7 +12325,8 @@ fi\n\
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
-        review: Option<AutoTurnReviewAction>,
+        code_review: Option<AutoTurnCodeReviewAction>,
+        cross_check: Option<AutoTurnCrossCheckAction>,
         transcript: Vec<code_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
@@ -12375,8 +12377,12 @@ fi\n\
             self.auto_state.pending_agent_timing = None;
         }
 
-        if let Some(review_action) = review {
+        if let Some(review_action) = code_review {
             self.auto_trigger_review_action(review_action);
+        }
+
+        if let Some(cross_check_action) = cross_check {
+            self.auto_handle_cross_check_request(cross_check_action);
         }
 
         match status {
@@ -13264,7 +13270,7 @@ fi\n\
         self.begin_review(prompt, hint, Some(preparation), review_metadata);
     }
 
-    fn auto_trigger_review_action(&mut self, action: AutoTurnReviewAction) {
+    fn auto_trigger_review_action(&mut self, action: AutoTurnCodeReviewAction) {
         if !self.auto_state.review_enabled {
             return;
         }
@@ -13281,6 +13287,30 @@ fi\n\
         self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
+    }
+
+    fn auto_handle_cross_check_request(&mut self, action: AutoTurnCrossCheckAction) {
+        let mut banner = if action.forced {
+            "Cross-check (required) in progress".to_string()
+        } else {
+            "Cross-check launched".to_string()
+        };
+
+        if let Some(summary) = action.summary.as_ref() {
+            if !summary.trim().is_empty() {
+                banner.push_str(": ");
+                banner.push_str(summary.trim());
+            }
+        }
+
+        if let Some(focus) = action.focus.as_ref() {
+            if !focus.trim().is_empty() {
+                banner.push_str(" — focus: ");
+                banner.push_str(focus.trim());
+            }
+        }
+
+        self.auto_queue_observer_banner(banner);
     }
 
     fn auto_rebuild_live_ring(&mut self) {
@@ -20483,13 +20513,14 @@ mod tests {
                 write: false,
                 models: None,
             }],
-            Some(AutoTurnReviewAction {
+            Some(AutoTurnCodeReviewAction {
                 commit: AutoReviewCommit {
                     source: AutoReviewCommitSource::Staged,
                     sha: None,
                     summary: Some("Pre-merge checklist".to_string()),
                 },
             }),
+            None,
             Vec::new(),
         );
 
