@@ -1,4 +1,4 @@
-use crate::agent_defaults::DEFAULT_AGENT_NAMES;
+use crate::agent_defaults::enabled_agent_model_specs;
 use crate::config_types::AgentConfig;
 use crate::config_types::SubagentCommandConfig;
 
@@ -18,7 +18,10 @@ pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
 
 /// Get default models if no agents are configured
 fn get_default_models() -> Vec<String> {
-    DEFAULT_AGENT_NAMES.iter().map(|name| (*name).to_string()).collect()
+    enabled_agent_model_specs()
+        .into_iter()
+        .map(|spec| spec.slug.to_string())
+        .collect()
 }
 
 /// Resolution result for a subagent command.
@@ -237,7 +240,8 @@ mod tests {
         let plan_prompt = result.unwrap();
         assert!(plan_prompt.contains("final, comprehensive plan"));
         // Default agents list should include cloud when no [[agents]] configured
-        assert!(plan_prompt.to_ascii_lowercase().contains("cloud"));
+        assert!(plan_prompt.contains("code-gpt-5-codex"));
+        assert!(!plan_prompt.contains("cloud-gpt-5-codex"));
 
         // Test /solve command
         let result = handle_slash_command("/solve fix the bug in authentication", None);
@@ -269,7 +273,7 @@ mod tests {
         // Create test agent configurations
         let agents = vec![
             AgentConfig {
-                name: "test-claude".to_string(),
+                name: "claude-sonnet-4.5".to_string(),
                 command: "claude".to_string(),
                 args: vec![],
                 read_only: false,
@@ -298,7 +302,7 @@ mod tests {
         let result = handle_slash_command("/plan test task", Some(&agents));
         assert!(result.is_some());
         let prompt = result.unwrap();
-        assert!(prompt.contains("test-claude"));
-        assert!(!prompt.contains("test-gemini")); // Should not include disabled agent
+        assert!(prompt.contains("claude-sonnet-4.5"));
+        assert!(!prompt.contains("test-gemini"));
     }
 }

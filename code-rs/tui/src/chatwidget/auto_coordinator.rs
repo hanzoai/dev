@@ -200,6 +200,7 @@ impl Default for TurnDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
     use serde_json::json;
 
     #[test]
@@ -214,8 +215,12 @@ mod tests {
     }
 
     #[test]
-    fn schema_includes_cli_agents_review_when_enabled() {
-        let schema = build_schema(&[], true, true);
+    fn schema_includes_cli_agents_review() {
+        let active_agents = vec![
+            "codex-plan".to_string(),
+            "codex-research".to_string(),
+        ];
+        let schema = build_schema(&active_agents);
         let props = schema
             .get("properties")
             .and_then(|v| v.as_object())
@@ -233,14 +238,46 @@ mod tests {
         assert!(cli_required.contains(&json!("prompt")));
         assert!(cli_required.contains(&json!("context")));
 
-        let agents_required = props
+        let agents_obj = props
             .get("agents")
             .and_then(|v| v.as_object())
-            .and_then(|obj| obj.get("required"))
+            .expect("agents schema object");
+        let agents_required = agents_obj
+            .get("required")
             .and_then(|v| v.as_array())
             .expect("agents required");
         assert!(agents_required.contains(&json!("timing")));
         assert!(agents_required.contains(&json!("list")));
+        assert!(!agents_required.contains(&json!("models")));
+
+        let list_items_schema = agents_obj
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("list"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("items"))
+            .and_then(|v| v.as_object())
+            .expect("agents.list items");
+        let item_props = list_items_schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("agents.list item properties");
+        let models_schema = item_props
+            .get("models")
+            .and_then(|v| v.as_object())
+            .expect("agents.list item models schema");
+        assert_eq!(models_schema.get("type"), Some(&json!("array")));
+        let enum_values = models_schema
+            .get("items")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("enum"))
+            .and_then(|v| v.as_array())
+            .expect("models enum values");
+        let expected_enum: Vec<Value> = active_agents
+            .iter()
+            .map(|name| Value::String(name.clone()))
+            .collect();
+        assert_eq!(*enum_values, expected_enum);
 
         let review_required = props
             .get("review")
@@ -254,41 +291,42 @@ mod tests {
     }
 
     #[test]
-    fn schema_omits_agents_when_disabled() {
-        let schema = build_schema(&[], false, true);
+    fn schema_defaults_to_builtin_agents_enum() {
+        let schema = build_schema(
+            &DEFAULT_AGENT_NAMES
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect::<Vec<_>>(),
+        );
         let props = schema
             .get("properties")
             .and_then(|v| v.as_object())
             .expect("schema properties");
-        assert!(props.contains_key("cli"), "cli property missing");
-        assert!(!props.contains_key("agents"), "agents property should be absent");
-        assert!(props.contains_key("review"), "review property missing");
-
-        let required = schema
-            .get("required")
-            .and_then(|v| v.as_array())
-            .expect("required array");
-        assert!(!required.contains(&json!("agents")));
-        assert!(required.contains(&json!("review")));
-    }
-
-    #[test]
-    fn schema_omits_review_when_disabled() {
-        let schema = build_schema(&[], true, false);
-        let props = schema
+        let agents_obj = props
+            .get("agents")
+            .and_then(|v| v.as_object())
+            .expect("agents schema");
+        let item_enum = agents_obj
             .get("properties")
             .and_then(|v| v.as_object())
-            .expect("schema properties");
-        assert!(props.contains_key("cli"), "cli property missing");
-        assert!(props.contains_key("agents"), "agents property missing");
-        assert!(!props.contains_key("review"), "review property should be absent");
-
-        let required = schema
-            .get("required")
+            .and_then(|obj| obj.get("list"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("items"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("properties"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("models"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("items"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("enum"))
             .and_then(|v| v.as_array())
-            .expect("required array");
-        assert!(required.contains(&json!("agents")));
-        assert!(!required.contains(&json!("review")));
+            .expect("models enum");
+        let expected: Vec<Value> = DEFAULT_AGENT_NAMES
+            .iter()
+            .map(|name| Value::String((*name).to_string()))
+            .collect();
+        assert_eq!(*item_enum, expected);
     }
 
     #[test]
@@ -300,7 +338,7 @@ mod tests {
             "agents": {
                 "timing": "blocking",
                 "list": [
-                    {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B"}
+                    {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B", "models": ["codex-plan"]}
                 ]
             },
             "review": {"source": "staged", "summary": "Pre-merge sanity"}
@@ -323,6 +361,10 @@ mod tests {
         let agent = &decision.agents[0];
         assert_eq!(agent.prompt, "Draft alternative fix");
         assert!(!agent.write);
+        assert_eq!(
+            agent.models,
+            Some(vec!["codex-plan".to_string()])
+        );
 
         let review = decision.review.expect("review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
@@ -627,12 +669,7 @@ fn run_auto_loop(
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
     let (base_developer_intro, primary_goal_message) =
         build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
-    let auto_drive_settings = config.tui.auto_drive.clone();
-    let schema = build_schema(
-        &active_agent_names,
-        auto_drive_settings.agents_enabled,
-        auto_drive_settings.review_enabled,
-    );
+    let schema = build_schema(&active_agent_names);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
 
@@ -968,12 +1005,31 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
         .map(|text| text.trim_end().to_string())
 }
 
-fn build_schema(
-    active_agents: &[String],
-    include_agents: bool,
-    include_review: bool,
-) -> Value {
-    let mut schema = json!({
+fn build_schema(active_agents: &[String]) -> Value {
+    let models_enum_values: Vec<Value> = active_agents
+        .iter()
+        .map(|name| Value::String(name.clone()))
+        .collect();
+
+    let models_items_schema = {
+        let mut schema = json!({
+            "type": "string",
+        });
+        if !models_enum_values.is_empty() {
+            schema["enum"] = Value::Array(models_enum_values.clone());
+        }
+        schema
+    };
+
+    let models_request_property = {
+        json!({
+            "type": "array",
+            "description": "Preferred agent models for this helper (choose from the valid agent list).",
+            "items": models_items_schema,
+        })
+    };
+
+    json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Coordinator Turn (CLI-first; agents + review background)",
         "type": "object",
@@ -1026,111 +1082,74 @@ fn build_schema(
         "required": ["finish_status", "progress", "cli"]
     });
 
-    if include_agents {
-        let models_enum_values: Vec<Value> = active_agents
-            .iter()
-            .map(|name| Value::String(name.clone()))
-            .collect();
-
-        let mut models_items_schema = json!({
-            "type": "string",
-        });
-        if !models_enum_values.is_empty() {
-            models_items_schema["enum"] = Value::Array(models_enum_values.clone());
-        }
-
-        let models_batch_property = json!({
-            "type": ["array", "null"],
-            "description": "Preferred agent models for this batch (null => let the CLI choose).",
-            "items": models_items_schema.clone(),
-        });
-
-        let models_request_property = json!({
-            "type": ["array", "null"],
-            "description": "Agent-specific model overrides (null inherits the batch selection).",
-            "items": models_items_schema,
-        });
-
-        schema["properties"]["agents"] = json!({
-            "type": ["object", "null"],
-            "additionalProperties": false,
-            "description": "Optional parallel helper agents for the CLI to spawn.",
-            "properties": {
-                "timing": {
-                    "type": "string",
-                    "enum": ["parallel", "blocking"],
-                    "description": "Parallel: run agents while the CLI continues. Blocking: wait for results before the CLI proceeds."
-                },
-                "list": {
-                    "type": "array",
-                    "maxItems": 3,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "write": {
-                                "type": "boolean",
-                                "description": "Allow writes in isolated worktree. Default false."
-                            },
-                            "prompt": {
-                                "type": "string",
-                                "minLength": 8,
-                                "maxLength": 400,
-                                "description": "Outcome-oriented instruction (what to produce)."
-                            },
-                            "context": {
-                                "type": ["string", "null"],
-                                "maxLength": 1500,
-                                "description": "Optional concrete details (paths, commands, constraints)."
-                            },
-                            "models": models_request_property
-                        },
-                        "required": ["prompt", "context", "write", "models"]
+            "agents": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Optional parallel helper agents for the CLI to spawn.",
+                "properties": {
+                    "timing": {
+                        "type": "string",
+                        "enum": ["parallel", "blocking"],
+                        "description": "Parallel: run agents while the CLI continues. Blocking: wait for results before the CLI proceeds."
                     },
-                    "description": "Helper agents to launch this turn (<=3)."
+                    "list": {
+                        "type": "array",
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "write": {
+                                    "type": "boolean",
+                                    "description": "Allow writes in isolated worktree. Default false."
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "minLength": 8,
+                                    "maxLength": 400,
+                                    "description": "Outcome-oriented instruction (what to produce)."
+                                },
+                                "context": {
+                                    "type": ["string", "null"],
+                                    "maxLength": 1500,
+                                    "description": "Optional concrete details (paths, commands, constraints)."
+                                },
+                                "models": models_request_property
+                            },
+                            "required": ["prompt", "context", "write", "models"]
+                        },
+                        "description": "Helper agents to launch this turn (<=3)."
+                    },
                 },
-                "models": models_batch_property
+                "required": ["timing", "list"]
             },
-            "required": ["timing", "list", "models"]
-        });
-
-        if let Some(required) = schema.get_mut("required").and_then(|v| v.as_array_mut()) {
-            required.push(Value::String("agents".to_string()));
-        }
-    }
-
-    if include_review {
-        schema["properties"]["review"] = json!({
-            "type": ["object", "null"],
-            "additionalProperties": false,
-            "description": "Optional background review thread to start/update this turn.",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    "enum": ["staged", "commit"],
-                    "description": "What to review."
+            "review": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Optional background review thread to start/update this turn.",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "enum": ["staged", "commit"],
+                        "description": "What to review."
+                    },
+                    "sha": {
+                        "type": ["string", "null"],
+                        "minLength": 7,
+                        "maxLength": 64,
+                        "description": "Required when source='commit'; otherwise null."
+                    },
+                    "summary": {
+                        "type": ["string", "null"],
+                        "maxLength": 200,
+                        "description": "Optional focus/risks/acceptance criteria."
+                    }
                 },
-                "sha": {
-                    "type": ["string", "null"],
-                    "minLength": 7,
-                    "maxLength": 64,
-                    "description": "Required when source='commit'; otherwise null."
-                },
-                "summary": {
-                    "type": ["string", "null"],
-                    "maxLength": 200,
-                    "description": "Optional focus/risks/acceptance criteria."
-                }
-            },
-            "required": ["source", "sha", "summary"]
-        });
-
-        if let Some(required) = schema.get_mut("required").and_then(|v| v.as_array_mut()) {
-            required.push(Value::String("review".to_string()));
-        }
-    }
-
-    schema
+                "required": ["source", "sha", "summary"]
+            }
+        },
+        "required": ["finish_status", "progress", "cli", "agents", "review"]
+    })
 }
 
 

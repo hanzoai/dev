@@ -2,6 +2,7 @@ use crate::codex::ApprovedCommandPattern;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
+use crate::agent_defaults::default_agent_configs;
 use crate::config_types::AutoDriveContinueMode;
 use crate::config_types::AutoDriveSettings;
 use crate::config_types::AllowedCommand;
@@ -2161,7 +2162,7 @@ impl Config {
             .unwrap_or_else(|| default_responses_originator());
 
         // Normalize agents: when `command` is missing/empty, default to `name`.
-        let agents: Vec<AgentConfig> = cfg
+        let mut agents: Vec<AgentConfig> = cfg
             .agents
             .into_iter()
             .map(|mut a| {
@@ -2169,6 +2170,25 @@ impl Config {
                 a
             })
             .collect();
+
+        if agents.is_empty() {
+            agents = default_agent_configs();
+        }
+
+        for agent in &agents {
+            if agent.name.eq_ignore_ascii_case("code")
+                || agent.name.eq_ignore_ascii_case("codex")
+                || agent.name.eq_ignore_ascii_case("claude")
+                || agent.name.eq_ignore_ascii_case("gemini")
+                || agent.name.eq_ignore_ascii_case("qwen")
+                || agent.name.eq_ignore_ascii_case("cloud")
+            {
+                tracing::warn!(
+                    "legacy agent name '{}' detected; update config to use model slugs (e.g., code-gpt-5-codex)",
+                    agent.name
+                );
+            }
+        }
 
         let mut confirm_guard = ConfirmGuardConfig::default();
         if let Some(mut user_guard) = cfg.confirm_guard {

@@ -1,12 +1,11 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 923
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
-   /model - choose model & reasoning effort NEW with GPT-5-Codex!
-   /chrome - connect to Chrome
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
@@ -18,18 +17,20 @@ expression: output
 
  › Handle captcha gracefully
 
-   ╭─ BROWSER (headless): example.com · 3 actions · 6.0s
-   │
-   │  #  ACTION               TARGET              VALUE      RESULT       t
-   │   1 Nav                  https://example.com —          ok            3.0s
-   │   2 Type                 —                   "pizza"    typed         2.0s
-   │   3 Key                  —                   "Enter"    ok            1.0s
-   │
-   │  Console: ⚠️   Encountering captcha block
-   │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   Browser session "example.com" (https://example.com) started here; latest
+   view is shown below.
 
- ┌────────────────────────────────────────────────────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+   +- Browser (headless): example.com
+   |
+   |   Opened   https://example.com
+   |   Typed    pizza
+   |   Pressed  Enter
+   |
+   |   Console: ⚠️  Encountering captcha block
+   |
+   +- [Ctrl+B] Expand · [Esc] Stop
+
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help
