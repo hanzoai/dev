@@ -5,6 +5,8 @@ expression: frame
  +----------------------------------------------------------------------------+
  |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
@@ -13,8 +15,6 @@ expression: frame
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
    Auto Drive > Working                              Awaiting review (0 turns)
- waiting for code review...
- Awaiting review (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

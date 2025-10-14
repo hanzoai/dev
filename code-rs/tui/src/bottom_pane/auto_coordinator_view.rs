@@ -348,62 +348,6 @@ impl AutoCoordinatorView {
         }
     }
 
-    fn derived_status_entries(
-        &self,
-        model: &AutoActiveViewModel,
-        display_message: &str,
-    ) -> Vec<(String, Style)> {
-        let mut entries: Vec<(String, Style)> = Vec::new();
-
-        if model.awaiting_submission {
-            let text = if let Some(countdown) = &model.countdown {
-                format!("Auto continue in {}s", countdown.remaining)
-            } else {
-                "Awaiting confirmation".to_string()
-            };
-            entries.push((text, Style::default().fg(colors::text_dim())));
-        }
-
-        for status in &model.status_lines {
-            let trimmed = status.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            let normalized = trimmed.trim_end_matches('…').trim();
-            if normalized.eq_ignore_ascii_case("auto drive") {
-                continue;
-            }
-            if normalized.eq_ignore_ascii_case(display_message) {
-                continue;
-            }
-            if auto_drive_strings::is_auto_drive_phrase(normalized) {
-                continue;
-            }
-
-            entries.push((
-                status.clone(),
-                Style::default().fg(colors::text_dim()),
-            ));
-        }
-        entries
-    }
-
-    fn status_lines_with_entries(&self, entries: &[(String, Style)]) -> Vec<Line<'static>> {
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        for (index, (text, style)) in entries.iter().enumerate() {
-            if index == 0 {
-                lines.push(Line::from(vec![
-                    Span::raw("   "),
-                    Span::styled(text.clone(), *style),
-                ]));
-            } else {
-                lines.push(Line::from(Span::styled(text.clone(), *style)));
-            }
-        }
-        lines
-    }
-
     fn status_message_line(&self, display_message: &str) -> Option<Line<'static>> {
         let message = self.status_message.as_ref()?;
         let trimmed = message.trim();
@@ -668,6 +612,12 @@ impl AutoCoordinatorView {
         model: &AutoActiveViewModel,
         composer_height: u16,
     ) -> u16 {
+        let mut total = Self::HEADER_HEIGHT as usize;
+
+        if !model.awaiting_submission {
+            return total.min(u16::MAX as usize) as u16;
+        }
+
         let inner_width = self.inner_width(width);
         let button_height = if ctx.button.is_some() { 3 } else { 0 };
         let hint_height = ctx
@@ -685,55 +635,37 @@ impl AutoCoordinatorView {
         };
 
         let display_message = self.resolve_display_message(model);
-        let mut total = self.status_message_wrap_count(inner_width, &display_message);
+        total = total.saturating_add(self.status_message_wrap_count(inner_width, &display_message));
 
-        if model.awaiting_submission {
-            if let Some(prompt_lines) = self.cli_prompt_lines(model) {
-                let prompt_height = Self::lines_height(&prompt_lines, inner_width) as usize;
-                total += prompt_height;
-                if prompt_height > 0 && ctx.button.is_some() {
-                    total += 1; // spacer before button
-                }
+        if let Some(prompt_lines) = self.cli_prompt_lines(model) {
+            let prompt_height = Self::lines_height(&prompt_lines, inner_width) as usize;
+            total += prompt_height;
+            if prompt_height > 0 && ctx.button.is_some() {
+                total += 1; // spacer before button
             }
-            if ctx.button.is_some() {
-                total += button_height;
-            }
-            if ctx.manual_hint.is_some() {
-                total += hint_height.max(1);
-            }
-            if ctrl_height > 0 {
-                total += 1; // spacer before ctrl hint
-                total += ctrl_height.max(1);
-            }
-        } else {
-            let status_entries = self.derived_status_entries(model, &display_message);
-            for (_, (text, _)) in status_entries.iter().enumerate() {
-                total += Self::wrap_count(text, inner_width);
-            }
-            if ctx.button.is_some() {
-                total += button_height;
-            }
-            if ctx.manual_hint.is_some() {
-                total += hint_height.max(1);
-            }
-            if ctrl_height > 0 {
-                total += 1; // spacer before ctrl hint
-                total += ctrl_height.max(1);
-            }
+        }
+        if ctx.button.is_some() {
+            total += button_height;
+        }
+        if ctx.manual_hint.is_some() {
+            total += hint_height.max(1);
+        }
+        if ctrl_height > 0 {
+            total += 1; // spacer before ctrl hint
+            total += ctrl_height.max(1);
         }
 
         let composer_block = usize::from(composer_height);
-        let show_summary = model.waiting_for_response
-            || model.awaiting_submission
-            || model.cli_running
-            || model.waiting_for_review;
-        let summary_height = if show_summary { 1usize } else { 0usize };
+        if composer_block > 0 {
+            total = total.saturating_add(composer_block);
+        }
 
-        total = total
-            .saturating_add(composer_block)
-            .saturating_add(summary_height);
-
-        total = total.saturating_add(Self::HEADER_HEIGHT as usize);
+        let summary_height = if self.build_status_summary(model).is_some() {
+            1
+        } else {
+            0
+        };
+        total = total.saturating_add(summary_height);
 
         total.min(u16::MAX as usize) as u16
     }
@@ -775,66 +707,48 @@ impl AutoCoordinatorView {
             return;
         }
 
+        if !model.awaiting_submission {
+            return;
+        }
+
         let ctx = Self::build_context(model);
         let mut top_lines: Vec<Line<'static>> = Vec::new();
         let mut after_lines: Vec<Line<'static>> = Vec::new();
 
-        if model.awaiting_submission {
-            if let Some(mut prompt_lines) = self.cli_prompt_lines(model) {
-                top_lines.append(&mut prompt_lines);
-            }
-
-            if let Some(button_block) = self.button_block_lines(&ctx) {
-                if !top_lines.is_empty() {
-                    top_lines.push(Line::default());
-                }
-                top_lines.extend(button_block);
-            }
-
-            if let Some(hint_line) = self.manual_hint_line(&ctx) {
-                if !after_lines.is_empty() {
-                    after_lines.push(Line::default());
-                }
-                after_lines.push(hint_line);
-            }
-
-            if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
-                if !after_lines.is_empty() {
-                    after_lines.push(Line::default());
-                }
-                after_lines.push(ctrl_hint_line);
-            }
-        } else {
-            let status_entries = self.derived_status_entries(model, &display_message);
-            top_lines.extend(self.status_lines_with_entries(&status_entries));
-
-            if let Some(button_block) = self.button_block_lines(&ctx) {
-                after_lines.extend(button_block);
-            }
-
-            if let Some(hint_line) = self.manual_hint_line(&ctx) {
-                after_lines.push(hint_line);
-            }
-
-            if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
-                if !after_lines.is_empty() {
-                    after_lines.push(Line::default());
-                }
-                after_lines.push(ctrl_hint_line);
-            }
+        if let Some(mut prompt_lines) = self.cli_prompt_lines(model) {
+            top_lines.append(&mut prompt_lines);
         }
 
-        if model.waiting_for_response || model.awaiting_submission || model.cli_running {
-            if let Some(progress_text) = Self::compose_progress_line(model) {
-                let line = Line::from(Span::styled(
-                    progress_text,
-                    Style::default().fg(colors::text()),
-                ));
-                if top_lines.is_empty() {
-                    top_lines.push(line);
-                } else {
-                    top_lines.insert(0, line);
-                }
+        if let Some(button_block) = self.button_block_lines(&ctx) {
+            if !top_lines.is_empty() {
+                top_lines.push(Line::default());
+            }
+            top_lines.extend(button_block);
+        }
+
+        if let Some(hint_line) = self.manual_hint_line(&ctx) {
+            if !after_lines.is_empty() {
+                after_lines.push(Line::default());
+            }
+            after_lines.push(hint_line);
+        }
+
+        if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
+            if !after_lines.is_empty() {
+                after_lines.push(Line::default());
+            }
+            after_lines.push(ctrl_hint_line);
+        }
+
+        if let Some(progress_text) = Self::compose_progress_line(model) {
+            let line = Line::from(Span::styled(
+                progress_text,
+                Style::default().fg(colors::text()),
+            ));
+            if top_lines.is_empty() {
+                top_lines.push(line);
+            } else {
+                top_lines.insert(0, line);
             }
         }
 
@@ -846,15 +760,7 @@ impl AutoCoordinatorView {
             }
         }
 
-        let show_summary = model.waiting_for_response
-            || model.awaiting_submission
-            || model.cli_running
-            || model.waiting_for_review;
-        let summary_line = if show_summary {
-            self.build_status_summary(model)
-        } else {
-            None
-        };
+        let summary_line = self.build_status_summary(model);
         let mut summary_height: u16 = if summary_line.is_some() { 1 } else { 0 };
 
         let mut top_height = Self::lines_height(&top_lines, inner.width);
