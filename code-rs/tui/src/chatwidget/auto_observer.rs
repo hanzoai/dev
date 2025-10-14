@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{self, json, Value};
 use tracing::{debug, error, warn};
 
-use crate::app_event::{AutoCoordinatorStatus, AutoObserverStatus, AutoObserverTelemetry};
+use crate::app_event::{AutoObserverStatus, AutoObserverTelemetry};
 use crate::thread_spawner;
 
 use super::auto_coordinator::{
@@ -38,10 +38,14 @@ pub(super) enum AutoObserverCommand {
     Stop,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) enum ObserverReason {
     Cadence,
-    FinalCheck { finish_status: AutoCoordinatorStatus },
+    CrossCheck {
+        forced: bool,
+        summary: Option<String>,
+        focus: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +62,8 @@ pub(super) struct ObserverOutcome {
     pub replace_message: Option<String>,
     pub additional_instructions: Option<String>,
     pub telemetry: AutoObserverTelemetry,
+    pub reason: ObserverReason,
+    pub conversation: Vec<ResponseItem>,
 }
 
 const OBSERVER_SCHEMA_NAME: &str = "auto_coordinator_observer";
@@ -115,7 +121,7 @@ fn run_observer_loop(
         match cmd {
             AutoObserverCommand::Trigger(trigger) => {
                 telemetry.trigger_count += 1;
-                match evaluate_observer(&runtime, client.clone(), trigger) {
+                match evaluate_observer(&runtime, client.clone(), trigger.clone()) {
                     Ok((status, replace_message, additional_instructions)) => {
                         telemetry.last_status = status;
                         telemetry.last_intervention = summarize_intervention(
@@ -128,6 +134,8 @@ fn run_observer_loop(
                             replace_message,
                             additional_instructions,
                             telemetry: telemetry.clone(),
+                            reason: trigger.reason.clone(),
+                            conversation: trigger.conversation.clone(),
                         };
 
                         if coordinator_tx
@@ -146,6 +154,8 @@ fn run_observer_loop(
                             replace_message: None,
                             additional_instructions: None,
                             telemetry: telemetry.clone(),
+                            reason: trigger.reason,
+                            conversation: Vec::new(),
                         };
                         if coordinator_tx
                             .send(AutoCoordinatorCommand::ObserverResult(outcome))
@@ -168,14 +178,18 @@ fn evaluate_observer(
     client: Arc<ModelClient>,
     trigger: ObserverTrigger,
 ) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
-    let prompt = build_observer_prompt(&trigger, MODEL_SLUG);
+    let preferred_slug = match trigger.reason {
+        ObserverReason::CrossCheck { .. } => "gpt-5",
+        _ => MODEL_SLUG,
+    };
+    let prompt = build_observer_prompt(&trigger, preferred_slug);
     match run_observer_prompt(runtime, client.clone(), prompt) {
         Ok(result) => Ok(result),
         Err(err) => {
             let fallback_slug = client.default_model_slug().to_string();
-            if should_retry_with_default_model(&err) && fallback_slug != MODEL_SLUG {
+            if should_retry_with_default_model(&err) && fallback_slug != preferred_slug {
                 debug!(
-                    preferred = %MODEL_SLUG,
+                    preferred = %preferred_slug,
                     fallback = %fallback_slug,
                     "auto observer falling back to configured model after invalid model error"
                 );
@@ -257,7 +271,7 @@ fn build_observer_prompt(trigger: &ObserverTrigger, model_slug: &str) -> Prompt 
     let mut prompt = Prompt::default();
     prompt.store = true;
 
-    let instructions = build_observer_instructions(&trigger.environment_details, trigger.reason);
+    let instructions = build_observer_instructions(&trigger.environment_details, trigger.reason.clone());
     prompt.input.push(make_message("developer", instructions));
     let goal = format!("Primary Goal\n{}", trigger.goal_text);
     prompt.input.push(make_message("developer", goal));
@@ -348,15 +362,34 @@ fn parse_observer_response(raw: &str) -> Result<(ObserverResponse, Value)> {
 fn build_observer_instructions(environment_details: &str, reason: ObserverReason) -> String {
     let body = match reason {
         ObserverReason::Cadence => "You are observing a AI Coordinator trying to drive a CLI towards a Primary Goal (shown below).\nPlease critically observe the conversation between the Coordinator and the CLI. Detect either of these issues;\n- Stuck in a loop\n- Not working towards primary goal\nGenerate a response based on this information;\n`status`: one of 'ok' or 'failing' - most of the time it will be 'ok', but use 'failing' when intervention absolutely is needed. When using 'failing' please provide one or both fields below to correct the problem;\n`replace_message`: A message to replace the last Coordinator message\n`additional_instructions`: Instructions to give to the Coordinator for future runs\n**Warning**\nYou almost always want to use `status`: \"ok\". You are a last resort. Avoid setting `status`: \"failing\" for minor issues as it will disrupt the progress of the task.".to_string(),
-        ObserverReason::FinalCheck { finish_status } => {
-            let finish_phrase = match finish_status {
-                AutoCoordinatorStatus::Success => "believes the goal has been fully completed",
-                AutoCoordinatorStatus::Failed => "reported that it cannot complete the goal",
-                AutoCoordinatorStatus::Continue => "is still mid-run and should not have requested final validation",
-            };
-            format!(
-                "You are performing a final validation run after Auto Drive {finish_phrase}.\nStudy the full conversation and decide if the Primary Goal is truly satisfied.\n- If absolutely everything is done, respond with `status`: 'ok' and leave the other fields null.\n- If any required work remains, respond with `status`: 'failing'. Provide a concise `additional_instructions` developer prompt describing what has already been completed and the specific steps still required. Include enough detail for the coordinator to resume effectively.\n- Use `replace_message` only when the last prompt sent to the CLI must be replaced immediately."
-            )
+        ObserverReason::CrossCheck { forced, ref summary, ref focus } => {
+            let mut lines = Vec::new();
+            lines.push("You are a senior QA reviewer performing an end-to-end cross-check of the Auto Drive run.".to_string());
+            lines.push("Confirm the Primary Goal is fully satisfied with explicit evidence. Assume nothing; require proof.".to_string());
+
+            if let Some(text) = summary {
+                if !text.trim().is_empty() {
+                    lines.push(format!("Cross-check emphasis: {}", text.trim()));
+                }
+            }
+            if let Some(text) = focus {
+                if !text.trim().is_empty() {
+                    lines.push(format!("Probe these risks or flows: {}", text.trim()));
+                }
+            }
+
+            if forced {
+                lines.push("This cross-check gates completion. Default to `status`: 'failing' unless the goal is unquestionably complete.".to_string());
+            } else {
+                lines.push("Be strict. Favor `status`: 'failing' whenever evidence is missing, ambiguous, or work appears partial.".to_string());
+            }
+
+            lines.push("Response contract (JSON):".to_string());
+            lines.push("- `status`: 'ok' only when the goal is entirely complete and verified; otherwise 'failing'.".to_string());
+            lines.push("- `additional_instructions`: concise, actionable developer steps to close the gaps you found.".to_string());
+            lines.push("- `replace_message`: only when the last coordinator message must be replaced immediately.".to_string());
+
+            lines.join("\n")
         }
     };
     format!("{body}\nEnvironment:\n{environment_details}")

@@ -1743,7 +1743,8 @@ impl App<'_> {
                     cli,
                     agents_timing,
                     agents,
-                    review,
+                    code_review,
+                    cross_check,
                     transcript,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1754,7 +1755,8 @@ impl App<'_> {
                             cli,
                             agents_timing,
                             agents,
-                            review,
+                            code_review,
+                            cross_check,
                             transcript,
                         );
                     }

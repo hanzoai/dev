@@ -113,8 +113,15 @@ pub(crate) struct AutoTurnAgentsAction {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct AutoTurnReviewAction {
+pub(crate) struct AutoTurnCodeReviewAction {
     pub commit: AutoReviewCommit,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AutoTurnCrossCheckAction {
+    pub summary: Option<String>,
+    pub focus: Option<String>,
+    pub forced: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,7 +256,8 @@ pub(crate) enum AppEvent {
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
-        review: Option<AutoTurnReviewAction>,
+        code_review: Option<AutoTurnCodeReviewAction>,
+        cross_check: Option<AutoTurnCrossCheckAction>,
         transcript: Vec<ResponseItem>,
     },
     AutoCoordinatorThinking {
