@@ -2800,6 +2800,41 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn is_reasoning_anchor(cell: &Box<dyn history_cell::HistoryCell>) -> bool {
+        cell
+            .as_any()
+            .downcast_ref::<history_cell::ExploreAggregationCell>()
+            .is_some()
+            || cell
+                .as_any()
+                .downcast_ref::<history_cell::AgentRunCell>()
+                .is_some()
+    }
+
+    fn reasoning_preview(lines: &[Line<'static>]) -> String {
+        const MAX_LINES: usize = 3;
+        const MAX_CHARS: usize = 120;
+        let mut previews: Vec<String> = Vec::new();
+        for line in lines.iter().take(MAX_LINES) {
+            let mut text = String::new();
+            for span in &line.spans {
+                text.push_str(span.content.as_ref());
+            }
+            if text.chars().count() > MAX_CHARS {
+                let mut truncated: String = text.chars().take(MAX_CHARS).collect();
+                truncated.push('…');
+                previews.push(truncated);
+            } else {
+                previews.push(text);
+            }
+        }
+        if previews.is_empty() {
+            String::new()
+        } else {
+            previews.join(" ⏐ ")
+        }
+    }
+
     fn refresh_reasoning_collapsed_visibility(&mut self) {
         let show = self.config.tui.show_reasoning;
         let mut needs_invalidate = false;
@@ -2820,11 +2855,7 @@ impl ChatWidget<'_> {
             let len = self.history_cells.len();
             let mut idx = 0usize;
             while idx < len {
-                let is_explore = self.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::ExploreAggregationCell>()
-                    .is_some();
-                if !is_explore {
+                if !Self::is_reasoning_anchor(&self.history_cells[idx]) {
                     idx += 1;
                     continue;
                 }
@@ -20161,6 +20192,51 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_collapse_hides_intermediate_titles_after_agent_anchor() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.config.tui.show_reasoning = false;
+
+        let agent_cell = history_cell::AgentRunCell::new("Batch".to_string());
+        chat.history_push(agent_cell);
+
+        let reasoning_one = history_cell::CollapsibleReasoningCell::new_with_id(
+            vec![Line::from("First reasoning".to_string())],
+            Some("r1".to_string()),
+        );
+        let reasoning_two = history_cell::CollapsibleReasoningCell::new_with_id(
+            vec![Line::from("Second reasoning".to_string())],
+            Some("r2".to_string()),
+        );
+
+        chat.history_push(reasoning_one);
+        chat.history_push(reasoning_two);
+
+        chat.refresh_reasoning_collapsed_visibility();
+
+        let reasoning_cells: Vec<&history_cell::CollapsibleReasoningCell> = chat
+            .history_cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+            })
+            .collect();
+
+        assert_eq!(reasoning_cells.len(), 2, "expected exactly two reasoning cells");
+
+        assert!(
+            reasoning_cells[0].display_lines().is_empty(),
+            "intermediate reasoning should hide when collapsed after agent anchor",
+        );
+        assert!(
+            !reasoning_cells[1].display_lines().is_empty(),
+            "last reasoning should remain visible",
+        );
+    }
+
+    #[test]
     fn auto_drive_stays_paused_while_auto_resolve_pending_fix() {
         let mut harness = ChatWidgetHarness::new();
         let chat = harness.chat();
@@ -26078,7 +26154,8 @@ impl WidgetRef for &ChatWidget<'_> {
         let mut screen_y = start_y; // Position on screen
         let spacing = 1u16; // Spacing between cells
         let viewport_bottom = scroll_pos.saturating_add(content_area.height);
-        let ps = self.history_render.prefix_sums.borrow();
+        let ps_ref = self.history_render.prefix_sums.borrow();
+        let ps: &Vec<u16> = &ps_ref;
         let mut start_idx = match ps.binary_search(&scroll_pos) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
@@ -26122,6 +26199,17 @@ impl WidgetRef for &ChatWidget<'_> {
         } else {
             None
         };
+        #[derive(Debug)]
+        struct HeightMismatch {
+            history_id: HistoryId,
+            cached: u16,
+            recomputed: u16,
+            idx: usize,
+            preview: String,
+        }
+
+        let mut height_mismatches: Vec<HeightMismatch> = Vec::new();
+
         for (offset, visible) in visible_slice.iter().enumerate() {
             let idx = start_idx + offset;
             let item = visible
@@ -26144,6 +26232,40 @@ impl WidgetRef for &ChatWidget<'_> {
                 .map(|lr| lr.layout());
 
             let item_height = visible.height;
+            if content_area.width > 0 {
+                if let Some(req) = render_requests.get(idx) {
+                    if req.history_id != HistoryId::ZERO
+                        && matches!(item.kind(), history_cell::HistoryCellType::Reasoning)
+                    {
+                        if item_height == 0 && content_width == 0 {
+                            // Zero-width viewport leaves both cached and computed heights at 0.
+                            // Skip to avoid false positives during aggressive window resizes.
+                            continue;
+                        }
+
+                        #[cfg(debug_assertions)]
+                        {
+                            let mut preview: Option<String> = None;
+                            let fresh = item.desired_height(content_width);
+                            if fresh != item_height {
+                                if preview.is_none() {
+                                    let lines = item.display_lines_trimmed();
+                                    if !lines.is_empty() {
+                                        preview = Some(ChatWidget::reasoning_preview(&lines));
+                                    }
+                                }
+                                height_mismatches.push(HeightMismatch {
+                                    history_id: req.history_id,
+                                    cached: item_height,
+                                    recomputed: fresh,
+                                    idx,
+                                    preview: preview.unwrap_or_default(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             if self.perf_state.enabled
                 && rendered_cells_full.is_none()
                 && matches!(visible.height_source, history_render::HeightSource::DesiredHeight)
@@ -26516,6 +26638,30 @@ impl WidgetRef for &ChatWidget<'_> {
                     screen_y = screen_y.saturating_add(spacing_rows);
                 }
             }
+        }
+
+        drop(ps_ref);
+
+        if let Some(first) = height_mismatches.first() {
+            for mismatch in &height_mismatches {
+                tracing::error!(
+                    target: "code_tui::history_cells",
+                    history_id = ?mismatch.history_id,
+                    idx = mismatch.idx,
+                    cached = mismatch.cached,
+                    recomputed = mismatch.recomputed,
+                    preview = %mismatch.preview,
+                    "History cell height mismatch detected; aborting to capture repro",
+                );
+            }
+            panic!(
+                "history cell height mismatch ({} cases); first id={:?} cached={} recomputed={} preview={}",
+                height_mismatches.len(),
+                first.history_id,
+                first.cached,
+                first.recomputed,
+                first.preview
+            );
         }
         if let Some(start) = render_loop_start {
             if self.perf_state.enabled {
