@@ -5,7 +5,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -14,8 +13,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  Auto Drive > Working                                  Awaiting input (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
  │Approval required — review and press Enter to send                          │
+ │cargo nextest run --no-fail-fast                                            │
+ │Enter to send now • Esc/E to edit prompt                                    │
  └────────────────────────────────────────────────────────────────────────────┘
- Awaiting approval  •  Agents Enabled  •  Review EnEnter approve  •  Esc cancel
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯
@@ -24,7 +24,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -33,8 +32,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  Auto Drive > Working                                  Awaiting input (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
  │Approval required — review and press Enter to send                          │
+ │cargo nextest run --no-fail-fast                                            │
+ │Enter to send • E to edit prompt • Esc to cancel Auto Drive                 │
  └────────────────────────────────────────────────────────────────────────────┘
- Awaiting approval  •  Agents Enabled  •  Review EnEnter approve  •  Esc cancel
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯
@@ -43,6 +43,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -51,9 +52,8 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /cloud - browse, apply, and create cloud tasks NEW
  Auto Drive > Working                                         Running (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
+ │cargo nextest run --no-fail-fast                                            │
  └────────────────────────────────────────────────────────────────────────────┘
- Agents Enabled  •  Review Enabled  •  Ctrl+S Settings      Esc stop Auto Drive
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
- │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯

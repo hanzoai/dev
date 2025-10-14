@@ -1300,8 +1300,14 @@ impl WidgetRef for &BottomPane<'_> {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                 if is_auto {
                     let content_width = area.width.saturating_sub(horizontal_padding * 2);
+                    let composer_height = self.composer.desired_height(area.width);
+                    let pad = BottomPane::BOTTOM_PAD_LINES;
+                    let max_view_height = area
+                        .height
+                        .saturating_sub(composer_height)
+                        .saturating_sub(pad);
                     let desired_height = view.desired_height(content_width);
-                    let view_height = desired_height.min(area.height);
+                    let view_height = desired_height.min(max_view_height);
 
                     if view_height > 0 {
                         let view_rect = Rect {
@@ -1319,14 +1325,11 @@ impl WidgetRef for &BottomPane<'_> {
                         if remaining_height > 0 {
                             let composer_area = Rect {
                                 x: area.x,
-                                y: view_rect.y + view_rect.height,
+                                y: view_rect.y.saturating_add(view_rect.height),
                                 width: area.width,
                                 height: remaining_height,
                             };
                             composer_rect = compute_composer_rect(composer_area, false);
-                        } else {
-                            composer_needs_render = false;
-                            self.last_composer_rect.set(None);
                         }
                     } else {
                         composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
