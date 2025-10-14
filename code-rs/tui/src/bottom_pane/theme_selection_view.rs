@@ -20,6 +20,7 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::theme::{custom_theme_is_dark, map_theme_for_palette, palette_mode, PaletteMode};
+use crate::thread_spawner;
 
 use super::BottomPane;
 use super::bottom_pane_view::BottomPaneView;
@@ -325,7 +326,10 @@ impl ThemeSelectionView {
     ) {
         let tx = self.app_event_tx.clone();
         let before_ticket = self.before_ticket.clone();
-        std::thread::spawn(move || {
+        let fallback_tx = self.app_event_tx.clone();
+        let fallback_ticket = self.before_ticket.clone();
+        let completion_tx = progress_tx.clone();
+        if thread_spawner::spawn_lightweight("spinner-create", move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
@@ -557,7 +561,19 @@ impl ThemeSelectionView {
                 // Persist + activate
                 let _ = progress_tx.send(ProgressMsg::CompletedOk { name: display_name, interval, frames: norm_frames });
             });
-        });
+        })
+        .is_none()
+        {
+            let _ = completion_tx.send(ProgressMsg::CompletedErr {
+                error: "background worker unavailable".to_string(),
+                _raw_snippet: String::new(),
+            });
+            fallback_tx.send_background_before_next_output_with_ticket(
+                &fallback_ticket,
+                "Failed to generate spinner preview: background worker unavailable".to_string(),
+            );
+            return;
+        }
     }
 
     /// Spawn a background task that creates a custom theme using the LLM.
@@ -643,7 +659,10 @@ impl ThemeSelectionView {
         }
 
         let before_ticket = self.before_ticket.clone();
-        std::thread::spawn(move || {
+        let fallback_tx = self.app_event_tx.clone();
+        let fallback_ticket = self.before_ticket.clone();
+        let completion_tx = progress_tx.clone();
+        if thread_spawner::spawn_lightweight("theme-create", move || {
             let rt = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
@@ -884,7 +903,19 @@ impl ThemeSelectionView {
                 }
                 let _ = progress_tx.send(ProgressMsg::CompletedThemeOk(name, colors, is_dark));
             });
-        });
+        })
+        .is_none()
+        {
+            let _ = completion_tx.send(ProgressMsg::CompletedErr {
+                error: "background worker unavailable".to_string(),
+                _raw_snippet: String::new(),
+            });
+            fallback_tx.send_background_before_next_output_with_ticket(
+                &fallback_ticket,
+                "Failed to generate theme: background worker unavailable".to_string(),
+            );
+            return;
+        }
     }
 }
 

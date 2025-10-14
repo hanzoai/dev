@@ -11,6 +11,7 @@ use serde_json::{self, json, Value};
 use tracing::{debug, error, warn};
 
 use crate::app_event::{AutoCoordinatorStatus, AutoObserverStatus, AutoObserverTelemetry};
+use crate::thread_spawner;
 
 use super::auto_coordinator::{
     extract_first_json_object,
@@ -69,11 +70,16 @@ pub(super) fn start_auto_observer(
     let (tx, rx) = mpsc::channel();
     let thread_tx = tx.clone();
 
-    std::thread::spawn(move || {
+    if thread_spawner::spawn_lightweight("auto-observer", move || {
         if let Err(err) = run_observer_loop(client, rx, coordinator_tx) {
             error!("auto observer loop error: {err:#}");
         }
-    });
+    })
+    .is_none()
+    {
+        error!("auto observer spawn rejected: background thread limit reached");
+        return Err(anyhow!("auto observer worker unavailable"));
+    }
 
     Ok(AutoObserverHandle {
         tx: thread_tx,
@@ -503,4 +509,3 @@ pub(super) fn build_observer_conversation(
 
     filtered
 }
-

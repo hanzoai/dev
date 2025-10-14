@@ -21,6 +21,7 @@ use ratatui::style::Style;
 use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::auto_drive_strings;
 use crate::auto_drive_style::AutoDriveVariant;
+use crate::thread_spawner;
 
 use code_common::elapsed::format_duration;
 use code_common::model_presets::ModelPreset;
@@ -9613,10 +9614,16 @@ impl ChatWidget<'_> {
                                 (ev2, om_for_insert, std::time::Instant::now()),
                             );
                             let tx = this.app_event_tx.clone();
-                            std::thread::spawn(move || {
+                            let fallback_tx = tx.clone();
+                            if thread_spawner::spawn_lightweight("exec-flush", move || {
                                 std::thread::sleep(std::time::Duration::from_millis(120));
                                 tx.send(crate::app_event::AppEvent::FlushPendingExecEnds);
-                            });
+                            })
+                            .is_none()
+                            {
+                                let _ = fallback_tx
+                                    .send(crate::app_event::AppEvent::FlushPendingExecEnds);
+                            }
                         }
                     },
                 );
@@ -12636,7 +12643,8 @@ fi\n\
             }
             Some(seconds) => {
                 let tx = self.app_event_tx.clone();
-                std::thread::spawn(move || {
+                let fallback_tx = tx.clone();
+                if thread_spawner::spawn_lightweight("countdown", move || {
                     let mut remaining = seconds;
                     while remaining > 0 {
                         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -12648,7 +12656,14 @@ fi\n\
                             break;
                         }
                     }
-                });
+                })
+                .is_none()
+                {
+                    let _ = fallback_tx.send(AppEvent::AutoCoordinatorCountdown {
+                        countdown_id,
+                        seconds_left: 0,
+                    });
+                }
             }
             None => {
                 // Manual approval mode: do not start countdown automatically.
