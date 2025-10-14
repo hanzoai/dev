@@ -1,10 +1,10 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 192
+assertion_line: 260
 expression: output
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
 
 

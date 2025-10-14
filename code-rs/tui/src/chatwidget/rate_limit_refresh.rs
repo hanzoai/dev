@@ -16,6 +16,7 @@ use crate::tui_event_extensions::handle_rate_limit;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::thread_spawner;
 
 /// Fire-and-forget helper that refreshes rate limit data using a dedicated model
 /// request. Results are funneled back into the main TUI loop via `AppEvent` so
@@ -25,12 +26,18 @@ pub(super) fn start_rate_limit_refresh(
     config: Config,
     debug_enabled: bool,
 ) {
-    std::thread::spawn(move || {
+    let fallback_tx = app_event_tx.clone();
+    if thread_spawner::spawn_lightweight("rate-refresh", move || {
         if let Err(err) = run_refresh(app_event_tx.clone(), config, debug_enabled) {
             let message = format!("Failed to refresh rate limits: {err}");
             app_event_tx.send(AppEvent::RateLimitFetchFailed { message });
         }
-    });
+    })
+    .is_none()
+    {
+        let message = "Failed to refresh rate limits: background worker unavailable".to_string();
+        fallback_tx.send(AppEvent::RateLimitFetchFailed { message });
+    }
 }
 
 fn run_refresh(

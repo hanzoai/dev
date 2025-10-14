@@ -25,8 +25,12 @@ use code_ollama::DEFAULT_OSS_MODEL;
 use code_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
+use std::sync::Once;
 use std::sync::OnceLock;
 use tracing_appender::non_blocking;
+use tracing_appender::rolling;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -75,6 +79,7 @@ mod terminal_info;
 mod text_formatting;
 mod text_processing;
 mod theme;
+mod thread_spawner;
 mod util {
     pub mod buffer;
     pub mod list_window;
@@ -395,7 +400,7 @@ pub async fn run_main(
     };
 
     let housekeeping_home = code_home.clone();
-    let housekeeping_handle = std::thread::spawn(move || {
+    let housekeeping_handle = thread_spawner::spawn_lightweight("housekeeping", move || {
         if let Err(err) = code_core::run_housekeeping_if_due(&housekeeping_home) {
             tracing::warn!("code home housekeeping failed: {err}");
         }
@@ -478,7 +483,16 @@ pub async fn run_main(
     let log_file = log_file_opts.open(log_dir.join("codex-tui.log"))?;
 
     // Wrap file in non‑blocking writer.
-    let (non_blocking, _guard) = non_blocking(log_file);
+    let (log_writer, _log_guard) = non_blocking(log_file);
+
+    let critical_dir = {
+        let mut path = code_home.clone();
+        path.push("logs");
+        path
+    };
+    std::fs::create_dir_all(&critical_dir)?;
+    let critical_appender = rolling::daily(&critical_dir, "critical.log");
+    let (critical_writer, _critical_guard) = non_blocking(critical_appender);
 
     let default_filter = if cli.debug {
         "code_core=info,code_tui=info,code_browser=info"
@@ -491,12 +505,24 @@ pub async fn run_main(
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter))
     };
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(env_filter())
+    let env_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .with_ansi(false)
-        .with_writer(non_blocking)
+        .with_writer(log_writer)
+        .with_filter(env_filter());
+
+    let critical_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_ansi(false)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_writer(critical_writer)
+        .with_filter(LevelFilter::ERROR);
+
+    let _ = tracing_subscriber::registry()
+        .with(env_layer)
+        .with(critical_layer)
         .try_init();
 
     if cli.oss {
@@ -522,11 +548,54 @@ pub async fn run_main(
         theme_configured_explicitly,
     );
 
-    if let Err(err) = housekeeping_handle.join() {
-        tracing::warn!("code home housekeeping task panicked: {err:?}");
+    if let Some(handle) = housekeeping_handle {
+        if let Err(err) = handle.join() {
+            tracing::warn!("code home housekeeping task panicked: {err:?}");
+        }
+    } else {
+        tracing::warn!("housekeeping thread spawn skipped: background thread limit reached");
     }
 
     run_result.map_err(|err| std::io::Error::other(err.to_string()))
+}
+
+pub(crate) fn install_unified_panic_hook() {
+    static PANIC_HOOK_ONCE: Once = Once::new();
+
+    PANIC_HOOK_ONCE.call_once(|| {
+        let prev_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let current_thread = std::thread::current();
+            let thread_name = current_thread.name().unwrap_or("unnamed");
+            let thread_id = format!("{:?}", current_thread.id());
+
+            if let Some(location) = info.location() {
+                tracing::error!(
+                    thread_name,
+                    thread_id,
+                    file = location.file(),
+                    line = location.line(),
+                    column = location.column(),
+                    panic = %info,
+                    "panic captured"
+                );
+            } else {
+                tracing::error!(
+                    thread_name,
+                    thread_id,
+                    panic = %info,
+                    "panic captured"
+                );
+            }
+
+            if let Err(err) = crate::tui::restore() {
+                tracing::warn!("failed to restore terminal after panic: {err}");
+            }
+
+            prev_hook(info);
+            std::process::exit(1);
+        }));
+    });
 }
 
 fn run_ratatui_app(
@@ -538,16 +607,7 @@ fn run_ratatui_app(
     theme_configured_explicitly: bool,
 ) -> color_eyre::Result<ExitSummary> {
     color_eyre::install()?;
-
-    // Forward panic reports through tracing so they appear in the UI status
-    // line, but do not swallow the default/color-eyre panic handler.
-    // Chain to the previous hook so users still get a rich panic report
-    // (including backtraces) after we restore the terminal.
-    let prev_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        tracing::error!("panic: {info}");
-        prev_hook(info);
-    }));
+    install_unified_panic_hook();
     maybe_apply_terminal_theme_detection(&mut config, theme_configured_explicitly);
 
     let (mut terminal, terminal_info) = tui::init(&config)?;

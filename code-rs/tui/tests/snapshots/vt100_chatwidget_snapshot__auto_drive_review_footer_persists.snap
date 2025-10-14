@@ -4,7 +4,7 @@ assertion_line: 393
 expression: frame
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for

@@ -6,6 +6,7 @@ use crate::auto_drive_style::AutoDriveVariant;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::glitch_animation;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
+use crate::thread_spawner;
 use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
 use code_core::protocol::TokenUsage;
@@ -1234,10 +1235,15 @@ impl BottomPane<'_> {
         let dur = Duration::from_secs(4);
         self.composer.set_access_mode_hint_for(dur);
         let tx = self.app_event_tx.clone();
-        std::thread::spawn(move || {
+        let fallback_tx = self.app_event_tx.clone();
+        if thread_spawner::spawn_lightweight("access-hint", move || {
             std::thread::sleep(dur + Duration::from_millis(120));
             tx.send(AppEvent::RequestRedraw);
-        });
+        })
+        .is_none()
+        {
+            fallback_tx.send(AppEvent::RequestRedraw);
+        }
         self.request_redraw();
     }
 
@@ -1245,10 +1251,15 @@ impl BottomPane<'_> {
         self.composer.set_access_mode_label_ephemeral(label, dur);
         // Schedule a redraw after expiry without blocking other scheduled frames.
         let tx = self.app_event_tx.clone();
-        std::thread::spawn(move || {
+        let fallback_tx = self.app_event_tx.clone();
+        if thread_spawner::spawn_lightweight("access-hint-ephemeral", move || {
             std::thread::sleep(dur + Duration::from_millis(120));
             tx.send(AppEvent::RequestRedraw);
-        });
+        })
+        .is_none()
+        {
+            fallback_tx.send(AppEvent::RequestRedraw);
+        }
         self.request_redraw();
     }
 

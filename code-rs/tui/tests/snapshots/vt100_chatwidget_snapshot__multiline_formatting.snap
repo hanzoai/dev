@@ -1,10 +1,10 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 581
+assertion_line: 649
 expression: output
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits

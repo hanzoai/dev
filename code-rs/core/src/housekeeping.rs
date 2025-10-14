@@ -779,8 +779,8 @@ mod tests {
         let outcome = perform_housekeeping(code_home, now, &config).unwrap();
 
         assert_eq!(outcome.session_days_removed, 1);
-        assert!(old_path.parent().unwrap().exists());
         assert!(!old_path.exists());
+        assert!(!old_path.parent().unwrap().exists());
         assert!(recent_path.exists());
     }
 
@@ -816,7 +816,8 @@ mod tests {
         fs::write(worktree_path.join(".git"), "gitdir: /tmp/nonexistent/.git/worktrees/active-branch\n").unwrap();
         let session_dir = code_home.join("working/_session");
         fs::create_dir_all(&session_dir).unwrap();
-        let registry_path = session_dir.join("pid-123.txt");
+        let pid = std::process::id();
+        let registry_path = session_dir.join(format!("pid-{pid}.txt"));
         let line = format!("/tmp/nonexistent\t{}\n", worktree_path.display());
         fs::write(&registry_path, line).unwrap();
 

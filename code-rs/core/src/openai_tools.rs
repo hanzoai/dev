@@ -785,7 +785,7 @@ mod tests {
 
     use super::*;
 
-    use crate::agent_defaults::{agent_model_specs, enabled_agent_model_specs};
+    use crate::agent_defaults::enabled_agent_model_specs;
 
     fn test_agent_models() -> Vec<String> {
         enabled_agent_model_specs()
@@ -1294,9 +1294,14 @@ mod tests {
                 "dash/paginate",
             ],
         );
+        let paginate_tool = tools
+            .iter()
+            .find(|tool| matches!(tool, OpenAiTool::Function(ResponsesApiTool { name, .. }) if name == "dash/paginate"))
+            .expect("dash/paginate tool present");
+
         assert_eq!(
-            tools[8],
-            OpenAiTool::Function(ResponsesApiTool {
+            paginate_tool,
+            &OpenAiTool::Function(ResponsesApiTool {
                 name: "dash/paginate".to_string(),
                 parameters: JsonSchema::Object {
                     properties: BTreeMap::from([(
