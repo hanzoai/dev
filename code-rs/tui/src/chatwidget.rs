@@ -602,6 +602,7 @@ struct AutoCoordinatorUiState {
     last_decision_display_is_summary: bool,
     observer_telemetry: Option<AutoObserverTelemetry>,
     observer_status: AutoObserverStatus,
+    pending_observer_banners: Vec<String>,
     coordinator_waiting: bool,
     review_enabled: bool,
     subagents_enabled: bool,
@@ -670,6 +671,7 @@ impl Default for AutoCoordinatorUiState {
             last_decision_display_is_summary: false,
             observer_telemetry: None,
             observer_status: AutoObserverStatus::default(),
+            pending_observer_banners: Vec::new(),
             coordinator_waiting: false,
             review_enabled: false,
             subagents_enabled: false,
@@ -12569,9 +12571,28 @@ fi\n\
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         let countdown_id = self.auto_state.countdown_id;
         let countdown_seconds = self.auto_state.countdown_seconds();
+        self.auto_flush_observer_banners();
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.auto_start_countdown(countdown_id, countdown_seconds);
+    }
+
+    fn auto_queue_observer_banner(&mut self, message: impl Into<String>) {
+        let text = message.into();
+        if text.trim().is_empty() {
+            return;
+        }
+        self.auto_state.pending_observer_banners.push(text);
+    }
+
+    fn auto_flush_observer_banners(&mut self) {
+        if self.auto_state.pending_observer_banners.is_empty() {
+            return;
+        }
+        let banners = std::mem::take(&mut self.auto_state.pending_observer_banners);
+        for banner in banners {
+            self.push_background_tail(banner);
+        }
     }
 
     fn auto_start_countdown(&self, countdown_id: u64, countdown_seconds: Option<u8>) {
@@ -12636,6 +12657,8 @@ fi\n\
         self.auto_state.observer_status = status;
         self.auto_state.observer_telemetry = Some(telemetry);
 
+        let flush_on_failing = self.auto_state.awaiting_submission;
+
         if matches!(status, AutoObserverStatus::Failing) {
             let guidance = additional_instructions
                 .as_deref()
@@ -12644,7 +12667,7 @@ fi\n\
             let banner = guidance
                 .map(|text| format!("Observer guidance: {text}"))
                 .unwrap_or_else(|| "Observer flagged the last Auto Drive step.".to_string());
-            self.push_background_tail(banner);
+            self.auto_queue_observer_banner(banner);
 
             if let Some(message) = replace_message
                 .as_deref()
@@ -12652,21 +12675,24 @@ fi\n\
                 .filter(|s| !s.is_empty())
             {
                 self.auto_state.current_cli_prompt = Some(message.to_string());
+                let summary = Self::truncate_with_ellipsis(message, 160);
+                self.auto_queue_observer_banner(format!("Observer replaced prompt with: {summary}"));
                 if self.auto_state.awaiting_submission {
                     self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
                     self.auto_state.reset_countdown();
                     let countdown_seconds = self.auto_state.countdown_seconds();
+                    self.auto_flush_observer_banners();
                     self.auto_start_countdown(self.auto_state.countdown_id, countdown_seconds);
                 }
-                let summary = Self::truncate_with_ellipsis(message, 160);
-                self.push_background_tail(format!("Observer replaced prompt with: {summary}"));
+            } else if flush_on_failing {
+                self.auto_flush_observer_banners();
             }
         } else if let Some(note) = additional_instructions
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            self.push_background_tail(format!("Observer note: {note}"));
+            self.auto_queue_observer_banner(format!("Observer note: {note}"));
         }
 
         self.auto_rebuild_live_ring();
@@ -12978,6 +13004,7 @@ fi\n\
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
+        self.auto_flush_observer_banners();
         if let Some(handle) = self.auto_handle.take() {
             handle.cancel();
             let _ = handle.send(AutoCoordinatorCommand::Stop);
