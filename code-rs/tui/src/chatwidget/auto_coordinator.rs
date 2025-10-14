@@ -91,7 +91,10 @@ impl AutoCoordinatorHandle {
 
 #[derive(Debug)]
 pub(super) enum AutoCoordinatorCommand {
-    UpdateConversation(Vec<ResponseItem>),
+    UpdateConversation {
+        conversation: Vec<ResponseItem>,
+        observer_conversation: Vec<ResponseItem>,
+    },
     ObserverResult(ObserverOutcome),
     Stop,
 }
@@ -641,6 +644,7 @@ pub(super) fn start_auto_coordinator(
     app_event_tx: AppEventSender,
     goal_text: String,
     conversation: Vec<ResponseItem>,
+    observer_conversation: Vec<ResponseItem>,
     config: Config,
     debug_enabled: bool,
     observer_cadence: u32,
@@ -656,6 +660,7 @@ pub(super) fn start_auto_coordinator(
             app_event_tx,
             goal_text,
             conversation,
+            observer_conversation,
             config,
             cmd_rx,
             loop_tx,
@@ -682,6 +687,7 @@ fn run_auto_loop(
     app_event_tx: AppEventSender,
     goal_text: String,
     initial_conversation: Vec<ResponseItem>,
+    initial_observer_conversation: Vec<ResponseItem>,
     config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
     cmd_tx: Sender<AutoCoordinatorCommand>,
@@ -707,19 +713,31 @@ fn run_auto_loop(
     let sandbox_policy = config.sandbox_policy.clone();
     let config = Arc::new(config);
     let active_agent_names = get_enabled_agents(&config.agents);
-    let client = Arc::new(ModelClient::new(
+    let debug_logger = Arc::new(Mutex::new(
+        DebugLogger::new(debug_enabled)
+            .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
+    ));
+    let coordinator_client = Arc::new(ModelClient::new(
         config.clone(),
-        Some(auth_mgr),
+        Some(auth_mgr.clone()),
         None,
-        model_provider,
+        model_provider.clone(),
         ReasoningEffort::Medium,
         model_reasoning_summary,
         model_text_verbosity,
         Uuid::new_v4(),
-        Arc::new(Mutex::new(
-            DebugLogger::new(debug_enabled)
-                .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
-        )),
+        debug_logger.clone(),
+    ));
+    let observer_client = Arc::new(ModelClient::new(
+        config.clone(),
+        Some(auth_mgr),
+        None,
+        model_provider,
+        ReasoningEffort::High,
+        model_reasoning_summary,
+        model_text_verbosity,
+        Uuid::new_v4(),
+        debug_logger.clone(),
     ));
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -755,17 +773,21 @@ fn run_auto_loop(
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
 
-    let mut pending_conversation = Some(initial_conversation);
+    let mut pending_conversation = Some((initial_conversation, initial_observer_conversation));
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
     let mut observer_guidance: Vec<String> = Vec::new();
     let mut observer_telemetry = AutoObserverTelemetry::default();
-    let mut observer_handle = match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
-        Ok(handle) => Some(handle),
-        Err(err) => {
-            tracing::error!("failed to start auto observer: {err:#}");
-            None
+    let mut observer_handle = if observer_cadence == 0 {
+        None
+    } else {
+        match start_auto_observer(observer_client.clone(), observer_cadence, cmd_tx.clone()) {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                tracing::error!("failed to start auto observer: {err:#}");
+                None
+            }
         }
     };
     let observer_cadence_interval = if observer_cadence == 0 {
@@ -781,22 +803,22 @@ fn run_auto_loop(
             break;
         }
 
-        if let Some(conv) = pending_conversation.take() {
+        if let Some((conv_full, conv_observer)) = pending_conversation.take() {
             if cancel_token.is_cancelled() {
                 stopped = true;
                 continue;
             }
 
-            let conv_for_observer = conv.clone();
             let developer_intro =
                 compose_developer_intro(&base_developer_intro, &observer_guidance);
+            let conv_for_request = conv_full.clone();
             match request_coordinator_decision(
                 &runtime,
-                client.as_ref(),
+                coordinator_client.as_ref(),
                 developer_intro.as_str(),
                 &primary_goal_message,
                 &schema,
-                conv,
+                conv_for_request,
                 auto_instructions.as_deref(),
                 &app_event_tx,
                 &cancel_token,
@@ -820,9 +842,9 @@ fn run_auto_loop(
                             dispatch_cross_check(
                                 observer_handle.as_ref(),
                                 &runtime,
-                                client.clone(),
+                                observer_client.clone(),
                                 &cmd_tx,
-                                conv_for_observer.clone(),
+                                conv_observer.clone(),
                                 goal_text.clone(),
                                 environment_details.clone(),
                                 cross.summary.clone(),
@@ -836,7 +858,7 @@ fn run_auto_loop(
                         {
                             if should_trigger_observer(requests_completed, cadence) {
                                 let conversation = build_observer_conversation(
-                                    conv_for_observer,
+                                    conv_observer.clone(),
                                     cli_prompt_for_observer,
                                 );
                                 let trigger = ObserverTrigger {
@@ -870,7 +892,7 @@ fn run_auto_loop(
                     }
 
                     let observer_conversation =
-                        build_observer_conversation(conv_for_observer.clone(), None);
+                        build_observer_conversation(conv_observer.clone(), None);
                     let final_summary = cross_check
                         .as_ref()
                         .and_then(|data| data.summary.clone());
@@ -880,7 +902,7 @@ fn run_auto_loop(
 
                     let validation_result = run_final_cross_check(
                         &runtime,
-                        client.clone(),
+                        observer_client.clone(),
                         observer_conversation,
                         &goal_text,
                         &environment_details,
@@ -912,7 +934,7 @@ fn run_auto_loop(
                             if let Some(instr) = additional_instructions.as_deref() {
                                 push_unique_guidance(&mut observer_guidance, instr);
                             }
-                            pending_conversation = Some(conv_for_observer);
+                            pending_conversation = Some((conv_full.clone(), conv_observer.clone()));
                             continue;
                         }
                     } else if let Err(err) = validation_result {
@@ -961,7 +983,7 @@ fn run_auto_loop(
                                 delta: message,
                                 summary_index: None,
                             });
-                            pending_conversation = Some(conv_for_observer);
+                            pending_conversation = Some((conv_full.clone(), conv_observer.clone()));
                             continue;
                         }
                         warn!(
@@ -990,10 +1012,10 @@ fn run_auto_loop(
         }
 
         match cmd_rx.recv() {
-            Ok(AutoCoordinatorCommand::UpdateConversation(conv)) => {
+            Ok(AutoCoordinatorCommand::UpdateConversation { conversation, observer_conversation }) => {
                 requests_completed = requests_completed.saturating_add(1);
                 consecutive_decision_failures = 0;
-                pending_conversation = Some(conv);
+                pending_conversation = Some((conversation, observer_conversation));
             }
             Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
                 let ObserverOutcome {
@@ -1021,7 +1043,7 @@ fn run_auto_loop(
                 if let ObserverReason::CrossCheck { .. } = reason {
                     if matches!(status, AutoObserverStatus::Failing) {
                         if !conversation.is_empty() {
-                            pending_conversation = Some(conversation);
+                            pending_conversation = Some((conversation.clone(), conversation));
                         }
                         consecutive_decision_failures = 0;
                         continue;
