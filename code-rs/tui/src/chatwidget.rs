@@ -12057,7 +12057,7 @@ fi\n\
 
     fn auto_show_goal_entry_panel(&mut self) {
         self.auto_state.goal = None;
-        let hint = "Type an Auto Drive goal and press Enter to begin.".to_string();
+        let hint = "Let's do this! What's your goal?".to_string();
         let status_lines = vec![hint];
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
             goal: None,
@@ -12181,9 +12181,6 @@ fi\n\
             self.auto_state.awaiting_goal_input = true;
             self.clear_composer();
             self.bottom_pane.ensure_input_focus();
-            self.push_background_tail(
-                "Please enter the goal you would like to work autonomously towards.".to_string(),
-            );
             let defaults = self.config.tui.auto_drive.clone();
             self.auto_state.review_enabled = defaults.review_enabled;
             self.auto_state.subagents_enabled = defaults.agents_enabled;
