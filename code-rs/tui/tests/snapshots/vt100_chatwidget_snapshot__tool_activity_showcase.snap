@@ -1,15 +1,10 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 474
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /chrome - connect to Chrome
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
-   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -24,11 +19,15 @@ expression: output
  ⚙ Web Search... (1m 15s)
    └ query: async rust tui example
 
+   Browser session "Browser Session" started here; latest view is shown below.
+
    ╭─ Browser (headless): Browser Session
    │
    │   Clicked  #login-button
    │
    ╰─ [Ctrl+B] Expand · [Esc] Stop
+
+   Agent batch "qa-bot" started here; latest status is shown below.
 
    ╭─ deploy-helper
    │

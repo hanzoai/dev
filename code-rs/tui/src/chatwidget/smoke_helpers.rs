@@ -2,7 +2,6 @@
 
 use super::ChatWidget;
 use crate::app_event::{AppEvent, AutoContinueMode};
-use crate::auto_drive_strings;
 use crate::app_event_sender::AppEventSender;
 use crate::history_cell::{self, HistoryCellType};
 use crate::markdown_render::render_markdown_text;
@@ -242,7 +241,7 @@ impl ChatWidgetHarness {
         let goal = goal.into();
         {
             let chat = self.chat();
-            let placeholder = auto_drive_strings::next_auto_drive_phrase().to_string();
+            let placeholder = "Loading message/reasoning".to_string();
             let mode = continue_mode.into_internal();
             chat.auto_state.reset();
             chat.auto_state.active = true;

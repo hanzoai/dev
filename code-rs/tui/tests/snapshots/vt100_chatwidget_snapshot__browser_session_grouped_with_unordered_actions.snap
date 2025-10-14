@@ -5,8 +5,6 @@ expression: output
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /model - choose model & reasoning effort NEW with GPT-5-Codex!
-   /chrome - connect to Chrome
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
@@ -18,14 +16,16 @@ expression: output
 
  › Handle captcha gracefully
 
-   ╭─ BROWSER (headless): example.com · 3 actions · 6.0s
+   Browser session "example.com" (https://example.com) started here; latest
+   view is shown below.
+
+   ╭─ Browser (headless): example.com
    │
-   │  #  ACTION               TARGET              VALUE      RESULT       t
-   │   1 Nav                  https://example.com —          ok            3.0s
-   │   2 Type                 —                   "pizza"    typed         2.0s
-   │   3 Key                  —                   "Enter"    ok            1.0s
+   │   Opened   https://example.com
+   │   Typed    pizza
+   │   Pressed  Enter
    │
-   │  Console: ⚠️   Encountering captcha block
+   │   Console: ⚠️  Encountering captcha block
    │
    ╰─ [Ctrl+B] Expand · [Esc] Stop
 

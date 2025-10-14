@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 856
 expression: output
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
@@ -9,8 +8,6 @@ expression: output
  ┌ Agents ────────────────────────────────────────────────────────────────────┐
  │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
  └────────────────────────────────────────────────────────────────────────────┘
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -19,6 +16,8 @@ expression: output
    /cloud - browse, apply, and create cloud tasks NEW
 
  › Kick off QA bot regression run
+
+   Agent batch "qa-bot" started here; latest status is shown below.
 
    ╭─ qa-bot
    │

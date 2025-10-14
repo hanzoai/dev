@@ -539,18 +539,22 @@ impl BottomPane<'_> {
             } else {
                 0
             };
-            let pad = if is_auto { 0 } else { BottomPane::BOTTOM_PAD_LINES };
-            let base_height = if is_auto {
-                view
-                    .as_any()
-                    .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
-                    .map(|auto_view| auto_view.desired_height_with_composer(width, &self.composer))
-                    .unwrap_or_else(|| view.desired_height(width))
+            let composer_height = if is_auto {
+                self.composer.desired_height(width)
             } else {
-                view.desired_height(width)
+                0
             };
+            let pad = if is_auto {
+                BottomPane::BOTTOM_PAD_LINES
+            } else {
+                0
+            };
+            let base_height = view
+                .desired_height(width)
+                .saturating_add(top_spacer)
+                .saturating_add(composer_height);
 
-            (base_height.saturating_add(top_spacer), pad)
+            (base_height, pad)
         } else {
             // Optionally add 1 for the empty line above the composer
             let spacer = if self.top_spacer_enabled { 1 } else { 0 };
@@ -1286,68 +1290,98 @@ impl WidgetRef for &BottomPane<'_> {
             .fg(crate::colors::text());
         fill_rect(buf, area, Some(' '), base_style);
 
-        let composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+        let mut composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
         let mut overlay_target = composer_rect;
-        let mut rendered = false;
+        let mut composer_needs_render = true;
+        let horizontal_padding = 1u16;
 
         if let Some(view) = &self.active_view {
             if !view.is_complete() {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
-                let mut avail = area.height;
-                if self.top_spacer_enabled && avail > 0 {
-                    avail = avail.saturating_sub(1);
-                }
-                if avail > 0 {
-                    let pad = if is_auto {
-                        BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1))
-                    } else {
-                        0
-                    };
-                    let view_height = avail.saturating_sub(pad);
+                if is_auto {
+                    let content_width = area.width.saturating_sub(horizontal_padding * 2);
+                    let desired_height = view.desired_height(content_width);
+                    let view_height = desired_height.min(area.height);
+
                     if view_height > 0 {
-                        let horizontal_padding = 1u16;
-                        let y_base = if self.top_spacer_enabled {
-                            area.y + 1
-                        } else {
-                            area.y
-                        };
                         let view_rect = Rect {
                             x: area.x + horizontal_padding,
-                            y: y_base,
-                            width: area.width.saturating_sub(horizontal_padding * 2),
+                            y: area.y,
+                            width: content_width,
                             height: view_height,
                         };
                         let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
                         fill_rect(buf, view_rect, None, view_bg);
-                        view.render_with_composer(view_rect, buf, &self.composer);
-                        if is_auto {
-                            overlay_target = view_rect;
+                        view.render(view_rect, buf);
+                        overlay_target = view_rect;
+
+                        let remaining_height = area.height.saturating_sub(view_height);
+                        if remaining_height > 0 {
+                            let composer_area = Rect {
+                                x: area.x,
+                                y: view_rect.y + view_rect.height,
+                                width: area.width,
+                                height: remaining_height,
+                            };
+                            composer_rect = compute_composer_rect(composer_area, false);
+                        } else {
+                            composer_needs_render = false;
+                            self.last_composer_rect.set(None);
                         }
-                        rendered = true;
+                    } else {
+                        composer_rect = compute_composer_rect(area, self.top_spacer_enabled);
+                    }
+                } else {
+                    let mut avail = area.height;
+                    if self.top_spacer_enabled && avail > 0 {
+                        avail = avail.saturating_sub(1);
+                    }
+                    if avail > 0 {
+                        let pad = BottomPane::BOTTOM_PAD_LINES.min(avail.saturating_sub(1));
+                        let view_height = avail.saturating_sub(pad);
+                        if view_height > 0 {
+                            let y_base = if self.top_spacer_enabled {
+                                area.y + 1
+                            } else {
+                                area.y
+                            };
+                            let view_rect = Rect {
+                                x: area.x + horizontal_padding,
+                                y: y_base,
+                                width: area.width.saturating_sub(horizontal_padding * 2),
+                                height: view_height,
+                            };
+                            let view_bg = ratatui::style::Style::default().bg(crate::colors::background());
+                            fill_rect(buf, view_rect, None, view_bg);
+                            view.render_with_composer(view_rect, buf, &self.composer);
+                            composer_needs_render = false;
+                        }
                     }
                 }
             }
         }
 
-        if !rendered {
+        if composer_needs_render && composer_rect.width > 0 && composer_rect.height > 0 {
             let comp_bg = ratatui::style::Style::default().bg(crate::colors::background());
             fill_rect(buf, composer_rect, None, comp_bg);
             (&self.composer).render_ref(composer_rect, buf);
             self.last_composer_rect.set(Some(composer_rect));
         }
 
-        let transition_phase = self
-            .auto_transition
-            .borrow()
-            .as_ref()
-            .map(|state| state.phase);
+        if !matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator) {
+            let transition_phase = self
+                .auto_transition
+                .borrow()
+                .as_ref()
+                .map(|state| state.phase);
 
-        if let Some(phase) = transition_phase {
-            let target = match phase {
-                AutoDriveTransitionPhase::Entering => overlay_target,
-                AutoDriveTransitionPhase::Exiting => composer_rect,
-            };
-            self.render_auto_drive_transition_overlay(area, buf, composer_rect, target);
+            if let Some(phase) = transition_phase {
+                let target = match phase {
+                    AutoDriveTransitionPhase::Entering => overlay_target,
+                    AutoDriveTransitionPhase::Exiting => composer_rect,
+                };
+                self.render_auto_drive_transition_overlay(area, buf, composer_rect, target);
+            }
         }
     }
 }

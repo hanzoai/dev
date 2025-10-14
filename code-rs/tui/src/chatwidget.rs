@@ -12120,7 +12120,7 @@ fi\n\
                 self.auto_state.current_reasoning_title = None;
                 self.auto_state.current_summary_index = None;
                 self.auto_state.placeholder_phrase =
-                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                    Some("Loading message/reasoning".to_string());
                 self.auto_state.thinking_prefix_stripped = false;
                 self.auto_state.last_broadcast_summary = None;
                 self.auto_state.last_decision_progress_past = None;
@@ -12304,7 +12304,7 @@ fi\n\
             self.auto_state.current_display_is_summary = false;
             self.auto_state.current_reasoning_title = None;
             self.auto_state.placeholder_phrase =
-                Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                Some("Loading message/reasoning".to_string());
             self.auto_state.thinking_prefix_stripped = false;
             self.update_header_border_activation();
             self.auto_rebuild_live_ring();
@@ -12909,7 +12909,7 @@ fi\n\
             self.auto_state.last_decision_display_is_summary && post_submit_display.is_some();
         self.auto_state.current_summary_index = None;
         self.auto_state.placeholder_phrase = post_submit_display.is_none().then(|| {
-            auto_drive_strings::next_auto_drive_phrase().to_string()
+            "Loading message/reasoning".to_string()
         });
         self.auto_state.current_reasoning_title = None;
         self.auto_state.thinking_prefix_stripped = false;
@@ -13339,7 +13339,7 @@ fi\n\
             self
                 .auto_state
                 .placeholder_phrase
-                .get_or_insert_with(|| auto_drive_strings::next_auto_drive_phrase().to_string())
+                .get_or_insert_with(|| "Loading message/reasoning".to_string())
                 .clone()
         };
 
@@ -13617,7 +13617,7 @@ fi\n\
                 self.auto_state.current_display_line = None;
                 self.auto_state.current_display_is_summary = false;
                 self.auto_state.placeholder_phrase =
-                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                    Some("Loading message/reasoning".to_string());
                 needs_refresh = true;
             }
         }
