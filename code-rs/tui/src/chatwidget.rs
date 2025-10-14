@@ -16604,6 +16604,18 @@ fi\n\
         let final_source = source.clone();
         if self.is_review_flow_active() {
             if let Some(ref want) = id {
+                if !self
+                    .stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()))
+                {
+                    tracing::debug!(
+                        "InsertFinalAnswer(review): dropping duplicate final for id={}",
+                        want
+                    );
+                    self.last_assistant_message = Some(final_source.clone());
+                    return;
+                }
                 if let Some(idx) = self.history_cells.iter().rposition(|c| {
                     c.as_any()
                         .downcast_ref::<history_cell::StreamingContentCell>()
@@ -16613,9 +16625,6 @@ fi\n\
                 }) {
                     self.history_remove_at(idx);
                 }
-                self.stream_state
-                    .closed_answer_ids
-                    .insert(StreamId(want.clone()));
             } else if let Some(idx) = self.history_cells.iter().rposition(|c| {
                 c.as_any()
                     .downcast_ref::<history_cell::StreamingContentCell>()
@@ -16624,7 +16633,34 @@ fi\n\
                 self.history_remove_at(idx);
             }
             self.last_assistant_message = Some(final_source.clone());
-            let _ = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let history_id = state.id;
+            let mut key = match id.as_deref() {
+                Some(rid) => self.try_stream_order_key(StreamKind::Answer, rid).unwrap_or_else(|| {
+                    tracing::warn!(
+                        "missing stream order key for final Answer id={}; using synthetic key",
+                        rid
+                    );
+                    self.next_internal_key()
+                }),
+                None => {
+                    tracing::warn!("missing stream id for final Answer; using synthetic key");
+                    self.next_internal_key()
+                }
+            };
+
+            if let Some(last) = self.last_assigned_order {
+                if key <= last {
+                    key = Self::order_key_successor(last);
+                    if let Some(ref want) = id {
+                        self.stream_order_seq
+                            .insert((StreamKind::Answer, want.clone()), key);
+                    }
+                }
+            }
+
+            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
+            self.history_insert_existing_record(Box::new(cell), key, "answer-review", history_id);
             // Advance Auto Drive after the assistant message has been finalized.
             self.auto_on_assistant_final();
             return;
