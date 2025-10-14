@@ -12085,9 +12085,7 @@ fi\n\
         self.bottom_pane.set_task_running(false);
         self.bottom_pane.clear_live_ring();
         self.bottom_pane.update_status_text("Auto Drive".to_string());
-        self.bottom_pane.set_standard_terminal_hint(Some(
-            "Ctrl+S Change Settings".to_string(),
-        ));
+        self.auto_update_terminal_hint();
         self.bottom_pane.ensure_input_focus();
         self.update_header_border_activation();
         self.request_redraw();
@@ -12138,11 +12136,9 @@ fi\n\
                 self.auto_state.last_decision_progress_current = None;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
-                self.bottom_pane.set_standard_terminal_hint(Some(
-                    "Esc stop Auto Drive • Ctrl+S Change Settings".to_string(),
-                ));
                 self.update_header_border_activation();
                 self.auto_rebuild_live_ring();
+                self.auto_update_terminal_hint();
                 self.push_background_tail(format!("Auto Drive started: {goal}"));
                 self.request_redraw();
             }
@@ -13326,22 +13322,25 @@ fi\n\
                     progress_past: None,
                     progress_current: None,
                 });
-                self
-                    .bottom_pane
-                    .show_auto_coordinator_view(model);
-                return;
-            }
-
-            self.bottom_pane.clear_auto_coordinator_view(true);
-            self.bottom_pane.clear_live_ring();
+            self
+                .bottom_pane
+                .show_auto_coordinator_view(model);
+            self.bottom_pane.set_standard_terminal_hint(None);
             return;
         }
 
-        if self.auto_state.paused_for_manual_edit {
-            self.bottom_pane.clear_auto_coordinator_view(false);
-            self.bottom_pane.clear_live_ring();
-            return;
-        }
+        self.bottom_pane.clear_auto_coordinator_view(true);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane.set_standard_terminal_hint(None);
+        return;
+    }
+
+    if self.auto_state.paused_for_manual_edit {
+        self.bottom_pane.clear_auto_coordinator_view(false);
+        self.bottom_pane.clear_live_ring();
+        self.bottom_pane.set_standard_terminal_hint(None);
+        return;
+    }
 
         self.bottom_pane.clear_live_ring();
 
@@ -13506,7 +13505,10 @@ fi\n\
             agents_enabled: self.auto_state.subagents_enabled,
             turns_completed: self.auto_state.turns_completed,
             started_at: self.auto_state.started_at,
-            elapsed: None,
+            elapsed: self
+                .auto_state
+                .started_at
+                .map(|started| Duration::from_secs(started.elapsed().as_secs())),
             progress_past: self.auto_state.current_progress_past.clone(),
             progress_current: self.auto_state.current_progress_current.clone(),
             cli_context,
@@ -13517,14 +13519,7 @@ fi\n\
             .bottom_pane
             .show_auto_coordinator_view(model);
 
-        if self.auto_state.waiting_for_response {
-            self.bottom_pane
-                .set_standard_terminal_hint(Some(
-                    "Esc stop Auto Drive • Ctrl+S Change Settings".to_string(),
-                ));
-        } else {
-            self.bottom_pane.set_standard_terminal_hint(None);
-        }
+        self.auto_update_terminal_hint();
 
         if self.auto_state.started_at.is_some() {
             self.app_event_tx
@@ -13556,6 +13551,43 @@ fi\n\
         } else {
             append_thought_ellipsis(trimmed)
         }
+    }
+
+    fn auto_update_terminal_hint(&mut self) {
+        if !self.auto_state.active && !self.auto_state.awaiting_goal_input {
+            self.bottom_pane.set_standard_terminal_hint(None);
+            return;
+        }
+
+        let agents_label = if self.auto_state.subagents_enabled {
+            "Agents Enabled"
+        } else {
+            "Agents Disabled"
+        };
+        let review_label = if self.auto_state.review_enabled {
+            "Review Enabled"
+        } else {
+            "Review Disabled"
+        };
+
+        let left = if self.auto_state.awaiting_submission {
+            format!(
+                "Awaiting approval  •  {}  •  {}  •  Ctrl+S Settings",
+                agents_label, review_label
+            )
+        } else {
+            format!("{}  •  {}  •  Ctrl+S Settings", agents_label, review_label)
+        };
+
+        let right = if self.auto_state.awaiting_submission {
+            "Enter approve  •  Esc cancel"
+        } else {
+            "Esc stop Auto Drive"
+        };
+
+        let hint = format!("{left}\t{right}");
+        self.bottom_pane
+            .set_standard_terminal_hint(Some(hint));
     }
 
     fn auto_update_display_title(&mut self) {

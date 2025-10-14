@@ -77,6 +77,7 @@ impl AutoDriveVariant {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct AutoDriveStyle {
     pub variant: AutoDriveVariant,
@@ -87,6 +88,7 @@ pub struct AutoDriveStyle {
     pub summary_style: Style,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct FrameStyle {
     pub title_prefix: &'static str,
@@ -98,6 +100,7 @@ pub struct FrameStyle {
     pub accent: Option<AccentStyle>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct AccentStyle {
     pub symbol: char,
@@ -105,6 +108,7 @@ pub struct AccentStyle {
     pub width: u16,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ButtonStyle {
     pub glyphs: ButtonGlyphs,
@@ -112,6 +116,7 @@ pub struct ButtonStyle {
     pub disabled_style: Style,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct ButtonGlyphs {
     pub top_left: char,

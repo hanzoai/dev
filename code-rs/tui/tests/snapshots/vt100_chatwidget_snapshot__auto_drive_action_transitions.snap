@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 334
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
@@ -11,15 +10,15 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
-
+   Auto Drive > Working                                      Running (0 turns)
+ Completed git status check. Comparing diffs against last run.
+ Analyzing workspace changes…
+ Comparing diffs against last run.
+ Running (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
-                                                                               
+   Agents Enabled  •  Review Enabled  •  Ctrl+S Settings   Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -30,15 +29,15 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
-
+   Auto Drive > Working                               Awaiting input (0 turns)
+ Completed git status check. Comparing diffs against last run.
+ Auto Drive will send:
+ Prompt:
+ Awaiting input (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
-                                                                               
+   Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -50,14 +49,14 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+   Auto Drive > Working                              Awaiting review (0 turns)
+ waiting for code review...
+ Awaiting review (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
-                                                                               
+   Agents Enabled  •  Review Enabled  •  Ctrl+S Settings   Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -69,10 +68,11 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
+   Auto Drive > Working                                      Running (0 turns)
+ Queued new command for execution.
+ Resuming automated investigation…
+ Running (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
+   Agents Enabled  •  Review Enabled  •  Ctrl+S Settings   Esc stop Auto Drive

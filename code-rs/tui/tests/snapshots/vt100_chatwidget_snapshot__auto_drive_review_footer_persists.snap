@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 393
 expression: frame
 ---
  +----------------------------------------------------------------------------+
@@ -13,9 +12,10 @@ expression: frame
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
-
+   Auto Drive > Working                              Awaiting review (0 turns)
+ waiting for code review...
+ Awaiting review (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
+   Agents Enabled  •  Review Enabled  •  Ctrl+S Settings   Esc stop Auto Drive
