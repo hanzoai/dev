@@ -200,6 +200,7 @@ impl Default for TurnDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use code_core::agent_defaults::DEFAULT_AGENT_NAMES;
     use serde_json::json;
 
     #[test]
@@ -215,7 +216,11 @@ mod tests {
 
     #[test]
     fn schema_includes_cli_agents_review() {
-        let schema = build_schema();
+        let active_agents = vec![
+            "codex-plan".to_string(),
+            "codex-research".to_string(),
+        ];
+        let schema = build_schema(&active_agents);
         let props = schema
             .get("properties")
             .and_then(|v| v.as_object())
@@ -242,6 +247,36 @@ mod tests {
             .expect("agents required");
         assert!(agents_required.contains(&json!("timing")));
         assert!(agents_required.contains(&json!("list")));
+        assert!(!agents_required.contains(&json!("models")));
+
+        let list_items_schema = agents_obj
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("list"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("items"))
+            .and_then(|v| v.as_object())
+            .expect("agents.list items");
+        let item_props = list_items_schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("agents.list item properties");
+        let models_schema = item_props
+            .get("models")
+            .and_then(|v| v.as_object())
+            .expect("agents.list item models schema");
+        assert_eq!(models_schema.get("type"), Some(&json!("array")));
+        let enum_values = models_schema
+            .get("items")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("enum"))
+            .and_then(|v| v.as_array())
+            .expect("models enum values");
+        let expected_enum: Vec<Value> = active_agents
+            .iter()
+            .map(|name| Value::String(name.clone()))
+            .collect();
+        assert_eq!(*enum_values, expected_enum);
 
         let review_required = props
             .get("review")
@@ -255,6 +290,45 @@ mod tests {
     }
 
     #[test]
+    fn schema_defaults_to_builtin_agents_enum() {
+        let schema = build_schema(
+            &DEFAULT_AGENT_NAMES
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect::<Vec<_>>(),
+        );
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema properties");
+        let agents_obj = props
+            .get("agents")
+            .and_then(|v| v.as_object())
+            .expect("agents schema");
+        let item_enum = agents_obj
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("list"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("items"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("properties"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("models"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("items"))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("enum"))
+            .and_then(|v| v.as_array())
+            .expect("models enum");
+        let expected: Vec<Value> = DEFAULT_AGENT_NAMES
+            .iter()
+            .map(|name| Value::String((*name).to_string()))
+            .collect();
+        assert_eq!(*item_enum, expected);
+    }
+
+    #[test]
     fn parse_decision_new_schema() {
         let raw = r#"{
             "finish_status": "continue",
@@ -263,7 +337,7 @@ mod tests {
             "agents": {
                 "timing": "blocking",
                 "list": [
-                    {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B"}
+                    {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B", "models": ["codex-plan"]}
                 ]
             },
             "review": {"source": "staged", "summary": "Pre-merge sanity"}
@@ -286,6 +360,10 @@ mod tests {
         let agent = &decision.agents[0];
         assert_eq!(agent.prompt, "Draft alternative fix");
         assert!(!agent.write);
+        assert_eq!(
+            agent.models,
+            Some(vec!["codex-plan".to_string()])
+        );
 
         let review = decision.review.expect("review action expected");
         assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
@@ -942,22 +1020,12 @@ fn build_schema(active_agents: &[String]) -> Value {
         schema
     };
 
-    let models_batch_property = {
-        let schema = json!({
-            "type": ["array", "null"],
-            "description": "Preferred agent models for this batch (null => let the CLI choose).",
-            "items": models_items_schema.clone(),
-        });
-        schema
-    };
-
     let models_request_property = {
-        let schema = json!({
-            "type": ["array", "null"],
-            "description": "Agent-specific model overrides (null inherits the batch selection).",
+        json!({
+            "type": "array",
+            "description": "Preferred agent models for this helper (choose from the valid agent list).",
             "items": models_items_schema,
-        });
-        schema
+        })
     };
 
     json!({
@@ -1047,9 +1115,8 @@ fn build_schema(active_agents: &[String]) -> Value {
                         },
                         "description": "Helper agents to launch this turn (<=3)."
                     },
-                    "models": models_batch_property
                 },
-                "required": ["timing", "list", "models"]
+                "required": ["timing", "list"]
             },
             "review": {
                 "type": ["object", "null"],
