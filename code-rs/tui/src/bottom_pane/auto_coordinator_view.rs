@@ -5,11 +5,11 @@ use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
 use crate::colors;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::Widget;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, WidgetRef, Wrap};
+use ratatui::widgets::{Paragraph, WidgetRef, Wrap};
 use unicode_width::UnicodeWidthStr;
 use std::time::{Duration, Instant};
 
@@ -79,8 +79,8 @@ pub(crate) struct AutoCoordinatorView {
 }
 
 impl AutoCoordinatorView {
-    const DEFAULT_COMPOSER_BLOCK: u16 = 5;
     const MIN_COMPOSER_VIEWPORT: u16 = 3;
+    const HEADER_HEIGHT: u16 = 1;
 
     pub fn new(
         model: AutoCoordinatorViewModel,
@@ -103,6 +103,7 @@ impl AutoCoordinatorView {
         self.style = style;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn desired_height_with_composer(&self, width: u16, composer: &ChatComposer) -> u16 {
         let AutoCoordinatorViewModel::Active(model) = &self.model;
         let ctx = Self::build_context(model);
@@ -189,54 +190,6 @@ impl AutoCoordinatorView {
         matches!(key_event.code, KeyCode::Up | KeyCode::Down)
     }
 
-    fn render_frame(
-        &self,
-        area: Rect,
-        buf: &mut Buffer,
-        frame_style: &FrameStyle,
-    ) -> Option<Rect> {
-        if area.width < 3 || area.height < 3 {
-            return None;
-        }
-
-        let title_content = format!(
-            "{}{}{}",
-            frame_style.title_prefix, frame_style.title_text, frame_style.title_suffix
-        );
-        let title_line = Line::from(Span::styled(title_content, frame_style.title_style));
-
-        Block::default()
-            .title(title_line)
-            .borders(Borders::ALL)
-            .border_style(frame_style.border_style)
-            .border_type(frame_style.border_type)
-            .render(area, buf);
-
-        let mut inner = Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
-            height: area.height.saturating_sub(2),
-        };
-
-        if let Some(accent) = &frame_style.accent {
-            if inner.width > 0 {
-                let width = accent.width.min(inner.width);
-                for dx in 0..width {
-                    let x = inner.x + dx;
-                    for y in inner.y..inner.y.saturating_add(inner.height) {
-                        let cell = &mut buf[(x, y)];
-                        cell.set_symbol(&accent.symbol.to_string());
-                        cell.set_style(accent.style);
-                    }
-                }
-                inner.x = inner.x.saturating_add(width);
-                inner.width = inner.width.saturating_sub(width);
-            }
-        }
-
-        Some(inner)
-    }
 
     fn frame_style_for_model(&self, model: &AutoActiveViewModel) -> FrameStyle {
         let mut style = self.style.frame.clone();
@@ -264,7 +217,142 @@ impl AutoCoordinatorView {
         style
     }
 
-    fn derived_status_entries(&self, model: &AutoActiveViewModel) -> Vec<(String, Style)> {
+    fn effective_elapsed(model: &AutoActiveViewModel) -> Option<Duration> {
+        if let Some(duration) = model.elapsed {
+            Some(duration)
+        } else {
+            model
+                .started_at
+                .map(|started| Instant::now().saturating_duration_since(started))
+        }
+    }
+
+    fn status_label(model: &AutoActiveViewModel) -> &'static str {
+        if model.waiting_for_review {
+            "Awaiting review"
+        } else if model.waiting_for_response || model.cli_running {
+            "Running"
+        } else if model.awaiting_submission {
+            "Awaiting input"
+        } else if model.started_at.is_some() {
+            "Running"
+        } else if model.elapsed.is_some() && model.started_at.is_none() {
+            "Stopped"
+        } else {
+            "Ready"
+        }
+    }
+
+    fn is_generic_status_message(message: &str) -> bool {
+        matches!(message, "Auto Drive" | "Auto Drive Goal")
+    }
+
+    fn resolve_display_message(&self, model: &AutoActiveViewModel) -> String {
+        if let Some(message) = self
+            .status_message
+            .as_ref()
+            .map(|msg| msg.trim())
+            .filter(|msg| !msg.is_empty())
+            .filter(|msg| !Self::is_generic_status_message(msg))
+        {
+            return message.to_string();
+        }
+
+        if let Some(current) = model.progress_current.as_ref() {
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+
+        if model.awaiting_submission {
+            if let Some(countdown) = &model.countdown {
+                return format!("Awaiting confirmation ({}s)", countdown.remaining);
+            }
+            if let Some(button) = &model.button {
+                let trimmed = button.label.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+
+        for status in &model.status_lines {
+            let trimmed = status.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+
+        auto_drive_strings::next_auto_drive_phrase().to_string()
+    }
+
+    fn runtime_text(&self, model: &AutoActiveViewModel) -> String {
+        let label = Self::status_label(model);
+        let mut details: Vec<String> = Vec::new();
+        if let Some(duration) = Self::effective_elapsed(model) {
+            if duration.as_secs() > 0 {
+                details.push(Self::format_elapsed(duration));
+            }
+        }
+        details.push(Self::format_turns(model.turns_completed));
+        format!("{} ({})", label, details.join(", "))
+    }
+
+    fn render_header(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        model: &AutoActiveViewModel,
+        frame_style: &FrameStyle,
+        display_message: &str,
+    ) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let left_spans = vec![
+            Span::raw("  "),
+            Span::styled("Auto Drive", frame_style.title_style.clone()),
+            Span::styled(" > ", Style::default().fg(colors::text_dim())),
+            Span::styled(display_message.to_string(), Style::default().fg(colors::text())),
+        ];
+        let left_line = Line::from(left_spans);
+
+        let runtime = self.runtime_text(model);
+        let runtime_display = if runtime.is_empty() {
+            String::new()
+        } else {
+            format!(" {} ", runtime)
+        };
+        let right_width = UnicodeWidthStr::width(runtime_display.as_str()).min(area.width as usize) as u16;
+        let constraints = if right_width == 0 {
+            vec![Constraint::Fill(1)]
+        } else {
+            vec![Constraint::Fill(1), Constraint::Length(right_width)]
+        };
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(constraints)
+            .split(area);
+
+        Paragraph::new(left_line).render(chunks[0], buf);
+
+        if right_width > 0 {
+            Paragraph::new(Line::from(Span::styled(
+                runtime_display,
+                self.style.summary_style.clone(),
+            )))
+            .alignment(Alignment::Right)
+            .render(chunks[chunks.len() - 1], buf);
+        }
+    }
+
+    fn derived_status_entries(
+        &self,
+        model: &AutoActiveViewModel,
+        display_message: &str,
+    ) -> Vec<(String, Style)> {
         let mut entries: Vec<(String, Style)> = Vec::new();
 
         if model.awaiting_submission {
@@ -281,19 +369,23 @@ impl AutoCoordinatorView {
             if trimmed.is_empty() {
                 continue;
             }
+
+            let normalized = trimmed.trim_end_matches('…').trim();
+            if normalized.eq_ignore_ascii_case("auto drive") {
+                continue;
+            }
+            if normalized.eq_ignore_ascii_case(display_message) {
+                continue;
+            }
+            if auto_drive_strings::is_auto_drive_phrase(normalized) {
+                continue;
+            }
+
             entries.push((
                 status.clone(),
                 Style::default().fg(colors::text_dim()),
             ));
         }
-
-        if entries.is_empty() {
-            entries.push((
-                auto_drive_strings::next_auto_drive_phrase().to_string(),
-                Style::default().fg(colors::text_dim()),
-            ));
-        }
-
         entries
     }
 
@@ -312,10 +404,16 @@ impl AutoCoordinatorView {
         lines
     }
 
-    fn status_message_line(&self) -> Option<Line<'static>> {
+    fn status_message_line(&self, display_message: &str) -> Option<Line<'static>> {
         let message = self.status_message.as_ref()?;
         let trimmed = message.trim();
         if trimmed.is_empty() {
+            return None;
+        }
+        if trimmed.eq_ignore_ascii_case("auto drive") {
+            return None;
+        }
+        if trimmed == display_message {
             return None;
         }
 
@@ -329,7 +427,7 @@ impl AutoCoordinatorView {
         ]))
     }
 
-    fn status_message_wrap_count(&self, width: u16) -> usize {
+    fn status_message_wrap_count(&self, width: u16, display_message: &str) -> usize {
         if width == 0 {
             return 0;
         }
@@ -338,6 +436,12 @@ impl AutoCoordinatorView {
         };
         let trimmed = message.trim();
         if trimmed.is_empty() {
+            return 0;
+        }
+        if trimmed.eq_ignore_ascii_case("auto drive") {
+            return 0;
+        }
+        if trimmed == display_message {
             return 0;
         }
         let display = format!("   {trimmed}");
@@ -535,9 +639,7 @@ impl AutoCoordinatorView {
     }
 
     fn inner_width(&self, width: u16) -> u16 {
-        width
-            .saturating_sub(3) // borders + left padding
-            .max(1)
+        width.max(1)
     }
 
     fn wrap_count(text: &str, width: u16) -> usize {
@@ -582,7 +684,8 @@ impl AutoCoordinatorView {
             Self::wrap_count(ctrl_hint, inner_width)
         };
 
-        let mut total = self.status_message_wrap_count(inner_width);
+        let display_message = self.resolve_display_message(model);
+        let mut total = self.status_message_wrap_count(inner_width, &display_message);
 
         if model.awaiting_submission {
             if let Some(prompt_lines) = self.cli_prompt_lines(model) {
@@ -603,7 +706,7 @@ impl AutoCoordinatorView {
                 total += ctrl_height.max(1);
             }
         } else {
-            let status_entries = self.derived_status_entries(model);
+            let status_entries = self.derived_status_entries(model, &display_message);
             for (_, (text, _)) in status_entries.iter().enumerate() {
                 total += Self::wrap_count(text, inner_width);
             }
@@ -630,9 +733,9 @@ impl AutoCoordinatorView {
             .saturating_add(composer_block)
             .saturating_add(summary_height);
 
-        total
-            .saturating_add(2) // frame borders
-            .min(u16::MAX as usize) as u16
+        total = total.saturating_add(Self::HEADER_HEIGHT as usize);
+
+        total.min(u16::MAX as usize) as u16
     }
 
     fn render_active(
@@ -640,13 +743,34 @@ impl AutoCoordinatorView {
         area: Rect,
         buf: &mut Buffer,
         model: &AutoActiveViewModel,
-        composer: &ChatComposer,
+        composer: Option<&ChatComposer>,
     ) {
-        let frame_style = self.frame_style_for_model(model);
-        let Some(inner) = self.render_frame(area, buf, &frame_style) else {
+        if area.width == 0 || area.height == 0 {
             return;
+        }
+
+        let frame_style = self.frame_style_for_model(model);
+        let display_message = self.resolve_display_message(model);
+
+        let header_height = Self::HEADER_HEIGHT.min(area.height);
+        let header_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: header_height,
         };
-        let inner = self.apply_left_padding(inner, buf);
+        self.render_header(header_area, buf, model, &frame_style, &display_message);
+
+        if area.height <= Self::HEADER_HEIGHT {
+            return;
+        }
+
+        let inner = Rect {
+            x: area.x,
+            y: area.y + Self::HEADER_HEIGHT,
+            width: area.width,
+            height: area.height.saturating_sub(Self::HEADER_HEIGHT),
+        };
         if inner.height == 0 || inner.width == 0 {
             return;
         }
@@ -681,7 +805,7 @@ impl AutoCoordinatorView {
                 after_lines.push(ctrl_hint_line);
             }
         } else {
-            let status_entries = self.derived_status_entries(model);
+            let status_entries = self.derived_status_entries(model, &display_message);
             top_lines.extend(self.status_lines_with_entries(&status_entries));
 
             if let Some(button_block) = self.button_block_lines(&ctx) {
@@ -714,7 +838,7 @@ impl AutoCoordinatorView {
             }
         }
 
-        if let Some(line) = self.status_message_line() {
+        if let Some(line) = self.status_message_line(&display_message) {
             if top_lines.is_empty() {
                 top_lines.push(line);
             } else {
@@ -736,18 +860,20 @@ impl AutoCoordinatorView {
         let mut top_height = Self::lines_height(&top_lines, inner.width);
         let mut after_height = Self::lines_height(&after_lines, inner.width);
 
-        // `inner` matches the bordered content area **after** the extra left pad.
         // `ChatComposer::render_ref` expects to operate on a region that is two
-        // columns wider than the tight composer rectangle (to account for the
-        // outer horizontal padding applied by the BottomPane). Reconstruct that
-        // width so height estimation matches render-time wrapping exactly.
+        // columns wider than the tight composer rectangle. Reconstruct that width
+        // so height estimation matches render-time wrapping exactly.
         let mut composer_block: u16 = if model.show_composer {
-            let measurement_width = inner.width.saturating_add(2);
-            let mut desired_block = composer.desired_height(measurement_width);
-            if desired_block < Self::MIN_COMPOSER_VIEWPORT {
-                desired_block = Self::MIN_COMPOSER_VIEWPORT;
+            if let Some(composer) = composer {
+                let measurement_width = inner.width.saturating_add(2);
+                let mut desired_block = composer.desired_height(measurement_width);
+                if desired_block < Self::MIN_COMPOSER_VIEWPORT {
+                    desired_block = Self::MIN_COMPOSER_VIEWPORT;
+                }
+                desired_block
+            } else {
+                0
             }
-            desired_block
         } else {
             0
         };
@@ -781,7 +907,7 @@ impl AutoCoordinatorView {
             }
         }
 
-        let composer_height = if model.show_composer {
+        let composer_height = if model.show_composer && composer.is_some() {
             let max_space_for_composer = inner
                 .height
                 .saturating_sub(top_height)
@@ -816,17 +942,19 @@ impl AutoCoordinatorView {
         }
 
         if composer_height > 0 && cursor_y < inner.y + inner.height {
-            let max_height = inner.y + inner.height - cursor_y;
-            let rect_height = composer_height.min(max_height);
-            if rect_height > 0 {
-                let composer_rect = Rect {
-                    x: inner.x,
-                    y: cursor_y,
-                    width: inner.width,
-                    height: rect_height,
-                };
-                composer.render_ref(composer_rect, buf);
-                cursor_y = cursor_y.saturating_add(rect_height);
+            if let Some(composer) = composer {
+                let max_height = inner.y + inner.height - cursor_y;
+                let rect_height = composer_height.min(max_height);
+                if rect_height > 0 {
+                    let composer_rect = Rect {
+                        x: inner.x,
+                        y: cursor_y,
+                        width: inner.width,
+                        height: rect_height,
+                    };
+                    composer.render_ref(composer_rect, buf);
+                    cursor_y = cursor_y.saturating_add(rect_height);
+                }
             }
         }
 
@@ -884,43 +1012,11 @@ impl AutoCoordinatorView {
     }
 
     fn build_status_summary(&self, model: &AutoActiveViewModel) -> Option<Line<'static>> {
-        let status_label = if model.waiting_for_review {
-            "Awaiting review"
-        } else if model.waiting_for_response {
-            "Running"
-        } else if model.awaiting_submission {
-            "Awaiting input"
-        } else if model.elapsed.is_some() && model.started_at.is_none() {
-            "Stopped"
-        } else {
-            "Ready"
-        };
-
-        let elapsed = if let Some(duration) = model.elapsed {
-            Some(duration)
-        } else if let Some(started_at) = model.started_at {
-            Some(Instant::now().saturating_duration_since(started_at))
-        } else {
-            None
-        };
-
-        let mut primary = status_label.to_string();
-        let mut details: Vec<String> = Vec::new();
-
-        if let Some(duration) = elapsed {
-            details.push(Self::format_elapsed(duration));
-        }
-
-        details.push(Self::format_turns(model.turns_completed));
-
-        if !details.is_empty() {
-            primary.push_str(" (");
-            primary.push_str(&details.join(", "));
-            primary.push(')');
-        }
-
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled(primary, self.style.summary_style.clone()));
+        spans.push(Span::styled(
+            self.runtime_text(model),
+            self.style.summary_style.clone(),
+        ));
 
         let secondary_style = Style::default().fg(colors::text_dim());
         let separator = self.style.footer_separator.to_string();
@@ -999,25 +1095,6 @@ impl AutoCoordinatorView {
         }
     }
 
-    fn apply_left_padding(&self, area: Rect, buf: &mut Buffer) -> Rect {
-        if area.width <= 1 {
-            return area;
-        }
-        let bg_style = Style::default()
-            .bg(colors::background())
-            .fg(colors::text());
-        for y in area.y..area.y.saturating_add(area.height) {
-            let cell = &mut buf[(area.x, y)];
-            cell.set_symbol(" ");
-            cell.set_style(bg_style);
-        }
-        Rect {
-            x: area.x + 1,
-            y: area.y,
-            width: area.width.saturating_sub(1),
-            height: area.height,
-        }
-    }
 }
 
 impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
@@ -1042,7 +1119,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
     fn desired_height(&self, width: u16) -> u16 {
         let AutoCoordinatorViewModel::Active(model) = &self.model;
         let ctx = Self::build_context(model);
-        self.estimated_height_active(width, &ctx, model, Self::DEFAULT_COMPOSER_BLOCK)
+        self.estimated_height_active(width, &ctx, model, 0)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -1050,10 +1127,8 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
             return;
         }
 
-        // Fallback path when the composer is not available: draw the outer
-        // frame so the layout remains stable.
-        let frame_style = self.style.frame.clone();
-        let _ = self.render_frame(area, buf, &frame_style);
+        let AutoCoordinatorViewModel::Active(model) = &self.model;
+        self.render_active(area, buf, model, None);
     }
 
     fn render_with_composer(
@@ -1067,7 +1142,7 @@ impl<'a> BottomPaneView<'a> for AutoCoordinatorView {
         }
 
         let AutoCoordinatorViewModel::Active(model) = &self.model;
-        self.render_active(area, buf, model, composer);
+        self.render_active(area, buf, model, Some(composer));
     }
 
     fn update_status_text(&mut self, text: String) -> ConditionalUpdate {

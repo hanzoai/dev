@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 371
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
@@ -11,15 +10,34 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
-
+   Auto Drive > Working                               Awaiting input (0 turns)
+ Auto Drive will send:
+ Prompt:
+ cargo fmt --check
+ Awaiting input (0 turns)  •  Agents Disabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
-                                                                               
+   Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ +----------------------------------------------------------------------------+
+   parallel work)
+   /limits - visualize weekly and hourly rate limits
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /cloud - browse, apply, and create cloud tasks NEW
+   Auto Drive > Working                               Awaiting input (0 turns)
+ Auto Drive will send:
+ Prompt:
+ cargo fmt --check
+ Awaiting input (0 turns)  •  Agents Disabled  •  Review Enabled
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+   Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -31,30 +49,11 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
+ › cargo fmt --check
+   Auto Drive > Running cargo fmt --check.                   Running (0 turns)
+ Running cargo fmt --check.
+ Running (0 turns)  •  Agents Disabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
  +----------------------------------------------------------------------------+
-                                                                               
-
----FRAME---
- +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
- +----------------------------------------------------------------------------+
-   parallel work)
-   /limits - visualize weekly and hourly rate limits
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
-
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- |                                                                            |
- +----------------------------------------------------------------------------+
- +----------------------------------------------------------------------------+
+   Agents Disabled  •  Review Enabled  •  Ctrl+S Settings  Esc stop Auto Drive

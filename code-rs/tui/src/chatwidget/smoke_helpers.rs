@@ -2,8 +2,8 @@
 
 use super::ChatWidget;
 use crate::app_event::{AppEvent, AutoContinueMode};
-use crate::auto_drive_strings;
 use crate::app_event_sender::AppEventSender;
+use crate::auto_drive_strings;
 use crate::history_cell::{self, HistoryCellType};
 use crate::markdown_render::render_markdown_text;
 use crate::tui::TerminalInfo;
