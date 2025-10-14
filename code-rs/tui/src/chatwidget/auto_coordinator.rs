@@ -1088,10 +1088,65 @@ fn build_schema(active_agents: &[String]) -> Value {
         schema
     };
 
+    let models_description = {
+        let guides = [
+            (
+                "claude-sonnet-4.5",
+                "Default for most coding tasks (along with code-gpt-5-codex) — excels at implementation, tool use, debugging, and testing.",
+            ),
+            (
+                "claude-opus-4.1",
+                "Prefer claude-sonnet-4.5 for most tasks, but a good fallback for complex reasoning when other attempts have failed.",
+            ),
+            (
+                "code-gpt-5-codex",
+                "Default for most coding tasks (along with claude-sonnet-4.5) - excels at implementation, refactors, multi-file edits and code review.",
+            ),
+            (
+                "code-gpt-5",
+                "Use for UI/UX or mixed tasks where explanation, design judgment, or multi-domain reasoning is equally important as code.",
+            ),
+            (
+                "gemini-2.5-pro",
+                "Use when you require huge context or multimodal grounding (repo-scale inputs, or search grounding); good for alternative architecture opinions.",
+            ),
+            (
+                "gemini-2.5-flash",
+                "Use for fast, high-volume scaffolding, creating minimal repros/tests, or budget-sensitive operations.",
+            ),
+            (
+                "qwen-3-coder",
+                "Fast and reasonably effective. Good for providing an alternative opinion when initial attempts fail.",
+            ),
+        ];
+
+        let mut description = String::from(
+            "Preferred agent models for this helper (choose from the valid agent list). Selection guide:",
+        );
+        let mut any_guides = false;
+
+        for (model, guide) in guides {
+            if active_agents.iter().any(|name| name == model) {
+                description.push('\n');
+                description.push_str("- `");
+                description.push_str(model);
+                description.push_str("`: ");
+                description.push_str(guide);
+                any_guides = true;
+            }
+        }
+
+        if !any_guides {
+            description.push_str("\n- No model guides available for the current configuration.");
+        }
+
+        description
+    };
+
     let models_request_property = {
         json!({
             "type": "array",
-            "description": "Preferred agent models for this helper (choose from the valid agent list).",
+            "description": models_description,
             "items": models_items_schema,
         })
     };
