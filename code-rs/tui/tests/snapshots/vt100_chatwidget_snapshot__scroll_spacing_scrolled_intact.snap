@@ -1,10 +1,11 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 521
 expression: scrolled
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
    Assistant reply number two with multiple paragraphs.
  •
    Here is another paragraph to expand height.
@@ -21,7 +22,7 @@ expression: scrolled
 
  › Fourth user prompt to guarantee overflow beyond the viewport height.
 
- ┌────────────────────────────────────────────────────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help

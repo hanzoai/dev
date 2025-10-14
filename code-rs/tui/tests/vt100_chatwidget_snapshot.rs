@@ -29,17 +29,158 @@ use code_tui::test_helpers::{
     AutoContinueModeFixture,
     ChatWidgetHarness,
 };
+use regex_lite::Regex;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 fn normalize_output(text: String) -> String {
     text
-        .replace('✧', "✶")
-        .replace('◇', "✶")
-        .replace('✦', "✶")
-        .replace('◆', "✶")
-        .replace('✨', "✶")
+        .chars()
+        .map(normalize_glyph)
+        .collect::<String>()
+        .pipe(normalize_timers)
+        .pipe(normalize_spacer_rows)
+}
+
+fn normalize_glyph(ch: char) -> char {
+    match ch {
+        // Decorative sparkles → single sentinel to keep intent without variation.
+        '✧' | '◇' | '✦' | '◆' | '✨' => '✶',
+        // Box-drawing corners → '+' for ASCII snapshots.
+        '┌' | '┐' | '└' | '┘'
+        | '┏' | '┓' | '┗' | '┛'
+        | '╔' | '╗' | '╚' | '╝'
+        | '╒' | '╕' | '╛' | '╜'
+        | '╓' | '╖' | '╙' | '╘'
+        | '╭' | '╮' | '╯' | '╰' => '+',
+        // Tee / cross junctions also collapse to '+' to keep structure recognizable.
+        '┬' | '┴' | '┼' | '├' | '┤'
+        | '┽' | '┾' | '┿'
+        | '╀' | '╁' | '╂' | '╃' | '╄'
+        | '╅' | '╆' | '╇' | '╈' | '╉'
+        | '╊' | '╋' | '╟' | '╠' | '╡'
+        | '╢' | '╫' | '╪' | '╬' => '+',
+        // Horizontal box drawing and variants → '-'.
+        '─' | '━' | '═' | '╼' | '╾'
+        | '╸' | '╺' | '╴' | '╶'
+        | '┄' | '┅' | '┈' | '┉' => '-',
+        // Vertical box drawing variants → '|'.
+        '│' | '┃' | '║' | '╽' | '╿'
+        | '╏' | '╎' | '┆' | '┇'
+        | '╷' | '╹' => '|',
+        // Diagonal strokes → ASCII approximations.
+        '╱' => '/',
+        '╲' => '/',
+        '╳' => 'X',
+        // Shade blocks → space to avoid rendering noise.
+        '█' | '▓' | '▒' | '░' => ' ',
+        // Various unicode dash variants → ASCII hyphen.
+        '‐' | '‑' | '‒' | '–' | '—' | '―' => '-',
+        other => other,
+    }
+}
+
+fn normalize_timers(text: String) -> String {
+    static IN_SECONDS_RE: OnceLock<Regex> = OnceLock::new();
+    static T_MINUS_RE: OnceLock<Regex> = OnceLock::new();
+    static MM_SS_RE: OnceLock<Regex> = OnceLock::new();
+    static MS_RE: OnceLock<Regex> = OnceLock::new();
+    static MIN_SEC_RE: OnceLock<Regex> = OnceLock::new();
+
+    let text = IN_SECONDS_RE
+        .get_or_init(|| Regex::new(r"\bin\s+\d+s\b").expect("valid in seconds regex"))
+        .replace_all(&text, "in XS")
+        .into_owned();
+
+    let text = T_MINUS_RE
+        .get_or_init(|| Regex::new(r"\bT-\d+\b").expect("valid T-minus regex"))
+        .replace_all(&text, "T-X")
+        .into_owned();
+
+    let text = MM_SS_RE
+        .get_or_init(|| Regex::new(r"\b\d{1,2}:\d{2}\b").expect("valid mm:ss regex"))
+        .replace_all(&text, "MM:SS")
+        .into_owned();
+
+    let text = MS_RE
+        .get_or_init(|| Regex::new(r"\b\d+ms\b").expect("valid milliseconds regex"))
+        .replace_all(&text, "Xms")
+        .into_owned();
+
+    MIN_SEC_RE
+        .get_or_init(|| Regex::new(r"\b\d+m\s+\d+s\b").expect("valid minute-second regex"))
+        .replace_all(&text, "Xm Ys")
+        .into_owned()
+}
+
+fn normalize_spacer_rows(text: String) -> String {
+    let ends_with_newline = text.ends_with('\n');
+    let mut lines: Vec<String> = Vec::new();
+    let mut pending_blank: Option<usize> = None;
+
+    for line in text.lines() {
+        if is_spacer_border_line(line) {
+            pending_blank = Some(line.chars().count());
+            continue;
+        }
+
+        lines.push(line.to_string());
+
+        if let Some(width) = pending_blank.take() {
+            lines.push(" ".repeat(width));
+        }
+    }
+
+    if let Some(width) = pending_blank {
+        lines.push(" ".repeat(width));
+    }
+
+    let mut normalized = lines.join("\n");
+    if ends_with_newline && (!normalized.is_empty() || text.is_empty()) {
+        normalized.push('\n');
+    }
+
+    normalized
+}
+
+fn is_spacer_border_line(line: &str) -> bool {
+    if line.trim().is_empty() {
+        return false;
+    }
+
+    let trimmed = line.trim();
+    if trimmed.len() < 3 {
+        return false;
+    }
+
+    let bytes = trimmed.as_bytes();
+    if bytes.first() != Some(&b'|') || bytes.last() != Some(&b'|') {
+        return false;
+    }
+
+    let inner = &trimmed[1..trimmed.len() - 1];
+    if inner.trim().is_empty() {
+        return false;
+    }
+
+    inner.chars().all(|ch| ch == '-' || ch == ' ')
+}
+
+trait Pipe: Sized {
+    fn pipe<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self) -> R;
+}
+
+impl<T> Pipe for T {
+    fn pipe<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
+        f(self)
+    }
 }
 
 fn is_history_header(line: &str) -> bool {
@@ -115,7 +256,7 @@ fn baseline_empty_chat() {
     let mut harness = ChatWidgetHarness::new();
     code_tui::test_helpers::set_standard_terminal_mode(&mut harness, false);
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("empty_chat", output);
 }
 
@@ -422,7 +563,7 @@ fn baseline_simple_conversation() {
         }),
     });
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("simple_conversation", output);
 }
 
@@ -504,7 +645,7 @@ fn baseline_multiline_formatting() {
         }),
     });
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 24));
     insta::assert_snapshot!("multiline_formatting", output);
 }
 
@@ -656,7 +797,7 @@ fn tool_activity_showcase() {
     );
     harness.override_running_tool_elapsed("agent-pending", Duration::from_secs(185));
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 40);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 40));
     insta::assert_snapshot!("tool_activity_showcase", output);
 }
 
@@ -773,7 +914,7 @@ fn browser_session_grouped_desired_layout() {
         }),
     });
 
-    let output = render_chat_widget_to_vt100(&mut harness, 80, 32);
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 32));
     insta::assert_snapshot!("browser_session_grouped_desired_layout", output);
 }
 

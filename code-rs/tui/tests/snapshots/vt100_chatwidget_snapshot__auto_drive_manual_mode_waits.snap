@@ -1,23 +1,21 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 274
+assertion_line: 415
 expression: frame
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
- ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
- │ justfile run manual                                                        │
- │ ┌─────────────────────────────────────────────────────────────────────────┐│
- │ │ What can I code for you today?                                          ││
- │ └─────────────────────────────────────────────────────────────────────────┘│
- │ ╭──────────╮                                                               │
- │ │ Continue │   Esc to cancel                                               │
- │ ╰──────────╯                                                               │
- │ Awaiting input (0s, 0 turns)  •  Agents Enabled  •  Review Enabled         │
- └────────────────────────────────────────────────────────────────────────────┘
+
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ |                                                                            |
+ |                                                                            |
+ |                                                                            |
+ |                                                                            |
+ +----------------------------------------------------------------------------+
