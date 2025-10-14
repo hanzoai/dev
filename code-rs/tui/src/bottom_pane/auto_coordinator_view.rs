@@ -612,7 +612,8 @@ impl AutoCoordinatorView {
         model: &AutoActiveViewModel,
         composer_height: u16,
     ) -> u16 {
-        let mut total = Self::HEADER_HEIGHT as usize;
+        let mut total = 1usize // blank spacer row
+            .saturating_add(Self::HEADER_HEIGHT as usize);
 
         if !model.awaiting_submission {
             return total.min(u16::MAX as usize) as u16;
@@ -660,12 +661,9 @@ impl AutoCoordinatorView {
             total = total.saturating_add(composer_block);
         }
 
-        let summary_height = if self.build_status_summary(model).is_some() {
-            1
-        } else {
-            0
-        };
-        total = total.saturating_add(summary_height);
+        if self.build_status_summary(model).is_some() {
+            total = total.saturating_add(1);
+        }
 
         total.min(u16::MAX as usize) as u16
     }
@@ -684,24 +682,40 @@ impl AutoCoordinatorView {
         let frame_style = self.frame_style_for_model(model);
         let display_message = self.resolve_display_message(model);
 
-        let header_height = Self::HEADER_HEIGHT.min(area.height);
-        let header_area = Rect {
+        // Draw spacer row to match composer spacing.
+        let spacer_row = Rect {
             x: area.x,
             y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        Self::clear_row(spacer_row, buf);
+
+        if area.height <= 1 {
+            return;
+        }
+
+        let header_height = Self::HEADER_HEIGHT.min(area.height.saturating_sub(1));
+        let header_area = Rect {
+            x: area.x,
+            y: area.y + 1,
             width: area.width,
             height: header_height,
         };
         self.render_header(header_area, buf, model, &frame_style, &display_message);
 
-        if area.height <= Self::HEADER_HEIGHT {
+        if area.height <= 1 + Self::HEADER_HEIGHT {
             return;
         }
 
         let inner = Rect {
             x: area.x,
-            y: area.y + Self::HEADER_HEIGHT,
+            y: area.y + 1 + Self::HEADER_HEIGHT,
             width: area.width,
-            height: area.height.saturating_sub(Self::HEADER_HEIGHT),
+            height: area
+                .height
+                .saturating_sub(1)
+                .saturating_sub(Self::HEADER_HEIGHT),
         };
         if inner.height == 0 || inner.width == 0 {
             return;
@@ -896,6 +910,17 @@ impl AutoCoordinatorView {
                 };
                 Paragraph::new(line).render(summary_rect, buf);
             }
+        }
+    }
+
+    fn clear_row(area: Rect, buf: &mut Buffer) {
+        if area.height == 0 {
+            return;
+        }
+        for x in area.x..area.x.saturating_add(area.width) {
+            let cell = &mut buf[(x, area.y)];
+            cell.set_symbol(" ");
+            cell.set_style(Style::default().fg(colors::text()).bg(colors::background()));
         }
     }
 

@@ -10,10 +10,10 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
+
    Auto Drive > Working                               Awaiting input (0 turns)
  Auto Drive will send:
  Prompt:
- cargo fmt --check
  Awaiting input (0 turns)  •  Agents Disabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
@@ -29,10 +29,10 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
+
    Auto Drive > Working                               Awaiting input (0 turns)
  Auto Drive will send:
  Prompt:
- cargo fmt --check
  Awaiting input (0 turns)  •  Agents Disabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
@@ -43,7 +43,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
-   /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -52,6 +51,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /cloud - browse, apply, and create cloud tasks NEW
 
  › cargo fmt --check
+
    Auto Drive > Running cargo fmt --check.                   Running (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
