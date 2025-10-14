@@ -5,7 +5,6 @@ expression: frame
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -14,8 +13,9 @@ expression: frame
  Auto Drive > Working                                  Awaiting input (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
  │Approval required — review and press Enter to send                          │
+ │justfile run manual                                                         │
+ │Enter to send • E to edit prompt • Esc to cancel Auto Drive                 │
  └────────────────────────────────────────────────────────────────────────────┘
- Awaiting approval  •  Agents Enabled  •  Review EnEnter approve  •  Esc cancel
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯

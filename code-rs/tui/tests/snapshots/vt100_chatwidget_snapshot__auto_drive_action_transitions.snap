@@ -5,6 +5,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /model - choose model & reasoning effort NEW with GPT-5-Codex!
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
@@ -13,9 +16,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
  Auto Drive > Working                                         Running (0 turns)
- ┌────────────────────────────────────────────────────────────────────────────┐
- └────────────────────────────────────────────────────────────────────────────┘
- Agents Enabled  •  Review Enabled  •  Ctrl+S Settings      Esc stop Auto Drive
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯
@@ -24,7 +24,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -33,8 +32,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  Auto Drive > Working                                  Awaiting input (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
  │Approval required — review and press Enter to send                          │
+ │cargo test --workspace                                                      │
+ │Enter to send now • Esc/E to edit prompt                                    │
  └────────────────────────────────────────────────────────────────────────────┘
- Awaiting approval  •  Agents Enabled  •  Review EnEnter approve  •  Esc cancel
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯
@@ -43,6 +43,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -51,11 +52,10 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /cloud - browse, apply, and create cloud tasks NEW
  Auto Drive > Working                                 Awaiting review (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
+ │cargo test --workspace                                                      │
  └────────────────────────────────────────────────────────────────────────────┘
- Agents Enabled  •  Review Enabled  •  Ctrl+S Settings      Esc stop Auto Drive
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
- │                                                                            │
  ╰────────────────────────────────────────────────────────────────────────────╯
 
 ---FRAME---
@@ -71,8 +71,8 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /cloud - browse, apply, and create cloud tasks NEW
  Auto Drive > Working                                         Running (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
+ │cargo test --workspace                                                      │
  └────────────────────────────────────────────────────────────────────────────┘
- Agents Enabled  •  Review Enabled  •  Ctrl+S Settings      Esc stop Auto Drive
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯
