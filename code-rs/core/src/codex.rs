@@ -58,7 +58,7 @@ use crate::protocol::WebSearchCompleteEvent;
 use code_protocol::mcp_protocol::AuthMode;
 use crate::account_usage;
 use crate::auth_accounts;
-use crate::agent_defaults::DEFAULT_AGENT_NAMES;
+use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use code_protocol::models::WebSearchAction;
 use code_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
@@ -3197,17 +3197,18 @@ async fn submission_loop(
                     config.tools_web_search_allowed_domains.clone();
 
                 let mut agent_models: Vec<String> = if config.agents.is_empty() {
-                    DEFAULT_AGENT_NAMES
-                        .iter()
-                        .map(|s| (*s).to_string())
+                    default_agent_configs()
+                        .into_iter()
+                        .filter(|cfg| cfg.enabled)
+                        .map(|cfg| cfg.name)
                         .collect()
                 } else {
                     get_enabled_agents(&config.agents)
                 };
                 if agent_models.is_empty() {
-                    agent_models = DEFAULT_AGENT_NAMES
-                        .iter()
-                        .map(|s| (*s).to_string())
+                    agent_models = enabled_agent_model_specs()
+                        .into_iter()
+                        .map(|spec| spec.slug.to_string())
                         .collect();
                 }
                 agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));

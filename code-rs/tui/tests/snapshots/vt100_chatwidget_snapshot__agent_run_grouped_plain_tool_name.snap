@@ -1,16 +1,14 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 856
+assertion_line: 1139
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
- ┌ Agents ────────────────────────────────────────────────────────────────────┐
- │ • QA Bot (running 0s) — Executing smoke tests         Ctrl+A open terminal │
- └────────────────────────────────────────────────────────────────────────────┘
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+ + Agents --------------------------------------------------------------------+
+ | • QA Bot (running 0s) - Executing smoke tests         Ctrl+A open terminal |
+ +----------------------------------------------------------------------------+
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -20,17 +18,19 @@ expression: output
 
  › Kick off QA bot regression run
 
-   ╭─ qa-bot
-   │
-   │   Context: regression sweep
-   │
-   │   Run targeted regression suite
-   │
-   │   • claude running (18s)
-   │
-   ╰─ [Ctrl+A] Expand · [Esc] Stop
+   Agent batch "qa-bot" started here; latest status is shown below.
 
- ┌───────────────────────────── ✶ Responding... ──────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+   +- qa-bot
+   |
+   |   Context: regression sweep
+   |
+   |   Run targeted regression suite
+   |
+   |   • claude running (18s)
+   |
+   +- [Ctrl+A] Expand · [Esc] Stop
+
+ +----------------------------- ✶ Responding... ------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help

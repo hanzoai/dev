@@ -1,15 +1,11 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 474
+assertion_line: 733
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
-   /chrome - connect to Chrome
-   /plan - create a comprehensive plan (multiple agents)
-   /code - perform a coding task (multiple agents)
-   /branch - work in an isolated /branch then /merge when done (great for
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
@@ -18,27 +14,31 @@ expression: output
 
  › Can you gather details from the latest docs update?
 
- ✔ Web Search, duration: 0ms
-   └ query: ratatui widget patterns
+ ✔ Web Search, duration: Xms
+   + query: ratatui widget patterns
 
- ⚙ Web Search... (1m 15s)
-   └ query: async rust tui example
+ ⚙ Web Search... (Xm Ys)
+   + query: async rust tui example
 
-   ╭─ Browser (headless): Browser Session
-   │
-   │   Clicked  #login-button
-   │
-   ╰─ [Ctrl+B] Expand · [Esc] Stop
+   Browser session "Browser Session" started here; latest view is shown below.
 
-   ╭─ deploy-helper
-   │
-   │   Run targeted regression suite
-   │
-   │   No agent updates yet
-   │
-   ╰─ [Ctrl+A] Expand · [Esc] Stop
+   +- Browser (headless): Browser Session
+   |
+   |   Clicked  #login-button
+   |
+   +- [Ctrl+B] Expand · [Esc] Stop
 
- ┌────────────────────────────────────────────────────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
+   Agent batch "qa-bot" started here; latest status is shown below.
+
+   +- deploy-helper
+   |
+   |   Run targeted regression suite
+   |
+   |   No agent updates yet
+   |
+   +- [Ctrl+A] Expand · [Esc] Stop
+
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help

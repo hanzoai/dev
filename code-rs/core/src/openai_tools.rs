@@ -785,15 +785,17 @@ mod tests {
 
     use super::*;
 
-    const TEST_AGENT_MODELS: &[&str] = &["claude", "gemini", "qwen", "code", "cloud"];
+    use crate::agent_defaults::{agent_model_specs, enabled_agent_model_specs};
+
+    fn test_agent_models() -> Vec<String> {
+        enabled_agent_model_specs()
+            .into_iter()
+            .map(|spec| spec.slug.to_string())
+            .collect()
+    }
 
     fn apply_default_agent_models(config: &mut ToolsConfig) {
-        config.set_agent_models(
-            TEST_AGENT_MODELS
-                .iter()
-                .map(|name| (*name).to_string())
-                .collect(),
-        );
+        config.set_agent_models(test_agent_models());
     }
 
     fn assert_eq_tool_names(tools: &[OpenAiTool], expected_names: &[&str]) {
