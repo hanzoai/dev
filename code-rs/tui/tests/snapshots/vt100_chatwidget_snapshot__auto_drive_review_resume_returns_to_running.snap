@@ -1,12 +1,10 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 301
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
-   /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
@@ -14,29 +12,29 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
- ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
- │ waiting for code review...                                                 │
- │ ┌─────────────────────────────────────────────────────────────────────────┐│
- │ │ What can I code for you today?                                          ││
- │ └─────────────────────────────────────────────────────────────────────────┘│
- │ Awaiting review (0s, 0 turns)  •  Agents Enabled  •  Review Enabled        │
+ Auto Drive > Working                                 Awaiting review (0 turns)
+ ┌────────────────────────────────────────────────────────────────────────────┐
  └────────────────────────────────────────────────────────────────────────────┘
+ Agents Enabled  •  Review Enabled  •  Ctrl+S Settings      Esc stop Auto Drive
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ What can I code for you today?                                             │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
 ---FRAME---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
- ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
- │ Review cleared open issues. Coordinator resumed the workflow.              │
- │ Review complete — resuming tasks…                                          │
- │ Coordinator resumed the workflow.                                          │
- │ ┌─────────────────────────────────────────────────────────────────────────┐│
- │ │ What can I code for you today?                                          ││
- │ └─────────────────────────────────────────────────────────────────────────┘│
- │ Running (0s, 0 turns)  •  Agents Enabled  •  Review Enabled                │
+ Auto Drive > Working                                         Running (0 turns)
+ ┌────────────────────────────────────────────────────────────────────────────┐
  └────────────────────────────────────────────────────────────────────────────┘
+ Agents Enabled  •  Review Enabled  •  Ctrl+S Settings      Esc stop Auto Drive
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ What can I code for you today?                                             │
+ ╰────────────────────────────────────────────────────────────────────────────╯

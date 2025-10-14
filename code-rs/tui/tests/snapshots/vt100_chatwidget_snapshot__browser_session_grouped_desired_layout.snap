@@ -8,24 +8,24 @@ expression: output
  ┌ Browser ───────────────────────────────────────────────────────────────────┐
  │ • https://example.com/docs                                   Ctrl+B expand │
  └────────────────────────────────────────────────────────────────────────────┘
-   /limits - visualize weekly and hourly rate limits
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
  › Open docs and find login button
 
-   ╭─ BROWSER (headless): example.com · 4 actions · 65.0s
+   Browser session "example.com" (https://example.com/docs) started here;
+   latest view is shown below.
+
+   ╭─ ┌Browser────────────────────────────────┐
+   │  │Screenshot:                            │
+   │  │browser_session.png                    │  Opened    https://example.co
+   │  │                                       │            m/docs
+   │  │                                       │  Clicked   Sign in button
+   │  └───────────────────────────────────────┘  Scrolled  dy=640
+   │                                             Typed     docs search
    │
-   │  #  ACTION       TARGET                   VALUE         RESULT       t
-   │   1 Nav          https://example.com/docs —             ok            5.0s
-   │   2 Click        Sign in button           "#sign-in"    ok           13.0s
-   │   3 Scroll       —                        "dy=640"      ok           14.0s
-   │   4 Type         —                        "docs search" ok           33.0s
-   │
-   │  Console: ⚠️   cdp warning: Refused to load script from cdn.example.com
-   │
-   │  Screenshot: /tmp/browser_session.png
+   │                                             Console: ⚠️  cdp warning:
+   │                                             Refused to load script fr...
+   │                                             cdn.example.com
    │
    ╰─ [Ctrl+B] Expand · [Esc] Stop
 

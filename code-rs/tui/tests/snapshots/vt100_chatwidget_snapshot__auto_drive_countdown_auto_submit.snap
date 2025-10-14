@@ -1,45 +1,44 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 230
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
- ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
- │ cargo fmt --check                                                          │
- │ ┌─────────────────────────────────────────────────────────────────────────┐│
- │ │ What can I code for you today?                                          ││
- │ └─────────────────────────────────────────────────────────────────────────┘│
- │ ╭───────────────╮                                                          │
- │ │ Continue (3s) │   Esc to cancel                                          │
- │ ╰───────────────╯                                                          │
- │ Awaiting input (0s, 0 turns)  •  Agents Disabled  •  Review Enabled        │
+ Auto Drive > Working                                  Awaiting input (0 turns)
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │Approval required — review and press Enter to send                          │
  └────────────────────────────────────────────────────────────────────────────┘
+ Awaiting approval  •  Agents Disabled  •  Review EEnter approve  •  Esc cancel
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ What can I code for you today?                                             │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
 ---FRAME---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
  └────────────────────────────────────────────────────────────────────────────┘
+   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
- ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
- │ cargo fmt --check                                                          │
- │ ┌─────────────────────────────────────────────────────────────────────────┐│
- │ │ What can I code for you today?                                          ││
- │ └─────────────────────────────────────────────────────────────────────────┘│
- │ ╭───────────────╮                                                          │
- │ │ Continue (1s) │   Esc to cancel                                          │
- │ ╰───────────────╯                                                          │
- │ Awaiting input (0s, 0 turns)  •  Agents Disabled  •  Review Enabled        │
+ Auto Drive > Working                                  Awaiting input (0 turns)
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │Approval required — review and press Enter to send                          │
  └────────────────────────────────────────────────────────────────────────────┘
+ Awaiting approval  •  Agents Disabled  •  Review EEnter approve  •  Esc cancel
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ What can I code for you today?                                             │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
 ---FRAME---
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                                    Code                                    │
@@ -51,11 +50,10 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /cloud - browse, apply, and create cloud tasks NEW
 
  › cargo fmt --check
- ┌ Auto Drive ────────────────────────────────────────────────────────────────┐
- │ Running cargo fmt --check.                                                 │
- │ Auto Drive executing formatter…                                            │
- │ ┌─────────────────────────────────────────────────────────────────────────┐│
- │ │ What can I code for you today?                                          ││
- │ └─────────────────────────────────────────────────────────────────────────┘│
- │ Running (0s, 0 turns)  •  Agents Disabled  •  Review Enabled               │
+ Auto Drive > Running cargo fmt --check.                      Running (0 turns)
+ ┌────────────────────────────────────────────────────────────────────────────┐
  └────────────────────────────────────────────────────────────────────────────┘
+ Agents Disabled  •  Review Enabled  •  Ctrl+S Settings     Esc stop Auto Drive
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ What can I code for you today?                                             │
+ ╰────────────────────────────────────────────────────────────────────────────╯

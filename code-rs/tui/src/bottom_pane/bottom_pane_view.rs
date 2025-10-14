@@ -52,6 +52,7 @@ pub(crate) trait BottomPaneView<'a> {
     }
 
     /// Allow read-only downcasting for views that expose additional APIs.
+    #[allow(dead_code)]
     fn as_any(&self) -> Option<&dyn Any> {
         None
     }
