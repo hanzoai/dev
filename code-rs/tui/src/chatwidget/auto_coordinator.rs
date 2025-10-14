@@ -1160,7 +1160,7 @@ fn build_schema(active_agents: &[String]) -> Value {
             "finish_status": {
                 "type": "string",
                 "enum": ["continue", "finish_success", "finish_failed"],
-                "description": "Prefer 'continue' unless the mission is fully complete or truly blocked."
+                "description": "Prefer 'continue' unless the mission is fully complete or truly blocked. Always consider what further work might be possible to confirm the goal is complete before ending."
             },
             "progress": {
                 "type": "object",
@@ -1168,15 +1168,15 @@ fn build_schema(active_agents: &[String]) -> Value {
                 "properties": {
                     "past": {
                         "type": ["string", "null"],
-                        "minLength": 1,
-                        "maxLength": 160,
-                        "description": "One sentence, past tense, meaningful work since last turn."
+                        "minLength": 4,
+                        "maxLength": 50,
+                        "description": "2-5 words, past-tense, work performed so far."
                     },
                     "current": {
-                        "type": ["string", "null"],
-                        "minLength": 1,
-                        "maxLength": 100,
-                        "description": "Short present-tense phrase of what runs now."
+                        "type": "string",
+                        "minLength": 4,
+                        "maxLength": 50,
+                        "description": "2-5 words, present-tense, what is being worked on now."
                     }
                 },
                 "required": ["past", "current"]
@@ -1184,7 +1184,7 @@ fn build_schema(active_agents: &[String]) -> Value {
             "cli": {
                 "type": ["object", "null"],
                 "additionalProperties": false,
-                "description": "The single atomic instruction for the CLI this turn. Set to null when finish_status != 'continue'.",
+                "description": "The single atomic instruction for the CLI this turn. Set to null only when finish_status != 'continue'.",
                 "properties": {
                     "context": {
                         "type": ["string", "null"],
@@ -1203,12 +1203,12 @@ fn build_schema(active_agents: &[String]) -> Value {
             "agents": {
                 "type": ["object", "null"],
                 "additionalProperties": false,
-                "description": "Optional parallel helper agents for the CLI to spawn.",
+                "description": "Parallel help agents for the CLI to spawn. Use as often as possible. Agents are faster, parallelize work and allow exploration of a range of approaches.",
                 "properties": {
                     "timing": {
                         "type": "string",
                         "enum": ["parallel", "blocking"],
-                        "description": "Parallel: run agents while the CLI continues. Blocking: wait for results before the CLI proceeds."
+                        "description": "Parallel: run while the CLI works. Blocking: wait for results before the CLI proceeds."
                     },
                     "list": {
                         "type": "array",
@@ -1219,7 +1219,12 @@ fn build_schema(active_agents: &[String]) -> Value {
                             "properties": {
                                 "write": {
                                     "type": "boolean",
-                                    "description": "Allow writes in isolated worktree. Default false."
+                                    "description": "Creates an isolated worktree for each agent and enable writes to that worktree. Default false so that the agent can only read files."
+                                },
+                                "context": {
+                                    "type": ["string", "null"],
+                                    "maxLength": 1500,
+                                    "description": "Background details (agents can not see the conversation - you must provide any neccessary information here)."
                                 },
                                 "prompt": {
                                     "type": "string",
@@ -1227,16 +1232,11 @@ fn build_schema(active_agents: &[String]) -> Value {
                                     "maxLength": 400,
                                     "description": "Outcome-oriented instruction (what to produce)."
                                 },
-                                "context": {
-                                    "type": ["string", "null"],
-                                    "maxLength": 1500,
-                                    "description": "Optional concrete details (paths, commands, constraints)."
-                                },
                                 "models": models_request_property
                             },
                             "required": ["prompt", "context", "write", "models"]
                         },
-                        "description": "Helper agents to launch this turn (<=3)."
+                        "description": "Aim for 1-3 helper agents per turn. More or less is allowed if the situation calls for it."
                     },
                 },
                 "required": ["timing", "list"]
@@ -1244,7 +1244,7 @@ fn build_schema(active_agents: &[String]) -> Value {
             "review": {
                 "type": ["object", "null"],
                 "additionalProperties": false,
-                "description": "Optional background review thread to start/update this turn.",
+                "description": "Starts an optional review at the start of the turn. Use whenever substainal code has changed. Confirms there are no errors in the implementation using a specalized review model.",
                 "properties": {
                     "source": {
                         "type": "string",
