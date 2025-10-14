@@ -1080,7 +1080,7 @@ impl BottomPane<'_> {
                             .map_or_else(String::new, str::to_string);
                         let _ = auto_view.update_status_text(status_text);
                         self.status_view_active = false;
-                        self.composer.set_embedded_mode(true);
+                        self.composer.set_embedded_mode(false);
                         self.enable_auto_drive_style();
                         self.request_redraw();
                         return;
@@ -1106,7 +1106,7 @@ impl BottomPane<'_> {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::AutoCoordinator;
         self.status_view_active = false;
-        self.composer.set_embedded_mode(true);
+        self.composer.set_embedded_mode(false);
         self.enable_auto_drive_style();
         self.request_redraw();
     }

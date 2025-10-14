@@ -68,7 +68,7 @@ pub(crate) struct AutoCoordinatorView {
     style: AutoDriveStyle,
 }
 
-const PUN_FALLBACK: &str = "Recalculating route…";
+const DEFAULT_FALLBACK: &str = "Loading message/reasoning";
 
 impl AutoCoordinatorView {
     pub fn new(
@@ -257,6 +257,8 @@ impl AutoCoordinatorView {
             "Running"
         } else if model.awaiting_submission {
             "Awaiting input"
+        } else if model.started_at.is_some() {
+            "Running"
         } else if model.elapsed.is_some() && model.started_at.is_none() {
             "Stopped"
         } else {
@@ -265,11 +267,14 @@ impl AutoCoordinatorView {
     }
 
     fn resolve_display_message(&self, model: &AutoActiveViewModel) -> String {
-        if let Some(message) = self.status_message.as_ref() {
-            let trimmed = message.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
+        if let Some(message) = self
+            .status_message
+            .as_ref()
+            .map(|msg| msg.trim())
+            .filter(|msg| !msg.is_empty())
+            .filter(|msg| !Self::is_generic_status_message(msg))
+        {
+            return message.to_string();
         }
 
         if let Some(current) = model.progress_current.as_ref() {
@@ -298,14 +303,20 @@ impl AutoCoordinatorView {
             }
         }
 
-        PUN_FALLBACK.to_string()
+        DEFAULT_FALLBACK.to_string()
+    }
+
+    fn is_generic_status_message(message: &str) -> bool {
+        matches!(message, "Auto Drive" | "Auto Drive Goal")
     }
 
     fn runtime_text(&self, model: &AutoActiveViewModel) -> String {
         let label = Self::status_label(model);
         let mut details: Vec<String> = Vec::new();
         if let Some(duration) = Self::effective_elapsed(model) {
-            details.push(Self::format_elapsed(duration));
+            if duration.as_secs() > 0 {
+                details.push(Self::format_elapsed(duration));
+            }
         }
         details.push(Self::format_turns(model.turns_completed));
         if details.is_empty() {
@@ -328,6 +339,7 @@ impl AutoCoordinatorView {
 
         let message = self.resolve_display_message(model);
         let left_spans = vec![
+            Span::raw("  "),
             Span::styled("Auto Drive", frame_style.title_style.clone()),
             Span::styled(" > ", Style::default().fg(colors::text_dim())),
             Span::styled(message, Style::default().fg(colors::text())),
@@ -335,7 +347,12 @@ impl AutoCoordinatorView {
         let left_line = Line::from(left_spans);
 
         let runtime = self.runtime_text(model);
-        let right_width = UnicodeWidthStr::width(runtime.as_str()).min(area.width as usize) as u16;
+        let runtime_display = if runtime.is_empty() {
+            String::new()
+        } else {
+            format!(" {} ", runtime)
+        };
+        let right_width = UnicodeWidthStr::width(runtime_display.as_str()).min(area.width as usize) as u16;
         let constraints = if right_width == 0 {
             vec![Constraint::Fill(1)]
         } else {
@@ -350,7 +367,7 @@ impl AutoCoordinatorView {
 
         if right_width > 0 {
             Paragraph::new(Line::from(Span::styled(
-                runtime,
+                runtime_display,
                 self.style.summary_style.clone(),
             )))
             .alignment(Alignment::Right)
