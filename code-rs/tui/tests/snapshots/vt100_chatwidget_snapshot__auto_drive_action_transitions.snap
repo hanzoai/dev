@@ -5,16 +5,16 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+   /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
    Auto Drive > Working                                      Running (0 turns)
- Completed git status check. Comparing diffs against last run.
- Analyzing workspace changes…
- Comparing diffs against last run.
- Running (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -43,6 +43,8 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
@@ -51,8 +53,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
    Auto Drive > Working                              Awaiting review (0 turns)
- waiting for code review...
- Awaiting review (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -62,6 +62,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
+   /chrome - connect to Chrome
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -69,9 +72,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
    Auto Drive > Working                                      Running (0 turns)
- Queued new command for execution.
- Resuming automated investigation…
- Running (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
