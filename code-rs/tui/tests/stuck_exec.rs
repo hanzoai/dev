@@ -84,3 +84,41 @@ fn exec_cell_clears_after_patch_flow() {
         output
     );
 }
+
+#[test]
+fn exec_spinner_clears_after_final_answer() {
+    use code_core::protocol::AgentMessageEvent;
+
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_spinner".to_string();
+    let cwd = PathBuf::from("/tmp");
+
+    harness.handle_event(Event {
+        id: "exec-begin-spinner".to_string(),
+        event_seq: 0,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "echo running".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    harness.handle_event(Event {
+        id: "answer-final".to_string(),
+        event_seq: 1,
+        msg: EventMsg::AgentMessage(AgentMessageEvent {
+            message: "All done.".into(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 12);
+    assert!(
+        !output.contains("running command"),
+        "spinner should clear after final answer, but output was:\n{}",
+        output
+    );
+}
