@@ -4,7 +4,7 @@ assertion_line: 289
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -23,7 +23,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits
@@ -42,7 +42,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits

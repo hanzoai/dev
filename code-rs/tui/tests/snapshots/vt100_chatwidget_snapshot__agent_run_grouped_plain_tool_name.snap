@@ -1,10 +1,10 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 1139
+assertion_line: 1183
 expression: output
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
  + Agents --------------------------------------------------------------------+
  | • QA Bot (running 0s) - Executing smoke tests         Ctrl+A open terminal |

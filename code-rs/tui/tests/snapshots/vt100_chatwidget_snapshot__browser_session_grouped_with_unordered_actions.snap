@@ -1,10 +1,10 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 923
+assertion_line: 1003
 expression: output
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)

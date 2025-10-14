@@ -4,7 +4,7 @@ assertion_line: 442
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
@@ -23,7 +23,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |                                    Code                                    |
+ |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
  +----------------------------------------------------------------------------+
    parallel work)
    /limits - visualize weekly and hourly rate limits
