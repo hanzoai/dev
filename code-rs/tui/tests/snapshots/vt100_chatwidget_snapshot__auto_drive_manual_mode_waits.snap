@@ -10,12 +10,12 @@ expression: frame
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
- Auto Drive > Working                                  Awaiting input (0 turns)
+   Auto Drive > Working                               Awaiting input (0 turns)
  ┌────────────────────────────────────────────────────────────────────────────┐
  │Approval required — review and press Enter to send                          │
  │justfile run manual                                                         │
- │Enter to send • E to edit prompt • Esc to cancel Auto Drive                 │
  └────────────────────────────────────────────────────────────────────────────┘
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ What can I code for you today?                                             │
  ╰────────────────────────────────────────────────────────────────────────────╯
+   Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
