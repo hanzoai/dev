@@ -33,6 +33,14 @@ Choosing Instructions
     - `parallel` when the CLI should continue its prompt while the agents run (it may call `agent.wait` later when convenient).
     - `blocking` when the CLI must wait on `agent.wait` before progressing with its own prompt.
   - DO NOT tell the agents to use isolated worktrees, this is done automatically.
+  - Model Selection Guide (aim for 2-4 per batch based on complexity of task):
+    - `claude-sonnet-4.5`: Default for most coding tasks (along with code-gpt-5-codex) — excels at implementation, tool use, debugging, and testing.
+    - `claude-opus-4.1`: Prefer claude-sonnet-4.5 for most tasks, but a good fallback for complex reasoning when other attempts have failed.
+    - `code-gpt-5-codex`: Default for most coding tasks (along with claude-sonnet-4.5) - excels at implementation, refactors, multi-file edits and code review.
+    - `code-gpt-5`: Use for UI/UX or mixed tasks where explanation, design judgment, or multi-domain reasoning is equally important as code.
+    - `gemini-2.5-pro`: Use when you require huge context or multimodal grounding (repo-scale inputs, or search grounding); good for alternative architecture opinions.
+    - `gemini-2.5-flash`: Use for fast, high-volume scaffolding, creating minimal repros/tests, or budget-sensitive operations.
+    - `qwen-3-coder`: Fast and reasonably effective. Good for providing an alternative opinion when initial attempts fail.
 - Review (background):
   - Use `source: "commit"` with `sha` to review a specific commit (preferred).
   - Use `source: "staged"` to review the workspace diff.
