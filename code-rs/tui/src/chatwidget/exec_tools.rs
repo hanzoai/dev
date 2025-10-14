@@ -616,6 +616,7 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
         }
     }
 
+    chat.maybe_hide_spinner();
     chat.refresh_auto_drive_visuals();
 }
 
