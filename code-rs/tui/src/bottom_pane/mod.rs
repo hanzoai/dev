@@ -6,7 +6,7 @@ use crate::auto_drive_style::AutoDriveVariant;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
 use crate::thread_spawner;
-use bottom_pane_view::BottomPaneView;
+pub(crate) use bottom_pane_view::BottomPaneView;
 use crate::util::buffer::fill_rect;
 use code_core::protocol::TokenUsage;
 use code_file_search::FileMatch;
@@ -55,6 +55,8 @@ pub(crate) mod validation_settings_view;
 mod update_settings_view;
 mod undo_timeline_view;
 mod notifications_settings_view;
+mod settings_overlay;
+pub(crate) use settings_overlay::SettingsSection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {
@@ -88,8 +90,9 @@ use code_common::model_presets::ModelPreset;
 use code_core::config_types::ReasoningEffort;
 use code_core::config_types::TextVerbosity;
 use code_core::config_types::ThemeName;
-use model_selection_view::ModelSelectionView;
-use theme_selection_view::ThemeSelectionView;
+pub(crate) use model_selection_view::ModelSelectionView;
+pub(crate) use mcp_settings_view::McpSettingsView;
+pub(crate) use theme_selection_view::ThemeSelectionView;
 use verbosity_selection_view::VerbositySelectionView;
 pub(crate) use undo_timeline_view::{UndoTimelineEntry, UndoTimelineEntryKind, UndoTimelineView};
 
@@ -254,6 +257,7 @@ impl BottomPane<'_> {
         self.request_redraw();
     }
 
+    #[allow(dead_code)]
     pub fn show_notifications_settings(&mut self, view: NotificationsSettingsView) {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
@@ -284,6 +288,7 @@ impl BottomPane<'_> {
         if matches!(self.active_view_kind, ActiveViewKind::AutoSettings) {
             self.active_view = None;
             self.active_view_kind = ActiveViewKind::None;
+            self.set_standard_terminal_hint(None);
             self.status_view_active = false;
             self.request_redraw();
         }
@@ -419,6 +424,7 @@ impl BottomPane<'_> {
                     self.active_view_kind = kind;
                 } else {
                     self.active_view_kind = ActiveViewKind::None;
+                    self.set_standard_terminal_hint(None);
                 }
 
                 if consumed {
@@ -442,6 +448,7 @@ impl BottomPane<'_> {
                 self.active_view_kind = kind;
             } else {
                 self.active_view_kind = ActiveViewKind::None;
+                self.set_standard_terminal_hint(None);
             }
             // Don't create a status view - keep composer visible
             // Debounce view navigation redraws to reduce render thrash
@@ -503,6 +510,7 @@ impl BottomPane<'_> {
                     self.active_view_kind = kind;
                 } else {
                     self.active_view_kind = ActiveViewKind::None;
+                    self.set_standard_terminal_hint(None);
                 }
                 // Don't create a status view - keep composer visible
                 self.show_ctrl_c_quit_hint();
@@ -525,6 +533,7 @@ impl BottomPane<'_> {
                 self.active_view_kind = kind;
             } else {
                 self.active_view_kind = ActiveViewKind::None;
+                self.set_standard_terminal_hint(None);
             }
             if matches!(update, ConditionalUpdate::NeedsRedraw) {
                 self.request_redraw();
@@ -646,6 +655,7 @@ impl BottomPane<'_> {
                     self.active_view_kind = kind;
                 } else {
                     self.active_view_kind = ActiveViewKind::None;
+                    self.set_standard_terminal_hint(None);
                 }
                 self.status_view_active = false;
             }
@@ -723,6 +733,7 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
+    #[allow(dead_code)]
     /// Show the theme selection UI
     pub fn show_theme_selection(
         &mut self,
@@ -837,6 +848,7 @@ impl BottomPane<'_> {
     }
 
     /// Show MCP servers status/toggle UI
+    #[allow(dead_code)]
     pub fn show_mcp_settings(&mut self, rows: crate::bottom_pane::mcp_settings_view::McpServerRows) {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
@@ -924,6 +936,7 @@ impl BottomPane<'_> {
         if self.active_view_kind == ActiveViewKind::AutoCoordinator {
             self.active_view = None;
             self.active_view_kind = ActiveViewKind::None;
+            self.set_standard_terminal_hint(None);
             self.status_view_active = false;
             self.composer.set_embedded_mode(false);
             if disable_style {

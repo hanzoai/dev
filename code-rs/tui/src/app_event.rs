@@ -322,9 +322,11 @@ pub(crate) enum AppEvent {
     RequestValidationToolInstall { name: String, command: String },
 
     /// Enable/disable a specific MCP server
+    #[allow(dead_code)]
     UpdateMcpServer { name: String, enable: bool },
 
     /// Prefill the composer input with the given text
+    #[allow(dead_code)]
     PrefillComposer(String),
 
     /// Submit a message with hidden preface instructions
@@ -397,6 +399,7 @@ pub(crate) enum AppEvent {
     },
 
     /// Update the theme (with history event)
+    #[allow(dead_code)]
     UpdateTheme(ThemeName),
     /// Add or update a subagent command in memory (UI already persisted to config.toml)
     UpdateSubagentCommand(code_core::config_types::SubagentCommandConfig),
@@ -415,10 +418,13 @@ pub(crate) enum AppEvent {
     ShowSubagentEditorNew,
 
     /// Preview theme (no history event)
+    #[allow(dead_code)]
     PreviewTheme(ThemeName),
     /// Update the loading spinner style (with history event)
+    #[allow(dead_code)]
     UpdateSpinner(String),
     /// Preview loading spinner (no history event)
+    #[allow(dead_code)]
     PreviewSpinner(String),
     /// Rotate access/safety preset (Read Only → Write with Approval → Full Access)
     CycleAccessMode,
