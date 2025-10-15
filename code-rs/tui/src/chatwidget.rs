@@ -97,6 +97,7 @@ use self::auto_coordinator::{
     AutoCoordinatorHandle,
     TurnConfig,
     TurnDescriptor,
+    CROSS_CHECK_RESTART_BANNER,
 };
 use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
@@ -4292,25 +4293,8 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn export_auto_drive_items(&self) -> Vec<code_protocol::models::ResponseItem> {
-        self.export_auto_drive_items_internal(|_| true)
-    }
-
-    fn export_auto_observer_items(&self) -> Vec<code_protocol::models::ResponseItem> {
-        self.export_auto_drive_items_internal(Self::observer_history_kind_allowed)
-    }
-
-    fn export_auto_drive_items_internal<F>(
-        &self,
-        allow_kind: F,
-    ) -> Vec<code_protocol::models::ResponseItem>
-    where
-        F: Fn(HistoryCellType) -> bool,
-    {
         let mut items = Vec::new();
         for cell in &self.history_cells {
-            if !allow_kind(cell.kind()) {
-                continue;
-            }
             let Some(role) = Self::auto_drive_role_for_kind(cell.kind()) else {
                 continue;
             };
@@ -4386,20 +4370,6 @@ impl ChatWidget<'_> {
             items.push(item);
         }
         items
-    }
-
-    fn observer_history_kind_allowed(kind: HistoryCellType) -> bool {
-        use crate::history_cell::HistoryCellType;
-        matches!(
-            kind,
-            HistoryCellType::User
-                | HistoryCellType::Assistant
-                | HistoryCellType::Exec { .. }
-                | HistoryCellType::Tool { .. }
-                | HistoryCellType::Patch { .. }
-                | HistoryCellType::Diff
-                | HistoryCellType::Error
-        )
     }
 
     fn rebuild_auto_history(&mut self) -> Vec<code_protocol::models::ResponseItem> {
@@ -12131,12 +12101,10 @@ fi\n\
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
-        let observer_conversation = self.export_auto_observer_items();
         match start_auto_coordinator(
             self.app_event_tx.clone(),
             goal.clone(),
             conversation,
-            observer_conversation,
             self.config.clone(),
             self.config.debug,
             self.config.auto_drive_observer_cadence,
@@ -12320,15 +12288,11 @@ fi\n\
         }
         self.auto_state.waiting_for_review = false;
         let conversation = self.current_auto_history();
-        let observer_conversation = self.export_auto_observer_items();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
         if handle
-            .send(AutoCoordinatorCommand::UpdateConversation {
-                conversation,
-                observer_conversation,
-            })
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
             .is_err()
         {
             self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
@@ -12660,14 +12624,6 @@ fi\n\
         if text.trim().is_empty() {
             return;
         }
-        if self
-            .auto_state
-            .pending_observer_banners
-            .iter()
-            .any(|existing| existing == &text)
-        {
-            return;
-        }
         self.auto_state.pending_observer_banners.push(text);
     }
 
@@ -12797,7 +12753,41 @@ fi\n\
         if !self.auto_state.active {
             return;
         }
+        if delta == CROSS_CHECK_RESTART_BANNER {
+            self.auto_on_cross_check_restart();
+            return;
+        }
         self.auto_on_reasoning_delta(&delta, summary_index);
+    }
+
+    fn auto_on_cross_check_restart(&mut self) {
+        self.auto_queue_observer_banner(CROSS_CHECK_RESTART_BANNER);
+        self.auto_state.current_cli_prompt = None;
+        self.auto_state.current_cli_context = None;
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.waiting_for_response = true;
+        self.auto_state.coordinator_waiting = true;
+        self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
+        self.auto_state.reset_countdown();
+        self.auto_state.seconds_remaining = 0;
+        self.auto_state.current_summary = None;
+        self.auto_state.current_progress_past = None;
+        self.auto_state.current_progress_current = None;
+        self.auto_state.current_display_line = None;
+        self.auto_state.current_display_is_summary = false;
+        self.auto_state.current_reasoning_title = None;
+        self.auto_state.current_summary_index = None;
+        self.auto_state.placeholder_phrase =
+            Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+        self.auto_state.thinking_prefix_stripped = false;
+        self.auto_state.pending_agent_actions.clear();
+        self.auto_state.pending_agent_timing = None;
+        self.clear_composer();
+        self.auto_flush_observer_banners();
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
     }
 
     fn auto_handle_post_turn_review(
@@ -16604,18 +16594,6 @@ fi\n\
         let final_source = source.clone();
         if self.is_review_flow_active() {
             if let Some(ref want) = id {
-                if !self
-                    .stream_state
-                    .closed_answer_ids
-                    .insert(StreamId(want.clone()))
-                {
-                    tracing::debug!(
-                        "InsertFinalAnswer(review): dropping duplicate final for id={}",
-                        want
-                    );
-                    self.last_assistant_message = Some(final_source.clone());
-                    return;
-                }
                 if let Some(idx) = self.history_cells.iter().rposition(|c| {
                     c.as_any()
                         .downcast_ref::<history_cell::StreamingContentCell>()
@@ -16625,6 +16603,9 @@ fi\n\
                 }) {
                     self.history_remove_at(idx);
                 }
+                self.stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()));
             } else if let Some(idx) = self.history_cells.iter().rposition(|c| {
                 c.as_any()
                     .downcast_ref::<history_cell::StreamingContentCell>()
@@ -16633,34 +16614,7 @@ fi\n\
                 self.history_remove_at(idx);
             }
             self.last_assistant_message = Some(final_source.clone());
-            let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
-            let history_id = state.id;
-            let mut key = match id.as_deref() {
-                Some(rid) => self.try_stream_order_key(StreamKind::Answer, rid).unwrap_or_else(|| {
-                    tracing::warn!(
-                        "missing stream order key for final Answer id={}; using synthetic key",
-                        rid
-                    );
-                    self.next_internal_key()
-                }),
-                None => {
-                    tracing::warn!("missing stream id for final Answer; using synthetic key");
-                    self.next_internal_key()
-                }
-            };
-
-            if let Some(last) = self.last_assigned_order {
-                if key <= last {
-                    key = Self::order_key_successor(last);
-                    if let Some(ref want) = id {
-                        self.stream_order_seq
-                            .insert((StreamKind::Answer, want.clone()), key);
-                    }
-                }
-            }
-
-            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
-            self.history_insert_existing_record(Box::new(cell), key, "answer-review", history_id);
+            let _ = self.finalize_answer_stream_state(id.as_deref(), &final_source);
             // Advance Auto Drive after the assistant message has been finalized.
             self.auto_on_assistant_final();
             return;
@@ -20614,84 +20568,6 @@ mod tests {
         let action = &chat.auto_state.pending_agent_actions[0];
         assert_eq!(action.prompt, "Draft alternative fix");
         assert!(!action.write);
-    }
-
-    #[test]
-    fn observer_history_filters_noise_cells() {
-        use crate::history::state::ExecStatus;
-        use crate::history_cell::{ExecKind, HistoryCellType, ToolCellStatus};
-
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::User));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Assistant));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Exec {
-            kind: ExecKind::Run,
-            status: ExecStatus::Success,
-        }));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Tool {
-            status: ToolCellStatus::Success,
-        }));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Error));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Diff));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Patch {
-            kind: crate::history_cell::PatchKind::ApplyFailure,
-        }));
-
-        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::PlanUpdate));
-        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::BackgroundEvent));
-        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::Plain));
-    }
-
-    #[test]
-    fn auto_observer_failing_reports_flush_duplicate_banners_on_success() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_state.awaiting_submission = false;
-        chat.auto_state.waiting_for_response = false;
-
-        let telemetry = AutoObserverTelemetry {
-            last_status: AutoObserverStatus::Failing,
-            ..AutoObserverTelemetry::default()
-        };
-        let instruction = "Tighten up the summary";
-
-        for _ in 0..3 {
-            chat.auto_handle_observer_report(
-                AutoObserverStatus::Failing,
-                telemetry.clone(),
-                None,
-                Some(instruction.to_string()),
-            );
-        }
-
-        assert_eq!(chat.auto_state.pending_observer_banners.len(), 1);
-
-        let baseline_cells = chat.history_cells.len();
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Success,
-            Some("Resolved outstanding actions".to_string()),
-            Some("Ready to wrap up".to_string()),
-            None,
-            None,
-            Vec::new(),
-            None,
-            Vec::new(),
-        );
-
-        let new_cells = chat.history_cells.len() - baseline_cells;
-        assert!(new_cells >= 2);
-
-        let guidance_hits = chat
-            .history_cells
-            .iter()
-            .flat_map(|cell| cell.display_lines_trimmed())
-            .flat_map(|line| line.spans.iter())
-            .filter(|span| span.content.contains("Observer guidance: Tighten up the summary"))
-            .count();
-        assert_eq!(guidance_hits, 1);
-        assert!(chat.auto_state.pending_observer_banners.is_empty());
     }
 
     #[test]

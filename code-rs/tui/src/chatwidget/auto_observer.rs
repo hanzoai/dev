@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use code_core::{error::CodexErr, ModelClient, Prompt, ResponseEvent, TextFormat};
+use code_core::{error::CodexErr, ModelClient, OpenAiTool, Prompt, ResponseEvent, TextFormat};
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
 use code_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
@@ -17,6 +17,7 @@ use super::auto_coordinator::{
     extract_first_json_object,
     make_message,
     AutoCoordinatorCommand,
+    CrossCheckTurnSnapshot,
     MODEL_SLUG,
 };
 
@@ -54,6 +55,8 @@ pub(super) struct ObserverTrigger {
     pub goal_text: String,
     pub environment_details: String,
     pub reason: ObserverReason,
+    pub turn_snapshot: Option<CrossCheckTurnSnapshot>,
+    pub tools: Vec<OpenAiTool>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +67,7 @@ pub(super) struct ObserverOutcome {
     pub telemetry: AutoObserverTelemetry,
     pub reason: ObserverReason,
     pub conversation: Vec<ResponseItem>,
+    pub turn_snapshot: Option<CrossCheckTurnSnapshot>,
 }
 
 const OBSERVER_SCHEMA_NAME: &str = "auto_coordinator_observer";
@@ -136,6 +140,7 @@ fn run_observer_loop(
                             telemetry: telemetry.clone(),
                             reason: trigger.reason.clone(),
                             conversation: trigger.conversation.clone(),
+                            turn_snapshot: trigger.turn_snapshot.clone(),
                         };
 
                         if coordinator_tx
@@ -156,6 +161,7 @@ fn run_observer_loop(
                             telemetry: telemetry.clone(),
                             reason: trigger.reason,
                             conversation: Vec::new(),
+                            turn_snapshot: None,
                         };
                         if coordinator_tx
                             .send(AutoCoordinatorCommand::ObserverResult(outcome))
@@ -276,6 +282,7 @@ fn build_observer_prompt(trigger: &ObserverTrigger, model_slug: &str) -> Prompt 
     let goal = format!("Primary Goal\n{}", trigger.goal_text);
     prompt.input.push(make_message("developer", goal));
     prompt.input.extend(trigger.conversation.clone());
+    prompt.set_tools(trigger.tools.clone());
 
     let schema = build_observer_schema();
     prompt.text_format = Some(TextFormat {
@@ -366,6 +373,7 @@ fn build_observer_instructions(environment_details: &str, reason: ObserverReason
             let mut lines = Vec::new();
             lines.push("You are a senior QA reviewer performing an end-to-end cross-check of the Auto Drive run.".to_string());
             lines.push("Confirm the Primary Goal is fully satisfied with explicit evidence. Assume nothing; require proof.".to_string());
+            lines.push("Use the available tools (shell, browser inspection, web search, agents) to run commands, inspect artifacts, and gather concrete evidence.".to_string());
 
             if let Some(text) = summary {
                 if !text.trim().is_empty() {

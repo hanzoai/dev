@@ -4,10 +4,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
+use code_browser::global as browser_global;
+use code_core::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use code_core::config::Config;
 use code_core::config_types::ReasoningEffort;
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
+use code_core::{get_openai_tools, OpenAiTool, ToolsConfig};
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
@@ -67,6 +70,7 @@ struct AutoCoordinatorCancelled;
 
 pub(super) const MODEL_SLUG: &str = "gpt-5";
 const SCHEMA_NAME: &str = "auto_coordinator_flow";
+pub(super) const CROSS_CHECK_RESTART_BANNER: &str = "Cross-check restart with minimal context";
 const COORDINATOR_PROMPT_PATH: &str = "code-rs/core/prompt_coordinator.md";
 
 #[derive(Debug, Clone)]
@@ -91,12 +95,16 @@ impl AutoCoordinatorHandle {
 
 #[derive(Debug)]
 pub(super) enum AutoCoordinatorCommand {
-    UpdateConversation {
-        conversation: Vec<ResponseItem>,
-        observer_conversation: Vec<ResponseItem>,
-    },
+    UpdateConversation(Vec<ResponseItem>),
     ObserverResult(ObserverOutcome),
     Stop,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CrossCheckTurnSnapshot {
+    pub cli_prompt: Option<String>,
+    pub cli_context: Option<String>,
+    pub progress_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -644,7 +652,6 @@ pub(super) fn start_auto_coordinator(
     app_event_tx: AppEventSender,
     goal_text: String,
     conversation: Vec<ResponseItem>,
-    observer_conversation: Vec<ResponseItem>,
     config: Config,
     debug_enabled: bool,
     observer_cadence: u32,
@@ -660,7 +667,6 @@ pub(super) fn start_auto_coordinator(
             app_event_tx,
             goal_text,
             conversation,
-            observer_conversation,
             config,
             cmd_rx,
             loop_tx,
@@ -687,7 +693,6 @@ fn run_auto_loop(
     app_event_tx: AppEventSender,
     goal_text: String,
     initial_conversation: Vec<ResponseItem>,
-    initial_observer_conversation: Vec<ResponseItem>,
     config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
     cmd_tx: Sender<AutoCoordinatorCommand>,
@@ -713,37 +718,61 @@ fn run_auto_loop(
     let sandbox_policy = config.sandbox_policy.clone();
     let config = Arc::new(config);
     let active_agent_names = get_enabled_agents(&config.agents);
-    let debug_logger = Arc::new(Mutex::new(
-        DebugLogger::new(debug_enabled)
-            .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
-    ));
-    let coordinator_client = Arc::new(ModelClient::new(
-        config.clone(),
-        Some(auth_mgr.clone()),
-        None,
-        model_provider.clone(),
-        ReasoningEffort::Medium,
-        model_reasoning_summary,
-        model_text_verbosity,
-        Uuid::new_v4(),
-        debug_logger.clone(),
-    ));
-    let observer_client = Arc::new(ModelClient::new(
+    let client = Arc::new(ModelClient::new(
         config.clone(),
         Some(auth_mgr),
         None,
         model_provider,
-        ReasoningEffort::High,
+        ReasoningEffort::Medium,
         model_reasoning_summary,
         model_text_verbosity,
         Uuid::new_v4(),
-        debug_logger.clone(),
+        Arc::new(Mutex::new(
+            DebugLogger::new(debug_enabled)
+                .unwrap_or_else(|_| DebugLogger::new(false).expect("debug logger")),
+        )),
     ));
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("creating runtime for auto coordinator")?;
+
+    let browser_enabled = runtime.block_on(async {
+        browser_global::get_browser_manager().await.is_some()
+    });
+
+    let mut tools_config = ToolsConfig::new(
+        &config.model_family,
+        config.approval_policy,
+        config.sandbox_policy.clone(),
+        config.include_plan_tool,
+        config.include_apply_patch_tool,
+        config.tools_web_search_request,
+        config.use_experimental_streamable_shell_tool,
+        config.include_view_image_tool,
+    );
+    tools_config.web_search_allowed_domains = config.tools_web_search_allowed_domains.clone();
+
+    let mut agent_models: Vec<String> = if config.agents.is_empty() {
+        default_agent_configs()
+            .into_iter()
+            .filter(|cfg| cfg.enabled)
+            .map(|cfg| cfg.name)
+            .collect()
+    } else {
+        get_enabled_agents(&config.agents)
+    };
+    if agent_models.is_empty() {
+        agent_models = enabled_agent_model_specs()
+            .into_iter()
+            .map(|spec| spec.slug.to_string())
+            .collect();
+    }
+    agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+    agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    tools_config.set_agent_models(agent_models);
+    let cross_check_tools: Vec<OpenAiTool> = get_openai_tools(&tools_config, None, browser_enabled, true);
 
     let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
         Ok(Some(text)) => {
@@ -773,21 +802,20 @@ fn run_auto_loop(
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
 
-    let mut pending_conversation = Some((initial_conversation, initial_observer_conversation));
+    let mut pending_conversation = Some(initial_conversation);
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
     let mut observer_guidance: Vec<String> = Vec::new();
     let mut observer_telemetry = AutoObserverTelemetry::default();
-    let mut observer_handle = if observer_cadence == 0 {
-        None
-    } else {
-        match start_auto_observer(observer_client.clone(), observer_cadence, cmd_tx.clone()) {
-            Ok(handle) => Some(handle),
-            Err(err) => {
-                tracing::error!("failed to start auto observer: {err:#}");
-                None
-            }
+    let mut last_cli_context: Option<String> = None;
+    let mut last_cli_prompt: Option<String> = None;
+    let mut last_progress_summary: Option<String> = None;
+    let mut observer_handle = match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
+        Ok(handle) => Some(handle),
+        Err(err) => {
+            tracing::error!("failed to start auto observer: {err:#}");
+            None
         }
     };
     let observer_cadence_interval = if observer_cadence == 0 {
@@ -803,22 +831,22 @@ fn run_auto_loop(
             break;
         }
 
-        if let Some((conv_full, conv_observer)) = pending_conversation.take() {
+        if let Some(conv) = pending_conversation.take() {
             if cancel_token.is_cancelled() {
                 stopped = true;
                 continue;
             }
 
+            let conv_for_observer = conv.clone();
             let developer_intro =
                 compose_developer_intro(&base_developer_intro, &observer_guidance);
-            let conv_for_request = conv_full.clone();
             match request_coordinator_decision(
                 &runtime,
-                coordinator_client.as_ref(),
+                client.as_ref(),
                 developer_intro.as_str(),
                 &primary_goal_message,
                 &schema,
-                conv_for_request,
+                conv,
                 auto_instructions.as_deref(),
                 &app_event_tx,
                 &cancel_token,
@@ -835,21 +863,53 @@ fn run_auto_loop(
                     mut response_items,
                 }) => {
                     consecutive_decision_failures = 0;
-                    let cli_prompt_for_observer = cli.as_ref().map(|action| action.prompt.as_str());
+                    let (turn_cli_prompt, turn_cli_context) = if let Some(cli_action) = &cli {
+                        let prompt = Some(cli_action.prompt.clone());
+                        let context = cli_action
+                            .context
+                            .as_ref()
+                            .map(|ctx| ctx.trim().to_string())
+                            .filter(|ctx| !ctx.is_empty());
+                        (prompt, context)
+                    } else {
+                        (None, None)
+                    };
+                    last_cli_prompt = turn_cli_prompt.clone();
+                    last_cli_context = turn_cli_context.clone();
+
+                    let mut latest_summary = progress_current.clone();
+                    if latest_summary.is_none() {
+                        latest_summary = progress_past.clone();
+                    }
+                    if let Some(summary_text) = latest_summary.clone() {
+                        last_progress_summary = Some(summary_text);
+                    } else {
+                        last_progress_summary = None;
+                    }
+
+                    let turn_snapshot = CrossCheckTurnSnapshot {
+                        cli_prompt: turn_cli_prompt.clone(),
+                        cli_context: turn_cli_context.clone(),
+                        progress_summary: latest_summary.clone(),
+                    };
+
+                    let cli_prompt_for_observer = turn_cli_prompt.as_deref();
 
                     if matches!(status, AutoCoordinatorStatus::Continue) {
                         if let Some(cross) = cross_check.clone() {
                             dispatch_cross_check(
                                 observer_handle.as_ref(),
                                 &runtime,
-                                observer_client.clone(),
+                                client.clone(),
                                 &cmd_tx,
-                                conv_observer.clone(),
+                                conv_for_observer.clone(),
                                 goal_text.clone(),
                                 environment_details.clone(),
                                 cross.summary.clone(),
                                 cross.focus.clone(),
                                 false,
+                                Some(turn_snapshot.clone()),
+                                cross_check_tools.clone(),
                             );
                         }
 
@@ -858,7 +918,7 @@ fn run_auto_loop(
                         {
                             if should_trigger_observer(requests_completed, cadence) {
                                 let conversation = build_observer_conversation(
-                                    conv_observer.clone(),
+                                    conv_for_observer,
                                     cli_prompt_for_observer,
                                 );
                                 let trigger = ObserverTrigger {
@@ -866,6 +926,8 @@ fn run_auto_loop(
                                     goal_text: goal_text.clone(),
                                     environment_details: environment_details.clone(),
                                     reason: ObserverReason::Cadence,
+                                    turn_snapshot: None,
+                                    tools: Vec::new(),
                                 };
                                 if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
                                     warn!("failed to trigger auto observer");
@@ -892,7 +954,7 @@ fn run_auto_loop(
                     }
 
                     let observer_conversation =
-                        build_observer_conversation(conv_observer.clone(), None);
+                        build_observer_conversation(conv_for_observer.clone(), None);
                     let final_summary = cross_check
                         .as_ref()
                         .and_then(|data| data.summary.clone());
@@ -902,12 +964,14 @@ fn run_auto_loop(
 
                     let validation_result = run_final_cross_check(
                         &runtime,
-                        observer_client.clone(),
+                        client.clone(),
                         observer_conversation,
                         &goal_text,
                         &environment_details,
                         final_summary,
                         final_focus,
+                        Some(turn_snapshot),
+                        cross_check_tools.clone(),
                     );
 
                     if let Ok((observer_status, replace_message, additional_instructions)) =
@@ -934,7 +998,7 @@ fn run_auto_loop(
                             if let Some(instr) = additional_instructions.as_deref() {
                                 push_unique_guidance(&mut observer_guidance, instr);
                             }
-                            pending_conversation = Some((conv_full.clone(), conv_observer.clone()));
+                            pending_conversation = Some(conv_for_observer);
                             continue;
                         }
                     } else if let Err(err) = validation_result {
@@ -983,7 +1047,7 @@ fn run_auto_loop(
                                 delta: message,
                                 summary_index: None,
                             });
-                            pending_conversation = Some((conv_full.clone(), conv_observer.clone()));
+                            pending_conversation = Some(conv_for_observer);
                             continue;
                         }
                         warn!(
@@ -1012,10 +1076,10 @@ fn run_auto_loop(
         }
 
         match cmd_rx.recv() {
-            Ok(AutoCoordinatorCommand::UpdateConversation { conversation, observer_conversation }) => {
+            Ok(AutoCoordinatorCommand::UpdateConversation(conv)) => {
                 requests_completed = requests_completed.saturating_add(1);
                 consecutive_decision_failures = 0;
-                pending_conversation = Some((conversation, observer_conversation));
+                pending_conversation = Some(conv);
             }
             Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
                 let ObserverOutcome {
@@ -1024,7 +1088,8 @@ fn run_auto_loop(
                     additional_instructions,
                     telemetry,
                     reason,
-                    conversation,
+                    conversation: _conversation,
+                    turn_snapshot,
                 } = outcome;
 
                 if let Some(instr) = additional_instructions.as_deref() {
@@ -1035,17 +1100,132 @@ fn run_auto_loop(
                 let event = AppEvent::AutoObserverReport {
                     status,
                     telemetry,
-                    replace_message,
-                    additional_instructions,
+                    replace_message: replace_message.clone(),
+                    additional_instructions: additional_instructions.clone(),
                 };
                 app_event_tx.send(event);
 
-                if let ObserverReason::CrossCheck { .. } = reason {
+                if let ObserverReason::CrossCheck { forced: _, summary, focus } = reason {
                     if matches!(status, AutoObserverStatus::Failing) {
-                        if !conversation.is_empty() {
-                            pending_conversation = Some((conversation.clone(), conversation));
+                        let mut restart_prompt = String::new();
+                        let append_candidate = |target: &mut String, candidate: Option<&str>| {
+                            if let Some(text) = candidate {
+                                let trimmed = text.trim();
+                                if trimmed.is_empty() {
+                                    return;
+                                }
+                                if !target.is_empty() {
+                                    target.push_str("\n\n");
+                                }
+                                target.push_str(trimmed);
+                            }
+                        };
+                        let snapshot_prompt = turn_snapshot
+                            .as_ref()
+                            .and_then(|snapshot| snapshot.cli_prompt.as_deref());
+                        let snapshot_context = turn_snapshot
+                            .as_ref()
+                            .and_then(|snapshot| snapshot.cli_context.as_deref());
+                        let snapshot_summary = turn_snapshot
+                            .as_ref()
+                            .and_then(|snapshot| snapshot.progress_summary.as_deref());
+
+                        append_candidate(&mut restart_prompt, replace_message.as_deref());
+
+                        let had_replacement = replace_message
+                            .as_deref()
+                            .map(|text| !text.trim().is_empty())
+                            .unwrap_or(false);
+
+                        if !had_replacement {
+                            append_candidate(
+                                &mut restart_prompt,
+                                snapshot_prompt.or_else(|| last_cli_prompt.as_deref()),
+                            );
                         }
+
+                        append_candidate(
+                            &mut restart_prompt,
+                            snapshot_summary.or_else(|| last_progress_summary.as_deref()),
+                        );
+
+                        let mut context_sections: Vec<String> = Vec::new();
+                        if let Some(context_text) = snapshot_context
+                            .or_else(|| last_cli_context.as_deref())
+                            .map(str::trim)
+                            .filter(|text| !text.is_empty())
+                        {
+                            context_sections.push(format!("CLI context:\n{}", context_text));
+                        }
+                        if had_replacement {
+                            if let Some(previous_prompt) = snapshot_prompt
+                                .or_else(|| last_cli_prompt.as_deref())
+                                .map(str::trim)
+                                .filter(|text| !text.is_empty())
+                            {
+                                context_sections.push(format!("Previous CLI prompt:\n{}", previous_prompt));
+                            }
+                        }
+                        if !context_sections.is_empty() {
+                            if !restart_prompt.is_empty() {
+                                restart_prompt.push_str("\n\n");
+                            }
+                            restart_prompt.push_str(&context_sections.join("\n\n"));
+                        }
+
+                        append_candidate(&mut restart_prompt, summary.as_deref());
+                        append_candidate(&mut restart_prompt, focus.as_deref());
+
+                        let restart_prompt = if restart_prompt.is_empty() {
+                            None
+                        } else {
+                            Some(restart_prompt)
+                        };
+
+                        let mut guidance_parts: Vec<String> = Vec::new();
+                        if let Some(instr) = additional_instructions
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        {
+                            guidance_parts.push(instr.to_string());
+                        }
+                        if let Some(summary_text) = summary
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        {
+                            guidance_parts.push(format!("Cross-check summary: {summary_text}"));
+                        }
+                        if let Some(focus_text) = focus
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                        {
+                            guidance_parts.push(format!("Areas to inspect: {focus_text}"));
+                        }
+                        let guidance_bundle = if guidance_parts.is_empty() {
+                            None
+                        } else {
+                            Some(guidance_parts.join("\n\n"))
+                        };
+
+                        let compact_conversation = build_compact_conversation_seed(
+                            &goal_text,
+                            restart_prompt.as_ref().map(|text| text.as_str()),
+                            guidance_bundle.as_deref(),
+                        );
+
+                        pending_conversation = Some(compact_conversation);
+                        requests_completed = requests_completed.saturating_sub(1);
                         consecutive_decision_failures = 0;
+                        last_cli_prompt = None;
+                        last_cli_context = None;
+                        last_progress_summary = None;
+                        let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
+                            delta: CROSS_CHECK_RESTART_BANNER.to_string(),
+                            summary_index: None,
+                        });
                         continue;
                     }
                 }
@@ -1083,6 +1263,40 @@ fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
     intro
 }
 
+pub(super) fn build_compact_conversation_seed(
+    goal: &str,
+    last_prompt: Option<&str>,
+    guidance: Option<&str>,
+) -> Vec<ResponseItem> {
+    let mut items: Vec<ResponseItem> = Vec::with_capacity(2);
+
+    let trimmed_goal = goal.trim();
+    let mut developer_message = format!(
+        "You are resuming Auto Drive with minimal context.\nPrimary goal:\n{}",
+        trimmed_goal
+    );
+    if let Some(guidance_text) = guidance
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        developer_message.push_str("\n\nCross-check guidance:\n");
+        developer_message.push_str(guidance_text);
+    }
+    items.push(make_message("developer", developer_message));
+
+    let user_prompt = last_prompt
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| text.to_string())
+        .unwrap_or_else(|| {
+            "Restart the plan and verify end-to-end behaviour satisfies the primary goal and the guidance above."
+                .to_string()
+        });
+    items.push(make_message("user", user_prompt));
+
+    items
+}
+
 fn dispatch_cross_check(
     observer_handle: Option<&AutoObserverHandle>,
     runtime: &tokio::runtime::Runtime,
@@ -1094,6 +1308,8 @@ fn dispatch_cross_check(
     summary: Option<String>,
     focus: Option<String>,
     forced: bool,
+    turn_snapshot: Option<CrossCheckTurnSnapshot>,
+    tools: Vec<OpenAiTool>,
 ) {
     let reason = ObserverReason::CrossCheck {
         forced,
@@ -1105,6 +1321,8 @@ fn dispatch_cross_check(
         goal_text,
         environment_details,
         reason: reason.clone(),
+        turn_snapshot: turn_snapshot.clone(),
+        tools: tools.clone(),
     };
 
     if let Some(handle) = observer_handle {
@@ -1122,6 +1340,7 @@ fn dispatch_cross_check(
                 telemetry: AutoObserverTelemetry::default(),
                 reason,
                 conversation,
+                turn_snapshot,
             };
             let _ = coordinator_tx.send(AutoCoordinatorCommand::ObserverResult(outcome));
         }
@@ -1143,6 +1362,8 @@ fn run_final_cross_check(
     environment_details: &str,
     summary: Option<String>,
     focus: Option<String>,
+    turn_snapshot: Option<CrossCheckTurnSnapshot>,
+    tools: Vec<OpenAiTool>,
 ) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
     let trigger = ObserverTrigger {
         conversation,
@@ -1153,6 +1374,8 @@ fn run_final_cross_check(
             summary,
             focus,
         },
+        turn_snapshot,
+        tools,
     };
     run_observer_once(runtime, client, trigger)
 }

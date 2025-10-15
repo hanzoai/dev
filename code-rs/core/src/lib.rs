@@ -130,4 +130,5 @@ pub use code_protocol::models::ReasoningItemContent;
 pub use code_protocol::models::ResponseItem;
 pub use environment_context::ToolCandidate;
 pub use environment_context::TOOL_CANDIDATES;
+pub use openai_tools::{get_openai_tools, OpenAiTool, ToolsConfig};
 pub use otel_init::*;

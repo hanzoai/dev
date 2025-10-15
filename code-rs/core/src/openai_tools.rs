@@ -44,7 +44,7 @@ pub struct FreeformToolFormat {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type")]
-pub(crate) enum OpenAiTool {
+pub enum OpenAiTool {
     #[serde(rename = "function")]
     Function(ResponsesApiTool),
     #[serde(rename = "local_shell")]
@@ -78,7 +78,7 @@ pub enum ConfigShellToolType {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ToolsConfig {
+pub struct ToolsConfig {
     pub shell_type: ConfigShellToolType,
     pub plan_tool: bool,
     #[allow(dead_code)]
@@ -148,7 +148,7 @@ impl ToolsConfig {
 
     // Compatibility constructor used by some tests/upstream calls.
     #[allow(dead_code)]
-    pub fn new_from_params(p: &ToolsConfigParams) -> Self {
+    pub(crate) fn new_from_params(p: &ToolsConfigParams) -> Self {
         Self::new(
             p.model_family,
             p.approval_policy,
@@ -647,7 +647,7 @@ fn sanitize_json_schema(value: &mut JsonValue) {
 /// Returns a list of OpenAiTools based on the provided config and MCP tools.
 /// Note that the keys of mcp_tools should be fully qualified names. See
 /// [`McpConnectionManager`] for more details.
-pub(crate) fn get_openai_tools(
+pub fn get_openai_tools(
     config: &ToolsConfig,
     mcp_tools: Option<HashMap<String, mcp_types::Tool>>,
     browser_enabled: bool,
