@@ -1769,6 +1769,11 @@ impl App<'_> {
                         widget.auto_handle_countdown(countdown_id, seconds_left);
                     }
                 }
+                AppEvent::AutoCoordinatorRestart { token, attempt } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_restart(token, attempt);
+                    }
+                }
                 AppEvent::AutoObserverReport {
                     status,
                     telemetry,
