@@ -207,6 +207,10 @@ impl Prompt {
         input_with_instructions
     }
 
+    pub fn set_tools(&mut self, tools: Vec<OpenAiTool>) {
+        self.tools = tools;
+    }
+
     /// Creates a formatted user instructions message from a string
     #[allow(dead_code)]
     pub(crate) fn format_user_instructions_message(ui: &str) -> ResponseItem {
