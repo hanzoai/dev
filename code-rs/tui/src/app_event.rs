@@ -268,6 +268,11 @@ pub(crate) enum AppEvent {
         countdown_id: u64,
         seconds_left: u8,
     },
+    /// Trigger an automatic Auto Drive restart after a transient failure.
+    AutoCoordinatorRestart {
+        token: u64,
+        attempt: u32,
+    },
     AutoObserverReport {
         status: AutoObserverStatus,
         telemetry: AutoObserverTelemetry,

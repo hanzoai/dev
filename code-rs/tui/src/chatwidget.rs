@@ -235,7 +235,7 @@ fn history_cell_logging_enabled() -> bool {
     })
 }
 use serde_json::{self, Value as JsonValue};
-use tracing::info;
+use tracing::{info, warn};
 // use image::GenericImageView;
 
 const TOKENS_PER_MILLION: f64 = 1_000_000.0;
@@ -625,6 +625,10 @@ struct AutoCoordinatorUiState {
     started_at: Option<Instant>,
     turns_completed: usize,
     last_run_summary: Option<AutoRunSummary>,
+    waiting_for_transient_recovery: bool,
+    pending_restart: Option<AutoRestartState>,
+    restart_token: u64,
+    transient_restart_attempts: u32,
 }
 
 impl AutoCoordinatorUiState {
@@ -694,6 +698,10 @@ impl Default for AutoCoordinatorUiState {
             started_at: None,
             turns_completed: 0,
             last_run_summary: None,
+            waiting_for_transient_recovery: false,
+            pending_restart: None,
+            restart_token: 0,
+            transient_restart_attempts: 0,
         }
     }
 }
@@ -707,6 +715,16 @@ struct AutoRunSummary {
     goal: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct AutoRestartState {
+    token: u64,
+    attempt: u32,
+    reason: String,
+}
+
+const AUTO_RESTART_MAX_ATTEMPTS: u32 = 6;
+const AUTO_RESTART_BASE_DELAY: Duration = Duration::from_secs(5);
+const AUTO_RESTART_MAX_DELAY: Duration = Duration::from_secs(120);
 const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
 const AUTO_RESOLVE_REVIEW_FOLLOWUP: &str = "This issue has been resolved. Please continue your search and return all remaining issues you find.";
 
@@ -12334,6 +12352,118 @@ fi\n\
         }
     }
 
+    fn auto_failure_is_transient(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        const TRANSIENT_MARKERS: &[&str] = &[
+            "stream error",
+            "network error",
+            "timed out",
+            "timeout",
+            "temporarily unavailable",
+            "retry window exceeded",
+            "retry limit exceeded",
+            "connection reset",
+            "connection refused",
+            "broken pipe",
+            "dns error",
+            "host unreachable",
+            "send request",
+        ];
+        TRANSIENT_MARKERS.iter().any(|needle| lower.contains(needle))
+    }
+
+    fn auto_restart_delay(attempt: u32) -> Duration {
+        if attempt == 0 {
+            return AUTO_RESTART_BASE_DELAY.min(AUTO_RESTART_MAX_DELAY);
+        }
+        let exponent = attempt.saturating_sub(1).min(5);
+        let multiplier = 1u32 << exponent;
+        let mut delay = AUTO_RESTART_BASE_DELAY.saturating_mul(multiplier);
+        if delay > AUTO_RESTART_MAX_DELAY {
+            delay = AUTO_RESTART_MAX_DELAY;
+        }
+        delay
+    }
+
+    fn auto_schedule_restart_event(&self, token: u64, attempt: u32, delay: Duration) {
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            tx.send(AppEvent::AutoCoordinatorRestart { token, attempt });
+        });
+    }
+
+    fn auto_pause_for_transient_failure(&mut self, message: String) {
+        let pending_attempt = self.auto_state.transient_restart_attempts.saturating_add(1);
+        let truncated = Self::truncate_with_ellipsis(&message, 160);
+        warn!(attempt = pending_attempt, "auto drive transient failure: {}", truncated);
+
+        if let Some(handle) = self.auto_handle.take() {
+            handle.cancel();
+        }
+
+        self.auto_state.waiting_for_transient_recovery = true;
+        self.auto_state.waiting_for_response = false;
+        self.auto_state.coordinator_waiting = false;
+        self.auto_state.awaiting_submission = false;
+        self.auto_state.paused_for_manual_edit = false;
+        self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.waiting_for_review = false;
+        self.auto_state.current_cli_prompt = None;
+        self.auto_state.current_cli_context = None;
+        self.auto_state.pending_agent_actions.clear();
+        self.auto_state.pending_agent_timing = None;
+        self.pending_turn_descriptor = None;
+        self.pending_auto_turn_config = None;
+
+        if pending_attempt > AUTO_RESTART_MAX_ATTEMPTS {
+            self.push_background_tail(format!(
+                "Auto Drive stopped after {AUTO_RESTART_MAX_ATTEMPTS} reconnect attempts. Last error: {truncated}"
+            ));
+            self.auto_stop(Some(format!(
+                "Auto Drive stopped after {AUTO_RESTART_MAX_ATTEMPTS} reconnect attempts."
+            )));
+            return;
+        }
+
+        self.auto_state.transient_restart_attempts = pending_attempt;
+
+        let delay = Self::auto_restart_delay(pending_attempt);
+        let human_delay = format_duration(delay);
+
+        self.auto_state.current_display_line = Some(format!(
+            "Waiting for connection… retrying in {human_delay} (attempt {pending_attempt}/{AUTO_RESTART_MAX_ATTEMPTS})"
+        ));
+        self.auto_state.current_display_is_summary = true;
+        self.auto_state.current_progress_current = Some(format!("Last error: {truncated}"));
+        self.auto_state.current_progress_past = None;
+        self.auto_state.placeholder_phrase = Some("Waiting for connection…".to_string());
+
+        self.bottom_pane.set_task_running(false);
+        self.bottom_pane.update_status_text("Auto Drive paused".to_string());
+        self.bottom_pane
+            .set_standard_terminal_hint(Some("Press Esc again to exit Auto Drive".to_string()));
+
+        let token = self.auto_state.restart_token.wrapping_add(1);
+        self.auto_state.restart_token = token;
+        self.auto_state.pending_restart = Some(AutoRestartState {
+            token,
+            attempt: pending_attempt,
+            reason: truncated.clone(),
+        });
+
+        self.push_background_tail(format!(
+            "Auto Drive will retry automatically in {human_delay} (attempt {pending_attempt}/{AUTO_RESTART_MAX_ATTEMPTS}). Last error: {truncated}"
+        ));
+
+        self.auto_schedule_restart_event(token, pending_attempt, delay);
+        self.auto_rebuild_live_ring();
+        self.auto_update_terminal_hint();
+        self.request_redraw();
+    }
+
     pub(crate) fn auto_handle_decision(
         &mut self,
         status: AutoCoordinatorStatus,
@@ -12402,6 +12532,12 @@ fi\n\
             self.auto_handle_cross_check_request(cross_check_action);
         }
 
+        if !matches!(status, AutoCoordinatorStatus::Failed) {
+            self.auto_state.transient_restart_attempts = 0;
+            self.auto_state.waiting_for_transient_recovery = false;
+            self.auto_state.pending_restart = None;
+        }
+
         match status {
             AutoCoordinatorStatus::Continue => {
                 let Some(prompt_text) = cli_prompt else {
@@ -12437,7 +12573,11 @@ fi\n\
                 } else {
                     format!("Coordinator error: {summary_text}")
                 };
-                self.auto_stop(Some(message));
+                if Self::auto_failure_is_transient(&message) {
+                    self.auto_pause_for_transient_failure(message);
+                } else {
+                    self.auto_stop(Some(message));
+                }
                 return;
             }
         }
@@ -12640,6 +12780,14 @@ fi\n\
         if text.trim().is_empty() {
             return;
         }
+        if self
+            .auto_state
+            .pending_observer_banners
+            .iter()
+            .any(|existing| existing == &text)
+        {
+            return;
+        }
         self.auto_state.pending_observer_banners.push(text);
     }
 
@@ -12707,6 +12855,66 @@ fi\n\
             self.auto_rebuild_live_ring();
             self.request_redraw();
         }
+    }
+
+    pub(crate) fn auto_handle_restart(&mut self, token: u64, attempt: u32) {
+        if !self.auto_state.active || !self.auto_state.waiting_for_transient_recovery {
+            return;
+        }
+        let Some(restart) = self.auto_state.pending_restart.clone() else {
+            return;
+        };
+        if restart.token != token || restart.attempt != attempt {
+            return;
+        }
+
+        let Some(goal) = self.auto_state.goal.clone() else {
+            self.push_background_tail(
+                "Auto Drive restart skipped because the goal is no longer available.".to_string(),
+            );
+            self.auto_state.pending_restart = None;
+            self.auto_state.waiting_for_transient_recovery = false;
+            self.auto_stop(Some("Auto Drive restart aborted.".to_string()));
+            return;
+        };
+
+        let review_enabled = self.auto_state.review_enabled;
+        let agents_enabled = self.auto_state.subagents_enabled;
+        let continue_mode = self.auto_state.continue_mode;
+        let previous_turns = self.auto_state.turns_completed;
+        let previous_started_at = self.auto_state.started_at;
+        let restart_attempts = self.auto_state.transient_restart_attempts;
+
+        self.auto_state.pending_restart = None;
+        self.auto_state.waiting_for_transient_recovery = false;
+        self.auto_state.restart_token = token;
+
+        if restart.reason.is_empty() {
+            self.push_background_tail(format!(
+                "Auto Drive resuming automatically (attempt {attempt}/{AUTO_RESTART_MAX_ATTEMPTS})."
+            ));
+        } else {
+            self.push_background_tail(format!(
+                "Auto Drive resuming automatically (attempt {attempt}/{AUTO_RESTART_MAX_ATTEMPTS}); previous error: {}",
+                restart.reason
+            ));
+        }
+
+        self.auto_launch_with_goal(goal, review_enabled, agents_enabled, continue_mode);
+
+        if previous_turns > 0 {
+            self.auto_state.turns_completed = previous_turns;
+        }
+        if let Some(started_at) = previous_started_at {
+            self.auto_state.started_at = Some(started_at);
+        }
+        self.auto_state.transient_restart_attempts = restart_attempts;
+        self.auto_state.current_progress_current = None;
+        self.auto_state.current_progress_past = None;
+        self.auto_rebuild_live_ring();
+        self.auto_update_terminal_hint();
+        self.request_redraw();
+        self.rebuild_auto_history();
     }
 
     pub(crate) fn auto_handle_observer_report(
@@ -16763,6 +16971,18 @@ fi\n\
         let final_source = source.clone();
         if self.is_review_flow_active() {
             if let Some(ref want) = id {
+                if !self
+                    .stream_state
+                    .closed_answer_ids
+                    .insert(StreamId(want.clone()))
+                {
+                    tracing::debug!(
+                        "InsertFinalAnswer(review): dropping duplicate final for id={}",
+                        want
+                    );
+                    self.last_assistant_message = Some(final_source.clone());
+                    return;
+                }
                 if let Some(idx) = self.history_cells.iter().rposition(|c| {
                     c.as_any()
                         .downcast_ref::<history_cell::StreamingContentCell>()
@@ -16772,9 +16992,6 @@ fi\n\
                 }) {
                     self.history_remove_at(idx);
                 }
-                self.stream_state
-                    .closed_answer_ids
-                    .insert(StreamId(want.clone()));
             } else if let Some(idx) = self.history_cells.iter().rposition(|c| {
                 c.as_any()
                     .downcast_ref::<history_cell::StreamingContentCell>()
@@ -16783,7 +17000,34 @@ fi\n\
                 self.history_remove_at(idx);
             }
             self.last_assistant_message = Some(final_source.clone());
-            let _ = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let state = self.finalize_answer_stream_state(id.as_deref(), &final_source);
+            let history_id = state.id;
+            let mut key = match id.as_deref() {
+                Some(rid) => self.try_stream_order_key(StreamKind::Answer, rid).unwrap_or_else(|| {
+                    tracing::warn!(
+                        "missing stream order key for final Answer id={}; using synthetic key",
+                        rid
+                    );
+                    self.next_internal_key()
+                }),
+                None => {
+                    tracing::warn!("missing stream id for final Answer; using synthetic key");
+                    self.next_internal_key()
+                }
+            };
+
+            if let Some(last) = self.last_assigned_order {
+                if key <= last {
+                    key = Self::order_key_successor(last);
+                    if let Some(ref want) = id {
+                        self.stream_order_seq
+                            .insert((StreamKind::Answer, want.clone()), key);
+                    }
+                }
+            }
+
+            let cell = history_cell::AssistantMarkdownCell::from_state(state, &self.config);
+            self.history_insert_existing_record(Box::new(cell), key, "answer-review", history_id);
             // Advance Auto Drive after the assistant message has been finalized.
             self.auto_on_assistant_final();
             return;
@@ -20703,6 +20947,84 @@ mod tests {
         let action = &chat.auto_state.pending_agent_actions[0];
         assert_eq!(action.prompt, "Draft alternative fix");
         assert!(!action.write);
+    }
+
+    #[test]
+    fn observer_history_filters_noise_cells() {
+        use crate::history::state::ExecStatus;
+        use crate::history_cell::{ExecKind, HistoryCellType, ToolCellStatus};
+
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::User));
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Assistant));
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Exec {
+            kind: ExecKind::Run,
+            status: ExecStatus::Success,
+        }));
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Tool {
+            status: ToolCellStatus::Success,
+        }));
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Error));
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Diff));
+        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Patch {
+            kind: crate::history_cell::PatchKind::ApplyFailure,
+        }));
+
+        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::PlanUpdate));
+        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::BackgroundEvent));
+        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::Plain));
+    }
+
+    #[test]
+    fn auto_observer_failing_reports_flush_duplicate_banners_on_success() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_state.awaiting_submission = false;
+        chat.auto_state.waiting_for_response = false;
+
+        let telemetry = AutoObserverTelemetry {
+            last_status: AutoObserverStatus::Failing,
+            ..AutoObserverTelemetry::default()
+        };
+        let instruction = "Tighten up the summary";
+
+        for _ in 0..3 {
+            chat.auto_handle_observer_report(
+                AutoObserverStatus::Failing,
+                telemetry.clone(),
+                None,
+                Some(instruction.to_string()),
+            );
+        }
+
+        assert_eq!(chat.auto_state.pending_observer_banners.len(), 1);
+
+        let baseline_cells = chat.history_cells.len();
+
+        chat.auto_handle_decision(
+            AutoCoordinatorStatus::Success,
+            Some("Resolved outstanding actions".to_string()),
+            Some("Ready to wrap up".to_string()),
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+        );
+
+        let new_cells = chat.history_cells.len() - baseline_cells;
+        assert!(new_cells >= 2);
+
+        let guidance_hits = chat
+            .history_cells
+            .iter()
+            .flat_map(|cell| cell.display_lines_trimmed())
+            .flat_map(|line| line.spans.iter())
+            .filter(|span| span.content.contains("Observer guidance: Tighten up the summary"))
+            .count();
+        assert_eq!(guidance_hits, 1);
+        assert!(chat.auto_state.pending_observer_banners.is_empty());
     }
 
     #[test]
