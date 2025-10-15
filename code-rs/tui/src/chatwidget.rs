@@ -66,6 +66,8 @@ mod exec_tools;
 mod gh_actions;
 mod history_render;
 mod help_handlers;
+mod settings_handlers;
+mod settings_overlay;
 mod limits_handlers;
 mod limits_overlay;
 mod interrupts;
@@ -144,7 +146,14 @@ use crate::bottom_pane::{
     AutoCoordinatorButton,
     AutoCoordinatorViewModel,
     CountdownState,
+    McpSettingsView,
+    ModelSelectionView,
+    NotificationsMode,
+    NotificationsSettingsView,
+    SettingsSection,
+    ThemeSelectionView,
 };
+use crate::bottom_pane::mcp_settings_view::{McpServerRow, McpServerRows};
 use crate::exec_command::strip_bash_lc_and_escape;
 #[cfg(feature = "code-fork")]
 use crate::tui_event_extensions::handle_browser_screenshot;
@@ -154,6 +163,7 @@ pub(crate) const DOUBLE_ESC_HINT: &str = "undo timeline";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EscIntent {
     DismissModal,
+    CloseSettings,
     CloseFilePopup,
     AutoPauseCountdown,
     AutoStopDuringApproval,
@@ -878,6 +888,9 @@ pub(crate) struct ChatWidget<'a> {
     // Help overlay state
     help: HelpState,
 
+    // Settings overlay state
+    settings: SettingsState,
+
     // Limits overlay state
     limits: LimitsState,
 
@@ -1346,6 +1359,13 @@ static MERGE_LOCKS: Lazy<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
 use self::diff_ui::DiffBlock;
 use self::diff_ui::DiffConfirm;
 use self::diff_ui::DiffOverlay;
+use self::settings_overlay::{
+    ModelSettingsContent,
+    ThemeSettingsContent,
+    NotificationsSettingsContent,
+    McpSettingsContent,
+    SettingsOverlayView,
+};
 use ratatui::text::Line as RtLine;
 use ratatui::text::Span as RtSpan;
 
@@ -3729,6 +3749,7 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            settings: SettingsState::default(),
             limits: LimitsState::default(),
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
@@ -4035,6 +4056,7 @@ impl ChatWidget<'_> {
                 overlay: None,
                 body_visible_rows: std::cell::Cell::new(0),
             },
+            settings: SettingsState::default(),
             limits: LimitsState::default(),
             terminal: TerminalState::default(),
             pending_manual_terminal: HashMap::new(),
@@ -4561,6 +4583,12 @@ impl ChatWidget<'_> {
             return;
         }
         if self.help.overlay.is_some() {
+            return;
+        }
+        if settings_handlers::handle_settings_key(self, key_event) {
+            return;
+        }
+        if self.settings.overlay.is_some() {
             return;
         }
         if diff_handlers::handle_diff_key(self, key_event) {
@@ -10990,21 +11018,9 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_notifications_command(&mut self, args: String) {
-        use crate::bottom_pane::{NotificationsMode, NotificationsSettingsView};
-
         let trimmed = args.trim();
         if trimmed.is_empty() {
-            let mode = match &self.config.tui.notifications {
-                Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
-                Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
-            };
-
-            let view = NotificationsSettingsView::new(
-                mode,
-                self.app_event_tx.clone(),
-                self.make_background_tail_ticket(),
-            );
-            self.bottom_pane.show_notifications_settings(view);
+            self.show_settings_overlay_full(SettingsSection::Notifications);
             return;
         }
 
@@ -15515,6 +15531,7 @@ fi\n\
         self.bottom_pane.on_file_search_result(query, matches);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn show_theme_selection(&mut self) {
         let tail_ticket = self.make_background_tail_ticket();
         let before_ticket = self.make_background_before_next_output_ticket();
@@ -15523,6 +15540,149 @@ fi\n\
             tail_ticket,
             before_ticket,
         );
+    }
+
+    pub(crate) fn show_settings_overlay_full(&mut self, section: SettingsSection) {
+        let mut overlay = SettingsOverlayView::new(section);
+        overlay.set_model_content(self.build_model_settings_content());
+        overlay.set_theme_content(self.build_theme_settings_content());
+        overlay.set_notifications_content(self.build_notifications_settings_content());
+        if let Some(mcp_content) = self.build_mcp_settings_content() {
+            overlay.set_mcp_content(mcp_content);
+        }
+        self.settings.overlay = Some(overlay);
+        self.request_redraw();
+    }
+
+    fn build_model_settings_content(&self) -> ModelSettingsContent {
+        let presets = self.available_model_presets();
+        let current_model = self.config.model.clone();
+        let current_effort = self.config.model_reasoning_effort;
+        let view = ModelSelectionView::new(
+            presets,
+            current_model,
+            current_effort,
+            self.app_event_tx.clone(),
+        );
+        ModelSettingsContent::new(view)
+    }
+
+    fn build_theme_settings_content(&mut self) -> ThemeSettingsContent {
+        let tail_ticket = self.make_background_tail_ticket();
+        let before_ticket = self.make_background_before_next_output_ticket();
+        let view = ThemeSelectionView::new(
+            crate::theme::current_theme_name(),
+            self.app_event_tx.clone(),
+            tail_ticket,
+            before_ticket,
+        );
+        ThemeSettingsContent::new(view)
+    }
+
+    fn build_notifications_settings_view(&mut self) -> NotificationsSettingsView {
+        let mode = match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => NotificationsMode::Toggle { enabled: *enabled },
+            Notifications::Custom(entries) => NotificationsMode::Custom { entries: entries.clone() },
+        };
+        let ticket = self.make_background_tail_ticket();
+        NotificationsSettingsView::new(mode, self.app_event_tx.clone(), ticket)
+    }
+
+    fn build_notifications_settings_content(&mut self) -> NotificationsSettingsContent {
+        NotificationsSettingsContent::new(self.build_notifications_settings_view())
+    }
+
+    fn build_mcp_server_rows(&mut self) -> Option<McpServerRows> {
+        let home = match code_core::config::find_code_home() {
+            Ok(home) => home,
+            Err(e) => {
+                let msg = format!("Failed to locate CODE_HOME: {}", e);
+                self.history_push_plain_state(history_cell::new_error_event(msg));
+                return None;
+            }
+        };
+
+        let (enabled, disabled) = match code_core::config::list_mcp_servers(&home) {
+            Ok(result) => result,
+            Err(e) => {
+                let msg = format!("Failed to read MCP config: {}", e);
+                self.history_push_plain_state(history_cell::new_error_event(msg));
+                return None;
+            }
+        };
+
+        let mut rows: McpServerRows = Vec::new();
+        for (name, cfg) in enabled.into_iter() {
+            rows.push(McpServerRow {
+                name,
+                enabled: true,
+                summary: Self::format_mcp_summary(&cfg),
+            });
+        }
+        for (name, cfg) in disabled.into_iter() {
+            rows.push(McpServerRow {
+                name,
+                enabled: false,
+                summary: Self::format_mcp_summary(&cfg),
+            });
+        }
+        rows.sort_by(|a, b| a.name.cmp(&b.name));
+        Some(rows)
+    }
+
+    fn build_mcp_settings_content(&mut self) -> Option<McpSettingsContent> {
+        let rows = self.build_mcp_server_rows()?;
+        let view = McpSettingsView::new(rows, self.app_event_tx.clone());
+        Some(McpSettingsContent::new(view))
+    }
+
+    pub(crate) fn close_settings_overlay(&mut self) {
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.notify_close();
+        }
+        self.settings.overlay = None;
+        self.request_redraw();
+    }
+
+    pub(crate) fn activate_current_settings_section(&mut self) -> bool {
+        let section = match self
+            .settings
+            .overlay
+            .as_ref()
+            .map(|overlay| overlay.active_section())
+        {
+            Some(section) => section,
+            None => return false,
+        };
+
+        let handled = match section {
+            SettingsSection::Model
+            | SettingsSection::Theme
+            | SettingsSection::Mcp
+            | SettingsSection::Notifications => false,
+            SettingsSection::Agents => {
+                self.show_agents_overview_ui();
+                true
+            }
+            SettingsSection::Limits => {
+                self.add_limits_output();
+                true
+            }
+            SettingsSection::Chrome => {
+                self.show_chrome_options(None);
+                true
+            }
+        };
+
+        if handled {
+            self.close_settings_overlay();
+        }
+
+        handled
+    }
+
+    pub(crate) fn settings_section_from_hint(section: &str) -> Option<SettingsSection> {
+        SettingsSection::from_hint(section)
     }
 
     // Ctrl+Y syntax cycling disabled intentionally.
@@ -16001,6 +16161,10 @@ fi\n\
             return EscRoute::new(EscIntent::DiffConfirm, true, false);
         }
 
+        if self.settings.overlay.is_some() {
+            return EscRoute::new(EscIntent::CloseSettings, true, false);
+        }
+
         if self.has_active_modal_view() {
             return EscRoute::new(EscIntent::DismissModal, true, false);
         }
@@ -16047,6 +16211,10 @@ fi\n\
     pub(crate) fn execute_esc_intent(&mut self, intent: EscIntent, key_event: KeyEvent) -> bool {
         match intent {
             EscIntent::DismissModal => {
+                self.handle_key_event(key_event);
+                true
+            }
+            EscIntent::CloseSettings => {
                 self.handle_key_event(key_event);
                 true
             }
@@ -16131,6 +16299,7 @@ fi\n\
         // a single Esc keypress closes the visible overlay instead of engaging the
         // global Esc policy (clear input / backtrack).
         self.bottom_pane.has_active_modal_view()
+            || self.settings.overlay.is_some()
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
             || self.limits.overlay.is_some()
@@ -18702,41 +18871,7 @@ fi\n\
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
-            // Interactive popup like /reasoning
-            match code_core::config::find_code_home() {
-                Ok(home) => match code_core::config::list_mcp_servers(&home) {
-                    Ok((enabled, disabled)) => {
-                        // Map into simple rows for the popup
-                        let mut rows: Vec<crate::bottom_pane::mcp_settings_view::McpServerRow> =
-                            Vec::new();
-                        for (name, cfg) in enabled.into_iter() {
-                            rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow {
-                                summary: Self::format_mcp_summary(&cfg),
-                                name,
-                                enabled: true,
-                            });
-                        }
-                        for (name, cfg) in disabled.into_iter() {
-                            rows.push(crate::bottom_pane::mcp_settings_view::McpServerRow {
-                                summary: Self::format_mcp_summary(&cfg),
-                                name,
-                                enabled: false,
-                            });
-                        }
-                        // Sort by name for stability
-                        rows.sort_by(|a, b| a.name.cmp(&b.name));
-                        self.bottom_pane.show_mcp_settings(rows);
-                    }
-                    Err(e) => {
-                        let msg = format!("Failed to read MCP config: {}", e);
-                        self.history_push_plain_state(history_cell::new_error_event(msg));
-                    }
-                },
-                Err(e) => {
-                    let msg = format!("Failed to locate CODEX_HOME: {}", e);
-                    self.history_push_plain_state(history_cell::new_error_event(msg));
-                }
-            }
+            self.show_settings_overlay_full(SettingsSection::Mcp);
             return;
         }
 
@@ -24971,6 +25106,36 @@ impl ChatWidget<'_> {
         Paragraph::new(RLine::from(spans)).render(content, buf);
     }
 
+    fn render_settings_overlay(
+        &self,
+        frame_area: Rect,
+        history_area: Rect,
+        buf: &mut Buffer,
+        overlay: &SettingsOverlayView,
+    ) {
+        use ratatui::widgets::Clear;
+
+        let scrim_style = Style::default()
+            .bg(crate::colors::overlay_scrim())
+            .fg(crate::colors::text_dim());
+        fill_rect(buf, frame_area, None, scrim_style);
+
+        let padding = 1u16;
+        let overlay_area = Rect {
+            x: history_area.x + padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(padding * 2),
+            height: history_area.height,
+        };
+
+        Clear.render(overlay_area, buf);
+
+        let bg_style = Style::default().bg(crate::colors::overlay_scrim());
+        fill_rect(buf, overlay_area, None, bg_style);
+
+        overlay.render(overlay_area, buf);
+    }
+
     fn get_browser_status_string(&self) -> String {
         "Browser".to_string()
     }
@@ -27221,8 +27386,12 @@ impl WidgetRef for &ChatWidget<'_> {
 
         // The welcome animation is no longer rendered as an overlay.
 
-        if self.terminal.overlay().is_none() && !self.agents_terminal.active {
-            if self.limits.overlay.is_some() {
+        let terminal_overlay_none = self.terminal.overlay().is_none();
+        let agents_terminal_active = self.agents_terminal.active;
+        if terminal_overlay_none && !agents_terminal_active {
+            if let Some(overlay) = self.settings.overlay.as_ref() {
+                self.render_settings_overlay(area, history_area, buf, overlay);
+            } else if self.limits.overlay.is_some() {
                 self.render_limits_overlay(area, history_area, buf);
             } else if let Some(overlay) = &self.diffs.overlay {
                 // Global scrim: dim the whole background to draw focus to the viewer
@@ -27558,82 +27727,84 @@ impl WidgetRef for &ChatWidget<'_> {
             }
 
             // Render help overlay (covering the history area) if active
-            if let Some(overlay) = &self.help.overlay {
-                // Global scrim across widget
-                let scrim_bg = Style::default()
-                    .bg(crate::colors::overlay_scrim())
-                    .fg(crate::colors::text_dim());
-                for y in area.y..area.y + area.height {
-                    for x in area.x..area.x + area.width {
-                        buf[(x, y)].set_style(scrim_bg);
+            if self.settings.overlay.is_none() {
+                if let Some(overlay) = &self.help.overlay {
+                    // Global scrim across widget
+                    let scrim_bg = Style::default()
+                        .bg(crate::colors::overlay_scrim())
+                        .fg(crate::colors::text_dim());
+                    for y in area.y..area.y + area.height {
+                        for x in area.x..area.x + area.width {
+                            buf[(x, y)].set_style(scrim_bg);
+                        }
                     }
-                }
-                let padding = 1u16;
-                let window_area = Rect {
-                    x: history_area.x + padding,
-                    y: history_area.y,
-                    width: history_area.width.saturating_sub(padding * 2),
-                    height: history_area.height,
-                };
-                Clear.render(window_area, buf);
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .title(ratatui::text::Line::from(vec![
-                        ratatui::text::Span::styled(
-                            " ",
-                            Style::default().fg(crate::colors::text_dim()),
-                        ),
-                        ratatui::text::Span::styled(
-                            "Help",
-                            Style::default().fg(crate::colors::text()),
-                        ),
-                        ratatui::text::Span::styled(
-                            " ——— ",
-                            Style::default().fg(crate::colors::text_dim()),
-                        ),
-                        ratatui::text::Span::styled(
-                            "Esc",
-                            Style::default().fg(crate::colors::text()),
-                        ),
-                        ratatui::text::Span::styled(
-                            " close ",
-                            Style::default().fg(crate::colors::text_dim()),
-                        ),
-                    ]))
-                    .style(Style::default().bg(crate::colors::background()))
-                    .border_style(
-                        Style::default()
-                            .fg(crate::colors::border())
-                            .bg(crate::colors::background()),
-                    );
-                let inner = block.inner(window_area);
-                block.render(window_area, buf);
+                    let padding = 1u16;
+                    let window_area = Rect {
+                        x: history_area.x + padding,
+                        y: history_area.y,
+                        width: history_area.width.saturating_sub(padding * 2),
+                        height: history_area.height,
+                    };
+                    Clear.render(window_area, buf);
+                    let block = Block::default()
+                        .borders(Borders::ALL)
+                        .title(ratatui::text::Line::from(vec![
+                            ratatui::text::Span::styled(
+                                " ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            ratatui::text::Span::styled(
+                                "Help",
+                                Style::default().fg(crate::colors::text()),
+                            ),
+                            ratatui::text::Span::styled(
+                                " ——— ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                            ratatui::text::Span::styled(
+                                "Esc",
+                                Style::default().fg(crate::colors::text()),
+                            ),
+                            ratatui::text::Span::styled(
+                                " close ",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]))
+                        .style(Style::default().bg(crate::colors::background()))
+                        .border_style(
+                            Style::default()
+                                .fg(crate::colors::border())
+                                .bg(crate::colors::background()),
+                        );
+                    let inner = block.inner(window_area);
+                    block.render(window_area, buf);
 
-                // Paint inner bg
-                let inner_bg = Style::default().bg(crate::colors::background());
-                for y in inner.y..inner.y + inner.height {
-                    for x in inner.x..inner.x + inner.width {
-                        buf[(x, y)].set_style(inner_bg);
+                    // Paint inner bg
+                    let inner_bg = Style::default().bg(crate::colors::background());
+                    for y in inner.y..inner.y + inner.height {
+                        for x in inner.x..inner.x + inner.width {
+                            buf[(x, y)].set_style(inner_bg);
+                        }
                     }
+
+                    // Body area with one cell padding
+                    let body = inner.inner(ratatui::layout::Margin::new(1, 1));
+
+                    // Compute visible slice
+                    let visible_rows = body.height as usize;
+                    self.help.body_visible_rows.set(body.height);
+                    let max_off = overlay.lines.len().saturating_sub(visible_rows.max(1));
+                    let skip = (overlay.scroll as usize).min(max_off);
+                    let end = (skip + visible_rows).min(overlay.lines.len());
+                    let visible = if skip < overlay.lines.len() {
+                        &overlay.lines[skip..end]
+                    } else {
+                        &[]
+                    };
+                    let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
+                        .wrap(ratatui::widgets::Wrap { trim: false });
+                    ratatui::widgets::Widget::render(paragraph, body, buf);
                 }
-
-                // Body area with one cell padding
-                let body = inner.inner(ratatui::layout::Margin::new(1, 1));
-
-                // Compute visible slice
-                let visible_rows = body.height as usize;
-                self.help.body_visible_rows.set(body.height);
-                let max_off = overlay.lines.len().saturating_sub(visible_rows.max(1));
-                let skip = (overlay.scroll as usize).min(max_off);
-                let end = (skip + visible_rows).min(overlay.lines.len());
-                let visible = if skip < overlay.lines.len() {
-                    &overlay.lines[skip..end]
-                } else {
-                    &[]
-                };
-                let paragraph = Paragraph::new(RtText::from(visible.to_vec()))
-                    .wrap(ratatui::widgets::Wrap { trim: false });
-                ratatui::widgets::Widget::render(paragraph, body, buf);
             }
         }
         // Finalize widget render timing
@@ -27856,6 +28027,11 @@ struct DiffsState {
 struct HelpState {
     overlay: Option<HelpOverlay>,
     body_visible_rows: std::cell::Cell<u16>,
+}
+
+#[derive(Default)]
+struct SettingsState {
+    overlay: Option<SettingsOverlayView>,
 }
 
 #[derive(Default)]
