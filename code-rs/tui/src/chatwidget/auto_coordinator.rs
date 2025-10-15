@@ -1658,10 +1658,11 @@ fn build_schema(active_agents: &[String]) -> Value {
                         "maxLength": 400,
                         "description": "Specific risks, flows, or acceptance criteria the cross check must probe."
                     }
-                }
+                },
+                "required": ["summary", "focus"]
             }
         },
-        "required": ["finish_status", "progress", "cli", "agents", "code_review"]
+        "required": ["finish_status", "progress", "cli", "agents", "code_review", "cross_check"]
     })
 }
 
