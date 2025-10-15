@@ -14,12 +14,15 @@ Notes
 ## Navigation & Session
 
 - `/browser`: open internal browser.
-- `/chrome`: connect to Chrome.
+- `/chrome`: connect to Chrome DevTools (opens Settings at Chrome section).
 - `/new`: start a new chat during a conversation.
 - `/resume`: resume a past session for this folder.
 - `/quit`: exit Codex.
 - `/logout`: log out of Codex.
 - `/login`: manage Code sign-ins (select, add, or disconnect accounts).
+- `/settings [section]`: open the unified Settings overlay. Optional section
+  argument jumps directly to a section such as `model`, `theme`, `agents`,
+  `limits`, `chrome`, `mcp`, or `notifications`.
 
 ## Workspace & Git
 
@@ -46,17 +49,23 @@ Notes
 
 ## UX & Display
 
-- `/theme`: switch between color themes.
+- `/theme`: open Settings at Theme section.
 - `/verbosity (high|medium|low)`: change text verbosity.
-- `/model`: choose what model and reasoning effort to use.
+- `/model`: open Settings at Model section.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
-- `/limits`: visualize current hourly and weekly rate-limit usage.
+- `/limits`: open Settings at Limits section to visualize hourly and weekly
+  rate-limit usage.
 - `/update`: check the installed version, detect available upgrades, and open a
   guided upgrade terminal that runs the installer interactively when possible.
-- `/notifications`: inspect and toggle TUI notifications.
-- `/mcp`: manage MCP servers (status/on/off/add).
+- `/notifications [status|on|off]`: manage notification settings. Opens an
+  interactive Settings overlay when called without arguments. With arguments:
+  `status` shows current config, `on` enables all, `off` disables all.
+- `/mcp [status|on|off <name>|add]`: manage MCP servers. Opens an interactive
+  Settings overlay when called without arguments, showing all servers with toggle
+  controls. With arguments: `status` lists servers, `on <name>` enables, `off <name>`
+  disables, and `add` starts the new server workflow.
 - `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
   harness settings.
 
@@ -67,9 +76,9 @@ Notes
 ## Performance & Agents
 
 - `/perf (on|off|show|reset)`: performance tracing controls.
-- `/agents`: list agents (running and availability).
-  including autonomous follow-ups and observer status (available in dev,
-  dev-fast, and pref builds).
+- `/agents`: open Settings at Agents section to configure agents and review
+  availability (including autonomous follow-ups and observer status; available
+  in dev, dev-fast, and perf builds).
 - `/auto [goal]`: start the maintainer-style auto coordinator. If no goal is
   provided it defaults to "review the git log for recent changes and come up
   with sensible follow up work".
