@@ -262,8 +262,8 @@ impl ModelSelectionView {
     }
 }
 
-impl<'a> BottomPaneView<'a> for ModelSelectionView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+impl ModelSelectionView {
+    pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
         match key_event {
             KeyEvent {
                 code: KeyCode::Up,
@@ -271,13 +271,16 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
                 ..
             } => {
                 self.move_selection_up();
+                true
             }
             KeyEvent {
                 code: KeyCode::Down,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => {
+            }
+            => {
                 self.move_selection_down();
+                true
             }
             KeyEvent {
                 code: KeyCode::Enter,
@@ -285,6 +288,7 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
                 ..
             } => {
                 self.confirm_selection();
+                true
             }
             KeyEvent {
                 code: KeyCode::Esc,
@@ -292,9 +296,16 @@ impl<'a> BottomPaneView<'a> for ModelSelectionView {
                 ..
             } => {
                 self.is_complete = true;
+                true
             }
-            _ => {}
+            _ => false,
         }
+    }
+}
+
+impl<'a> BottomPaneView<'a> for ModelSelectionView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        let _ = self.handle_key_event_direct(key_event);
     }
 
     fn is_complete(&self) -> bool {

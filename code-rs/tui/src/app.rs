@@ -1,6 +1,7 @@
 use crate::app_event::{AppEvent, TerminalRunController, TerminalRunEvent};
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::{ChatWidget, EscIntent, GhostState};
+use crate::bottom_pane::SettingsSection;
 use crate::cloud_tasks_service;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::file_search::FileSearchManager;
@@ -1938,12 +1939,25 @@ impl App<'_> {
                         }
                         SlashCommand::Limits => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.add_limits_output();
+                                if command_args.trim().is_empty() {
+                                    widget.show_settings_overlay_full(SettingsSection::Limits);
+                                } else {
+                                    widget.add_limits_output();
+                                }
                             }
                         }
                         SlashCommand::Update => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 widget.handle_update_command(command_args.trim());
+                            }
+                        }
+                        SlashCommand::Settings => {
+                            if let AppState::Chat { widget } = &mut self.app_state {
+                                let section = command
+                                    .settings_section_from_args(&command_args)
+                                    .and_then(ChatWidget::settings_section_from_hint)
+                                    .unwrap_or(SettingsSection::Model);
+                                widget.show_settings_overlay_full(section);
                             }
                         }
                         SlashCommand::Notifications => {
@@ -1953,7 +1967,11 @@ impl App<'_> {
                         }
                         SlashCommand::Agents => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_agents_command(command_args);
+                                if command_args.trim().is_empty() {
+                                    widget.show_settings_overlay_full(SettingsSection::Agents);
+                                } else {
+                                    widget.handle_agents_command(command_args);
+                                }
                             }
                         }
                         SlashCommand::Github => {
@@ -1973,7 +1991,11 @@ impl App<'_> {
                         }
                         SlashCommand::Model => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.handle_model_command(command_args);
+                                if command_args.trim().is_empty() {
+                                    widget.show_settings_overlay_full(SettingsSection::Model);
+                                } else {
+                                    widget.handle_model_command(command_args);
+                                }
                             }
                         }
                         SlashCommand::Reasoning => {
@@ -1990,7 +2012,7 @@ impl App<'_> {
                             // Theme selection is handled in submit_user_message
                             // This case is here for completeness
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.show_theme_selection();
+                                widget.show_settings_overlay_full(SettingsSection::Theme);
                             }
                         }
                         SlashCommand::Prompts => {
@@ -2028,7 +2050,11 @@ impl App<'_> {
                         SlashCommand::Chrome => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 tracing::info!("[cdp] /chrome invoked, args='{}'", command_args);
-                                widget.handle_chrome_command(command_args);
+                                if command_args.trim().is_empty() {
+                                    widget.show_settings_overlay_full(SettingsSection::Chrome);
+                                } else {
+                                    widget.handle_chrome_command(command_args);
+                                }
                             }
                         }
                         #[cfg(debug_assertions)]

@@ -139,6 +139,7 @@ pub fn find_spinner_by_name(name: &str) -> Option<&'static Spinner> {
         })
 }
 
+#[allow(dead_code)]
 pub fn spinner_names() -> Vec<String> {
     let mut v: Vec<String> = ALL_SPINNERS.iter().map(|s| s.name.clone()).collect();
     v.extend(CUSTOM_SPINNERS.read().unwrap().iter().map(|s| s.name.clone()));
@@ -218,6 +219,7 @@ fn vpush(out: &mut Vec<Spinner>, name: &str, sj: SpinnerJson, group_override: Op
     out.push(Spinner { name: name.to_string(), label, group, interval_ms: sj.interval, frames: sj.frames });
 }
 
+#[allow(dead_code)]
 pub fn global_max_frame_len() -> usize {
     let mut maxlen = 0usize;
     for s in ALL_SPINNERS.iter() { for f in &s.frames { maxlen = maxlen.max(f.chars().count()); } }
@@ -227,6 +229,7 @@ pub fn global_max_frame_len() -> usize {
 
 pub fn set_custom_spinners(custom: Vec<Spinner>) { *CUSTOM_SPINNERS.write().unwrap() = custom; }
 
+#[allow(dead_code)]
 pub fn add_custom_spinner(name: String, label: String, interval_ms: u64, frames: Vec<String>) {
     let mut v = CUSTOM_SPINNERS.write().unwrap();
     if let Some(pos) = v.iter().position(|s| s.name == name) {
