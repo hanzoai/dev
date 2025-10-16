@@ -12190,6 +12190,8 @@ fi\n\
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
+                self.auto_reset_intro_timing();
+                self.auto_ensure_intro_timing();
                 self.auto_state.active = true;
                 self.auto_state.started_at = Some(Instant::now());
                 self.auto_state.turns_completed = 0;

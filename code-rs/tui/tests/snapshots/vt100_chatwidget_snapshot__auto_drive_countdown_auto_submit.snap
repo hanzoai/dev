@@ -12,7 +12,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                               Awaiting input (0 turns)
+  Auto Drive > Working                                Awaiting input (0 turns)
  Auto Drive will send:
  Prompt:
  Awaiting input (0 turns)  •  Agents Disabled  •  Review Enabled
@@ -31,7 +31,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                               Awaiting input (0 turns)
+  Auto Drive > Working                                Awaiting input (0 turns)
  Auto Drive will send:
  Prompt:
  Awaiting input (0 turns)  •  Agents Disabled  •  Review Enabled
@@ -53,7 +53,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
  › cargo fmt --check
 
-   Auto Drive > Running cargo fmt --check.                   Running (0 turns)
+  Auto Drive > Running cargo fmt --check.                    Running (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

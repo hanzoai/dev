@@ -15,7 +15,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                                      Running (0 turns)
+  Auto Drive > Working                                       Running (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -31,7 +31,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                               Awaiting input (0 turns)
+  Auto Drive > Working                                Awaiting input (0 turns)
  Completed git status check. Comparing diffs against last run.
  Auto Drive will send:
  Awaiting input (0 turns)  •  Agents Enabled  •  Review Enabled
@@ -53,7 +53,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                              Awaiting review (0 turns)
+  Auto Drive > Working                               Awaiting review (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -72,7 +72,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                                      Running (0 turns)
+  Auto Drive > Working                                       Running (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
