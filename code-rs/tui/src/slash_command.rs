@@ -116,14 +116,14 @@ impl SlashCommand {
             SlashCommand::Mention => "mention a file",
             SlashCommand::Cmd => "run a project command",
             SlashCommand::Status => "show current session configuration and token usage",
-            SlashCommand::Limits => "visualize rate limits (opens Settings at Limits)",
+            SlashCommand::Limits => "open Settings overlay at Limits section",
             SlashCommand::Update => "check for updates and optionally upgrade",
             SlashCommand::Notifications => "manage notification settings (opens Settings when no args)",
             SlashCommand::Theme => "open Settings at Theme section",
             SlashCommand::Settings => "open Settings (sections: model, theme, agents, limits, chrome, mcp, notifications)",
             SlashCommand::Prompts => "show example prompts",
             SlashCommand::Model => "open Settings at Model section",
-            SlashCommand::Agents => "open Settings at Agents section",
+            SlashCommand::Agents => "open Settings overlay at Agents section",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"

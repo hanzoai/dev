@@ -55,7 +55,7 @@ Notes
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
-- `/limits`: open Settings at Limits section to visualize hourly and weekly
+- `/limits`: open the Settings overlay at Limits to visualize hourly and weekly
   rate-limit usage.
 - `/update`: check the installed version, detect available upgrades, and open a
   guided upgrade terminal that runs the installer interactively when possible.
@@ -76,9 +76,9 @@ Notes
 ## Performance & Agents
 
 - `/perf (on|off|show|reset)`: performance tracing controls.
-- `/agents`: open Settings at Agents section to configure agents and review
-  availability (including autonomous follow-ups and observer status; available
-  in dev, dev-fast, and perf builds).
+- `/agents`: open the Settings overlay at Agents to manage agents and subagent
+  commands (including autonomous follow-ups and observer status; available in
+  dev, dev-fast, and perf builds).
 - `/auto [goal]`: start the maintainer-style auto coordinator. If no goal is
   provided it defaults to "review the git log for recent changes and come up
   with sensible follow up work".
