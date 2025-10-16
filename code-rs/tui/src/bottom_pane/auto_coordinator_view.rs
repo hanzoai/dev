@@ -286,7 +286,14 @@ impl AutoCoordinatorView {
             }
         }
 
-        matches!(key_event.code, KeyCode::Up | KeyCode::Down)
+        if matches!(key_event.code, KeyCode::Up | KeyCode::Down) {
+            let hide_composer = match &self.model {
+                AutoCoordinatorViewModel::Active(model) => !model.show_composer,
+            };
+            return hide_composer;
+        }
+
+        false
     }
 
 
