@@ -1,16 +1,17 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 1183
 expression: output
 ---
  +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ |                                    Code                                    |
  +----------------------------------------------------------------------------+
  + Agents --------------------------------------------------------------------+
  | • QA Bot (running 0s) - Executing smoke tests         Ctrl+A open terminal |
  +----------------------------------------------------------------------------+
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
-   /limits - visualize weekly and hourly rate limits
+   /limits - visualize rate limits (opens Settings at Limits)
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
