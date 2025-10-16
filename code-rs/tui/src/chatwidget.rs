@@ -68,7 +68,6 @@ mod history_render;
 mod help_handlers;
 mod settings_handlers;
 mod settings_overlay;
-mod limits_handlers;
 mod limits_overlay;
 mod interrupts;
 mod layout_scroll;
@@ -101,7 +100,7 @@ use self::auto_coordinator::{
     TurnDescriptor,
     CROSS_CHECK_RESTART_BANNER,
 };
-use self::limits_overlay::{LimitsOverlay, LimitsOverlayContent, LimitsTab};
+use self::limits_overlay::{LimitsOverlayContent, LimitsTab};
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{
     CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings, VisibleCell,
@@ -4588,6 +4587,12 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if settings_handlers::handle_settings_key(self, key_event) {
+            return;
+        }
+        if self.settings.overlay.is_some() {
+            return;
+        }
         if terminal_handlers::handle_terminal_key(self, key_event) {
             return;
         }
@@ -4595,23 +4600,11 @@ impl ChatWidget<'_> {
             // Block background input while the terminal overlay is visible.
             return;
         }
-        if limits_handlers::handle_limits_key(self, key_event) {
-            return;
-        }
-        if self.limits.overlay.is_some() {
-            return;
-        }
         // Intercept keys for overlays when active (help first, then diff)
         if help_handlers::handle_help_key(self, key_event) {
             return;
         }
         if self.help.overlay.is_some() {
-            return;
-        }
-        if settings_handlers::handle_settings_key(self, key_event) {
-            return;
-        }
-        if self.settings.overlay.is_some() {
             return;
         }
         if diff_handlers::handle_diff_key(self, key_event) {
@@ -4920,23 +4913,10 @@ impl ChatWidget<'_> {
 
     fn set_limits_overlay_content(&mut self, content: LimitsOverlayContent) {
         let handled_by_settings = self.update_limits_settings_content(content.clone());
-
-        if handled_by_settings
-            && self
-                .settings
-                .overlay
-                .as_ref()
-                .map(|overlay| overlay.active_section())
-                == Some(SettingsSection::Limits)
-        {
-            self.limits.overlay = None;
-            return;
-        }
-
-        if let Some(existing) = self.limits.overlay.as_mut() {
-            existing.set_content(content);
+        if handled_by_settings {
+            self.limits.cached_content = None;
         } else {
-            self.limits.overlay = Some(LimitsOverlay::new(content));
+            self.limits.cached_content = Some(content);
         }
     }
 
@@ -4961,18 +4941,6 @@ impl ChatWidget<'_> {
             LimitsOverlayContent::Tabs(tabs)
         };
         self.set_limits_overlay_content(content);
-    }
-
-    fn rebuild_limits_overlay(&mut self) {
-        if self.rate_limit_fetch_inflight {
-            self.set_limits_overlay_content(LimitsOverlayContent::Loading);
-            return;
-        }
-
-        let snapshot = self.rate_limit_snapshot.clone();
-        let reset_info = self.rate_limit_reset_info();
-        let tabs = self.build_limits_tabs(snapshot, reset_info);
-        self.set_limits_overlay_tabs(tabs);
     }
 
     fn build_limits_tabs(
@@ -9411,9 +9379,17 @@ impl ChatWidget<'_> {
                     self.rate_limit_snapshot = Some(snapshot);
                     self.rate_limit_last_fetch_at = Some(Utc::now());
                     self.rate_limit_fetch_inflight = false;
-                    if self.limits.overlay.is_some() {
-                        self.rebuild_limits_overlay();
-                        self.request_redraw();
+                    let refresh_limits_settings = self
+                        .settings
+                        .overlay
+                        .as_ref()
+                        .map(|overlay| {
+                            overlay.active_section() == SettingsSection::Limits
+                                && !overlay.is_menu_active()
+                        })
+                        .unwrap_or(false);
+                    if refresh_limits_settings {
+                        self.show_limits_settings_ui();
                     }
                 }
                 self.bottom_pane.set_token_usage(
@@ -10909,8 +10885,12 @@ impl ChatWidget<'_> {
         ));
     }
 
-    pub(crate) fn add_limits_output(&mut self) {
+    pub(crate) fn show_limits_settings_ui(&mut self) {
         self.ensure_settings_overlay_section(SettingsSection::Limits);
+
+        if let Some(cached) = self.limits.cached_content.take() {
+            self.update_limits_settings_content(cached);
+        }
 
         let snapshot = self.rate_limit_snapshot.clone();
         let needs_refresh = self.should_refresh_limits();
@@ -10935,7 +10915,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        if show_loading && self.settings.overlay.as_ref().map(|o| o.active_section()) != Some(SettingsSection::Limits) && self.limits.overlay.is_none() {
+        if show_loading {
             self.set_limits_overlay_content(LimitsOverlayContent::Loading);
             self.request_redraw();
         }
@@ -10970,15 +10950,13 @@ impl ChatWidget<'_> {
     pub(crate) fn on_rate_limit_refresh_failed(&mut self, message: String) {
         self.rate_limit_fetch_inflight = false;
 
-        if self.limits.overlay.is_some() {
-            let content = if self.rate_limit_snapshot.is_some() {
-                LimitsOverlayContent::Error(message.clone())
-            } else {
-                LimitsOverlayContent::Placeholder
-            };
-            self.set_limits_overlay_content(content);
-            self.request_redraw();
-        }
+        let content = if self.rate_limit_snapshot.is_some() {
+            LimitsOverlayContent::Error(message.clone())
+        } else {
+            LimitsOverlayContent::Placeholder
+        };
+        self.set_limits_overlay_content(content);
+        self.request_redraw();
 
         if self.rate_limit_snapshot.is_some() {
             self.history_push_plain_state(history_cell::new_warning_event(message));
@@ -11074,7 +11052,7 @@ impl ChatWidget<'_> {
     pub(crate) fn handle_notifications_command(&mut self, args: String) {
         let trimmed = args.trim();
         if trimmed.is_empty() {
-            self.show_settings_overlay_full(SettingsSection::Notifications);
+            self.show_settings_overlay(Some(SettingsSection::Notifications));
             return;
         }
 
@@ -11319,7 +11297,7 @@ impl ChatWidget<'_> {
                 "Usage: /agents".to_string(),
             ));
         }
-        self.show_settings_overlay_full(SettingsSection::Agents);
+        self.show_settings_overlay(Some(SettingsSection::Agents));
     }
 
     pub(crate) fn handle_limits_command(&mut self, args: String) {
@@ -11328,7 +11306,7 @@ impl ChatWidget<'_> {
                 "Usage: /limits".to_string(),
             ));
         }
-        self.show_settings_overlay_full(SettingsSection::Limits);
+        self.show_settings_overlay(Some(SettingsSection::Limits));
     }
 
     pub(crate) fn handle_login_command(&mut self) {
@@ -15905,8 +15883,17 @@ fi\n\
         );
     }
 
-    pub(crate) fn show_settings_overlay_full(&mut self, section: SettingsSection) {
-        let mut overlay = SettingsOverlayView::new(section);
+    pub(crate) fn show_settings_overlay(&mut self, section: Option<SettingsSection>) {
+        let initial_section = section
+            .or_else(|| {
+                self.settings
+                    .overlay
+                    .as_ref()
+                    .map(|overlay| overlay.active_section())
+            })
+            .unwrap_or(SettingsSection::Model);
+
+        let mut overlay = SettingsOverlayView::new(initial_section);
         overlay.set_model_content(self.build_model_settings_content());
         overlay.set_theme_content(self.build_theme_settings_content());
         overlay.set_notifications_content(self.build_notifications_settings_content());
@@ -15915,6 +15902,12 @@ fi\n\
         }
         overlay.set_agents_content(self.build_agents_settings_content());
         overlay.set_limits_content(self.build_limits_settings_content());
+
+        match section {
+            Some(section) => overlay.set_mode_section(section),
+            None => overlay.set_mode_menu(None),
+        }
+
         self.settings.overlay = Some(overlay);
         self.request_redraw();
     }
@@ -15922,12 +15915,15 @@ fi\n\
     pub(crate) fn ensure_settings_overlay_section(&mut self, section: SettingsSection) {
         match self.settings.overlay.as_mut() {
             Some(overlay) => {
-                if overlay.set_section(section) {
+                let was_menu = overlay.is_menu_active();
+                let changed_section = overlay.active_section() != section;
+                overlay.set_mode_section(section);
+                if was_menu || changed_section {
                     self.request_redraw();
                 }
             }
             None => {
-                self.show_settings_overlay_full(section);
+                self.show_settings_overlay(Some(section));
             }
         }
     }
@@ -16174,7 +16170,7 @@ fi\n\
                 false
             }
             SettingsSection::Limits => {
-                self.add_limits_output();
+                self.show_limits_settings_ui();
                 false
             }
             SettingsSection::Chrome => {
@@ -16811,7 +16807,6 @@ fi\n\
             || self.settings.overlay.is_some()
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
-            || self.limits.overlay.is_some()
             || self.terminal.overlay.is_some()
     }
 
@@ -19416,7 +19411,7 @@ fi\n\
     pub(crate) fn handle_mcp_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
-            self.show_settings_overlay_full(SettingsSection::Mcp);
+            self.show_settings_overlay(Some(SettingsSection::Mcp));
             return;
         }
 
@@ -25437,194 +25432,6 @@ impl ChatWidget<'_> {
         Paragraph::new(RLine::from(spans)).render(content, buf);
     }
 
-    fn render_limits_overlay(&self, frame_area: Rect, history_area: Rect, buf: &mut Buffer) {
-        use ratatui::layout::Margin;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Clear;
-        use ratatui::widgets::Paragraph;
-        use ratatui::widgets::Wrap;
-
-        let Some(overlay) = self.limits.overlay.as_ref() else {
-            return;
-        };
-
-        let tab_count = overlay.tab_count();
-
-        let scrim_style = Style::default()
-            .bg(crate::colors::overlay_scrim())
-            .fg(crate::colors::text_dim());
-        fill_rect(buf, frame_area, None, scrim_style);
-
-        let padding = 1u16;
-        let overlay_area = Rect {
-            x: history_area.x + padding,
-            y: history_area.y,
-            width: history_area.width.saturating_sub(padding * 2),
-            height: history_area.height,
-        };
-
-        Clear.render(overlay_area, buf);
-
-        let dim_style = Style::default().fg(crate::colors::text_dim());
-        let mut title_spans: Vec<Span<'static>> = vec![
-            Span::styled(" Rate limits ", Style::default().fg(crate::colors::text())),
-        ];
-        if tab_count > 1 {
-            title_spans.extend_from_slice(&[
-                Span::styled("——— ", dim_style),
-                Span::styled("◂ ▸", Style::default().fg(crate::colors::function())),
-                Span::styled(" change account ", dim_style),
-            ]);
-        }
-        title_spans.extend_from_slice(&[
-            Span::styled("——— ", dim_style),
-            Span::styled("Esc", Style::default().fg(crate::colors::text())),
-            Span::styled(" close ", dim_style),
-            Span::styled("——— ", dim_style),
-            Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-            Span::styled(" scroll", dim_style),
-        ]);
-        let title = RLine::from(title_spans);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .style(Style::default().bg(crate::colors::background()))
-            .border_style(
-                Style::default()
-                    .fg(crate::colors::border())
-                    .bg(crate::colors::background()),
-            );
-        let inner = block.inner(overlay_area);
-        block.render(overlay_area, buf);
-
-        let body = inner.inner(Margin::new(1, 1));
-        if body.width == 0 || body.height == 0 {
-            overlay.set_visible_rows(0);
-            overlay.set_max_scroll(0);
-            return;
-        }
-
-        let (tabs_area, content_area) = if tab_count > 1 {
-            let [tabs_area, content_area] =
-                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(body);
-            (Some(tabs_area), content_area)
-        } else {
-            (None, body)
-        };
-
-        if let Some(area) = tabs_area {
-            if let Some(tabs) = overlay.tabs() {
-                let labels: Vec<String> = tabs
-                    .iter()
-                    .map(|tab| format!("  {}  ", tab.title))
-                    .collect();
-
-                let mut constraints: Vec<Constraint> = Vec::new();
-                let mut consumed: u16 = 0;
-                for label in &labels {
-                    let width = label.chars().count() as u16;
-                    let remaining = area.width.saturating_sub(consumed);
-                    let w = width.min(remaining);
-                    constraints.push(Constraint::Length(w));
-                    consumed = consumed.saturating_add(w);
-                    if consumed >= area.width.saturating_sub(4) {
-                        break;
-                    }
-                }
-                constraints.push(Constraint::Fill(1));
-
-                let chunks = Layout::horizontal(constraints).split(area);
-
-                let tabs_bottom_rule = Block::default()
-                    .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(crate::colors::border()));
-                tabs_bottom_rule.render(area, buf);
-
-                let selected_idx = overlay.selected_tab();
-
-                for (idx, label) in labels.iter().enumerate() {
-                    if idx >= chunks.len().saturating_sub(1) {
-                        break;
-                    }
-                    let rect = chunks[idx];
-                    if rect.width == 0 {
-                        continue;
-                    }
-
-                    let selected = idx == selected_idx;
-                    let bg_style = Style::default().bg(crate::colors::background());
-                    fill_rect(buf, rect, None, bg_style);
-
-                    let label_rect = Rect {
-                        x: rect.x + 1,
-                        y: rect.y,
-                        width: rect.width.saturating_sub(2),
-                        height: 1,
-                    };
-                    let label_style = if selected {
-                        Style::default()
-                            .fg(crate::colors::text())
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        dim_style
-                    };
-                    let line = RLine::from(Span::styled(label.clone(), label_style));
-                    Paragraph::new(RtText::from(vec![line]))
-                        .wrap(Wrap { trim: true })
-                        .render(label_rect, buf);
-
-                    if selected {
-                        let accent_width = label.chars().count() as u16;
-                        let accent_rect = Rect {
-                            x: label_rect.x,
-                            y: rect.y + rect.height.saturating_sub(1),
-                            width: accent_width.min(label_rect.width).max(1),
-                            height: 1,
-                        };
-                        let underline = Block::default()
-                            .borders(Borders::BOTTOM)
-                            .border_style(Style::default().fg(crate::colors::text_bright()));
-                        underline.render(accent_rect, buf);
-                    }
-                }
-            }
-        }
-
-        let text_area = content_area;
-
-        let lines = overlay.lines_for_width(text_area.width);
-        let total_lines = lines.len();
-        let visible_rows = text_area.height as usize;
-        overlay.set_visible_rows(text_area.height);
-        let max_scroll = total_lines
-            .saturating_sub(visible_rows.max(1))
-            .min(u16::MAX as usize) as u16;
-        overlay.set_max_scroll(max_scroll);
-
-        let scroll = overlay.scroll().min(max_scroll) as usize;
-        let end = (scroll + visible_rows).min(total_lines);
-        let slice = if scroll < total_lines {
-            lines[scroll..end].to_vec()
-        } else {
-            Vec::new()
-        };
-
-        fill_rect(
-            buf,
-            text_area,
-            Some(' '),
-            Style::default().bg(crate::colors::background()),
-        );
-
-        Paragraph::new(RtText::from(slice))
-            .wrap(Wrap { trim: false })
-            .render(text_area, buf);
-    }
-
     /// Render a collapsed header for the agents HUD with counts/list (1 line + border)
     fn render_agents_header(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::layout::Margin;
@@ -25645,11 +25452,9 @@ impl ChatWidget<'_> {
                 let state = match a.status {
                     AgentStatus::Pending => "pending".to_string(),
                     AgentStatus::Running => {
-                        // Show elapsed running time when available
                         if let Some(rt) = self.agent_runtime.get(&a.id) {
                             if let Some(start) = rt.started_at {
-                                let now = Instant::now();
-                                let elapsed = now.saturating_duration_since(start);
+                                let elapsed = Instant::now().saturating_duration_since(start);
                                 format!("running {}", self.fmt_short_duration(elapsed))
                             } else {
                                 "running".to_string()
@@ -25689,12 +25494,11 @@ impl ChatWidget<'_> {
             .title(" Agents ");
         let inner = block.inner(area);
         block.render(area, buf);
-        let content = inner.inner(Margin::new(1, 0)); // 1 space padding inside border
+        let content = inner.inner(Margin::new(1, 0));
 
         let key_hint_style = Style::default().fg(crate::colors::function());
-        let label_style = Style::default().dim(); // match top status bar label
+        let label_style = Style::default().dim();
 
-        // Left side: status dot + text (no label) and Agents summary
         let mut left_spans: Vec<Span> = Vec::new();
         let is_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
         let dot_style = if is_active {
@@ -25703,12 +25507,9 @@ impl ChatWidget<'_> {
             Style::default().fg(crate::colors::text_dim())
         };
         left_spans.push(Span::styled("•", dot_style));
-        // no status text; dot conveys status
-        // single space between dot and summary; no label/separator
         left_spans.push(Span::raw(" "));
         left_spans.push(Span::raw(summary));
 
-        // Right side: hint for opening terminal (Ctrl+A)
         let right_spans: Vec<Span> = vec![
             Span::from("Ctrl+A").style(key_hint_style),
             Span::styled(" open terminal", label_style),
@@ -28014,8 +27815,6 @@ impl WidgetRef for &ChatWidget<'_> {
         if terminal_overlay_none && !agents_terminal_active {
             if let Some(overlay) = self.settings.overlay.as_ref() {
                 self.render_settings_overlay(area, history_area, buf, overlay);
-            } else if self.limits.overlay.is_some() {
-                self.render_limits_overlay(area, history_area, buf);
             } else if let Some(overlay) = &self.diffs.overlay {
                 // Global scrim: dim the whole background to draw focus to the viewer
                 // We intentionally do this across the entire widget area rather than just the
@@ -28659,7 +28458,7 @@ struct SettingsState {
 
 #[derive(Default)]
 struct LimitsState {
-    overlay: Option<LimitsOverlay>,
+    cached_content: Option<LimitsOverlayContent>,
 }
 
 struct HelpOverlay {

@@ -3,7 +3,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -24,6 +24,50 @@ pub(crate) trait SettingsContent {
     fn handle_key(&mut self, key: KeyEvent) -> bool;
     fn is_complete(&self) -> bool;
     fn on_close(&mut self) {}
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MenuState {
+    selected: SettingsSection,
+}
+
+impl MenuState {
+    fn new(selected: SettingsSection) -> Self {
+        Self { selected }
+    }
+
+    fn selected(&self) -> SettingsSection {
+        self.selected
+    }
+
+    fn set_selected(&mut self, section: SettingsSection) {
+        self.selected = section;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SectionState {
+    active: SettingsSection,
+}
+
+impl SectionState {
+    fn new(active: SettingsSection) -> Self {
+        Self { active }
+    }
+
+    fn active(&self) -> SettingsSection {
+        self.active
+    }
+
+    fn set_active(&mut self, section: SettingsSection) {
+        self.active = section;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SettingsOverlayMode {
+    Menu(MenuState),
+    Section(SectionState),
 }
 
 pub(crate) struct ModelSettingsContent {
@@ -607,7 +651,8 @@ impl SettingsContent for LimitsSettingsContent {
 
 /// Full-screen settings overlay rendered by the chat widget.
 pub(crate) struct SettingsOverlayView {
-    active_section: SettingsSection,
+    mode: SettingsOverlayMode,
+    last_section: SettingsSection,
     model_content: Option<ModelSettingsContent>,
     theme_content: Option<ThemeSettingsContent>,
     notifications_content: Option<NotificationsSettingsContent>,
@@ -618,8 +663,10 @@ pub(crate) struct SettingsOverlayView {
 
 impl SettingsOverlayView {
     pub(crate) fn new(section: SettingsSection) -> Self {
+        let section_state = SectionState::new(section);
         Self {
-            active_section: section,
+            mode: SettingsOverlayMode::Section(section_state),
+            last_section: section,
             model_content: None,
             theme_content: None,
             notifications_content: None,
@@ -630,7 +677,24 @@ impl SettingsOverlayView {
     }
 
     pub(crate) fn active_section(&self) -> SettingsSection {
-        self.active_section
+        match self.mode {
+            SettingsOverlayMode::Menu(state) => state.selected(),
+            SettingsOverlayMode::Section(state) => state.active(),
+        }
+    }
+
+    pub(crate) fn is_menu_active(&self) -> bool {
+        matches!(self.mode, SettingsOverlayMode::Menu(_))
+    }
+
+    pub(crate) fn set_mode_menu(&mut self, selected: Option<SettingsSection>) {
+        let section = selected.unwrap_or(self.last_section);
+        self.mode = SettingsOverlayMode::Menu(MenuState::new(section));
+    }
+
+    pub(crate) fn set_mode_section(&mut self, section: SettingsSection) {
+        self.mode = SettingsOverlayMode::Section(SectionState::new(section));
+        self.last_section = section;
     }
 
     pub(crate) fn set_model_content(&mut self, content: ModelSettingsContent) {
@@ -671,21 +735,25 @@ impl SettingsOverlayView {
     }
 
     pub(crate) fn set_section(&mut self, section: SettingsSection) -> bool {
-        if self.active_section == section {
+        if self.active_section() == section {
             return false;
         }
-        self.active_section = section;
+        self.last_section = section;
+        match &mut self.mode {
+            SettingsOverlayMode::Menu(state) => state.set_selected(section),
+            SettingsOverlayMode::Section(state) => state.set_active(section),
+        }
         true
     }
 
     pub(crate) fn select_next(&mut self) -> bool {
-        let mut idx = self.index_of(self.active_section);
+        let mut idx = self.index_of(self.active_section());
         idx = (idx + 1) % SettingsSection::ALL.len();
         self.set_section(SettingsSection::ALL[idx])
     }
 
     pub(crate) fn select_previous(&mut self) -> bool {
-        let mut idx = self.index_of(self.active_section);
+        let mut idx = self.index_of(self.active_section());
         idx = idx.checked_sub(1).unwrap_or(SettingsSection::ALL.len() - 1);
         self.set_section(SettingsSection::ALL[idx])
     }
@@ -751,7 +819,7 @@ impl SettingsOverlayView {
         }
 
         let [header_area, body_area] = Layout::vertical([
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Fill(1),
         ])
         .areas(content);
@@ -764,22 +832,60 @@ impl SettingsOverlayView {
         if area.width == 0 || area.height == 0 {
             return;
         }
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled("↑/↓", Style::default().fg(crate::colors::text())));
-        spans.push(Span::styled(" navigate  ", Style::default().fg(crate::colors::text_dim())));
-        spans.push(Span::styled("m/t/a/l/c/p/n", Style::default().fg(crate::colors::text())));
-        spans.push(Span::styled(" jump  ", Style::default().fg(crate::colors::text_dim())));
-        spans.push(Span::styled("Enter", Style::default().fg(crate::colors::text())));
-        spans.push(Span::styled(" select", Style::default().fg(crate::colors::text_dim())));
+        let [crumb_area, hint_area] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
 
-        let line = Line::from(spans);
-        Paragraph::new(line)
+        let crumb = {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            spans.push(Span::styled("Settings", Style::default().fg(crate::colors::text())));
+            spans.push(Span::styled(" ▸ ", Style::default().fg(crate::colors::text_dim())));
+            let section_label = if self.is_menu_active() {
+                "Menu".to_string()
+            } else {
+                self.active_section().label().to_string()
+            };
+            spans.push(Span::styled(section_label, Style::default().fg(crate::colors::text())));
+            Line::from(spans)
+        };
+        Paragraph::new(crumb)
             .style(Style::default().bg(crate::colors::background()))
-            .render(area, buf);
+            .render(crumb_area, buf);
+
+        if hint_area.height == 0 {
+            return;
+        }
+
+        let hints = if self.is_menu_active() {
+            Line::from(vec![
+                Span::styled("↑↓", Style::default().fg(crate::colors::text())),
+                Span::styled(" move  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Enter", Style::default().fg(crate::colors::text())),
+                Span::styled(" open  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Esc", Style::default().fg(crate::colors::text())),
+                Span::styled(" close", Style::default().fg(crate::colors::text_dim())),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("←", Style::default().fg(crate::colors::text())),
+                Span::styled(" back  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Esc", Style::default().fg(crate::colors::text())),
+                Span::styled(" menu  ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("↑↓", Style::default().fg(crate::colors::text())),
+                Span::styled(" navigate", Style::default().fg(crate::colors::text_dim())),
+            ])
+        };
+
+        Paragraph::new(hints)
+            .style(Style::default().bg(crate::colors::background()))
+            .render(hint_area, buf);
     }
 
     fn render_body(&self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        if self.is_menu_active() {
+            self.render_menu(area, buf);
             return;
         }
 
@@ -793,6 +899,54 @@ impl SettingsOverlayView {
         self.render_content(main, buf);
     }
 
+    fn render_menu(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let items: Vec<ListItem> = SettingsSection::ALL
+            .iter()
+            .map(|section| {
+                let is_active = *section == self.active_section();
+                let mut spans: Vec<Span<'static>> = Vec::new();
+                let prefix = if is_active { "›" } else { " " };
+                spans.push(Span::styled(prefix, Style::default().fg(crate::colors::text())));
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    section.label(),
+                    if is_active {
+                        Style::default()
+                            .fg(crate::colors::text())
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(crate::colors::text_dim())
+                    },
+                ));
+                if let Some(shortcut) = section.shortcut() {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        format!("({})", shortcut.to_ascii_uppercase()),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                }
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled("Sections", Style::default().fg(crate::colors::text()))),
+        );
+
+        let mut state = ListState::default();
+        let selected_idx = SettingsSection::ALL
+            .iter()
+            .position(|section| *section == self.active_section());
+        state.select(selected_idx);
+        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
+    }
+
     fn render_sidebar(&self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;
@@ -800,7 +954,7 @@ impl SettingsOverlayView {
         let items: Vec<ListItem> = SettingsSection::ALL
             .iter()
             .map(|section| {
-                let is_active = *section == self.active_section;
+                let is_active = *section == self.active_section();
                 let mut spans: Vec<Span<'static>> = Vec::new();
                 let prefix = if is_active { "›" } else { " " };
                 spans.push(Span::styled(prefix, Style::default().fg(crate::colors::text())));
@@ -833,14 +987,19 @@ impl SettingsOverlayView {
                     .fg(crate::colors::primary())
                     .add_modifier(Modifier::BOLD),
             );
-        list.render(area, buf);
+        let mut state = ListState::default();
+        let selected_idx = SettingsSection::ALL
+            .iter()
+            .position(|section| *section == self.active_section());
+        state.select(selected_idx);
+        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
     }
 
     fn render_content(&self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;
         }
-        match self.active_section {
+        match self.active_section() {
             SettingsSection::Model => {
                 if let Some(content) = self.model_content.as_ref() {
                     content.render(area, buf);
@@ -895,7 +1054,11 @@ impl SettingsOverlayView {
     }
 
     pub(crate) fn active_content_mut(&mut self) -> Option<&mut dyn SettingsContent> {
-        match self.active_section {
+        if self.is_menu_active() {
+            return None;
+        }
+
+        match self.active_section() {
             SettingsSection::Model => self
                 .model_content
                 .as_mut()
@@ -925,7 +1088,7 @@ impl SettingsOverlayView {
     }
 
     pub(crate) fn notify_close(&mut self) {
-        match self.active_section {
+        match self.active_section() {
             SettingsSection::Model => {
                 if let Some(content) = self.model_content.as_mut() {
                     content.on_close();
