@@ -1,20 +1,21 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 334
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ |                                    Code                                    |
  +----------------------------------------------------------------------------+
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
-   /limits - visualize weekly and hourly rate limits
+   /limits - visualize rate limits (opens Settings at Limits)
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                                      Running (0 turns)
+  Auto Drive > Working                                       Running (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -22,15 +23,15 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ |                                    Code                                    |
  +----------------------------------------------------------------------------+
    parallel work)
-   /limits - visualize weekly and hourly rate limits
+   /limits - visualize rate limits (opens Settings at Limits)
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                               Awaiting input (0 turns)
+  Auto Drive > Working                                Awaiting input (0 turns)
  Completed git status check. Comparing diffs against last run.
  Auto Drive will send:
  Awaiting input (0 turns)  •  Agents Enabled  •  Review Enabled
@@ -41,18 +42,18 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ |                                    Code                                    |
  +----------------------------------------------------------------------------+
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
-   /limits - visualize weekly and hourly rate limits
+   /limits - visualize rate limits (opens Settings at Limits)
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                              Awaiting review (0 turns)
+  Auto Drive > Working                               Awaiting review (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -60,18 +61,18 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
 ---FRAME---
  +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ |                                    Code                                    |
  +----------------------------------------------------------------------------+
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
-   /limits - visualize weekly and hourly rate limits
+   /limits - visualize rate limits (opens Settings at Limits)
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                                      Running (0 turns)
+  Auto Drive > Working                                       Running (0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

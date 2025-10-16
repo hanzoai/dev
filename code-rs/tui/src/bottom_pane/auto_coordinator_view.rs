@@ -2,14 +2,16 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
+use crate::glitch_animation::{gradient_multi, mix_rgb};
 use crate::colors;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::Widget;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, WidgetRef, Wrap};
+use std::borrow::Cow;
 use unicode_width::UnicodeWidthStr;
 use std::time::{Duration, Instant};
 
@@ -53,6 +55,8 @@ pub(crate) struct AutoActiveViewModel {
     pub elapsed: Option<Duration>,
     pub progress_past: Option<String>,
     pub progress_current: Option<String>,
+    pub intro_started_at: Option<Instant>,
+    pub intro_reduced_motion: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +73,12 @@ struct VariantContext {
     button: Option<ButtonContext>,
     ctrl_hint: String,
     manual_hint: Option<String>,
+}
+
+struct IntroState<'a> {
+    header_text: Cow<'a, str>,
+    body_visible: bool,
+    schedule_next_in: Option<Duration>,
 }
 
 pub(crate) struct AutoCoordinatorView {
@@ -120,6 +130,90 @@ impl AutoCoordinatorView {
             0
         };
         self.estimated_height_active(width, &ctx, model, composer_height)
+    }
+
+    fn intro_state<'a>(header_text: &'a str, model: &AutoActiveViewModel) -> IntroState<'a> {
+        const LETTER_INTERVAL_MS: u64 = 32;
+        const BODY_DELAY_MS: u64 = 90;
+        const MIN_FRAME_MS: u64 = 16;
+
+        if header_text.is_empty() || model.intro_reduced_motion {
+            return IntroState {
+                header_text: Cow::Borrowed(header_text),
+                body_visible: true,
+                schedule_next_in: None,
+            };
+        }
+
+        let Some(started) = model.intro_started_at else {
+            return IntroState {
+                header_text: Cow::Borrowed(header_text),
+                body_visible: true,
+                schedule_next_in: None,
+            };
+        };
+
+        let total_chars = header_text.chars().count();
+        if total_chars == 0 {
+            return IntroState {
+                header_text: Cow::Borrowed(header_text),
+                body_visible: true,
+                schedule_next_in: None,
+            };
+        }
+
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(started);
+        let interval_ms = LETTER_INTERVAL_MS as u128;
+        let stage = (elapsed.as_millis() / interval_ms) as usize;
+        let mut visible = stage.saturating_add(1);
+        if visible > total_chars {
+            visible = total_chars;
+        }
+
+        let header_completion_ms = if total_chars <= 1 {
+            0
+        } else {
+            LETTER_INTERVAL_MS * (total_chars as u64 - 1)
+        };
+        let header_completion = Duration::from_millis(header_completion_ms);
+        let body_delay = Duration::from_millis(BODY_DELAY_MS);
+        let header_done = elapsed >= header_completion;
+        let body_visible = header_done && elapsed >= header_completion + body_delay;
+
+        let header_text = if visible >= total_chars {
+            Cow::Borrowed(header_text)
+        } else {
+            Cow::Owned(header_text.chars().take(visible).collect())
+        };
+
+        let mut schedule_next_in = None;
+        if !body_visible {
+            let next_target = if visible < total_chars {
+                Duration::from_millis(LETTER_INTERVAL_MS * visible as u64)
+            } else {
+                header_completion + body_delay
+            };
+
+            let mut remaining = if next_target > elapsed {
+                next_target - elapsed
+            } else {
+                Duration::from_millis(0)
+            };
+
+            if remaining == Duration::from_millis(0) {
+                remaining = Duration::from_millis(MIN_FRAME_MS);
+            }
+
+            let min_delay = Duration::from_millis(MIN_FRAME_MS);
+            schedule_next_in = Some(remaining.max(min_delay));
+        }
+
+        IntroState {
+            header_text,
+            body_visible,
+            schedule_next_in,
+        }
     }
 
     fn build_context(model: &AutoActiveViewModel) -> VariantContext {
@@ -306,17 +400,63 @@ impl AutoCoordinatorView {
         model: &AutoActiveViewModel,
         frame_style: &FrameStyle,
         display_message: &str,
+        header_label: &str,
+        full_title: &str,
+        intro: &IntroState<'_>,
     ) {
         if area.width == 0 || area.height == 0 {
             return;
         }
 
-        let left_spans = vec![
-            Span::raw("  "),
-            Span::styled("Auto Drive", frame_style.title_style.clone()),
-            Span::styled(" > ", Style::default().fg(colors::text_dim())),
-            Span::styled(display_message.to_string(), Style::default().fg(colors::text())),
-        ];
+        let animating = intro.schedule_next_in.is_some() && !model.intro_reduced_motion;
+        let mut left_spans: Vec<Span<'static>> = Vec::new();
+        left_spans.push(Span::raw(" "));
+
+        let fallback_color = frame_style
+            .border_style
+            .fg
+            .or(frame_style.title_style.fg)
+            .unwrap_or_else(colors::primary);
+
+        if animating {
+            let total_chars = full_title.chars().count().max(1);
+            let visible_chars: Vec<char> = header_label.chars().collect();
+            if !visible_chars.is_empty() {
+                for (idx, ch) in visible_chars.iter().enumerate() {
+                    let gradient_position = if total_chars > 1 {
+                        idx as f32 / (total_chars as f32 - 1.0)
+                    } else {
+                        0.0
+                    };
+                    let mut color = gradient_multi(gradient_position);
+                    if visible_chars.len() == total_chars {
+                        color = mix_rgb(color, fallback_color, 0.65);
+                    } else if idx == visible_chars.len().saturating_sub(1) {
+                        color = mix_rgb(color, Color::Rgb(255, 255, 255), 0.35);
+                    }
+                    left_spans.push(Span::styled(
+                        ch.to_string(),
+                        Style::default()
+                            .fg(color)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
+        } else {
+            let mut title_style = frame_style.title_style.clone();
+            title_style.fg = Some(fallback_color);
+            title_style = title_style.add_modifier(Modifier::BOLD);
+            left_spans.push(Span::styled(header_label.to_string(), title_style));
+        }
+
+        left_spans.push(Span::styled(
+            " > ",
+            Style::default().fg(colors::text_dim()),
+        ));
+        left_spans.push(Span::styled(
+            display_message.to_string(),
+            Style::default().fg(colors::text()),
+        ));
         let left_line = Line::from(left_spans);
 
         let runtime = self.runtime_text(model);
@@ -681,6 +821,10 @@ impl AutoCoordinatorView {
 
         let frame_style = self.frame_style_for_model(model);
         let display_message = self.resolve_display_message(model);
+        let intro = Self::intro_state(frame_style.title_text, model);
+        if let Some(delay) = intro.schedule_next_in {
+            self.app_event_tx.send(AppEvent::ScheduleFrameIn(delay));
+        }
 
         // Draw spacer row to match composer spacing.
         let spacer_row = Rect {
@@ -702,7 +846,17 @@ impl AutoCoordinatorView {
             width: area.width,
             height: header_height,
         };
-        self.render_header(header_area, buf, model, &frame_style, &display_message);
+        let header_label = intro.header_text.as_ref();
+        self.render_header(
+            header_area,
+            buf,
+            model,
+            &frame_style,
+            &display_message,
+            header_label,
+            frame_style.title_text,
+            &intro,
+        );
 
         if area.height <= 1 + Self::HEADER_HEIGHT {
             return;
@@ -722,6 +876,11 @@ impl AutoCoordinatorView {
         }
 
         if !model.awaiting_submission {
+            return;
+        }
+
+        if !intro.body_visible {
+            Self::clear_rect(inner, buf);
             return;
         }
 
@@ -924,6 +1083,21 @@ impl AutoCoordinatorView {
         }
     }
 
+    fn clear_rect(area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+        for offset in 0..area.height {
+            let row = Rect {
+                x: area.x,
+                y: area.y + offset,
+                width: area.width,
+                height: 1,
+            };
+            Self::clear_row(row, buf);
+        }
+    }
+
     fn lines_height(lines: &[Line<'static>], width: u16) -> u16 {
         if lines.is_empty() {
             return 0;
@@ -944,35 +1118,50 @@ impl AutoCoordinatorView {
 
     fn build_status_summary(&self, model: &AutoActiveViewModel) -> Option<Line<'static>> {
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled(
-            self.runtime_text(model),
-            self.style.summary_style.clone(),
-        ));
+
+        let runtime_text = self.runtime_text(model);
+        if !runtime_text.trim().is_empty() {
+            spans.push(Span::styled(
+                runtime_text,
+                self.style.summary_style.clone(),
+            ));
+        }
 
         let secondary_style = Style::default().fg(colors::text_dim());
         let separator = self.style.footer_separator.to_string();
+
+        let push_stat = |
+            spans: &mut Vec<Span<'static>>,
+            text: &str,
+            style: Style,
+        | {
+            if text.trim().is_empty() {
+                return;
+            }
+            let sep = if spans.is_empty() {
+                separator.trim_start().to_string()
+            } else {
+                separator.clone()
+            };
+            if !sep.is_empty() {
+                spans.push(Span::styled(sep, secondary_style.clone()));
+            }
+            spans.push(Span::styled(text.to_string(), style));
+        };
 
         let agents_text = if model.agents_enabled {
             "Agents Enabled"
         } else {
             "Agents Disabled"
         };
+        push_stat(&mut spans, agents_text, secondary_style.clone());
+
         let review_text = if model.review_enabled {
             "Review Enabled"
         } else {
             "Review Disabled"
         };
-
-        spans.push(Span::styled(separator.clone(), secondary_style.clone()));
-        spans.push(Span::styled(agents_text.to_string(), secondary_style));
-        spans.push(Span::styled(
-            separator,
-            Style::default().fg(colors::text_dim()),
-        ));
-        spans.push(Span::styled(
-            review_text.to_string(),
-            Style::default().fg(colors::text_dim()),
-        ));
+        push_stat(&mut spans, review_text, secondary_style.clone());
 
         Some(Line::from(spans))
     }
