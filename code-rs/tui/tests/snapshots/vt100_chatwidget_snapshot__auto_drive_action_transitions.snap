@@ -34,7 +34,6 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
   Auto Drive > Working                                Awaiting input (0 turns)
  Completed git status check. Comparing diffs against last run.
  Auto Drive will send:
- Awaiting input (0 turns)  •  Agents Enabled  •  Review Enabled
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

@@ -743,8 +743,6 @@ impl Default for AutoCoordinatorUiState {
 struct AutoRunSummary {
     duration: Duration,
     turns_completed: usize,
-    review_enabled: bool,
-    agents_enabled: bool,
     message: Option<String>,
     goal: Option<String>,
 }
@@ -12167,8 +12165,6 @@ fi\n\
             manual_hint: None,
             ctrl_switch_hint: String::new(),
             cli_running: false,
-            review_enabled: self.auto_state.review_enabled,
-            agents_enabled: self.auto_state.subagents_enabled,
             turns_completed: 0,
             started_at: None,
             elapsed: None,
@@ -12951,13 +12947,13 @@ fi\n\
             return;
         };
 
-        let review_enabled = self.auto_state.review_enabled;
-        let agents_enabled = self.auto_state.subagents_enabled;
         let cross_check_enabled = self.auto_state.cross_check_enabled;
         let continue_mode = self.auto_state.continue_mode;
         let previous_turns = self.auto_state.turns_completed;
         let previous_started_at = self.auto_state.started_at;
         let restart_attempts = self.auto_state.transient_restart_attempts;
+        let review_enabled = self.auto_state.review_enabled;
+        let agents_enabled = self.auto_state.subagents_enabled;
 
         self.auto_state.pending_restart = None;
         self.auto_state.waiting_for_transient_recovery = false;
@@ -13408,8 +13404,6 @@ fi\n\
             .map(|start| start.elapsed())
             .unwrap_or_default();
         let turns_completed = self.auto_state.turns_completed;
-        let review_enabled = self.auto_state.review_enabled;
-        let agents_enabled = self.auto_state.subagents_enabled;
 
         if let Some(msg) = message.clone() {
             self.push_background_tail(msg);
@@ -13441,8 +13435,6 @@ fi\n\
         let summary = AutoRunSummary {
             duration,
             turns_completed,
-            review_enabled,
-            agents_enabled,
             message,
             goal,
         };
@@ -13690,8 +13682,6 @@ fi\n\
                     manual_hint: None,
                     ctrl_switch_hint: "Esc to exit Auto Drive".to_string(),
                     cli_running: false,
-                    review_enabled: summary.review_enabled,
-                    agents_enabled: summary.agents_enabled,
                     turns_completed: summary.turns_completed,
                     started_at: None,
                     elapsed: Some(summary.duration),
@@ -13880,8 +13870,6 @@ fi\n\
             manual_hint,
             ctrl_switch_hint,
             cli_running,
-            review_enabled: self.auto_state.review_enabled,
-            agents_enabled: self.auto_state.subagents_enabled,
             turns_completed: self.auto_state.turns_completed,
             started_at: self.auto_state.started_at,
             elapsed: self

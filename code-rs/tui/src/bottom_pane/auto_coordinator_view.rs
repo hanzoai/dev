@@ -48,8 +48,6 @@ pub(crate) struct AutoActiveViewModel {
     pub manual_hint: Option<String>,
     pub ctrl_switch_hint: String,
     pub cli_running: bool,
-    pub review_enabled: bool,
-    pub agents_enabled: bool,
     pub turns_completed: usize,
     pub started_at: Option<Instant>,
     pub elapsed: Option<Duration>,
@@ -111,6 +109,13 @@ impl AutoCoordinatorView {
 
     pub fn set_style(&mut self, style: AutoDriveStyle) {
         self.style = style;
+    }
+
+    pub(crate) fn composer_visible(&self) -> bool {
+        matches!(
+            &self.model,
+            AutoCoordinatorViewModel::Active(model) if model.show_composer
+        )
     }
 
     #[allow(dead_code)]
@@ -801,10 +806,6 @@ impl AutoCoordinatorView {
             total = total.saturating_add(composer_block);
         }
 
-        if self.build_status_summary(model).is_some() {
-            total = total.saturating_add(1);
-        }
-
         total.min(u16::MAX as usize) as u16
     }
 
@@ -933,9 +934,6 @@ impl AutoCoordinatorView {
             }
         }
 
-        let summary_line = self.build_status_summary(model);
-        let mut summary_height: u16 = if summary_line.is_some() { 1 } else { 0 };
-
         let mut top_height = Self::lines_height(&top_lines, inner.width);
         let mut after_height = Self::lines_height(&after_lines, inner.width);
 
@@ -957,10 +955,7 @@ impl AutoCoordinatorView {
             0
         };
 
-        let total_needed = top_height as usize
-            + after_height as usize
-            + summary_height as usize
-            + composer_block as usize;
+        let total_needed = top_height as usize + after_height as usize + composer_block as usize;
 
         if total_needed > inner.height as usize {
             let mut deficit = total_needed - inner.height as usize;
@@ -973,12 +968,6 @@ impl AutoCoordinatorView {
             top_height = top_height.saturating_sub(reduce_top as u16);
             deficit -= reduce_top;
 
-            if deficit > 0 && summary_height > 0 {
-                let reduce_summary = usize::from(summary_height).min(deficit);
-                summary_height = summary_height.saturating_sub(reduce_summary as u16);
-                deficit -= reduce_summary;
-            }
-
             if deficit > 0 && model.show_composer {
                 let reducible = composer_block.saturating_sub(Self::MIN_COMPOSER_VIEWPORT);
                 let reduce_composer = usize::from(reducible).min(deficit);
@@ -990,8 +979,7 @@ impl AutoCoordinatorView {
             let max_space_for_composer = inner
                 .height
                 .saturating_sub(top_height)
-                .saturating_sub(after_height)
-                .saturating_sub(summary_height);
+                .saturating_sub(after_height);
 
             if max_space_for_composer == 0 {
                 1
@@ -1041,8 +1029,7 @@ impl AutoCoordinatorView {
             let max_height = inner
                 .y
                 .saturating_add(inner.height)
-                .saturating_sub(cursor_y)
-                .saturating_sub(summary_height);
+                .saturating_sub(cursor_y);
             let rect_height = after_height.min(max_height);
             if rect_height > 0 {
                 let after_rect = Rect {
@@ -1054,22 +1041,9 @@ impl AutoCoordinatorView {
                 Paragraph::new(after_lines.clone())
                     .wrap(Wrap { trim: true })
                     .render(after_rect, buf);
-                cursor_y = cursor_y.saturating_add(rect_height);
             }
         }
 
-        if let Some(line) = summary_line {
-            if cursor_y < inner.y + inner.height {
-                let rect_height = (inner.y + inner.height - cursor_y).max(1);
-                let summary_rect = Rect {
-                    x: inner.x,
-                    y: cursor_y,
-                    width: inner.width,
-                    height: rect_height,
-                };
-                Paragraph::new(line).render(summary_rect, buf);
-            }
-        }
     }
 
     fn clear_row(area: Rect, buf: &mut Buffer) {
@@ -1114,56 +1088,6 @@ impl AutoCoordinatorView {
             };
             acc.saturating_add(segments.max(1))
         })
-    }
-
-    fn build_status_summary(&self, model: &AutoActiveViewModel) -> Option<Line<'static>> {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-
-        let runtime_text = self.runtime_text(model);
-        if !runtime_text.trim().is_empty() {
-            spans.push(Span::styled(
-                runtime_text,
-                self.style.summary_style.clone(),
-            ));
-        }
-
-        let secondary_style = Style::default().fg(colors::text_dim());
-        let separator = self.style.footer_separator.to_string();
-
-        let push_stat = |
-            spans: &mut Vec<Span<'static>>,
-            text: &str,
-            style: Style,
-        | {
-            if text.trim().is_empty() {
-                return;
-            }
-            let sep = if spans.is_empty() {
-                separator.trim_start().to_string()
-            } else {
-                separator.clone()
-            };
-            if !sep.is_empty() {
-                spans.push(Span::styled(sep, secondary_style.clone()));
-            }
-            spans.push(Span::styled(text.to_string(), style));
-        };
-
-        let agents_text = if model.agents_enabled {
-            "Agents Enabled"
-        } else {
-            "Agents Disabled"
-        };
-        push_stat(&mut spans, agents_text, secondary_style.clone());
-
-        let review_text = if model.review_enabled {
-            "Review Enabled"
-        } else {
-            "Review Disabled"
-        };
-        push_stat(&mut spans, review_text, secondary_style.clone());
-
-        Some(Line::from(spans))
     }
 
     fn format_elapsed(duration: Duration) -> String {
