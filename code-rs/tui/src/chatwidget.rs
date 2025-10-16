@@ -629,11 +629,25 @@ struct AutoCoordinatorUiState {
     pending_restart: Option<AutoRestartState>,
     restart_token: u64,
     transient_restart_attempts: u32,
+    intro_started_at: Option<Instant>,
+    intro_reduced_motion: bool,
 }
 
 impl AutoCoordinatorUiState {
     fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    fn reset_intro_timing(&mut self) {
+        self.intro_started_at = None;
+        self.intro_reduced_motion = false;
+    }
+
+    fn ensure_intro_timing(&mut self, reduced_motion: bool) {
+        if self.intro_started_at.is_none() {
+            self.intro_started_at = Some(Instant::now());
+        }
+        self.intro_reduced_motion = reduced_motion;
     }
 
     fn countdown_active(&self) -> bool {
@@ -702,10 +716,13 @@ impl Default for AutoCoordinatorUiState {
             pending_restart: None,
             restart_token: 0,
             transient_restart_attempts: 0,
+            intro_started_at: None,
+            intro_reduced_motion: false,
         }
     }
 }
 
+#[derive(Clone)]
 struct AutoRunSummary {
     duration: Duration,
     turns_completed: usize,
@@ -12091,8 +12108,29 @@ fi\n\
         }
     }
 
+    fn auto_reduced_motion_preference() -> bool {
+        match std::env::var("CODE_TUI_REDUCED_MOTION") {
+            Ok(value) => {
+                let normalized = value.trim().to_ascii_lowercase();
+                !matches!(normalized.as_str(), "" | "0" | "false" | "off" | "no")
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn auto_reset_intro_timing(&mut self) {
+        self.auto_state.reset_intro_timing();
+    }
+
+    fn auto_ensure_intro_timing(&mut self) {
+        let reduced_motion = Self::auto_reduced_motion_preference();
+        self.auto_state.ensure_intro_timing(reduced_motion);
+    }
+
     fn auto_show_goal_entry_panel(&mut self) {
         self.auto_state.goal = None;
+        self.auto_reset_intro_timing();
+        self.auto_ensure_intro_timing();
         let hint = "Let's do this! What's your goal?".to_string();
         let status_lines = vec![hint];
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
@@ -12116,6 +12154,8 @@ fi\n\
             elapsed: None,
             progress_past: None,
             progress_current: None,
+            intro_started_at: self.auto_state.intro_started_at,
+            intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });
         self.bottom_pane.show_auto_coordinator_view(model);
         self.bottom_pane.set_task_running(false);
@@ -13570,8 +13610,10 @@ fi\n\
                 self.auto_show_goal_entry_panel();
                 return;
             }
-            if let Some(summary) = self.auto_state.last_run_summary.as_ref() {
+            if let Some(summary) = self.auto_state.last_run_summary.clone() {
                 self.bottom_pane.clear_live_ring();
+                self.auto_reset_intro_timing();
+                self.auto_ensure_intro_timing();
                 let mut status_lines: Vec<String> = Vec::new();
                 if let Some(msg) = summary.message.as_ref() {
                     let trimmed = msg.trim();
@@ -13607,6 +13649,8 @@ fi\n\
                     elapsed: Some(summary.duration),
                     progress_past: None,
                     progress_current: None,
+                    intro_started_at: self.auto_state.intro_started_at,
+                    intro_reduced_motion: self.auto_state.intro_reduced_motion,
                 });
             self
                 .bottom_pane
@@ -13618,6 +13662,7 @@ fi\n\
         self.bottom_pane.clear_auto_coordinator_view(true);
         self.bottom_pane.clear_live_ring();
         self.bottom_pane.set_standard_terminal_hint(None);
+        self.auto_reset_intro_timing();
         return;
     }
 
@@ -13799,6 +13844,8 @@ fi\n\
             progress_current: self.auto_state.current_progress_current.clone(),
             cli_context,
             show_composer,
+            intro_started_at: self.auto_state.intro_started_at,
+            intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });
 
         self
