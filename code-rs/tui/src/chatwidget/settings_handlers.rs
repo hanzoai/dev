@@ -12,17 +12,71 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         return true;
     }
 
+    let Some(ref mut overlay) = chat.settings.overlay else { return true };
+
+    if overlay.is_menu_active() {
+        let mut handled = true;
+        let mut changed = false;
+
+        match key_event.code {
+            KeyCode::Enter | KeyCode::Right => {
+                let section = overlay.active_section();
+                overlay.set_mode_section(section);
+                chat.request_redraw();
+                return true;
+            }
+            KeyCode::Esc | KeyCode::Left => {
+                chat.close_settings_overlay();
+                return true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                changed = overlay.select_previous();
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                changed = overlay.select_next();
+            }
+            KeyCode::Char(c) => {
+                changed = overlay.select_by_shortcut(c);
+            }
+            KeyCode::Home => {
+                changed = overlay.set_section(crate::bottom_pane::SettingsSection::Model);
+            }
+            KeyCode::End => {
+                let last = crate::bottom_pane::SettingsSection::ALL
+                    .last()
+                    .copied()
+                    .unwrap_or(crate::bottom_pane::SettingsSection::Model);
+                changed = overlay.set_section(last);
+            }
+            _ => {
+                handled = false;
+            }
+        }
+
+        if changed {
+            chat.request_redraw();
+        }
+
+        return handled;
+    }
+
+    match key_event.code {
+        KeyCode::Esc | KeyCode::Left if key_event.modifiers.is_empty() => {
+            overlay.set_mode_menu(None);
+            chat.request_redraw();
+            return true;
+        }
+        _ => {}
+    }
+
     let mut handled_by_content = false;
     let mut should_close = false;
 
-    {
-        let overlay = chat.settings.overlay.as_mut().expect("overlay checked above");
-        if let Some(content) = overlay.active_content_mut() {
-            if content.handle_key(key_event) {
-                handled_by_content = true;
-                if content.is_complete() {
-                    should_close = true;
-                }
+    if let Some(content) = overlay.active_content_mut() {
+        if content.handle_key(key_event) {
+            handled_by_content = true;
+            if content.is_complete() {
+                should_close = true;
             }
         }
     }
@@ -35,8 +89,6 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         return true;
     }
 
-    let Some(ref mut overlay) = chat.settings.overlay else { return true };
-
     let mut handled = true;
     let mut changed = false;
 
@@ -46,11 +98,7 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
                 return true;
             }
         }
-        KeyCode::Esc => {
-            chat.close_settings_overlay();
-            return true;
-        }
-        KeyCode::Left | KeyCode::BackTab => {
+        KeyCode::BackTab => {
             changed = overlay.select_previous();
         }
         KeyCode::Right | KeyCode::Tab => {

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use super::ChatWidget;
+use crate::bottom_pane::SettingsSection;
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
@@ -171,6 +172,48 @@ impl ChatWidgetHarness {
 
     pub(crate) fn chat(&mut self) -> &mut ChatWidget<'static> {
         &mut self.chat
+    }
+
+    pub fn open_agents_settings_overlay(&mut self) {
+        self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
+        self.chat.show_agents_overview_ui();
+        self.flush_into_widget();
+    }
+
+    pub fn show_agent_editor(&mut self, name: impl Into<String>) {
+        self.chat.show_agent_editor_ui(name.into());
+        self.flush_into_widget();
+    }
+
+    pub fn is_settings_overlay_visible(&mut self) -> bool {
+        self.flush_into_widget();
+        self.chat.settings.overlay.is_some()
+    }
+
+    pub fn settings_overlay_is_agents_active(&mut self) -> bool {
+        self.flush_into_widget();
+        self.chat
+            .settings
+            .overlay
+            .as_ref()
+            .map(|overlay| overlay.active_section() == SettingsSection::Agents)
+            .unwrap_or(false)
+    }
+
+    pub fn agents_settings_is_agent_editor_active(&mut self) -> bool {
+        self.flush_into_widget();
+        self.chat
+            .settings
+            .overlay
+            .as_ref()
+            .and_then(|overlay| overlay.agents_content())
+            .map(|content| content.is_agent_editor_active())
+            .unwrap_or(false)
+    }
+
+    pub fn is_bottom_pane_active(&mut self) -> bool {
+        self.flush_into_widget();
+        self.chat.bottom_pane.has_active_view()
     }
 
     pub(crate) fn layout_metrics(&self) -> LayoutMetrics {

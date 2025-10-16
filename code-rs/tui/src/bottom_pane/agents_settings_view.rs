@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect, Margin};
 use ratatui::style::{Modifier, Style};
@@ -127,86 +127,176 @@ impl SubagentEditorView {
         // Update in-memory config
         self.app_event_tx.send(AppEvent::UpdateSubagentCommand(cfg));
     }
-}
 
-impl<'a> BottomPaneView<'a> for SubagentEditorView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
-        let show_delete = !self.is_new && !matches!(self.name_field.text().to_ascii_lowercase().as_str(), "plan" | "solve" | "code");
+    fn handle_key_event_internal(&mut self, key_event: KeyEvent) -> bool {
+        let show_delete = !self.is_new
+            && !matches!(
+                self.name_field.text().to_ascii_lowercase().as_str(),
+                "plan" | "solve" | "code"
+            );
         let last_btn_idx = if show_delete { 6 } else { 5 };
+
         match key_event {
             KeyEvent { code: KeyCode::Esc, .. } => {
-                // Return to Agents overview on first Esc
                 self.is_complete = true;
                 self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                true
             }
-            KeyEvent { code: KeyCode::Tab, .. } => { self.field = (self.field + 1).min(last_btn_idx); }
-            KeyEvent { code: KeyCode::BackTab, .. } => { if self.field > 0 { self.field -= 1; } }
+            KeyEvent { code: KeyCode::Tab, .. } => {
+                self.field = (self.field + 1).min(last_btn_idx);
+                true
+            }
+            KeyEvent { code: KeyCode::BackTab, .. } => {
+                if self.field > 0 {
+                    self.field -= 1;
+                }
+                true
+            }
             KeyEvent { code: KeyCode::Up, modifiers, .. } => {
                 if self.field == 3 {
-                    // In text: Up scrolls/moves unless at very start, then move to previous input
                     let at_start = self.orch_field.cursor_is_at_start();
                     let _ = self.orch_field.handle_key(KeyEvent { code: KeyCode::Up, modifiers, ..key_event });
-                    if at_start { if self.field > 0 { self.field -= 1; } }
-                } else if self.field > 0 { self.field -= 1; }
+                    if at_start && self.field > 0 {
+                        self.field -= 1;
+                    }
+                } else if self.field > 0 {
+                    self.field -= 1;
+                }
+                true
             }
             KeyEvent { code: KeyCode::Down, modifiers, .. } => {
                 if self.field == 3 {
-                    // In text: Down scrolls/moves unless at end, then move to next input
                     let at_end = self.orch_field.cursor_is_at_end();
                     let _ = self.orch_field.handle_key(KeyEvent { code: KeyCode::Down, modifiers, ..key_event });
-                    if at_end { self.field = (self.field + 1).min(5); }
-                } else { self.field = (self.field + 1).min(5); }
+                    if at_end {
+                        self.field = (self.field + 1).min(5);
+                    }
+                } else {
+                    self.field = (self.field + 1).min(5);
+                }
+                true
             }
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => { self.read_only = !self.read_only; }
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 1 => { self.read_only = !self.read_only; }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 1 => { self.read_only = !self.read_only; }
-            KeyEvent { code: KeyCode::Left, .. } if self.field == 2 => { if self.agent_cursor > 0 { self.agent_cursor -= 1; } }
-            KeyEvent { code: KeyCode::Right, .. } if self.field == 2 => { if self.agent_cursor + 1 < self.available_agents.len() { self.agent_cursor += 1; } }
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 1 => {
+                self.read_only = !self.read_only;
+                true
+            }
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 1 => {
+                self.read_only = !self.read_only;
+                true
+            }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 1 => {
+                self.read_only = !self.read_only;
+                true
+            }
+            KeyEvent { code: KeyCode::Left, .. } if self.field == 2 => {
+                if self.agent_cursor > 0 {
+                    self.agent_cursor -= 1;
+                }
+                true
+            }
+            KeyEvent { code: KeyCode::Right, .. } if self.field == 2 => {
+                if self.agent_cursor + 1 < self.available_agents.len() {
+                    self.agent_cursor += 1;
+                }
+                true
+            }
             KeyEvent { code: KeyCode::Char(' '), .. } if self.field == 2 => {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
+                true
             }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 2 => {
                 let idx = self.agent_cursor.min(self.available_agents.len().saturating_sub(1));
                 self.toggle_agent_at(idx);
+                true
             }
-            // Left/Right between Save / Delete / Cancel
-            KeyEvent { code: KeyCode::Left, .. } if self.field >= 5 && show_delete => { if self.field > 4 { self.field -= 1; } }
-            KeyEvent { code: KeyCode::Right, .. } if self.field >= 4 && show_delete => { if self.field < 6 { self.field += 1; } }
-            KeyEvent { code: KeyCode::Left, .. } if !show_delete && self.field == 5 => { self.field = 4; }
-            KeyEvent { code: KeyCode::Right, .. } if !show_delete && self.field == 4 => { self.field = 5; }
-            // Delegate input to focused text fields (handles Shift‑chars, Enter/newline, undo, etc.)
-            ev @ KeyEvent { .. } if self.field == 0 => { let _ = self.name_field.handle_key(ev); }
-            ev @ KeyEvent { .. } if self.field == 3 => { let _ = self.orch_field.handle_key(ev); }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 && !self.confirm_delete => { self.save(); self.is_complete = true; }
-            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && show_delete && !self.confirm_delete => { self.confirm_delete = true; }
+            KeyEvent { code: KeyCode::Left, .. } if self.field >= 5 && show_delete => {
+                if self.field > 4 {
+                    self.field -= 1;
+                }
+                true
+            }
+            KeyEvent { code: KeyCode::Right, .. } if self.field >= 4 && show_delete => {
+                if self.field < 6 {
+                    self.field += 1;
+                }
+                true
+            }
+            KeyEvent { code: KeyCode::Left, .. } if !show_delete && self.field == 5 => {
+                self.field = 4;
+                true
+            }
+            KeyEvent { code: KeyCode::Right, .. } if !show_delete && self.field == 4 => {
+                self.field = 5;
+                true
+            }
+            ev @ KeyEvent { .. } if self.field == 0 => {
+                let _ = self.name_field.handle_key(ev);
+                true
+            }
+            ev @ KeyEvent { .. } if self.field == 3 => {
+                let _ = self.orch_field.handle_key(ev);
+                true
+            }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 4 && !self.confirm_delete => {
+                self.save();
+                self.is_complete = true;
+                true
+            }
+            KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && show_delete && !self.confirm_delete => {
+                self.confirm_delete = true;
+                true
+            }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 6 && !self.confirm_delete => {
-                // Cancel → return to Agents overview
                 self.is_complete = true;
                 self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                true
             }
             KeyEvent { code: KeyCode::Enter, .. } if self.field == 5 && !show_delete && !self.confirm_delete => {
-                // Cancel in 2-button layout
                 self.is_complete = true;
                 self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                true
             }
-            // Confirm phase: 4 = Confirm, 5 = Back (when confirm_delete is true)
             KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 4 => {
-                // Delete from disk and in-memory, then close
                 let id = self.name_field.text().to_string();
                 if !id.trim().is_empty() {
                     if let Ok(home) = code_core::config::find_code_home() {
                         let idc = id.clone();
-                        tokio::spawn(async move { let _ = code_core::config_edit::delete_subagent_command(&home, &idc).await; });
+                        tokio::spawn(async move {
+                            let _ = code_core::config_edit::delete_subagent_command(&home, &idc).await;
+                        });
                     }
                     self.app_event_tx.send(AppEvent::DeleteSubagentCommand(id));
+                    self.is_complete = true;
+                    self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                } else {
+                    self.confirm_delete = false;
                 }
-                self.is_complete = true;
-                self.app_event_tx.send(AppEvent::ShowAgentsOverview);
+                true
             }
-            KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 5 => { self.confirm_delete = false; }
-            _ => {}
+            KeyEvent { code: KeyCode::Enter, .. } if self.confirm_delete && self.field == 5 => {
+                self.confirm_delete = false;
+                true
+            }
+            KeyEvent { code: KeyCode::Char('s'), modifiers, .. }
+                if modifiers.contains(KeyModifiers::CONTROL) && !self.confirm_delete =>
+            {
+                self.save();
+                self.is_complete = true;
+                true
+            }
+            _ => false,
         }
+    }
+
+    pub(crate) fn handle_key_event_direct(&mut self, key_event: KeyEvent) -> bool {
+        self.handle_key_event_internal(key_event)
+    }
+}
+
+impl<'a> BottomPaneView<'a> for SubagentEditorView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        let _ = self.handle_key_event_internal(key_event);
     }
 
     fn is_complete(&self) -> bool { self.is_complete }
