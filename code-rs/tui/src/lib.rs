@@ -39,6 +39,7 @@ mod app_event;
 mod app_event_sender;
 mod account_label;
 mod bottom_pane;
+mod chrome_launch;
 mod chatwidget;
 mod citation_regex;
 mod cloud_tasks_service;

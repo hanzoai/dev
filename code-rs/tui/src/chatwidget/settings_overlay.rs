@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Widget};
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -17,6 +17,7 @@ use crate::bottom_pane::{
     agent_editor_view::AgentEditorView,
     agents_settings_view::SubagentEditorView,
 };
+use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
 use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
 
 pub(crate) trait SettingsContent {
@@ -649,6 +650,166 @@ impl SettingsContent for LimitsSettingsContent {
     }
 }
 
+pub(crate) struct ChromeSettingsContent {
+    selected_index: usize,
+    app_event_tx: AppEventSender,
+    port: Option<u16>,
+    is_complete: bool,
+}
+
+impl ChromeSettingsContent {
+    pub(crate) fn new(app_event_tx: AppEventSender, port: Option<u16>) -> Self {
+        Self {
+            selected_index: 0,
+            app_event_tx,
+            port,
+            is_complete: false,
+        }
+    }
+
+    fn options() -> &'static [(ChromeLaunchOption, &'static str, &'static str)] {
+        CHROME_LAUNCH_CHOICES
+    }
+
+    fn move_up(&mut self) {
+        let len = Self::options().len();
+        if self.selected_index == 0 {
+            self.selected_index = len.saturating_sub(1);
+        } else {
+            self.selected_index -= 1;
+        }
+    }
+
+    fn move_down(&mut self) {
+        let len = Self::options().len();
+        if len > 0 {
+            self.selected_index = (self.selected_index + 1) % len;
+        }
+    }
+
+    fn confirm(&mut self) {
+        if let Some((option, _, _)) = Self::options().get(self.selected_index) {
+            let _ = self
+                .app_event_tx
+                .send(AppEvent::ChromeLaunchOptionSelected(*option, self.port));
+            self.is_complete = true;
+        }
+    }
+
+    fn cancel(&mut self) {
+        let _ = self.app_event_tx.send(AppEvent::ChromeLaunchOptionSelected(
+            ChromeLaunchOption::Cancel,
+            self.port,
+        ));
+        self.is_complete = true;
+    }
+}
+
+impl SettingsContent for ChromeSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        Clear.render(area, buf);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Chrome Launch Options "))
+            .title_alignment(Alignment::Center)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .border_style(Style::default().fg(crate::colors::border()));
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(vec![Span::styled(
+            "Chrome is already running or CDP connection failed",
+            Style::default()
+                .fg(crate::colors::warning())
+                .add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Select an option:"));
+        lines.push(Line::from(""));
+
+        for (idx, (_, label, description)) in Self::options().iter().enumerate() {
+            let selected = idx == self.selected_index;
+            if selected {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("› {}", label),
+                    Style::default()
+                        .fg(crate::colors::success())
+                        .add_modifier(Modifier::BOLD),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", description),
+                    Style::default().fg(crate::colors::secondary()),
+                )]));
+            } else {
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", label),
+                    Style::default().fg(crate::colors::text()),
+                )]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!("  {}", description),
+                    Style::default().fg(crate::colors::text_dim()),
+                )]));
+            }
+            lines.push(Line::from(""));
+        }
+
+        lines.push(Line::from(vec![
+            Span::styled("↑↓/jk", Style::default().fg(crate::colors::function())),
+            Span::styled(" move  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Enter", Style::default().fg(crate::colors::function())),
+            Span::styled(" select  ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Esc/q", Style::default().fg(crate::colors::function())),
+            Span::styled(" cancel", Style::default().fg(crate::colors::text_dim())),
+        ]));
+
+        let content_area = inner.inner(Margin::new(1, 1));
+        if content_area.width == 0 || content_area.height == 0 {
+            return;
+        }
+
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .render(content_area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_up();
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_down();
+                true
+            }
+            KeyCode::Enter => {
+                self.confirm();
+                true
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.cancel();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.is_complete
+    }
+}
+
 /// Full-screen settings overlay rendered by the chat widget.
 pub(crate) struct SettingsOverlayView {
     mode: SettingsOverlayMode,
@@ -659,6 +820,7 @@ pub(crate) struct SettingsOverlayView {
     mcp_content: Option<McpSettingsContent>,
     agents_content: Option<AgentsSettingsContent>,
     limits_content: Option<LimitsSettingsContent>,
+    chrome_content: Option<ChromeSettingsContent>,
 }
 
 impl SettingsOverlayView {
@@ -673,6 +835,7 @@ impl SettingsOverlayView {
             mcp_content: None,
             agents_content: None,
             limits_content: None,
+            chrome_content: None,
         }
     }
 
@@ -719,6 +882,10 @@ impl SettingsOverlayView {
 
     pub(crate) fn set_limits_content(&mut self, content: LimitsSettingsContent) {
         self.limits_content = Some(content);
+    }
+
+    pub(crate) fn set_chrome_content(&mut self, content: ChromeSettingsContent) {
+        self.chrome_content = Some(content);
     }
 
     #[cfg_attr(not(any(test, feature = "test-helpers")), allow(dead_code))]
@@ -1028,6 +1195,13 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::Limits.placeholder());
             }
+            SettingsSection::Chrome => {
+                if let Some(content) = self.chrome_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Chrome.placeholder());
+            }
             SettingsSection::Notifications => {
                 if let Some(content) = self.notifications_content.as_ref() {
                     content.render(area, buf);
@@ -1042,7 +1216,6 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::Mcp.placeholder());
             }
-            section => self.render_placeholder(area, buf, section.placeholder()),
         }
     }
 
@@ -1075,6 +1248,10 @@ impl SettingsOverlayView {
                 .limits_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Chrome => self
+                .chrome_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Notifications => self
                 .notifications_content
                 .as_mut()
@@ -1083,7 +1260,6 @@ impl SettingsOverlayView {
                 .mcp_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
-            _ => None,
         }
     }
 
@@ -1106,6 +1282,11 @@ impl SettingsOverlayView {
             }
             SettingsSection::Mcp => {
                 if let Some(content) = self.mcp_content.as_mut() {
+                    content.on_close();
+                }
+            }
+            SettingsSection::Chrome => {
+                if let Some(content) = self.chrome_content.as_mut() {
                     content.on_close();
                 }
             }
