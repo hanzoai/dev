@@ -1,17 +1,18 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 415
 expression: frame
 ---
  +----------------------------------------------------------------------------+
- |            Code  •  Directory: ~/www/just-every/code/code-rs/tui           |
+ |                                    Code                                    |
  +----------------------------------------------------------------------------+
    parallel work)
-   /limits - visualize weekly and hourly rate limits
+   /limits - visualize rate limits (opens Settings at Limits)
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
-   Auto Drive > Working                               Awaiting input (0 turns)
+  Auto Drive > Working                                Awaiting input (0 turns)
  Auto Drive will send:
  Prompt:
  Awaiting input (0 turns)  •  Agents Enabled  •  Review Enabled
