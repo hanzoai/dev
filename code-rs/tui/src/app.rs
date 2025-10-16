@@ -1958,9 +1958,8 @@ impl App<'_> {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 let section = command
                                     .settings_section_from_args(&command_args)
-                                    .and_then(ChatWidget::settings_section_from_hint)
-                                    .unwrap_or(SettingsSection::Model);
-                                widget.show_settings_overlay_full(section);
+                                    .and_then(ChatWidget::settings_section_from_hint);
+                                widget.show_settings_overlay(section);
                             }
                         }
                         SlashCommand::Notifications => {
@@ -1991,7 +1990,7 @@ impl App<'_> {
                         SlashCommand::Model => {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 if command_args.trim().is_empty() {
-                                    widget.show_settings_overlay_full(SettingsSection::Model);
+                                    widget.show_settings_overlay(Some(SettingsSection::Model));
                                 } else {
                                     widget.handle_model_command(command_args);
                                 }
@@ -2011,7 +2010,7 @@ impl App<'_> {
                             // Theme selection is handled in submit_user_message
                             // This case is here for completeness
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                widget.show_settings_overlay_full(SettingsSection::Theme);
+                                widget.show_settings_overlay(Some(SettingsSection::Theme));
                             }
                         }
                         SlashCommand::Prompts => {
@@ -2050,7 +2049,7 @@ impl App<'_> {
                             if let AppState::Chat { widget } = &mut self.app_state {
                                 tracing::info!("[cdp] /chrome invoked, args='{}'", command_args);
                                 if command_args.trim().is_empty() {
-                                    widget.show_settings_overlay_full(SettingsSection::Chrome);
+                                    widget.show_settings_overlay(Some(SettingsSection::Chrome));
                                 } else {
                                     widget.handle_chrome_command(command_args);
                                 }
