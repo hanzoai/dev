@@ -3,6 +3,7 @@
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_style::AutoDriveVariant;
+use crate::bottom_pane::chat_composer::ComposerRenderMode;
 use crate::chatwidget::BackgroundOrderTicket;
 use crate::user_approval_widget::{ApprovalRequest, UserApprovalWidget};
 use crate::thread_spawner;
@@ -900,6 +901,12 @@ impl BottomPane<'_> {
                             .status_message()
                             .map_or_else(String::new, str::to_string);
                         let _ = auto_view.update_status_text(status_text);
+                        let mode = if auto_view.composer_visible() {
+                            ComposerRenderMode::Full
+                        } else {
+                            ComposerRenderMode::FooterOnly
+                        };
+                        self.composer.set_render_mode(mode);
                         self.status_view_active = false;
                         self.composer.set_embedded_mode(false);
                         self.enable_auto_drive_style();
@@ -911,6 +918,7 @@ impl BottomPane<'_> {
         }
 
         if self.active_view.is_some() && self.active_view_kind != ActiveViewKind::AutoCoordinator {
+            self.composer.set_render_mode(ComposerRenderMode::Full);
             return;
         }
 
@@ -924,10 +932,16 @@ impl BottomPane<'_> {
             .status_message()
             .map_or_else(String::new, str::to_string);
         let _ = view.update_status_text(status_text);
+        let mode = if view.composer_visible() {
+            ComposerRenderMode::Full
+        } else {
+            ComposerRenderMode::FooterOnly
+        };
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::AutoCoordinator;
         self.status_view_active = false;
         self.composer.set_embedded_mode(false);
+        self.composer.set_render_mode(mode);
         self.enable_auto_drive_style();
         self.request_redraw();
     }
@@ -939,6 +953,7 @@ impl BottomPane<'_> {
             self.set_standard_terminal_hint(None);
             self.status_view_active = false;
             self.composer.set_embedded_mode(false);
+            self.composer.set_render_mode(ComposerRenderMode::Full);
             if disable_style {
                 self.disable_auto_drive_style();
             } else if self.auto_drive_active {
