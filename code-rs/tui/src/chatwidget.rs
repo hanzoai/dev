@@ -152,7 +152,9 @@ use crate::bottom_pane::{
     NotificationsSettingsView,
     SettingsSection,
     ThemeSelectionView,
+    agent_editor_view::AgentEditorView,
 };
+use crate::bottom_pane::agents_settings_view::SubagentEditorView;
 use crate::bottom_pane::mcp_settings_view::{McpServerRow, McpServerRows};
 use crate::exec_command::strip_bash_lc_and_escape;
 #[cfg(feature = "code-fork")]
@@ -1378,10 +1380,13 @@ use self::diff_ui::DiffBlock;
 use self::diff_ui::DiffConfirm;
 use self::diff_ui::DiffOverlay;
 use self::settings_overlay::{
-    ModelSettingsContent,
-    ThemeSettingsContent,
-    NotificationsSettingsContent,
+    AgentOverviewRow,
+    AgentsSettingsContent,
+    LimitsSettingsContent,
     McpSettingsContent,
+    ModelSettingsContent,
+    NotificationsSettingsContent,
+    ThemeSettingsContent,
     SettingsOverlayView,
 };
 use ratatui::text::Line as RtLine;
@@ -4914,6 +4919,20 @@ impl ChatWidget<'_> {
     }
 
     fn set_limits_overlay_content(&mut self, content: LimitsOverlayContent) {
+        let handled_by_settings = self.update_limits_settings_content(content.clone());
+
+        if handled_by_settings
+            && self
+                .settings
+                .overlay
+                .as_ref()
+                .map(|overlay| overlay.active_section())
+                == Some(SettingsSection::Limits)
+        {
+            self.limits.overlay = None;
+            return;
+        }
+
         if let Some(existing) = self.limits.overlay.as_mut() {
             existing.set_content(content);
         } else {
@@ -4921,12 +4940,27 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn set_limits_overlay_tabs(&mut self, tabs: Vec<LimitsTab>) {
-        if tabs.is_empty() {
-            self.set_limits_overlay_content(LimitsOverlayContent::Placeholder);
+    fn update_limits_settings_content(&mut self, content: LimitsOverlayContent) -> bool {
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            if let Some(view) = overlay.limits_content_mut() {
+                view.set_content(content);
+            } else {
+                overlay.set_limits_content(LimitsSettingsContent::new(content));
+            }
+            self.request_redraw();
+            true
         } else {
-            self.set_limits_overlay_content(LimitsOverlayContent::Tabs(tabs));
+            false
         }
+    }
+
+    fn set_limits_overlay_tabs(&mut self, tabs: Vec<LimitsTab>) {
+        let content = if tabs.is_empty() {
+            LimitsOverlayContent::Placeholder
+        } else {
+            LimitsOverlayContent::Tabs(tabs)
+        };
+        self.set_limits_overlay_content(content);
     }
 
     fn rebuild_limits_overlay(&mut self) {
@@ -10876,6 +10910,8 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn add_limits_output(&mut self) {
+        self.ensure_settings_overlay_section(SettingsSection::Limits);
+
         let snapshot = self.rate_limit_snapshot.clone();
         let needs_refresh = self.should_refresh_limits();
 
@@ -10899,7 +10935,7 @@ impl ChatWidget<'_> {
             return;
         }
 
-        if show_loading && self.limits.overlay.is_none() {
+        if show_loading && self.settings.overlay.as_ref().map(|o| o.active_section()) != Some(SettingsSection::Limits) && self.limits.overlay.is_none() {
             self.set_limits_overlay_content(LimitsOverlayContent::Loading);
             self.request_redraw();
         }
@@ -11133,16 +11169,10 @@ impl ChatWidget<'_> {
             }
         }
         lines.push(Line::from(""));
-        lines.push(Line::from("Manage with:".bold()));
+        lines.push(Line::from("Manage in the overlay:".bold()));
         lines.push(Line::from(
-            "  /agents add name=<name> read-only=<true|false> agents=claude,gemini,qwen,code",
-        ));
-        lines.push(Line::from(
-            "  /agents edit name=<name> [read-only=..] [agents=..] [orchestrator=..] [agent=..]",
-        ));
-        lines.push(Line::from("  /agents delete name=<name>"));
-        lines.push(Line::from(
-            "  Values with spaces require quotes in the composer.",
+            "  /agents  — open Settings › Agents (↑↓ navigate • Enter edit • Esc back)"
+                .fg(crate::colors::text_dim()),
         ));
         lines.push(Line::from(""));
 
@@ -11283,9 +11313,22 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
-    pub(crate) fn handle_agents_command(&mut self, _args: String) {
-        // Open the new overview combining Agents and Commands
-        self.show_agents_overview_ui();
+    pub(crate) fn handle_agents_command(&mut self, args: String) {
+        if !args.trim().is_empty() {
+            self.history_push_plain_state(history_cell::new_error_event(
+                "Usage: /agents".to_string(),
+            ));
+        }
+        self.show_settings_overlay_full(SettingsSection::Agents);
+    }
+
+    pub(crate) fn handle_limits_command(&mut self, args: String) {
+        if !args.trim().is_empty() {
+            self.history_push_plain_state(history_cell::new_error_event(
+                "Usage: /limits".to_string(),
+            ));
+        }
+        self.show_settings_overlay_full(SettingsSection::Limits);
     }
 
     pub(crate) fn handle_login_command(&mut self) {
@@ -11443,120 +11486,166 @@ impl ChatWidget<'_> {
     // Legacy show_agents_settings_ui removed — overview/Direct editors replace it
 
     pub(crate) fn show_agents_overview_ui(&mut self) {
-        // Agents list with enabled status and install check
-        fn command_exists(cmd: &str) -> bool {
-            if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
-                return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
-            }
-            #[cfg(target_os = "windows")]
-            {
-                if let Ok(p) = which::which(cmd) {
-                    p.is_file()
-                } else {
-                    false
-                }
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let Some(path_os) = std::env::var_os("PATH") else {
-                    return false;
-                };
-                for dir in std::env::split_paths(&path_os) {
-                    if dir.as_os_str().is_empty() {
-                        continue;
-                    }
-                    let candidate = dir.join(cmd);
-                    if let Ok(meta) = std::fs::metadata(&candidate) {
-                        if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            }
-        }
-
-        fn is_builtin_agent(name: &str, command: &str) -> bool {
-            name.eq_ignore_ascii_case("code")
-                || name.eq_ignore_ascii_case("codex")
-                || name.eq_ignore_ascii_case("cloud")
-                || command.eq_ignore_ascii_case("code")
-                || command.eq_ignore_ascii_case("codex")
-                || command.eq_ignore_ascii_case("cloud")
-        }
-
-        let mut agent_rows: Vec<(String, bool, bool, String)> = Vec::new();
-        // Desired presentation order for known agents, matching CLI defaults.
-        let mut ordered: Vec<String> = enabled_agent_model_specs()
-            .into_iter()
-            .map(|spec| spec.slug.to_string())
-            .collect();
-        let mut extras: Vec<String> = Vec::new();
-        for a in &self.config.agents {
-            if !ordered.iter().any(|p| a.name.eq_ignore_ascii_case(p)) {
-                extras.push(a.name.to_ascii_lowercase());
-            }
-        }
-        extras.sort();
-        for e in extras {
-            if !ordered.iter().any(|n| n.eq_ignore_ascii_case(&e)) {
-                ordered.push(e);
-            }
-        }
-
-        for name in ordered.iter() {
-            if let Some(cfg) = self
-                .config
-                .agents
-                .iter()
-                .find(|a| a.name.eq_ignore_ascii_case(name))
-            {
-                let builtin = is_builtin_agent(&cfg.name, &cfg.command);
-                let installed = builtin || command_exists(&cfg.command);
-                agent_rows.push((
-                    cfg.name.clone(),
-                    cfg.enabled,
-                    installed,
-                    cfg.command.clone(),
-                ));
-            } else {
-                // Default command = name, enabled=true, installed based on PATH
-                let cmd = name.clone();
-                let builtin = is_builtin_agent(name, &cmd);
-                let installed = builtin || command_exists(&cmd);
-                // Keep display name as given (e.g., "code")
-                agent_rows.push((name.clone(), true, installed, cmd));
-            }
-        }
-        // Commands: built-ins followed by custom
-        let mut commands: Vec<String> = vec!["plan".into(), "solve".into(), "code".into()];
-        let custom: Vec<String> = self
-            .config
-            .subagent_commands
-            .iter()
-            .map(|c| c.name.clone())
-            .filter(|n| !commands.iter().any(|b| b.eq_ignore_ascii_case(n)))
-            .collect();
-        commands.extend(custom);
-
-        let total_rows = agent_rows
+        let (rows, commands) = self.collect_agents_overview_rows();
+        let total_rows = rows
             .len()
             .saturating_add(commands.len())
             .saturating_add(1);
         let selected = if total_rows == 0 {
             0
         } else {
-            self.agents_overview_selected_index
+            self
+                .agents_overview_selected_index
                 .min(total_rows.saturating_sub(1))
         };
         self.agents_overview_selected_index = selected;
-        self.bottom_pane
-            .show_agents_overview(agent_rows, commands, selected);
+
+        self.ensure_settings_overlay_section(SettingsSection::Agents);
+
+        let updated = self.try_update_agents_settings_overview(
+            rows.clone(),
+            commands.clone(),
+            selected,
+        );
+
+        if !updated {
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                let content = AgentsSettingsContent::new_overview(
+                    rows,
+                    commands,
+                    selected,
+                    self.app_event_tx.clone(),
+                );
+                overlay.set_agents_content(content);
+            }
+        }
+
+        self.request_redraw();
+    }
+
+    fn try_update_agents_settings_overview(
+        &mut self,
+        rows: Vec<AgentOverviewRow>,
+        commands: Vec<String>,
+        selected: usize,
+    ) -> bool {
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            if overlay.active_section() == SettingsSection::Agents {
+                if let Some(content) = overlay.agents_content_mut() {
+                    content.set_overview(rows, commands, selected);
+                } else {
+                    overlay.set_agents_content(AgentsSettingsContent::new_overview(
+                        rows,
+                        commands,
+                        selected,
+                        self.app_event_tx.clone(),
+                    ));
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    fn try_set_agents_settings_editor(&mut self, editor: SubagentEditorView) -> bool {
+        let mut editor = Some(editor);
+        let mut needs_content = false;
+
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            if overlay.active_section() == SettingsSection::Agents {
+                if let Some(content) = overlay.agents_content_mut() {
+                    content.set_editor(editor.take().expect("editor set once"));
+                    self.request_redraw();
+                    return true;
+                } else {
+                    needs_content = true;
+                }
+            }
+        }
+
+        if needs_content {
+            let (rows, commands) = self.collect_agents_overview_rows();
+            let total = rows.len().saturating_add(commands.len()).saturating_add(1);
+            let selected = if total == 0 {
+                0
+            } else {
+                self.agents_overview_selected_index.min(total.saturating_sub(1))
+            };
+            self.agents_overview_selected_index = selected;
+
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                if overlay.active_section() == SettingsSection::Agents {
+                    let mut content = AgentsSettingsContent::new_overview(
+                        rows,
+                        commands,
+                        selected,
+                        self.app_event_tx.clone(),
+                    );
+                    content.set_editor(editor.take().expect("editor set once"));
+                    overlay.set_agents_content(content);
+                    self.request_redraw();
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn try_set_agents_settings_agent_editor(&mut self, editor: AgentEditorView) -> bool {
+        let mut editor = Some(editor);
+        let mut needs_content = false;
+
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            if overlay.active_section() == SettingsSection::Agents {
+                if let Some(content) = overlay.agents_content_mut() {
+                    content.set_agent_editor(editor.take().expect("editor set once"));
+                    self.request_redraw();
+                    return true;
+                } else {
+                    needs_content = true;
+                }
+            }
+        }
+
+        if needs_content {
+            let (rows, commands) = self.collect_agents_overview_rows();
+            let total = rows.len().saturating_add(commands.len()).saturating_add(1);
+            let selected = if total == 0 {
+                0
+            } else {
+                self.agents_overview_selected_index.min(total.saturating_sub(1))
+            };
+            self.agents_overview_selected_index = selected;
+
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                if overlay.active_section() == SettingsSection::Agents {
+                    let mut content = AgentsSettingsContent::new_overview(
+                        rows,
+                        commands,
+                        selected,
+                        self.app_event_tx.clone(),
+                    );
+                    content.set_agent_editor(editor.take().expect("editor set once"));
+                    overlay.set_agents_content(content);
+                    self.request_redraw();
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     pub(crate) fn set_agents_overview_selection(&mut self, index: usize) {
         self.agents_overview_selected_index = index;
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            if overlay.active_section() == SettingsSection::Agents {
+                if let Some(content) = overlay.agents_content_mut() {
+                    content.set_overview_selection(index);
+                }
+            }
+        }
     }
 
     fn update_agents_terminal_state(
@@ -14843,8 +14932,26 @@ fi\n\
                 .collect()
         };
         let existing = self.config.subagent_commands.clone();
-        self.bottom_pane
-            .show_subagent_editor(name, available_agents, existing, false);
+        let app_event_tx = self.app_event_tx.clone();
+        let build_editor = || {
+            SubagentEditorView::new_with_data(
+                name.clone(),
+                available_agents.clone(),
+                existing.clone(),
+                false,
+                app_event_tx.clone(),
+            )
+        };
+
+        if self.try_set_agents_settings_editor(build_editor()) {
+            self.request_redraw();
+            return;
+        }
+
+        self.ensure_settings_overlay_section(SettingsSection::Agents);
+        self.show_agents_overview_ui();
+        let _ = self.try_set_agents_settings_editor(build_editor());
+        self.request_redraw();
     }
 
     pub(crate) fn show_new_subagent_editor(&mut self) {
@@ -14862,8 +14969,26 @@ fi\n\
                 .collect()
         };
         let existing = self.config.subagent_commands.clone();
-        self.bottom_pane
-            .show_subagent_editor(String::new(), available_agents, existing, true);
+        let app_event_tx = self.app_event_tx.clone();
+        let build_editor = || {
+            SubagentEditorView::new_with_data(
+                String::new(),
+                available_agents.clone(),
+                existing.clone(),
+                true,
+                app_event_tx.clone(),
+            )
+        };
+
+        if self.try_set_agents_settings_editor(build_editor()) {
+            self.request_redraw();
+            return;
+        }
+
+        self.ensure_settings_overlay_section(SettingsSection::Agents);
+        self.show_agents_overview_ui();
+        let _ = self.try_set_agents_settings_editor(build_editor());
+        self.request_redraw();
     }
 
     pub(crate) fn show_agent_editor_ui(&mut self, name: String) {
@@ -14894,28 +15019,58 @@ fi\n\
                 );
                 if d.is_empty() { None } else { Some(d) }
             };
-            self.bottom_pane.show_agent_editor(
-                cfg.name.clone(),
-                cfg.enabled,
-                ro,
-                wr,
-                cfg.instructions.clone(),
-                cfg.command.clone(),
-            );
+            let app_event_tx = self.app_event_tx.clone();
+            let cfg_name = cfg.name.clone();
+            let cfg_enabled = cfg.enabled;
+            let cfg_instructions = cfg.instructions.clone();
+            let cfg_command = cfg.command.clone();
+            let build_editor = || {
+                AgentEditorView::new(
+                    cfg_name.clone(),
+                    cfg_enabled,
+                    ro.clone(),
+                    wr.clone(),
+                    cfg_instructions.clone(),
+                    cfg_command.clone(),
+                    app_event_tx.clone(),
+                )
+            };
+            if self.try_set_agents_settings_agent_editor(build_editor()) {
+                self.request_redraw();
+                return;
+            }
+
+            self.ensure_settings_overlay_section(SettingsSection::Agents);
+            self.show_agents_overview_ui();
+            let _ = self.try_set_agents_settings_agent_editor(build_editor());
+            self.request_redraw();
         } else {
             // Fallback: synthesize defaults
             let cmd = name.clone();
             let ro = code_core::agent_defaults::default_params_for(&name, true /*read_only*/);
             let wr =
                 code_core::agent_defaults::default_params_for(&name, false /*read_only*/);
-            self.bottom_pane.show_agent_editor(
-                name,
-                true,
-                if ro.is_empty() { None } else { Some(ro) },
-                if wr.is_empty() { None } else { Some(wr) },
-                None,
-                cmd,
-            );
+            let app_event_tx = self.app_event_tx.clone();
+            let build_editor = || {
+                AgentEditorView::new(
+                    name.clone(),
+                    true,
+                    if ro.is_empty() { None } else { Some(ro.clone()) },
+                    if wr.is_empty() { None } else { Some(wr.clone()) },
+                    None,
+                    cmd.clone(),
+                    app_event_tx.clone(),
+                )
+            };
+            if self.try_set_agents_settings_agent_editor(build_editor()) {
+                self.request_redraw();
+                return;
+            }
+
+            self.ensure_settings_overlay_section(SettingsSection::Agents);
+            self.show_agents_overview_ui();
+            let _ = self.try_set_agents_settings_agent_editor(build_editor());
+            self.request_redraw();
         }
     }
 
@@ -15758,8 +15913,23 @@ fi\n\
         if let Some(mcp_content) = self.build_mcp_settings_content() {
             overlay.set_mcp_content(mcp_content);
         }
+        overlay.set_agents_content(self.build_agents_settings_content());
+        overlay.set_limits_content(self.build_limits_settings_content());
         self.settings.overlay = Some(overlay);
         self.request_redraw();
+    }
+
+    pub(crate) fn ensure_settings_overlay_section(&mut self, section: SettingsSection) {
+        match self.settings.overlay.as_mut() {
+            Some(overlay) => {
+                if overlay.set_section(section) {
+                    self.request_redraw();
+                }
+            }
+            None => {
+                self.show_settings_overlay_full(section);
+            }
+        }
     }
 
     fn build_model_settings_content(&self) -> ModelSettingsContent {
@@ -15844,6 +16014,137 @@ fi\n\
         Some(McpSettingsContent::new(view))
     }
 
+    fn collect_agents_overview_rows(&self) -> (Vec<AgentOverviewRow>, Vec<String>) {
+        fn command_exists(cmd: &str) -> bool {
+            if cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') || cmd.contains('\\') {
+                return std::fs::metadata(cmd).map(|m| m.is_file()).unwrap_or(false);
+            }
+            #[cfg(target_os = "windows")]
+            {
+                which::which(cmd).map(|p| p.is_file()).unwrap_or(false)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let Some(path_os) = std::env::var_os("PATH") else {
+                    return false;
+                };
+                for dir in std::env::split_paths(&path_os) {
+                    if dir.as_os_str().is_empty() {
+                        continue;
+                    }
+                    let candidate = dir.join(cmd);
+                    if let Ok(meta) = std::fs::metadata(&candidate) {
+                        if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+        }
+
+        fn is_builtin_agent(name: &str, command: &str) -> bool {
+            name.eq_ignore_ascii_case("code")
+                || name.eq_ignore_ascii_case("codex")
+                || name.eq_ignore_ascii_case("cloud")
+                || command.eq_ignore_ascii_case("code")
+                || command.eq_ignore_ascii_case("codex")
+                || command.eq_ignore_ascii_case("cloud")
+        }
+
+        let mut agent_rows: Vec<AgentOverviewRow> = Vec::new();
+        let mut ordered: Vec<String> = enabled_agent_model_specs()
+            .into_iter()
+            .map(|spec| spec.slug.to_string())
+            .collect();
+        let mut extras: Vec<String> = Vec::new();
+        for agent in &self.config.agents {
+            if !ordered.iter().any(|name| agent.name.eq_ignore_ascii_case(name)) {
+                extras.push(agent.name.to_ascii_lowercase());
+            }
+        }
+        extras.sort();
+        for extra in extras {
+            if !ordered.iter().any(|name| name.eq_ignore_ascii_case(&extra)) {
+                ordered.push(extra);
+            }
+        }
+
+        for name in ordered.iter() {
+            if let Some(cfg) = self
+                .config
+                .agents
+                .iter()
+                .find(|a| a.name.eq_ignore_ascii_case(name))
+            {
+                let builtin = is_builtin_agent(&cfg.name, &cfg.command);
+                let installed = builtin || command_exists(&cfg.command);
+                agent_rows.push(AgentOverviewRow {
+                    name: cfg.name.clone(),
+                    enabled: cfg.enabled,
+                    installed,
+                });
+            } else {
+                let cmd = name.clone();
+                let builtin = is_builtin_agent(name, &cmd);
+                let installed = builtin || command_exists(&cmd);
+                agent_rows.push(AgentOverviewRow {
+                    name: name.clone(),
+                    enabled: true,
+                    installed,
+                });
+            }
+        }
+
+        let mut commands: Vec<String> = vec!["plan".into(), "solve".into(), "code".into()];
+        let custom: Vec<String> = self
+            .config
+            .subagent_commands
+            .iter()
+            .map(|c| c.name.clone())
+            .filter(|name| !commands.iter().any(|builtin| builtin.eq_ignore_ascii_case(name)))
+            .collect();
+        commands.extend(custom);
+
+        (agent_rows, commands)
+    }
+
+    fn build_agents_settings_content(&mut self) -> AgentsSettingsContent {
+        let (rows, commands) = self.collect_agents_overview_rows();
+        let total = rows.len().saturating_add(commands.len()).saturating_add(1);
+        let selected = if total == 0 {
+            0
+        } else {
+            self.agents_overview_selected_index.min(total.saturating_sub(1))
+        };
+        self.agents_overview_selected_index = selected;
+        AgentsSettingsContent::new_overview(rows, commands, selected, self.app_event_tx.clone())
+    }
+
+    fn build_limits_settings_content(&mut self) -> LimitsSettingsContent {
+        let snapshot = self.rate_limit_snapshot.clone();
+        let needs_refresh = self.should_refresh_limits();
+
+        let content = if self.rate_limit_fetch_inflight || needs_refresh {
+            LimitsOverlayContent::Loading
+        } else {
+            let reset_info = self.rate_limit_reset_info();
+            let tabs = self.build_limits_tabs(snapshot.clone(), reset_info);
+            if tabs.is_empty() {
+                LimitsOverlayContent::Placeholder
+            } else {
+                LimitsOverlayContent::Tabs(tabs)
+            }
+        };
+
+        if needs_refresh {
+            self.request_latest_rate_limits(snapshot.is_none());
+        }
+
+        LimitsSettingsContent::new(content)
+    }
+
     pub(crate) fn close_settings_overlay(&mut self) {
         if let Some(overlay) = self.settings.overlay.as_mut() {
             overlay.notify_close();
@@ -15870,11 +16171,11 @@ fi\n\
             | SettingsSection::Notifications => false,
             SettingsSection::Agents => {
                 self.show_agents_overview_ui();
-                true
+                false
             }
             SettingsSection::Limits => {
                 self.add_limits_output();
-                true
+                false
             }
             SettingsSection::Chrome => {
                 self.show_chrome_options(None);

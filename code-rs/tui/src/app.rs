@@ -1946,11 +1946,7 @@ impl App<'_> {
                         }
                         SlashCommand::Limits => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                if command_args.trim().is_empty() {
-                                    widget.show_settings_overlay_full(SettingsSection::Limits);
-                                } else {
-                                    widget.add_limits_output();
-                                }
+                                widget.handle_limits_command(command_args);
                             }
                         }
                         SlashCommand::Update => {
@@ -1974,11 +1970,7 @@ impl App<'_> {
                         }
                         SlashCommand::Agents => {
                             if let AppState::Chat { widget } = &mut self.app_state {
-                                if command_args.trim().is_empty() {
-                                    widget.show_settings_overlay_full(SettingsSection::Agents);
-                                } else {
-                                    widget.handle_agents_command(command_args);
-                                }
+                                widget.handle_agents_command(command_args);
                             }
                         }
                         SlashCommand::Github => {
@@ -2145,6 +2137,7 @@ impl App<'_> {
                 }
                 AppEvent::ShowAgentEditor { name } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_agent_editor_ui(name);
                     }
                 }
@@ -2207,17 +2200,20 @@ impl App<'_> {
                 // ShowAgentsSettings removed
                 AppEvent::ShowAgentsOverview => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_agents_overview_ui();
                     }
                 }
                 // ShowSubagentEditor removed; use ShowSubagentEditorForName/ShowSubagentEditorNew
                 AppEvent::ShowSubagentEditorForName { name } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_subagent_editor_for_name(name);
                     }
                 }
                 AppEvent::ShowSubagentEditorNew => {
                     if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.ensure_settings_overlay_section(SettingsSection::Agents);
                         widget.show_new_subagent_editor();
                     }
                 }
