@@ -1118,35 +1118,50 @@ impl AutoCoordinatorView {
 
     fn build_status_summary(&self, model: &AutoActiveViewModel) -> Option<Line<'static>> {
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled(
-            self.runtime_text(model),
-            self.style.summary_style.clone(),
-        ));
+
+        let runtime_text = self.runtime_text(model);
+        if !runtime_text.trim().is_empty() {
+            spans.push(Span::styled(
+                runtime_text,
+                self.style.summary_style.clone(),
+            ));
+        }
 
         let secondary_style = Style::default().fg(colors::text_dim());
         let separator = self.style.footer_separator.to_string();
+
+        let push_stat = |
+            spans: &mut Vec<Span<'static>>,
+            text: &str,
+            style: Style,
+        | {
+            if text.trim().is_empty() {
+                return;
+            }
+            let sep = if spans.is_empty() {
+                separator.trim_start().to_string()
+            } else {
+                separator.clone()
+            };
+            if !sep.is_empty() {
+                spans.push(Span::styled(sep, secondary_style.clone()));
+            }
+            spans.push(Span::styled(text.to_string(), style));
+        };
 
         let agents_text = if model.agents_enabled {
             "Agents Enabled"
         } else {
             "Agents Disabled"
         };
+        push_stat(&mut spans, agents_text, secondary_style.clone());
+
         let review_text = if model.review_enabled {
             "Review Enabled"
         } else {
             "Review Disabled"
         };
-
-        spans.push(Span::styled(separator.clone(), secondary_style.clone()));
-        spans.push(Span::styled(agents_text.to_string(), secondary_style));
-        spans.push(Span::styled(
-            separator,
-            Style::default().fg(colors::text_dim()),
-        ));
-        spans.push(Span::styled(
-            review_text.to_string(),
-            Style::default().fg(colors::text_dim()),
-        ));
+        push_stat(&mut spans, review_text, secondary_style.clone());
 
         Some(Line::from(spans))
     }
