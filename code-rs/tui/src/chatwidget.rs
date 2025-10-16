@@ -631,6 +631,7 @@ struct AutoCoordinatorUiState {
     transient_restart_attempts: u32,
     intro_started_at: Option<Instant>,
     intro_reduced_motion: bool,
+    intro_pending: bool,
 }
 
 impl AutoCoordinatorUiState {
@@ -648,6 +649,19 @@ impl AutoCoordinatorUiState {
             self.intro_started_at = Some(Instant::now());
         }
         self.intro_reduced_motion = reduced_motion;
+    }
+
+    fn mark_intro_pending(&mut self) {
+        self.intro_pending = true;
+    }
+
+    fn take_intro_pending(&mut self) -> bool {
+        if self.intro_pending {
+            self.intro_pending = false;
+            true
+        } else {
+            false
+        }
     }
 
     fn countdown_active(&self) -> bool {
@@ -718,6 +732,7 @@ impl Default for AutoCoordinatorUiState {
             transient_restart_attempts: 0,
             intro_started_at: None,
             intro_reduced_motion: false,
+            intro_pending: false,
         }
     }
 }
@@ -12129,8 +12144,11 @@ fi\n\
 
     fn auto_show_goal_entry_panel(&mut self) {
         self.auto_state.goal = None;
-        self.auto_reset_intro_timing();
-        self.auto_ensure_intro_timing();
+        let seed_intro = self.auto_state.take_intro_pending();
+        if seed_intro {
+            self.auto_reset_intro_timing();
+            self.auto_ensure_intro_timing();
+        }
         let hint = "Let's do this! What's your goal?".to_string();
         let status_lines = vec![hint];
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
@@ -12190,8 +12208,10 @@ fi\n\
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
-                self.auto_reset_intro_timing();
-                self.auto_ensure_intro_timing();
+                if self.auto_state.take_intro_pending() {
+                    self.auto_reset_intro_timing();
+                    self.auto_ensure_intro_timing();
+                }
                 self.auto_state.active = true;
                 self.auto_state.started_at = Some(Instant::now());
                 self.auto_state.turns_completed = 0;
@@ -12229,6 +12249,7 @@ fi\n\
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
+                self.auto_state.mark_intro_pending();
                 self.auto_show_goal_entry_panel();
             }
         }
@@ -12264,6 +12285,7 @@ fi\n\
             self.auto_state.subagents_enabled = defaults.agents_enabled;
             self.auto_state.continue_mode = auto_continue_from_config(defaults.continue_mode);
             self.auto_state.reset_countdown();
+            self.auto_state.mark_intro_pending();
             self.auto_show_goal_entry_panel();
             self.update_header_border_activation();
             self.request_redraw();
@@ -12279,6 +12301,7 @@ fi\n\
         let defaults = self.config.tui.auto_drive.clone();
         let default_mode = auto_continue_from_config(defaults.continue_mode);
 
+        self.auto_state.mark_intro_pending();
         self.auto_launch_with_goal(
             goal_text,
             defaults.review_enabled,
