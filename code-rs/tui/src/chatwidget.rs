@@ -101,6 +101,7 @@ use self::auto_coordinator::{
     CROSS_CHECK_RESTART_BANNER,
 };
 use self::limits_overlay::{LimitsOverlayContent, LimitsTab};
+use crate::chrome_launch::ChromeLaunchOption;
 use self::rate_limit_refresh::start_rate_limit_refresh;
 use self::history_render::{
     CachedLayout, HistoryRenderState, RenderRequest, RenderRequestKind, RenderSettings, VisibleCell,
@@ -1382,6 +1383,7 @@ use self::settings_overlay::{
     AgentOverviewRow,
     AgentsSettingsContent,
     LimitsSettingsContent,
+    ChromeSettingsContent,
     McpSettingsContent,
     ModelSettingsContent,
     NotificationsSettingsContent,
@@ -15902,6 +15904,7 @@ fi\n\
         }
         overlay.set_agents_content(self.build_agents_settings_content());
         overlay.set_limits_content(self.build_limits_settings_content());
+        overlay.set_chrome_content(self.build_chrome_settings_content(None));
 
         match section {
             Some(section) => overlay.set_mode_section(section),
@@ -15964,6 +15967,10 @@ fi\n\
 
     fn build_notifications_settings_content(&mut self) -> NotificationsSettingsContent {
         NotificationsSettingsContent::new(self.build_notifications_settings_view())
+    }
+
+    fn build_chrome_settings_content(&self, port: Option<u16>) -> ChromeSettingsContent {
+        ChromeSettingsContent::new(self.app_event_tx.clone(), port)
     }
 
     fn build_mcp_server_rows(&mut self) -> Option<McpServerRows> {
@@ -17700,16 +17707,19 @@ fi\n\
     }
 
     pub(crate) fn show_chrome_options(&mut self, port: Option<u16>) {
-        self.bottom_pane.show_chrome_selection(port);
+        self.ensure_settings_overlay_section(SettingsSection::Chrome);
+        let content = self.build_chrome_settings_content(port);
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.set_chrome_content(content);
+        }
+        self.request_redraw();
     }
 
     pub(crate) fn handle_chrome_launch_option(
         &mut self,
-        option: crate::bottom_pane::chrome_selection_view::ChromeLaunchOption,
+        option: ChromeLaunchOption,
         port: Option<u16>,
     ) {
-        use crate::bottom_pane::chrome_selection_view::ChromeLaunchOption;
-
         let launch_port = port.unwrap_or(9222);
         let ticket = self.make_background_tail_ticket();
 

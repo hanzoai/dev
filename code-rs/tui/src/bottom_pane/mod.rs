@@ -24,7 +24,6 @@ mod auto_drive_settings_view;
 mod bottom_pane_view;
 mod chat_composer;
 mod chat_composer_history;
-pub mod chrome_selection_view;
 mod diff_popup;
 mod custom_prompt_view;
 mod command_popup;
@@ -710,17 +709,6 @@ impl BottomPane<'_> {
             tail_ticket,
             before_ticket,
         );
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        // Status shown in composer title now
-        self.status_view_active = false;
-        self.request_redraw()
-    }
-
-    /// Show the Chrome launch options UI
-    pub fn show_chrome_selection(&mut self, port: Option<u16>) {
-        use chrome_selection_view::ChromeSelectionView;
-        let view = ChromeSelectionView::new(self.app_event_tx.clone(), port);
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         // Status shown in composer title now
