@@ -31,8 +31,7 @@ mod command_popup;
 mod file_search_popup;
 mod paste_burst;
 mod popup_consts;
-mod agent_editor_view;
-mod agents_overview_view;
+pub(crate) mod agent_editor_view;
 mod model_selection_view;
 mod scroll_state;
 mod selection_popup_common;
@@ -230,21 +229,6 @@ impl BottomPane<'_> {
         }
     }
 
-    /// Show Agents overview (Agents + Commands sections)
-    pub fn show_agents_overview(
-        &mut self,
-        agents: Vec<(String, bool, bool, String)>,
-        commands: Vec<String>,
-        selected_index: usize,
-    ) {
-        use agents_overview_view::AgentsOverviewView;
-        let view = AgentsOverviewView::new(agents, commands, selected_index, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
     pub fn show_update_settings(&mut self, view: update_settings_view::UpdateSettingsView) {
         if !crate::updates::upgrade_ui_enabled() {
             self.request_redraw();
@@ -294,32 +278,6 @@ impl BottomPane<'_> {
         }
     }
 
-    /// Show per-agent editor
-    pub fn show_agent_editor(
-        &mut self,
-        name: String,
-        enabled: bool,
-        args_read_only: Option<Vec<String>>,
-        args_write: Option<Vec<String>>,
-        instructions: Option<String>,
-        command: String,
-    ) {
-        use agent_editor_view::AgentEditorView;
-        let view = AgentEditorView::new(
-            name,
-            enabled,
-            args_read_only,
-            args_write,
-            instructions,
-            command,
-            self.app_event_tx.clone(),
-        );
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
     pub fn show_login_accounts(&mut self, view: LoginAccountsView) {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
@@ -340,6 +298,11 @@ impl BottomPane<'_> {
             self.composer.set_using_chatgpt_auth(using);
             self.request_redraw();
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn has_active_view(&self) -> bool {
+        self.active_view.is_some()
     }
 
     pub fn set_has_chat_history(&mut self, has_history: bool) {
@@ -866,22 +829,6 @@ impl BottomPane<'_> {
     ) {
         use validation_settings_view::ValidationSettingsView;
         let view = ValidationSettingsView::new(groups, tools, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
-    /// Show Subagent editor UI
-    pub fn show_subagent_editor(
-        &mut self,
-        name: String,
-        available_agents: Vec<String>,
-        existing: Vec<code_core::config_types::SubagentCommandConfig>,
-        is_new: bool,
-    ) {
-        use crate::bottom_pane::agents_settings_view::SubagentEditorView;
-        let view = SubagentEditorView::new_with_data(name, available_agents, existing, is_new, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
