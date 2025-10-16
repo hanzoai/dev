@@ -2,12 +2,13 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
+use crate::glitch_animation::{gradient_multi, mix_rgb};
 use crate::colors;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::Widget;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, WidgetRef, Wrap};
 use std::borrow::Cow;
@@ -400,17 +401,62 @@ impl AutoCoordinatorView {
         frame_style: &FrameStyle,
         display_message: &str,
         header_label: &str,
+        full_title: &str,
+        intro: &IntroState<'_>,
     ) {
         if area.width == 0 || area.height == 0 {
             return;
         }
 
-        let left_spans = vec![
-            Span::raw("  "),
-            Span::styled(header_label.to_string(), frame_style.title_style.clone()),
-            Span::styled(" > ", Style::default().fg(colors::text_dim())),
-            Span::styled(display_message.to_string(), Style::default().fg(colors::text())),
-        ];
+        let animating = intro.schedule_next_in.is_some() && !model.intro_reduced_motion;
+        let mut left_spans: Vec<Span<'static>> = Vec::new();
+        left_spans.push(Span::raw(" "));
+
+        let fallback_color = frame_style
+            .border_style
+            .fg
+            .or(frame_style.title_style.fg)
+            .unwrap_or_else(colors::primary);
+
+        if animating {
+            let total_chars = full_title.chars().count().max(1);
+            let visible_chars: Vec<char> = header_label.chars().collect();
+            if !visible_chars.is_empty() {
+                for (idx, ch) in visible_chars.iter().enumerate() {
+                    let gradient_position = if total_chars > 1 {
+                        idx as f32 / (total_chars as f32 - 1.0)
+                    } else {
+                        0.0
+                    };
+                    let mut color = gradient_multi(gradient_position);
+                    if visible_chars.len() == total_chars {
+                        color = mix_rgb(color, fallback_color, 0.65);
+                    } else if idx == visible_chars.len().saturating_sub(1) {
+                        color = mix_rgb(color, Color::Rgb(255, 255, 255), 0.35);
+                    }
+                    left_spans.push(Span::styled(
+                        ch.to_string(),
+                        Style::default()
+                            .fg(color)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
+        } else {
+            let mut title_style = frame_style.title_style.clone();
+            title_style.fg = Some(fallback_color);
+            title_style = title_style.add_modifier(Modifier::BOLD);
+            left_spans.push(Span::styled(header_label.to_string(), title_style));
+        }
+
+        left_spans.push(Span::styled(
+            " > ",
+            Style::default().fg(colors::text_dim()),
+        ));
+        left_spans.push(Span::styled(
+            display_message.to_string(),
+            Style::default().fg(colors::text()),
+        ));
         let left_line = Line::from(left_spans);
 
         let runtime = self.runtime_text(model);
@@ -808,6 +854,8 @@ impl AutoCoordinatorView {
             &frame_style,
             &display_message,
             header_label,
+            frame_style.title_text,
+            &intro,
         );
 
         if area.height <= 1 + Self::HEADER_HEIGHT {
