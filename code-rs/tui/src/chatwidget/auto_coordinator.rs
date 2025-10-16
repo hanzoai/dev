@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use code_browser::global as browser_global;
 use code_core::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use code_core::config::Config;
-use code_core::config_types::ReasoningEffort;
+use code_core::config_types::{AutoDriveSettings, ReasoningEffort};
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
 use code_core::{get_openai_tools, OpenAiTool, ToolsConfig};
@@ -236,7 +236,7 @@ mod tests {
             "codex-plan".to_string(),
             "codex-research".to_string(),
         ];
-        let schema = build_schema(&active_agents);
+        let schema = build_schema(&active_agents, SchemaFeatures::default());
         let props = schema
             .get("properties")
             .and_then(|v| v.as_object())
@@ -323,6 +323,7 @@ mod tests {
                 .iter()
                 .map(|name| (*name).to_string())
                 .collect::<Vec<_>>(),
+            SchemaFeatures::default(),
         );
         let props = schema
             .get("properties")
@@ -353,6 +354,70 @@ mod tests {
             .map(|name| Value::String((*name).to_string()))
             .collect();
         assert_eq!(*item_enum, expected);
+    }
+
+    #[test]
+    fn schema_omits_agents_when_disabled() {
+        let active_agents = vec!["codex-plan".to_string()];
+        let schema = build_schema(
+            &active_agents,
+            SchemaFeatures {
+                include_agents: false,
+                ..SchemaFeatures::default()
+            },
+        );
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema properties");
+        assert!(!props.contains_key("agents"));
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("required array");
+        assert!(!required.contains(&json!("agents")));
+    }
+
+    #[test]
+    fn schema_omits_code_review_when_disabled() {
+        let schema = build_schema(
+            &[],
+            SchemaFeatures {
+                include_review: false,
+                ..SchemaFeatures::default()
+            },
+        );
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema properties");
+        assert!(!props.contains_key("code_review"));
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("required array");
+        assert!(!required.contains(&json!("code_review")));
+    }
+
+    #[test]
+    fn schema_omits_cross_check_when_disabled() {
+        let schema = build_schema(
+            &[],
+            SchemaFeatures {
+                include_cross_check: false,
+                ..SchemaFeatures::default()
+            },
+        );
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .expect("schema properties");
+        assert!(!props.contains_key("cross_check"));
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("required array");
+        assert!(!required.contains(&json!("cross_check")));
     }
 
     #[test]
@@ -798,7 +863,11 @@ fn run_auto_loop(
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
     let (base_developer_intro, primary_goal_message) =
         build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
-    let schema = build_schema(&active_agent_names);
+    let schema_features = SchemaFeatures::from_auto_settings(&config.tui.auto_drive);
+    let include_agents = schema_features.include_agents;
+    let include_review = schema_features.include_review;
+    let include_cross_check = schema_features.include_cross_check;
+    let schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
 
@@ -856,12 +925,22 @@ fn run_auto_loop(
                     progress_past,
                     progress_current,
                     cli,
-                    agents_timing,
-                    agents,
-                    code_review,
-                    cross_check,
+                    mut agents_timing,
+                    mut agents,
+                    mut code_review,
+                    mut cross_check,
                     mut response_items,
                 }) => {
+                    if !include_agents {
+                        agents_timing = None;
+                        agents.clear();
+                    }
+                    if !include_review {
+                        code_review = None;
+                    }
+                    if !include_cross_check {
+                        cross_check = None;
+                    }
                     consecutive_decision_failures = 0;
                     let (turn_cli_prompt, turn_cli_context) = if let Some(cli_action) = &cli {
                         let prompt = Some(cli_action.prompt.clone());
@@ -896,21 +975,23 @@ fn run_auto_loop(
                     let cli_prompt_for_observer = turn_cli_prompt.as_deref();
 
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        if let Some(cross) = cross_check.clone() {
-                            dispatch_cross_check(
-                                observer_handle.as_ref(),
-                                &runtime,
-                                client.clone(),
-                                &cmd_tx,
-                                conv_for_observer.clone(),
-                                goal_text.clone(),
-                                environment_details.clone(),
-                                cross.summary.clone(),
-                                cross.focus.clone(),
-                                false,
-                                Some(turn_snapshot.clone()),
-                                cross_check_tools.clone(),
-                            );
+                        if include_cross_check {
+                            if let Some(cross) = cross_check.clone() {
+                                dispatch_cross_check(
+                                    observer_handle.as_ref(),
+                                    &runtime,
+                                    client.clone(),
+                                    &cmd_tx,
+                                    conv_for_observer.clone(),
+                                    goal_text.clone(),
+                                    environment_details.clone(),
+                                    cross.summary.clone(),
+                                    cross.focus.clone(),
+                                    false,
+                                    Some(turn_snapshot.clone()),
+                                    cross_check_tools.clone(),
+                                );
+                            }
                         }
 
                         if let (Some(handle), Some(cadence)) =
@@ -935,9 +1016,13 @@ fn run_auto_loop(
                             }
                         }
 
-                        let cross_check_event = cross_check
-                            .as_ref()
-                            .map(|action| cross_check_action_to_event(action));
+                        let cross_check_event = if include_cross_check {
+                            cross_check
+                                .as_ref()
+                                .map(|action| cross_check_action_to_event(action))
+                        } else {
+                            None
+                        };
                         let event = AppEvent::AutoCoordinatorDecision {
                             status,
                             progress_past,
@@ -953,56 +1038,58 @@ fn run_auto_loop(
                         continue;
                     }
 
-                    let observer_conversation =
-                        build_observer_conversation(conv_for_observer.clone(), None);
-                    let final_summary = cross_check
-                        .as_ref()
-                        .and_then(|data| data.summary.clone());
-                    let final_focus = cross_check
-                        .as_ref()
-                        .and_then(|data| data.focus.clone());
+                    if include_cross_check {
+                        let observer_conversation =
+                            build_observer_conversation(conv_for_observer.clone(), None);
+                        let final_summary = cross_check
+                            .as_ref()
+                            .and_then(|data| data.summary.clone());
+                        let final_focus = cross_check
+                            .as_ref()
+                            .and_then(|data| data.focus.clone());
 
-                    let validation_result = run_final_cross_check(
-                        &runtime,
-                        client.clone(),
-                        observer_conversation,
-                        &goal_text,
-                        &environment_details,
-                        final_summary,
-                        final_focus,
-                        Some(turn_snapshot),
-                        cross_check_tools.clone(),
-                    );
+                        let validation_result = run_final_cross_check(
+                            &runtime,
+                            client.clone(),
+                            observer_conversation,
+                            &goal_text,
+                            &environment_details,
+                            final_summary,
+                            final_focus,
+                            Some(turn_snapshot),
+                            cross_check_tools.clone(),
+                        );
 
-                    if let Ok((observer_status, replace_message, additional_instructions)) =
-                        &validation_result
-                    {
-                        let telemetry = AutoObserverTelemetry {
-                            trigger_count: observer_telemetry.trigger_count.saturating_add(1),
-                            last_status: *observer_status,
-                            last_intervention: summarize_intervention(
-                                replace_message.as_deref(),
-                                additional_instructions.as_deref(),
-                            ),
-                        };
-                        observer_telemetry = telemetry.clone();
-                        let observer_event = AppEvent::AutoObserverReport {
-                            status: *observer_status,
-                            telemetry,
-                            replace_message: replace_message.clone(),
-                            additional_instructions: additional_instructions.clone(),
-                        };
-                        app_event_tx.send(observer_event);
+                        if let Ok((observer_status, replace_message, additional_instructions)) =
+                            &validation_result
+                        {
+                            let telemetry = AutoObserverTelemetry {
+                                trigger_count: observer_telemetry.trigger_count.saturating_add(1),
+                                last_status: *observer_status,
+                                last_intervention: summarize_intervention(
+                                    replace_message.as_deref(),
+                                    additional_instructions.as_deref(),
+                                ),
+                            };
+                            observer_telemetry = telemetry.clone();
+                            let observer_event = AppEvent::AutoObserverReport {
+                                status: *observer_status,
+                                telemetry,
+                                replace_message: replace_message.clone(),
+                                additional_instructions: additional_instructions.clone(),
+                            };
+                            app_event_tx.send(observer_event);
 
-                        if matches!(observer_status, AutoObserverStatus::Failing) {
-                            if let Some(instr) = additional_instructions.as_deref() {
-                                push_unique_guidance(&mut observer_guidance, instr);
+                            if matches!(observer_status, AutoObserverStatus::Failing) {
+                                if let Some(instr) = additional_instructions.as_deref() {
+                                    push_unique_guidance(&mut observer_guidance, instr);
+                                }
+                                pending_conversation = Some(conv_for_observer);
+                                continue;
                             }
-                            pending_conversation = Some(conv_for_observer);
-                            continue;
+                        } else if let Err(err) = validation_result {
+                            warn!("final observer validation failed: {err:#}");
                         }
-                    } else if let Err(err) = validation_result {
-                        warn!("final observer validation failed: {err:#}");
                     }
 
                     let event = AppEvent::AutoCoordinatorDecision {
@@ -1450,7 +1537,34 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
         .map(|text| text.trim_end().to_string())
 }
 
-fn build_schema(active_agents: &[String]) -> Value {
+#[derive(Clone, Copy)]
+struct SchemaFeatures {
+    include_agents: bool,
+    include_review: bool,
+    include_cross_check: bool,
+}
+
+impl SchemaFeatures {
+    fn from_auto_settings(settings: &AutoDriveSettings) -> Self {
+        Self {
+            include_agents: settings.agents_enabled,
+            include_review: settings.review_enabled,
+            include_cross_check: settings.cross_check_enabled,
+        }
+    }
+}
+
+impl Default for SchemaFeatures {
+    fn default() -> Self {
+        Self {
+            include_agents: true,
+            include_review: true,
+            include_cross_check: true,
+        }
+    }
+}
+
+fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
     let models_enum_values: Vec<Value> = active_agents
         .iter()
         .map(|name| Value::String(name.clone()))
@@ -1521,64 +1635,77 @@ fn build_schema(active_agents: &[String]) -> Value {
         description
     };
 
-    let models_request_property = {
-        json!({
-            "type": "array",
-            "description": models_description,
-            "items": models_items_schema,
-        })
-    };
+    let models_request_property = json!({
+        "type": "array",
+        "description": models_description,
+        "items": models_items_schema,
+    });
 
-    json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "Coordinator Turn (CLI-first; agents + review background)",
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "finish_status": {
-                "type": "string",
-                "enum": ["continue", "finish_success", "finish_failed"],
-                "description": "Prefer 'continue' unless the mission is fully complete or truly blocked. Always consider what further work might be possible to confirm the goal is complete before ending."
-            },
-            "progress": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "past": {
-                        "type": ["string", "null"],
-                        "minLength": 4,
-                        "maxLength": 50,
-                        "description": "2-5 words, past-tense, work performed so far."
-                    },
-                    "current": {
-                        "type": "string",
-                        "minLength": 4,
-                        "maxLength": 50,
-                        "description": "2-5 words, present-tense, what is being worked on now."
-                    }
+    let mut properties = serde_json::Map::new();
+    let mut required: Vec<Value> = Vec::new();
+
+    properties.insert(
+        "finish_status".to_string(),
+        json!({
+            "type": "string",
+            "enum": ["continue", "finish_success", "finish_failed"],
+            "description": "Prefer 'continue' unless the mission is fully complete or truly blocked. Always consider what further work might be possible to confirm the goal is complete before ending."
+        }),
+    );
+    required.push(Value::String("finish_status".to_string()));
+
+    properties.insert(
+        "progress".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "past": {
+                    "type": ["string", "null"],
+                    "minLength": 4,
+                    "maxLength": 50,
+                    "description": "2-5 words, past-tense, work performed so far."
                 },
-                "required": ["past", "current"]
+                "current": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 50,
+                    "description": "2-5 words, present-tense, what is being worked on now."
+                }
             },
-            "cli": {
-                "type": ["object", "null"],
-                "additionalProperties": false,
-                "description": "The single atomic instruction for the CLI this turn. Set to null only when finish_status != 'continue'.",
-                "properties": {
-                    "context": {
-                        "type": ["string", "null"],
-                        "maxLength": 1500,
-                        "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "minLength": 4,
-                        "maxLength": 240,
-                        "description": "Exactly one objective in 1–2 sentences. No step lists."
-                    }
+            "required": ["past", "current"]
+        }),
+    );
+    required.push(Value::String("progress".to_string()));
+
+    properties.insert(
+        "cli".to_string(),
+        json!({
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "description": "The single atomic instruction for the CLI this turn. Set to null only when finish_status != 'continue'.",
+            "properties": {
+                "context": {
+                    "type": ["string", "null"],
+                    "maxLength": 1500,
+                    "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
                 },
-                "required": ["prompt", "context"]
+                "prompt": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 240,
+                    "description": "Exactly one objective in 1–2 sentences. No step lists."
+                }
             },
-            "agents": {
+            "required": ["prompt", "context"]
+        }),
+    );
+    required.push(Value::String("cli".to_string()));
+
+    if features.include_agents {
+        properties.insert(
+            "agents".to_string(),
+            json!({
                 "type": ["object", "null"],
                 "additionalProperties": false,
                 "description": "Parallel help agents for the CLI to spawn. Use as often as possible. Agents are faster, parallelize work and allow exploration of a range of approaches.",
@@ -1610,7 +1737,7 @@ fn build_schema(active_agents: &[String]) -> Value {
                                     "maxLength": 400,
                                     "description": "Outcome-oriented instruction (what to produce)."
                                 },
-                                "models": models_request_property
+                                "models": models_request_property.clone()
                             },
                             "required": ["prompt", "context", "write", "models"]
                         },
@@ -1618,8 +1745,15 @@ fn build_schema(active_agents: &[String]) -> Value {
                     },
                 },
                 "required": ["timing", "list"]
-            },
-            "code_review": {
+            }),
+        );
+        required.push(Value::String("agents".to_string()));
+    }
+
+    if features.include_review {
+        properties.insert(
+            "code_review".to_string(),
+            json!({
                 "type": ["object", "null"],
                 "additionalProperties": false,
                 "description": "Starts an optional code review at the start of the turn. Use whenever substantial code has changed. Confirms there are no errors in the implementation using a specialized review model.",
@@ -1642,8 +1776,15 @@ fn build_schema(active_agents: &[String]) -> Value {
                     }
                 },
                 "required": ["source", "sha", "summary"]
-            },
-            "cross_check": {
+            }),
+        );
+        required.push(Value::String("code_review".to_string()));
+    }
+
+    if features.include_cross_check {
+        properties.insert(
+            "cross_check".to_string(),
+            json!({
                 "type": ["object", "null"],
                 "additionalProperties": false,
                 "description": "Optional QA-style cross check to validate the turn outcome. Runs alongside the CLI and prefers failing when anything looks incomplete.",
@@ -1660,10 +1801,26 @@ fn build_schema(active_agents: &[String]) -> Value {
                     }
                 },
                 "required": ["summary", "focus"]
-            }
-        },
-        "required": ["finish_status", "progress", "cli", "agents", "code_review", "cross_check"]
-    })
+            }),
+        );
+        required.push(Value::String("cross_check".to_string()));
+    }
+
+    let mut schema = serde_json::Map::new();
+    schema.insert(
+        "$schema".to_string(),
+        Value::String("https://json-schema.org/draft/2020-12/schema".to_string()),
+    );
+    schema.insert(
+        "title".to_string(),
+        Value::String("Coordinator Turn (CLI-first; agents + review background)".to_string()),
+    );
+    schema.insert("type".to_string(), Value::String("object".to_string()));
+    schema.insert("additionalProperties".to_string(), Value::Bool(false));
+    schema.insert("properties".to_string(), Value::Object(properties));
+    schema.insert("required".to_string(), Value::Array(required));
+
+    Value::Object(schema)
 }
 
 
