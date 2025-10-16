@@ -619,6 +619,7 @@ struct AutoCoordinatorUiState {
     coordinator_waiting: bool,
     review_enabled: bool,
     subagents_enabled: bool,
+    cross_check_enabled: bool,
     pending_agent_actions: Vec<AutoTurnAgentsAction>,
     pending_agent_timing: Option<AutoTurnAgentsTiming>,
     continue_mode: AutoContinueMode,
@@ -692,6 +693,7 @@ impl Default for AutoCoordinatorUiState {
             coordinator_waiting: false,
             review_enabled: false,
             subagents_enabled: false,
+            cross_check_enabled: true,
             pending_agent_actions: Vec::new(),
             pending_agent_timing: None,
             continue_mode,
@@ -12132,9 +12134,11 @@ fi\n\
         goal: String,
         review_enabled: bool,
         subagents_enabled: bool,
+        cross_check_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
+        self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
         match start_auto_coordinator(
             self.app_event_tx.clone(),
             goal.clone(),
@@ -12148,6 +12152,7 @@ fi\n\
                 self.auto_state.reset();
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
+                self.auto_state.cross_check_enabled = cross_check_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
                 self.auto_state.active = true;
@@ -12185,6 +12190,7 @@ fi\n\
                 self.auto_state.awaiting_goal_input = true;
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
+                self.auto_state.cross_check_enabled = cross_check_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
                 self.auto_show_goal_entry_panel();
@@ -12220,6 +12226,7 @@ fi\n\
             let defaults = self.config.tui.auto_drive.clone();
             self.auto_state.review_enabled = defaults.review_enabled;
             self.auto_state.subagents_enabled = defaults.agents_enabled;
+            self.auto_state.cross_check_enabled = defaults.cross_check_enabled;
             self.auto_state.continue_mode = auto_continue_from_config(defaults.continue_mode);
             self.auto_state.reset_countdown();
             self.auto_show_goal_entry_panel();
@@ -12241,6 +12248,7 @@ fi\n\
             goal_text,
             defaults.review_enabled,
             defaults.agents_enabled,
+            defaults.cross_check_enabled,
             default_mode,
         );
     }
@@ -12880,6 +12888,7 @@ fi\n\
 
         let review_enabled = self.auto_state.review_enabled;
         let agents_enabled = self.auto_state.subagents_enabled;
+        let cross_check_enabled = self.auto_state.cross_check_enabled;
         let continue_mode = self.auto_state.continue_mode;
         let previous_turns = self.auto_state.turns_completed;
         let previous_started_at = self.auto_state.started_at;
@@ -12900,7 +12909,13 @@ fi\n\
             ));
         }
 
-        self.auto_launch_with_goal(goal, review_enabled, agents_enabled, continue_mode);
+        self.auto_launch_with_goal(
+            goal,
+            review_enabled,
+            agents_enabled,
+            cross_check_enabled,
+            continue_mode,
+        );
 
         if previous_turns > 0 {
             self.auto_state.turns_completed = previous_turns;
@@ -12978,13 +12993,18 @@ fi\n\
             return;
         }
         if delta == CROSS_CHECK_RESTART_BANNER {
-            self.auto_on_cross_check_restart();
+            if self.auto_state.cross_check_enabled {
+                self.auto_on_cross_check_restart();
+            }
             return;
         }
         self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
     fn auto_on_cross_check_restart(&mut self) {
+        if !self.auto_state.cross_check_enabled {
+            return;
+        }
         self.auto_queue_observer_banner(CROSS_CHECK_RESTART_BANNER);
         self.auto_state.current_cli_prompt = None;
         self.auto_state.current_cli_context = None;
@@ -13541,6 +13561,9 @@ fi\n\
     }
 
     fn auto_handle_cross_check_request(&mut self, action: AutoTurnCrossCheckAction) {
+        if !self.auto_state.cross_check_enabled {
+            return;
+        }
         let mut banner = if action.forced {
             "Cross-check (required) in progress".to_string()
         } else {
