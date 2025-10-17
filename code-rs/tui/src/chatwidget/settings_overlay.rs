@@ -8,14 +8,18 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::{
+    agent_editor_view::AgentEditorView,
+    agents_settings_view::SubagentEditorView,
+    AutoDriveSettingsView,
     BottomPaneView,
+    GithubSettingsView,
     McpSettingsView,
     ModelSelectionView,
     NotificationsSettingsView,
     SettingsSection,
     ThemeSelectionView,
-    agent_editor_view::AgentEditorView,
-    agents_settings_view::SubagentEditorView,
+    UpdateSettingsView,
+    ValidationSettingsView,
 };
 use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
 use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
@@ -140,6 +144,106 @@ impl SettingsContent for NotificationsSettingsContent {
 
     fn is_complete(&self) -> bool {
         self.view.is_complete()
+    }
+}
+
+pub(crate) struct UpdatesSettingsContent {
+    view: UpdateSettingsView,
+}
+
+impl UpdatesSettingsContent {
+    pub(crate) fn new(view: UpdateSettingsView) -> Self {
+        Self { view }
+    }
+}
+
+impl SettingsContent for UpdatesSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.view.render(area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.view.handle_key_event_direct(key);
+        true
+    }
+
+    fn is_complete(&self) -> bool {
+        self.view.is_view_complete()
+    }
+}
+
+pub(crate) struct ValidationSettingsContent {
+    view: ValidationSettingsView,
+}
+
+impl ValidationSettingsContent {
+    pub(crate) fn new(view: ValidationSettingsView) -> Self {
+        Self { view }
+    }
+}
+
+impl SettingsContent for ValidationSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.view.render(area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.view.handle_key_event_direct(key);
+        true
+    }
+
+    fn is_complete(&self) -> bool {
+        self.view.is_view_complete()
+    }
+}
+
+pub(crate) struct GithubSettingsContent {
+    view: GithubSettingsView,
+}
+
+impl GithubSettingsContent {
+    pub(crate) fn new(view: GithubSettingsView) -> Self {
+        Self { view }
+    }
+}
+
+impl SettingsContent for GithubSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.view.render(area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.view.handle_key_event_direct(key);
+        true
+    }
+
+    fn is_complete(&self) -> bool {
+        self.view.is_view_complete()
+    }
+}
+
+pub(crate) struct AutoDriveSettingsContent {
+    view: AutoDriveSettingsView,
+}
+
+impl AutoDriveSettingsContent {
+    pub(crate) fn new(view: AutoDriveSettingsView) -> Self {
+        Self { view }
+    }
+}
+
+impl SettingsContent for AutoDriveSettingsContent {
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.view.render(area, buf);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        self.view.handle_key_event_direct(key);
+        true
+    }
+
+    fn is_complete(&self) -> bool {
+        self.view.is_view_complete()
     }
 }
 
@@ -816,9 +920,13 @@ pub(crate) struct SettingsOverlayView {
     last_section: SettingsSection,
     model_content: Option<ModelSettingsContent>,
     theme_content: Option<ThemeSettingsContent>,
+    updates_content: Option<UpdatesSettingsContent>,
     notifications_content: Option<NotificationsSettingsContent>,
     mcp_content: Option<McpSettingsContent>,
     agents_content: Option<AgentsSettingsContent>,
+    validation_content: Option<ValidationSettingsContent>,
+    github_content: Option<GithubSettingsContent>,
+    auto_drive_content: Option<AutoDriveSettingsContent>,
     limits_content: Option<LimitsSettingsContent>,
     chrome_content: Option<ChromeSettingsContent>,
 }
@@ -831,9 +939,13 @@ impl SettingsOverlayView {
             last_section: section,
             model_content: None,
             theme_content: None,
+            updates_content: None,
             notifications_content: None,
             mcp_content: None,
             agents_content: None,
+            validation_content: None,
+            github_content: None,
+            auto_drive_content: None,
             limits_content: None,
             chrome_content: None,
         }
@@ -868,6 +980,10 @@ impl SettingsOverlayView {
         self.theme_content = Some(content);
     }
 
+    pub(crate) fn set_updates_content(&mut self, content: UpdatesSettingsContent) {
+        self.updates_content = Some(content);
+    }
+
     pub(crate) fn set_notifications_content(&mut self, content: NotificationsSettingsContent) {
         self.notifications_content = Some(content);
     }
@@ -878,6 +994,18 @@ impl SettingsOverlayView {
 
     pub(crate) fn set_agents_content(&mut self, content: AgentsSettingsContent) {
         self.agents_content = Some(content);
+    }
+
+    pub(crate) fn set_validation_content(&mut self, content: ValidationSettingsContent) {
+        self.validation_content = Some(content);
+    }
+
+    pub(crate) fn set_github_content(&mut self, content: GithubSettingsContent) {
+        self.github_content = Some(content);
+    }
+
+    pub(crate) fn set_auto_drive_content(&mut self, content: AutoDriveSettingsContent) {
+        self.auto_drive_content = Some(content);
     }
 
     pub(crate) fn set_limits_content(&mut self, content: LimitsSettingsContent) {
@@ -1181,12 +1309,40 @@ impl SettingsOverlayView {
                 }
                 self.render_placeholder(area, buf, SettingsSection::Theme.placeholder());
             }
+            SettingsSection::Updates => {
+                if let Some(content) = self.updates_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Updates.placeholder());
+            }
             SettingsSection::Agents => {
                 if let Some(content) = self.agents_content.as_ref() {
                     content.render(area, buf);
                     return;
                 }
                 self.render_placeholder(area, buf, SettingsSection::Agents.placeholder());
+            }
+            SettingsSection::AutoDrive => {
+                if let Some(content) = self.auto_drive_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::AutoDrive.placeholder());
+            }
+            SettingsSection::Validation => {
+                if let Some(content) = self.validation_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Validation.placeholder());
+            }
+            SettingsSection::Github => {
+                if let Some(content) = self.github_content.as_ref() {
+                    content.render(area, buf);
+                    return;
+                }
+                self.render_placeholder(area, buf, SettingsSection::Github.placeholder());
             }
             SettingsSection::Limits => {
                 if let Some(content) = self.limits_content.as_ref() {
@@ -1240,8 +1396,24 @@ impl SettingsOverlayView {
                 .theme_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Updates => self
+                .updates_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Agents => self
                 .agents_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::AutoDrive => self
+                .auto_drive_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Validation => self
+                .validation_content
+                .as_mut()
+                .map(|content| content as &mut dyn SettingsContent),
+            SettingsSection::Github => self
+                .github_content
                 .as_mut()
                 .map(|content| content as &mut dyn SettingsContent),
             SettingsSection::Limits => self
