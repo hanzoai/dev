@@ -12697,6 +12697,7 @@ fi\n\
         self.auto_state.current_cli_context = None;
         self.auto_state.pending_agent_actions.clear();
         self.auto_state.pending_agent_timing = None;
+
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
 
@@ -12804,7 +12805,7 @@ fi\n\
                 .into_iter()
                 .map(|mut action| {
                     let original = action.write;
-                    let resolved = self.resolve_agent_write_flag(&action);
+                    let resolved = self.resolve_agent_write_flag(action.write_requested);
                     if resolved && !original {
                         promoted_agents.push(action.prompt.clone());
                     }
@@ -13639,51 +13640,27 @@ fi\n\
     }
 
     fn auto_agents_can_write(&self) -> bool {
-        matches!(
-            self.config.sandbox_policy,
-            SandboxPolicy::DangerFullAccess | SandboxPolicy::WorkspaceWrite { .. }
-        )
+        match self.config.sandbox_policy {
+            SandboxPolicy::DangerFullAccess => true,
+            SandboxPolicy::WorkspaceWrite { allow_git_writes, .. } => allow_git_writes,
+            SandboxPolicy::ReadOnly => false,
+        }
     }
 
-    fn resolve_agent_write_flag(&self, action: &AutoTurnAgentsAction) -> bool {
-        if !self.auto_state.subagents_enabled {
-            return false;
-        }
+    fn resolve_agent_write_flag(&self, requested_write: Option<bool>) -> bool {
         if !self.auto_agents_can_write() {
             return false;
         }
-        if action.write {
-            return true;
+        if !self.auto_state.subagents_enabled {
+            return requested_write.unwrap_or(false);
         }
-        if Self::agent_prompt_prefers_read_only(&action.prompt) {
-            return false;
-        }
-        if let Some(ctx) = action.context.as_deref() {
-            if Self::agent_prompt_prefers_read_only(ctx) {
-                return false;
-            }
-        }
-        true
+        requested_write.unwrap_or(true)
     }
 
-    fn agent_prompt_prefers_read_only(text: &str) -> bool {
-        const READ_ONLY_KEYWORDS: [&str; 10] = [
-            "investigate",
-            "research",
-            "review",
-            "analyze",
-            "analysis",
-            "audit",
-            "assess",
-            "summarize",
-            "outline",
-            "plan",
-        ];
-        let lowered = text.to_ascii_lowercase();
-        lowered
-            .split(|ch: char| !ch.is_alphanumeric())
-            .filter(|token| !token.is_empty())
-            .any(|token| READ_ONLY_KEYWORDS.contains(&token))
+    fn default_agent_command(name: &str) -> String {
+        agent_model_spec(name)
+            .map(|spec| spec.cli.to_string())
+            .unwrap_or_else(|| name.to_string())
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
@@ -15312,6 +15289,7 @@ fi\n\
             let cfg_enabled = cfg.enabled;
             let cfg_instructions = cfg.instructions.clone();
             let cfg_command = cfg.command.clone();
+            let default_cmd = Self::default_agent_command(&cfg_name);
             let build_editor = || {
                 AgentEditorView::new(
                     cfg_name.clone(),
@@ -15319,7 +15297,11 @@ fi\n\
                     ro.clone(),
                     wr.clone(),
                     cfg_instructions.clone(),
-                    cfg_command.clone(),
+                    if cfg_command.trim().is_empty() {
+                        default_cmd.clone()
+                    } else {
+                        cfg_command.clone()
+                    },
                     app_event_tx.clone(),
                 )
             };
@@ -15334,7 +15316,7 @@ fi\n\
             self.request_redraw();
         } else {
             // Fallback: synthesize defaults
-            let cmd = name.clone();
+            let cmd = Self::default_agent_command(&name);
             let ro = code_core::agent_defaults::default_params_for(&name, true /*read_only*/);
             let wr =
                 code_core::agent_defaults::default_params_for(&name, false /*read_only*/);
@@ -15403,13 +15385,19 @@ fi\n\
             slot.args_read_only = args_ro.clone();
             slot.args_write = args_wr.clone();
             slot.instructions = instr.clone();
+            if let Some(spec) = agent_model_spec(name) {
+                if slot.command.trim().is_empty() || slot.command.eq_ignore_ascii_case(name) {
+                    slot.command = spec.cli.to_string();
+                }
+            }
             updated_existing = true;
         }
 
         if !updated_existing {
+            let command = Self::default_agent_command(name);
             let new_cfg = AgentConfig {
                 name: name.to_string(),
-                command: name.to_string(),
+                command,
                 args: Vec::new(),
                 read_only: false,
                 enabled,
@@ -21514,6 +21502,7 @@ mod tests {
                 prompt: "Draft alternative fix".to_string(),
                 context: None,
                 write: false,
+                write_requested: Some(false),
                 models: None,
             }],
             Some(AutoTurnCodeReviewAction {
@@ -21647,6 +21636,7 @@ mod tests {
             prompt: "Draft alternative fix".to_string(),
             context: Some("Focus on parser module".to_string()),
             write: false,
+            write_requested: Some(false),
             models: Some(vec![
                 "claude-sonnet-4.5".to_string(),
                 "gemini-2.5-pro".to_string(),
