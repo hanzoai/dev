@@ -146,6 +146,7 @@ use crate::bottom_pane::{
     AutoCoordinatorButton,
     AutoCoordinatorViewModel,
     CountdownState,
+    GithubSettingsView,
     McpSettingsView,
     ModelSelectionView,
     NotificationsMode,
@@ -153,6 +154,9 @@ use crate::bottom_pane::{
     SettingsSection,
     ThemeSelectionView,
     agent_editor_view::AgentEditorView,
+    AutoDriveSettingsView,
+    UpdateSettingsView,
+    ValidationSettingsView,
 };
 use crate::bottom_pane::agents_settings_view::SubagentEditorView;
 use crate::bottom_pane::mcp_settings_view::{McpServerRow, McpServerRows};
@@ -1413,13 +1417,17 @@ use self::diff_ui::DiffConfirm;
 use self::diff_ui::DiffOverlay;
 use self::settings_overlay::{
     AgentOverviewRow,
+    AutoDriveSettingsContent,
     AgentsSettingsContent,
+    GithubSettingsContent,
     LimitsSettingsContent,
     ChromeSettingsContent,
     McpSettingsContent,
     ModelSettingsContent,
     NotificationsSettingsContent,
     ThemeSettingsContent,
+    UpdatesSettingsContent,
+    ValidationSettingsContent,
     SettingsOverlayView,
 };
 use ratatui::text::Line as RtLine;
@@ -11051,12 +11059,12 @@ impl ChatWidget<'_> {
             || trimmed.eq_ignore_ascii_case("ui")
             || trimmed.eq_ignore_ascii_case("config")
         {
-            self.show_update_settings_ui();
+            self.ensure_updates_settings_overlay();
             return;
         }
 
-        // Always surface the update settings UI before kicking off any upgrade flow.
-        self.show_update_settings_ui();
+        // Always surface the update settings overlay before kicking off any upgrade flow.
+        self.ensure_updates_settings_overlay();
 
         match crate::updates::resolve_upgrade_resolution() {
             crate::updates::UpgradeResolution::Command { command, display } => {
@@ -11431,15 +11439,36 @@ impl ChatWidget<'_> {
         self.bottom_pane.set_using_chatgpt_auth(using);
     }
 
-    fn show_update_settings_ui(&mut self) {
-        use crate::bottom_pane::UpdateSettingsView;
+    fn spawn_update_refresh(&self, shared_state: std::sync::Arc<std::sync::Mutex<UpdateSharedState>>) {
+        let config = self.config.clone();
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = crate::updates::check_for_updates_now(&config).await;
+            let mut state = shared_state.lock().expect("update state poisoned");
+            match result {
+                Ok(info) => {
+                    state.checking = false;
+                    state.latest_version = info.latest_version;
+                    state.error = None;
+                }
+                Err(err) => {
+                    state.checking = false;
+                    state.latest_version = None;
+                    state.error = Some(err.to_string());
+                }
+            }
+            drop(state);
+            let _ = tx.send(AppEvent::RequestRedraw);
+        });
+    }
 
+    fn prepare_update_settings_view(&mut self) -> Option<UpdateSettingsView> {
         if !crate::updates::upgrade_ui_enabled() {
             self.send_background_tail_ordered(
                 "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
                     to_string(),
             );
-            return;
+            return None;
         }
 
         let shared_state = std::sync::Arc::new(std::sync::Mutex::new(UpdateSharedState {
@@ -11465,37 +11494,143 @@ impl ChatWidget<'_> {
             self.make_background_tail_ticket(),
             code_version::version().to_string(),
             self.config.auto_upgrade_enabled,
-            command.clone(),
-            display.clone(),
+            command,
+            display,
             instructions,
             shared_state.clone(),
         );
 
-        self.bottom_pane.show_update_settings(view);
-
-        let config = self.config.clone();
-        let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
-            let result = crate::updates::check_for_updates_now(&config).await;
-            let mut state = shared_state.lock().expect("update state poisoned");
-            match result {
-                Ok(info) => {
-                    state.checking = false;
-                    state.latest_version = info.latest_version;
-                    state.error = None;
-                }
-                Err(err) => {
-                    state.checking = false;
-                    state.latest_version = None;
-                    state.error = Some(err.to_string());
-                }
-            }
-            drop(state);
-            let _ = tx.send(AppEvent::RequestRedraw);
-        });
+        self.spawn_update_refresh(shared_state);
+        Some(view)
     }
 
-    // Legacy show_agents_settings_ui removed — overview/Direct editors replace it
+    fn build_updates_settings_content(&mut self) -> Option<UpdatesSettingsContent> {
+        self.prepare_update_settings_view()
+            .map(UpdatesSettingsContent::new)
+    }
+
+    fn build_validation_settings_content(&mut self) -> ValidationSettingsContent {
+        let groups = vec![
+            (
+                GroupStatus {
+                    group: ValidationGroup::Functional,
+                    name: "Functional checks",
+                },
+                self.config.validation.groups.functional,
+            ),
+            (
+                GroupStatus {
+                    group: ValidationGroup::Stylistic,
+                    name: "Stylistic checks",
+                },
+                self.config.validation.groups.stylistic,
+            ),
+        ];
+
+        let tool_rows: Vec<ToolRow> = validation_settings_view::detect_tools()
+            .into_iter()
+            .map(|status| {
+                let group = match status.category {
+                    ValidationCategory::Functional => ValidationGroup::Functional,
+                    ValidationCategory::Stylistic => ValidationGroup::Stylistic,
+                };
+                let requested = self.validation_tool_requested(status.name);
+                let group_enabled = self.validation_group_enabled(group);
+                ToolRow { status, enabled: requested, group_enabled }
+            })
+            .collect();
+
+        let view = ValidationSettingsView::new(groups, tool_rows, self.app_event_tx.clone());
+        ValidationSettingsContent::new(view)
+    }
+
+    fn build_github_settings_content(&mut self) -> GithubSettingsContent {
+        let enabled = self.config.github.check_workflows_on_push;
+        let token_info = gh_actions::get_github_token().map(|(_, src)| src);
+        let (ready, token_status) = match token_info {
+            Some(gh_actions::TokenSource::Env) => (
+                true,
+                "Token: detected (env: GITHUB_TOKEN/GH_TOKEN)".to_string(),
+            ),
+            Some(gh_actions::TokenSource::GhCli) => (
+                true,
+                "Token: detected via gh auth".to_string(),
+            ),
+            None => (
+                false,
+                "Token: not set (set GH_TOKEN/GITHUB_TOKEN or run 'gh auth login')".to_string(),
+            ),
+        };
+
+        let view = GithubSettingsView::new(enabled, token_status, ready, self.app_event_tx.clone());
+        GithubSettingsContent::new(view)
+    }
+
+    fn build_auto_drive_settings_content(&mut self) -> AutoDriveSettingsContent {
+        let review = self.auto_state.review_enabled;
+        let agents = self.auto_state.subagents_enabled;
+        let mode = self.auto_state.continue_mode;
+        let view = AutoDriveSettingsView::new(
+            self.app_event_tx.clone(),
+            review,
+            agents,
+            mode,
+        );
+        AutoDriveSettingsContent::new(view)
+    }
+
+    fn ensure_updates_settings_overlay(&mut self) {
+        if self.settings.overlay.is_none() {
+            self.show_settings_overlay(Some(SettingsSection::Updates));
+            return;
+        }
+        if let Some(content) = self.build_updates_settings_content() {
+            if let Some(overlay) = self.settings.overlay.as_mut() {
+                overlay.set_updates_content(content);
+            }
+        }
+        self.ensure_settings_overlay_section(SettingsSection::Updates);
+        self.request_redraw();
+    }
+
+    fn ensure_validation_settings_overlay(&mut self) {
+        if self.settings.overlay.is_none() {
+            self.show_settings_overlay(Some(SettingsSection::Validation));
+            return;
+        }
+        let content = self.build_validation_settings_content();
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.set_validation_content(content);
+        }
+        self.ensure_settings_overlay_section(SettingsSection::Validation);
+        self.request_redraw();
+    }
+
+    fn ensure_github_settings_overlay(&mut self) {
+        if self.settings.overlay.is_none() {
+            self.show_settings_overlay(Some(SettingsSection::Github));
+            return;
+        }
+        let content = self.build_github_settings_content();
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.set_github_content(content);
+        }
+        self.ensure_settings_overlay_section(SettingsSection::Github);
+        self.request_redraw();
+    }
+
+    fn ensure_auto_drive_settings_overlay(&mut self) {
+        if self.settings.overlay.is_none() {
+            self.show_settings_overlay(Some(SettingsSection::AutoDrive));
+            return;
+        }
+        let content = self.build_auto_drive_settings_content();
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.set_auto_drive_content(content);
+        }
+        self.ensure_settings_overlay_section(SettingsSection::AutoDrive);
+        self.request_redraw();
+    }
 
     pub(crate) fn show_agents_overview_ui(&mut self) {
         let (rows, commands) = self.collect_agents_overview_rows();
@@ -12330,6 +12465,11 @@ fi\n\
         let provided = goal.unwrap_or_default();
         let trimmed = provided.trim();
 
+        if trimmed.eq_ignore_ascii_case("settings") {
+            self.ensure_auto_drive_settings_overlay();
+            return;
+        }
+
         let full_auto_enabled = matches!(
             (&self.config.sandbox_policy, self.config.approval_policy),
             (SandboxPolicy::DangerFullAccess, AskForApproval::Never)
@@ -12384,15 +12524,19 @@ fi\n\
     }
 
     pub(crate) fn show_auto_drive_settings(&mut self) {
-        let review = self.auto_state.review_enabled;
-        let agents = self.auto_state.subagents_enabled;
-        let mode = self.auto_state.continue_mode;
-        self.bottom_pane
-            .show_auto_drive_settings(review, agents, mode);
+        self.ensure_auto_drive_settings_overlay();
     }
 
     pub(crate) fn close_auto_drive_settings(&mut self) {
-        self.bottom_pane.clear_auto_drive_settings();
+        if matches!(
+            self.settings
+                .overlay
+                .as_ref()
+                .map(|overlay| overlay.active_section()),
+            Some(SettingsSection::AutoDrive)
+        ) {
+            self.close_settings_overlay();
+        }
         let should_rebuild_view = if self.auto_state.active {
             !self.auto_state.paused_for_manual_edit
         } else {
@@ -15949,6 +16093,22 @@ fi\n\
             "Automatic upgrades disabled"
         };
         self.bottom_pane.flash_footer_notice(notice.to_string());
+
+        let should_refresh_updates = matches!(
+            self.settings
+                .overlay
+                .as_ref()
+                .map(|overlay| overlay.active_section()),
+            Some(SettingsSection::Updates)
+        );
+
+        if should_refresh_updates {
+            if let Some(content) = self.build_updates_settings_content() {
+                if let Some(overlay) = self.settings.overlay.as_mut() {
+                    overlay.set_updates_content(content);
+                }
+            }
+        }
         self.request_redraw();
     }
 
@@ -15981,11 +16141,17 @@ fi\n\
         let mut overlay = SettingsOverlayView::new(initial_section);
         overlay.set_model_content(self.build_model_settings_content());
         overlay.set_theme_content(self.build_theme_settings_content());
+        if let Some(update_content) = self.build_updates_settings_content() {
+            overlay.set_updates_content(update_content);
+        }
         overlay.set_notifications_content(self.build_notifications_settings_content());
         if let Some(mcp_content) = self.build_mcp_settings_content() {
             overlay.set_mcp_content(mcp_content);
         }
         overlay.set_agents_content(self.build_agents_settings_content());
+        overlay.set_auto_drive_content(self.build_auto_drive_settings_content());
+        overlay.set_validation_content(self.build_validation_settings_content());
+        overlay.set_github_content(self.build_github_settings_content());
         overlay.set_limits_content(self.build_limits_settings_content());
         overlay.set_chrome_content(self.build_chrome_settings_content(None));
 
@@ -16253,6 +16419,10 @@ fi\n\
         let handled = match section {
             SettingsSection::Model
             | SettingsSection::Theme
+            | SettingsSection::Updates
+            | SettingsSection::Validation
+            | SettingsSection::Github
+            | SettingsSection::AutoDrive
             | SettingsSection::Mcp
             | SettingsSection::Notifications => false,
             SettingsSection::Agents => {
@@ -19126,26 +19296,9 @@ fi\n\
     pub(crate) fn handle_github_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         self.consume_pending_prompt_for_ui_only_turn();
-        let enabled = self.config.github.check_workflows_on_push;
-
         // If no args or 'status', show interactive settings in the footer
         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("status") {
-            let token_info = gh_actions::get_github_token().map(|(_, src)| src);
-            let (ready, token_status) = match token_info {
-                Some(gh_actions::TokenSource::Env) => (
-                    true,
-                    "Token: detected (env: GITHUB_TOKEN/GH_TOKEN)".to_string(),
-                ),
-                Some(gh_actions::TokenSource::GhCli) => {
-                    (true, "Token: detected via gh auth".to_string())
-                }
-                None => (
-                    false,
-                    "Token: not set (set GH_TOKEN/GITHUB_TOKEN or run 'gh auth login')".to_string(),
-                ),
-            };
-            self.bottom_pane
-                .show_github_settings(enabled, token_status, ready);
+            self.ensure_github_settings_overlay();
             return;
         }
 
@@ -19187,6 +19340,8 @@ fi\n\
 
         let lines: Vec<String> = response.lines().map(|line| line.to_string()).collect();
         self.history_push_plain_paragraphs(PlainMessageKind::Background, lines);
+
+        self.ensure_github_settings_overlay();
     }
 
     fn validation_tool_flag_mut(
@@ -19396,37 +19551,7 @@ fi\n\
     pub(crate) fn handle_validation_command(&mut self, command_text: String) {
         let trimmed = command_text.trim();
         if trimmed.is_empty() {
-            let groups = vec![
-                (
-                    GroupStatus {
-                        group: ValidationGroup::Functional,
-                        name: "Functional checks",
-                    },
-                    self.config.validation.groups.functional,
-                ),
-                (
-                    GroupStatus {
-                        group: ValidationGroup::Stylistic,
-                        name: "Stylistic checks",
-                    },
-                    self.config.validation.groups.stylistic,
-                ),
-            ];
-
-            let tool_rows: Vec<ToolRow> = validation_settings_view::detect_tools()
-                .into_iter()
-                .map(|status| {
-                    let group = match status.category {
-                        ValidationCategory::Functional => ValidationGroup::Functional,
-                        ValidationCategory::Stylistic => ValidationGroup::Stylistic,
-                    };
-                    let requested = self.validation_tool_requested(status.name);
-                    let group_enabled = self.validation_group_enabled(group);
-                    ToolRow { status, enabled: requested, group_enabled }
-                })
-                .collect();
-
-            self.bottom_pane.show_validation_settings(groups, tool_rows);
+            self.ensure_validation_settings_overlay();
             return;
         }
 
@@ -19483,6 +19608,8 @@ fi\n\
                 }
             }
         }
+
+        self.ensure_validation_settings_overlay();
     }
 
     fn format_mcp_summary(cfg: &code_core::config_types::McpServerConfig) -> String {
