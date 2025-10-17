@@ -257,36 +257,120 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     {
         let conversation = conversation.clone();
         tokio::spawn(async move {
+            #[cfg(unix)]
+            let mut sigterm_stream = match tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            ) {
+                Ok(stream) => Some(stream),
+                Err(err) => {
+                    tracing::warn!("failed to install SIGTERM handler: {err}");
+                    None
+                }
+            };
+            #[cfg(unix)]
+            let mut sigterm_requested = false;
+
             loop {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::debug!("Keyboard interrupt");
-                        // Immediately notify Codex to abort any in‑flight task.
-                        conversation.submit(Op::Interrupt).await.ok();
-
-                        // Exit the inner loop and return to the main input prompt. The codex
-                        // will emit a `TurnInterrupted` (Error) event which is drained later.
-                        break;
-                    }
-                    res = conversation.next_event() => match res {
-                        Ok(event) => {
-                            debug!("Received event: {event:?}");
-
-                            let is_shutdown_complete = matches!(event.msg, EventMsg::ShutdownComplete);
-                            if let Err(e) = tx.send(event) {
-                                error!("Error sending event: {e:?}");
+                #[cfg(unix)]
+                {
+                    if let Some(stream) = sigterm_stream.as_mut() {
+                        tokio::select! {
+                            _ = stream.recv() => {
+                                tracing::debug!("SIGTERM received; requesting shutdown");
+                                conversation.submit(Op::Shutdown).await.ok();
+                                sigterm_requested = true;
                                 break;
                             }
-                            if is_shutdown_complete {
-                                info!("Received shutdown event, exiting event loop.");
+                            _ = tokio::signal::ctrl_c() => {
+                                tracing::debug!("Keyboard interrupt");
+                                conversation.submit(Op::Interrupt).await.ok();
                                 break;
                             }
-                        },
-                        Err(e) => {
-                            error!("Error receiving event: {e:?}");
-                            break;
+                            res = conversation.next_event() => match res {
+                                Ok(event) => {
+                                    debug!("Received event: {event:?}");
+
+                                    let is_shutdown_complete = matches!(event.msg, EventMsg::ShutdownComplete);
+                                    if let Err(e) = tx.send(event) {
+                                        error!("Error sending event: {e:?}");
+                                        break;
+                                    }
+                                    if is_shutdown_complete {
+                                        info!("Received shutdown event, exiting event loop.");
+                                        break;
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Error receiving event: {e:?}");
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {
+                                tracing::debug!("Keyboard interrupt");
+                                conversation.submit(Op::Interrupt).await.ok();
+                                break;
+                            }
+                            res = conversation.next_event() => match res {
+                                Ok(event) => {
+                                    debug!("Received event: {event:?}");
+
+                                    let is_shutdown_complete = matches!(event.msg, EventMsg::ShutdownComplete);
+                                    if let Err(e) = tx.send(event) {
+                                        error!("Error sending event: {e:?}");
+                                        break;
+                                    }
+                                    if is_shutdown_complete {
+                                        info!("Received shutdown event, exiting event loop.");
+                                        break;
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Error receiving event: {e:?}");
+                                    break;
+                                }
+                            }
                         }
                     }
+                }
+                #[cfg(not(unix))]
+                {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {
+                            tracing::debug!("Keyboard interrupt");
+                            conversation.submit(Op::Interrupt).await.ok();
+                            break;
+                        }
+                        res = conversation.next_event() => match res {
+                            Ok(event) => {
+                                debug!("Received event: {event:?}");
+
+                                let is_shutdown_complete = matches!(event.msg, EventMsg::ShutdownComplete);
+                                if let Err(e) = tx.send(event) {
+                                    error!("Error sending event: {e:?}");
+                                    break;
+                                }
+                                if is_shutdown_complete {
+                                    info!("Received shutdown event, exiting event loop.");
+                                    break;
+                                }
+                            },
+                            Err(e) => {
+                                error!("Error receiving event: {e:?}");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            #[cfg(unix)]
+            drop(sigterm_stream);
+            #[cfg(unix)]
+            if sigterm_requested {
+                unsafe {
+                    libc::raise(libc::SIGTERM);
                 }
             }
         });
