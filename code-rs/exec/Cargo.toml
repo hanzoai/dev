@@ -44,5 +44,8 @@ tokio = { workspace = true, features = [
 tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 
 [dev-dependencies]
