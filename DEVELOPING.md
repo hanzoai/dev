@@ -5,6 +5,21 @@
 - `./build-fast.sh`
 - `pnpm install && pnpm lint`
 
+### Build cache layout and sccache
+
+The fast build now chooses a cache bucket per Git worktree or branch so
+concurrent builds no longer fight over `target`. You can override the default
+bucket with `BUILD_FAST_CACHE_KEY=my-feature` when you need a stable directory
+for long lived experiments. The active bucket is echoed at the start of each
+run.
+
+Rust compiler outputs are still shared through `sccache` when it is available.
+For best results in a multi-worktree setup, configure a single `sccache`
+back-end (local disk or remote Redis/S3) and mount each checkout at a consistent
+absolute path so cache keys line up. Environment variables like
+`SCCACHE_ENDPOINT`, `SCCACHE_BUCKET`, or `SCCACHE_DIR` are respected if you need
+to point at a central cache server.
+
 ## Auto Drive Fault Injection (development only)
 
 Some retry/backoff paths are easier to exercise with injectable failures. Build

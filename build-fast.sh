@@ -35,6 +35,46 @@ trim() {
   printf '%s' "$value"
 }
 
+hash_string() {
+  local input="${1:-}"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$input" | shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$input" | sha256sum | awk '{print $1}'
+  else
+    python3 - <<'PY' 2>/dev/null
+import hashlib, sys
+data = sys.stdin.read().encode()
+print(hashlib.sha256(data).hexdigest())
+PY
+  fi
+}
+
+sanitize_cache_key() {
+  local raw="${1:-}"
+  # Replace any unsupported characters with '-'
+  raw="${raw//[^A-Za-z0-9._-]/-}"
+  # Collapse repeated separators
+  while [[ "$raw" == *--* ]]; do
+    raw="${raw//--/-}"
+  done
+  # Trim leading and trailing dashes
+  while [[ "$raw" == -* ]]; do
+    raw="${raw#-}"
+  done
+  while [[ "$raw" == *- ]]; do
+    raw="${raw%-}"
+  done
+  if [ -z "$raw" ]; then
+    raw="default"
+  fi
+  # Prevent overly long directory names
+  if [ "${#raw}" -gt 120 ]; then
+    raw="${raw:0:120}"
+  fi
+  printf '%s' "$raw"
+}
+
 bin_requested() {
   local needle="${1:-}"
   for candidate in "${TARGET_BINS[@]}"; do
@@ -202,7 +242,35 @@ if [ ! -d "$WORKSPACE_PATH" ]; then
 fi
 
 TARGET_CACHE_ROOT="${CACHE_HOME}/working/_target-cache/${REPO_NAME}"
-TARGET_CACHE_DIR="${TARGET_CACHE_ROOT}/${WORKSPACE_DIR}"
+
+# Change to the selected Rust workspace root regardless of caller CWD
+cd "${WORKSPACE_PATH}"
+
+WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -z "${BUILD_FAST_CACHE_KEY:-}" ]; then
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    BRANCH_NAME_RAW="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+    if [ "${BRANCH_NAME_RAW}" = "HEAD" ]; then
+      BRANCH_NAME_RAW="detached-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+    fi
+  else
+    BRANCH_NAME_RAW="unknown"
+  fi
+  WORKTREE_HASH="$(hash_string "${WORKTREE_ROOT}")"
+  WORKTREE_HASH_SHORT="${WORKTREE_HASH:0:12}"
+  CACHE_KEY_RAW="${BRANCH_NAME_RAW}-${WORKTREE_HASH_SHORT}"
+  CACHE_KEY_SOURCE="branch/worktree"
+else
+  CACHE_KEY_RAW="${BUILD_FAST_CACHE_KEY}"
+  CACHE_KEY_SOURCE="override"
+fi
+
+CACHE_KEY="$(sanitize_cache_key "${CACHE_KEY_RAW}")"
+if [ -z "${CACHE_KEY}" ]; then
+  CACHE_KEY="default"
+fi
+
+TARGET_CACHE_DIR="${TARGET_CACHE_ROOT}/${CACHE_KEY}/${WORKSPACE_DIR}"
 
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
   TARGET_CACHE_DIR_ABS="${TARGET_CACHE_DIR}"
@@ -218,8 +286,7 @@ else
   TARGET_CACHE_DIR_ABS="${CARGO_TARGET_DIR}"
 fi
 
-# Change to the selected Rust workspace root regardless of caller CWD
-cd "${WORKSPACE_PATH}"
+echo "Cache bucket: ${CACHE_KEY} (${CACHE_KEY_SOURCE})"
 
 CLI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' cli/Cargo.toml | head -n1)"
 TUI_PACKAGE="$(sed -n 's/^name\s*=\s*"\(.*\)"/\1/p' tui/Cargo.toml | head -n1)"
