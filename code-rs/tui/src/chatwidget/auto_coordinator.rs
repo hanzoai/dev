@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(decision.agents.len(), 1);
         let agent = &decision.agents[0];
         assert_eq!(agent.prompt, "Draft alternative fix");
-        assert!(!agent.write);
+        assert_eq!(agent.write, Some(false));
         assert_eq!(
             agent.models,
             Some(vec!["codex-plan".to_string()])
@@ -590,7 +590,7 @@ struct AgentPayload {
     #[serde(default)]
     context: Option<String>,
     #[serde(default)]
-    write: bool,
+    write: Option<bool>,
     #[serde(default)]
     models: Option<Vec<String>>,
 }
@@ -697,7 +697,7 @@ struct CliAction {
 struct AgentAction {
     prompt: String,
     context: Option<String>,
-    write: bool,
+    write: Option<bool>,
     models: Option<Vec<String>>,
 }
 
@@ -2547,12 +2547,7 @@ fn convert_decision_new(
         match payloads {
             AgentsField::List(list) => {
                 for payload in list {
-                    let AgentPayload {
-                        prompt,
-                        context,
-                        write,
-                        models,
-                    } = payload;
+                    let AgentPayload { prompt, context, write, models } = payload;
                     let prompt = clean_required(&prompt, "agents[*].prompt")?;
                     agent_actions.push(AgentAction {
                         prompt,
@@ -2573,12 +2568,7 @@ fn convert_decision_new(
                 }
                 let batch_models = clean_models(models);
                 for payload in requests {
-                    let AgentPayload {
-                        prompt,
-                        context,
-                        write,
-                        models,
-                    } = payload;
+                    let AgentPayload { prompt, context, write, models } = payload;
                     let prompt = clean_required(&prompt, "agents.requests[*].prompt")?;
                     let models = clean_models(models).or_else(|| batch_models.clone());
                     agent_actions.push(AgentAction {
@@ -2767,7 +2757,8 @@ fn agent_action_to_event(action: &AgentAction) -> AutoTurnAgentsAction {
     AutoTurnAgentsAction {
         prompt: action.prompt.clone(),
         context: action.context.clone(),
-        write: action.write,
+        write: action.write.unwrap_or(false),
+        write_requested: action.write,
         models: action.models.clone(),
     }
 }
