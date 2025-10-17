@@ -53,7 +53,7 @@ agent {
     "files": ["services/api", "services/api/src", "services/api/Cargo.toml"],
     "models": ["claude-sonnet-4.5","code-gpt-5-codex","`gemini-2.5-pro"],
     "output": "Middleware + passing tests + README snippet",
-    "read_only": false // Allow changes - will launch every agent in a separate worktree
+    "write": true // Allow changes - will launch every agent in a separate worktree
   }
 }
 agent {"action":"wait","wait":{"batch_id":"<batch_id>","return_all":true,"timeout_seconds":600}} // Long timeout or you can do separate work and check back later.
