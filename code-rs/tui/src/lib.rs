@@ -671,6 +671,18 @@ fn run_ratatui_app(
         print_timing_summary(&summary);
     }
 
+    #[cfg(unix)]
+    let sigterm_triggered = app.sigterm_triggered();
+    #[cfg(unix)]
+    app.clear_sigterm_guard();
+    drop(app);
+    #[cfg(unix)]
+    if sigterm_triggered {
+        unsafe {
+            libc::raise(libc::SIGTERM);
+        }
+    }
+
     // ignore error when collecting usage – report underlying error instead
     app_result.map(|_| ExitSummary {
         token_usage: usage,
