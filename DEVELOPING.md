@@ -8,10 +8,11 @@
 ### Build cache layout and sccache
 
 The fast build now chooses a cache bucket per Git worktree or branch so
-concurrent builds no longer fight over `target`. You can override the default
-bucket with `BUILD_FAST_CACHE_KEY=my-feature` when you need a stable directory
-for long lived experiments. The active bucket is echoed at the start of each
-run.
+concurrent builds no longer fight over `target`. Each bucket name includes a
+hash of the raw ref to keep slashes and similarly named branches distinct. You
+can override the default bucket with `BUILD_FAST_CACHE_KEY=my-feature` when you
+need a stable directory for long lived experiments. The active bucket is echoed
+at the start of each run.
 
 Rust compiler outputs are still shared through `sccache` when it is available.
 For best results in a multi-worktree setup, configure a single `sccache`
