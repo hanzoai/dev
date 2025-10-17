@@ -1,6 +1,6 @@
 //! Bottom pane: shows the ChatComposer or a BottomPaneView, if one is active.
 
-use crate::app_event::{AppEvent, AutoContinueMode};
+use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_style::AutoDriveVariant;
 use crate::bottom_pane::chat_composer::ComposerRenderMode;
@@ -73,6 +73,7 @@ pub(crate) use auto_coordinator_view::{
     CountdownState,
 };
 pub(crate) use auto_drive_settings_view::AutoDriveSettingsView;
+pub(crate) use github_settings_view::GithubSettingsView;
 pub(crate) use login_accounts_view::{
     LoginAccountsState,
     LoginAccountsView,
@@ -82,6 +83,7 @@ pub(crate) use login_accounts_view::{
 
 pub(crate) use update_settings_view::{UpdateSettingsView, UpdateSharedState};
 pub(crate) use notifications_settings_view::{NotificationsMode, NotificationsSettingsView};
+pub(crate) use validation_settings_view::ValidationSettingsView;
 use approval_modal_view::ApprovalModalView;
 #[cfg(feature = "code-fork")]
 use approval_ui::ApprovalUi;
@@ -99,7 +101,6 @@ pub(crate) use undo_timeline_view::{UndoTimelineEntry, UndoTimelineEntryKind, Un
 enum ActiveViewKind {
     None,
     AutoCoordinator,
-    AutoSettings,
     Other,
 }
 
@@ -229,53 +230,12 @@ impl BottomPane<'_> {
         }
     }
 
-    pub fn show_update_settings(&mut self, view: update_settings_view::UpdateSettingsView) {
-        if !crate::updates::upgrade_ui_enabled() {
-            self.request_redraw();
-            return;
-        }
-
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
     #[allow(dead_code)]
     pub fn show_notifications_settings(&mut self, view: NotificationsSettingsView) {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
         self.request_redraw();
-    }
-
-    pub(crate) fn show_auto_drive_settings(
-        &mut self,
-        review_enabled: bool,
-        agents_enabled: bool,
-        continue_mode: AutoContinueMode,
-    ) {
-        let view = AutoDriveSettingsView::new(
-            self.app_event_tx.clone(),
-            review_enabled,
-            agents_enabled,
-            continue_mode,
-        );
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::AutoSettings;
-        self.status_view_active = false;
-        self.composer.set_embedded_mode(false);
-        self.request_redraw();
-    }
-
-    pub(crate) fn clear_auto_drive_settings(&mut self) {
-        if matches!(self.active_view_kind, ActiveViewKind::AutoSettings) {
-            self.active_view = None;
-            self.active_view_kind = ActiveViewKind::None;
-            self.set_standard_terminal_hint(None);
-            self.status_view_active = false;
-            self.request_redraw();
-        }
     }
 
     pub fn show_login_accounts(&mut self, view: LoginAccountsView) {
@@ -782,16 +742,6 @@ impl BottomPane<'_> {
         self.request_redraw()
     }
 
-    /// Show GitHub settings (token status + watcher toggle)
-    pub fn show_github_settings(&mut self, watcher_enabled: bool, token_status: String, ready: bool) {
-        use github_settings_view::GithubSettingsView;
-        let view = GithubSettingsView::new(watcher_enabled, token_status, ready, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
     pub fn show_undo_timeline_view(&mut self, view: UndoTimelineView) {
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
@@ -804,20 +754,6 @@ impl BottomPane<'_> {
     pub fn show_mcp_settings(&mut self, rows: crate::bottom_pane::mcp_settings_view::McpServerRows) {
         use mcp_settings_view::McpSettingsView;
         let view = McpSettingsView::new(rows, self.app_event_tx.clone());
-        self.active_view = Some(Box::new(view));
-        self.active_view_kind = ActiveViewKind::Other;
-        self.status_view_active = false;
-        self.request_redraw();
-    }
-
-    /// Show validation harness settings (master toggle + per-tool toggles).
-    pub fn show_validation_settings(
-        &mut self,
-        groups: Vec<(validation_settings_view::GroupStatus, bool)>,
-        tools: Vec<validation_settings_view::ToolRow>,
-    ) {
-        use validation_settings_view::ValidationSettingsView;
-        let view = ValidationSettingsView::new(groups, tools, self.app_event_tx.clone());
         self.active_view = Some(Box::new(view));
         self.active_view_kind = ActiveViewKind::Other;
         self.status_view_active = false;
