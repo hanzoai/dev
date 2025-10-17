@@ -6363,12 +6363,18 @@ fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
     }
 }
 
-fn resolve_agent_read_only(requested: Option<bool>, config: Option<&crate::config_types::AgentConfig>) -> bool {
-    if let Some(flag) = requested {
-        flag
-    } else {
-        config.map(|c| c.read_only).unwrap_or(false)
+fn resolve_agent_read_only(
+    write: Option<bool>,
+    read_only: Option<bool>,
+    config: Option<&crate::config_types::AgentConfig>,
+) -> bool {
+    if let Some(flag) = write {
+        return !flag;
     }
+    if let Some(flag) = read_only {
+        return flag;
+    }
+    config.map(|c| c.read_only).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -6392,21 +6398,36 @@ mod resolve_read_only_tests {
     }
 
     #[test]
-    fn explicit_flag_overrides_config_true() {
+    fn explicit_write_overrides_config_read_only() {
         let cfg = make_config(true);
-        assert!(!resolve_agent_read_only(Some(false), Some(&cfg)));
+        assert!(
+            !resolve_agent_read_only(Some(true), None, Some(&cfg)),
+            "write=true should allow writes even when config prefers read-only"
+        );
+    }
+
+    #[test]
+    fn explicit_read_only_flag_takes_precedence() {
+        let cfg = make_config(false);
+        assert!(
+            resolve_agent_read_only(None, Some(true), Some(&cfg)),
+            "read_only=true should force read-only even when config allows writes"
+        );
+        assert!(
+            resolve_agent_read_only(Some(false), None, Some(&cfg)),
+            "write=false should force read-only"
+        );
     }
 
     #[test]
     fn falls_back_to_config_when_request_absent() {
         let cfg = make_config(true);
-        assert!(resolve_agent_read_only(None, Some(&cfg)));
+        assert!(resolve_agent_read_only(None, None, Some(&cfg)));
     }
 
     #[test]
     fn defaults_to_false_without_config() {
-        assert!(!resolve_agent_read_only(None, None));
-        assert!(resolve_agent_read_only(Some(true), None));
+        assert!(!resolve_agent_read_only(None, None, None));
     }
 }
 
@@ -6503,6 +6524,7 @@ pub(crate) async fn handle_agent_tool(
             let context = create_opts.context.take();
             let output = create_opts.output.take();
             let files = create_opts.files.take();
+            let write = create_opts.write.take();
             let read_only = create_opts.read_only.take();
             let mut normalized_name = normalize_agent_name(create_opts.name.take());
             if normalized_name.is_none() {
@@ -6515,6 +6537,7 @@ pub(crate) async fn handle_agent_tool(
                 context: context.clone(),
                 output: output.clone(),
                 files: files.clone(),
+                write,
                 read_only,
                 name: normalized_name.clone(),
             };
@@ -6557,8 +6580,11 @@ pub(crate) async fn handle_agent_tool(
                     );
                 }
             }
-            if let Some(ro) = read_only {
-                create_event.insert("read_only".to_string(), serde_json::Value::Bool(ro));
+            if let Some(flag) = write {
+                create_event.insert("write".to_string(), serde_json::Value::Bool(flag));
+            }
+            if let Some(flag) = read_only {
+                create_event.insert("read_only".to_string(), serde_json::Value::Bool(flag));
             }
             if let Some(ref name_str) = normalized_name {
                 if !name_str.is_empty() {
@@ -6940,7 +6966,11 @@ pub(crate) async fn handle_run_agent(
                     }
 
                     // Respect explicit read_only flag from the caller; otherwise fall back to the config default.
-                    let read_only = resolve_agent_read_only(params.read_only, Some(config));
+                    let read_only = resolve_agent_read_only(
+                        params.write,
+                        params.read_only,
+                        Some(config),
+                    );
 
                     let agent_id = manager
                         .create_agent_with_config(
@@ -6965,7 +6995,7 @@ pub(crate) async fn handle_run_agent(
                         skipped.push(format!("{} (missing: {})", model, cmd_to_check));
                         continue;
                     }
-                    let read_only = resolve_agent_read_only(params.read_only, None);
+                    let read_only = resolve_agent_read_only(params.write, params.read_only, None);
                     let agent_id = manager
                         .create_agent(
                             model.clone(),
@@ -6986,7 +7016,7 @@ pub(crate) async fn handle_run_agent(
 
             // If nothing runnable remains, fall back to a single built‑in Codex agent.
             if agent_ids.is_empty() {
-                let read_only = resolve_agent_read_only(params.read_only, None);
+                let read_only = resolve_agent_read_only(params.write, params.read_only, None);
                 let agent_id = manager
                     .create_agent(
                         "code".to_string(),
