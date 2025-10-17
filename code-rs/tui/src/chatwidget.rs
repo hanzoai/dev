@@ -13607,23 +13607,23 @@ fi\n\
 
     fn auto_stop(&mut self, message: Option<String>) {
         self.auto_flush_observer_banners();
-        if let Some(handle) = self.auto_handle.take() {
-            handle.cancel();
-            let _ = handle.send(AutoCoordinatorCommand::Stop);
-        }
         let duration = self
             .auto_state
             .started_at
             .map(|start| start.elapsed())
             .unwrap_or_default();
         let turns_completed = self.auto_state.turns_completed;
-
+        let goal = self.auto_state.goal.clone();
+        if let Some(handle) = self.auto_handle.take() {
+            handle.cancel();
+            let _ = handle.send(AutoCoordinatorCommand::Stop);
+        }
+        self.bottom_pane.clear_auto_coordinator_view(true);
         if let Some(msg) = message.clone() {
             self.push_background_tail(msg);
         }
 
-        self.bottom_pane
-            .set_standard_terminal_hint(Some("Press Esc again to exit Auto Drive".to_string()));
+        self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_history.clear();
         self.auto_turn_review_state = None;
         let any_exec_running = !self.exec.running_commands.is_empty();
@@ -13644,7 +13644,6 @@ fi\n\
         if ENABLE_WARP_STRIPES {
             self.header_wave.set_enabled(false, Instant::now());
         }
-        let goal = self.auto_state.goal.clone();
         let summary = AutoRunSummary {
             duration,
             turns_completed,
@@ -13906,6 +13905,7 @@ fi\n\
             self
                 .bottom_pane
                 .show_auto_coordinator_view(model);
+            self.bottom_pane.release_auto_drive_style();
             self.bottom_pane.set_standard_terminal_hint(None);
             return;
         }

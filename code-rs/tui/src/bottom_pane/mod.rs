@@ -831,7 +831,16 @@ impl BottomPane<'_> {
                 self.apply_auto_drive_style();
             }
             self.request_redraw();
+            return;
         }
+
+        if disable_style {
+            self.disable_auto_drive_style();
+        }
+    }
+
+    pub(crate) fn release_auto_drive_style(&mut self) {
+        self.disable_auto_drive_style();
     }
 
     /// Height (terminal rows) required by the current bottom pane.
