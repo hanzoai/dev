@@ -36,6 +36,7 @@ pub(crate) struct AgentEditorView {
     complete: bool,
     app_event_tx: AppEventSender,
     installed: bool,
+    command: String,
     install_hint: String,
 }
 
@@ -123,6 +124,7 @@ impl AgentEditorView {
                         args_read_only: ro_opt,
                         args_write: wr_opt,
                         instructions: instr_opt,
+                        command: self.command.clone(),
                     });
                     self.complete = true;
                     self.app_event_tx.send(AppEvent::ShowAgentsOverview);
@@ -209,6 +211,7 @@ impl AgentEditorView {
             complete: false,
             app_event_tx,
             installed: command_exists(&command),
+            command,
             install_hint: String::new(),
         };
 
@@ -219,13 +222,13 @@ impl AgentEditorView {
         // OS-specific short hint
         #[cfg(target_os = "macos")]
         {
-            let brew_formula = macos_brew_formula_for_command(&command);
-            v.install_hint = format!("'{command}' not found. On macOS, try Homebrew (brew install {brew_formula}) or consult the agent's docs.");
+            let brew_formula = macos_brew_formula_for_command(&v.command);
+            v.install_hint = format!("'{}' not found. On macOS, try Homebrew (brew install {brew_formula}) or consult the agent's docs.", v.command);
         }
         #[cfg(target_os = "linux")]
-        { v.install_hint = format!("'{}' not found. On Linux, install via your package manager or consult the agent's docs.", command); }
+        { v.install_hint = format!("'{}' not found. On Linux, install via your package manager or consult the agent's docs.", v.command); }
         #[cfg(target_os = "windows")]
-        { v.install_hint = format!("'{}' not found. On Windows, install the CLI from the vendor site and ensure it’s on PATH.", command); }
+        { v.install_hint = format!("'{}' not found. On Windows, install the CLI from the vendor site and ensure it’s on PATH.", v.command); }
 
         v
     }
