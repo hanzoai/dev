@@ -155,6 +155,60 @@ impl AutoDriveSettingsView {
 
         lines
     }
+
+    pub fn handle_key_event_direct(&mut self, key_event: KeyEvent) {
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return;
+        }
+
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key_event.code, KeyCode::Char('s') | KeyCode::Char('S'))
+        {
+            self.close();
+            self.app_event_tx.send(AppEvent::RequestRedraw);
+            return;
+        }
+
+        match key_event.code {
+            KeyCode::Esc => {
+                self.close();
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            }
+            KeyCode::Up => {
+                if self.selected_index == 0 {
+                    self.selected_index = Self::option_count() - 1;
+                } else {
+                    self.selected_index -= 1;
+                }
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            }
+            KeyCode::Down => {
+                self.selected_index = (self.selected_index + 1) % Self::option_count();
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            }
+            KeyCode::Left => {
+                if self.selected_index == 2 {
+                    self.cycle_continue_mode(false);
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                }
+            }
+            KeyCode::Right => {
+                if self.selected_index == 2 {
+                    self.cycle_continue_mode(true);
+                    self.app_event_tx.send(AppEvent::RequestRedraw);
+                }
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.toggle_selected();
+                self.app_event_tx.send(AppEvent::RequestRedraw);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn is_view_complete(&self) -> bool {
+        self.closing
+    }
 }
 
 impl<'a> BottomPaneView<'a> for AutoDriveSettingsView {

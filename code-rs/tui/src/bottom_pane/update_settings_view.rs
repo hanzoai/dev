@@ -227,10 +227,7 @@ impl UpdateSettingsView {
         lines
     }
 
-}
-
-impl<'a> BottomPaneView<'a> for UpdateSettingsView {
-    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+    pub fn handle_key_event_direct(&mut self, key_event: KeyEvent) {
         const FIELD_COUNT: usize = 3;
 
         match key_event.code {
@@ -248,16 +245,24 @@ impl<'a> BottomPaneView<'a> for UpdateSettingsView {
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if self.field == 1 => {
                 self.toggle_auto();
             }
-            KeyCode::Enter => {
-                match self.field {
-                    0 => self.invoke_run_upgrade(),
-                    1 => self.toggle_auto(),
-                    _ => self.is_complete = true,
-                }
-            }
+            KeyCode::Enter => match self.field {
+                0 => self.invoke_run_upgrade(),
+                1 => self.toggle_auto(),
+                _ => self.is_complete = true,
+            },
             _ => {}
         }
         self.app_event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    pub fn is_view_complete(&self) -> bool {
+        self.is_complete
+    }
+}
+
+impl<'a> BottomPaneView<'a> for UpdateSettingsView {
+    fn handle_key_event(&mut self, _pane: &mut BottomPane<'a>, key_event: KeyEvent) {
+        self.handle_key_event_direct(key_event);
     }
 
     fn is_complete(&self) -> bool {
