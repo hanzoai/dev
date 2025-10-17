@@ -50,6 +50,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+#[cfg(unix)]
+use signal_hook::consts::signal::SIGTERM;
+#[cfg(unix)]
+use signal_hook::{flag, SigId};
 use tokio::sync::oneshot;
 
 /// Time window for debouncing redraw requests.
@@ -222,6 +226,11 @@ pub(crate) struct App<'a> {
     /// Terminal information queried at startup
     terminal_info: TerminalInfo,
 
+    #[cfg(unix)]
+    sigterm_guard: Option<SigId>,
+    #[cfg(unix)]
+    sigterm_flag: Arc<AtomicBool>,
+
     /// Perform a hard clear on the first frame to ensure the entire buffer
     /// starts with our theme background. This avoids terminals that may show
     /// profile defaults until all cells are explicitly painted.
@@ -313,6 +322,10 @@ impl App<'_> {
         // re-publishing the events as AppEvents, as appropriate.
         // Create the input thread stop flag up front so we can store it on `Self`.
         let input_running = Arc::new(AtomicBool::new(true));
+        #[cfg(unix)]
+        let mut sigterm_guard = None;
+        #[cfg(unix)]
+        let sigterm_flag = Arc::new(AtomicBool::new(false));
         {
             let app_event_tx = app_event_tx.clone();
             let input_running_thread = input_running.clone();
@@ -407,6 +420,40 @@ impl App<'_> {
             });
         }
 
+        #[cfg(unix)]
+        {
+            let term_trigger = Arc::new(AtomicBool::new(false));
+            let tx = app_event_tx.clone();
+            let running_for_thread = input_running.clone();
+            let trigger_for_thread = Arc::clone(&term_trigger);
+            let flag_for_thread = sigterm_flag.clone();
+            let listener = move || {
+                while running_for_thread.load(Ordering::Relaxed) {
+                    if trigger_for_thread.swap(false, Ordering::SeqCst) {
+                        running_for_thread.store(false, Ordering::Release);
+                        flag_for_thread.store(true, Ordering::Release);
+                        tx.send(AppEvent::ExitRequest);
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            };
+
+            if thread_spawner::spawn_lightweight("sigterm-listener", listener).is_some() {
+                match flag::register(SIGTERM, Arc::clone(&term_trigger)) {
+                    Ok(sig_id) => {
+                        sigterm_guard = Some(sig_id);
+                    }
+                    Err(err) => {
+                        tracing::warn!("failed to register SIGTERM handler: {err}");
+                        input_running.store(false, Ordering::Release);
+                    }
+                }
+            } else {
+                tracing::warn!("SIGTERM listener spawn skipped: background thread limit reached");
+            }
+        }
+
         let login_status = get_login_status(&config);
         let should_show_onboarding =
             should_show_onboarding(login_status, &config, show_trust_screen);
@@ -493,7 +540,21 @@ impl App<'_> {
             terminal_runs: HashMap::new(),
             terminal_title_override: None,
             login_flow: None,
+            #[cfg(unix)]
+            sigterm_guard,
+            #[cfg(unix)]
+            sigterm_flag,
         }
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn sigterm_triggered(&self) -> bool {
+        self.sigterm_flag.load(Ordering::Relaxed)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn clear_sigterm_guard(&mut self) {
+        self.sigterm_guard.take();
     }
 
     fn apply_terminal_title(&self) {
