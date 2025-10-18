@@ -3,7 +3,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Widget, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -23,6 +24,10 @@ use crate::bottom_pane::{
 };
 use crate::chrome_launch::{ChromeLaunchOption, CHROME_LAUNCH_CHOICES};
 use super::limits_overlay::{LimitsOverlay, LimitsOverlayContent};
+use crate::live_wrap::take_prefix_by_width;
+use crate::util::buffer::fill_rect;
+
+const LABEL_COLUMN_WIDTH: usize = 18;
 
 pub(crate) trait SettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer);
@@ -73,6 +78,78 @@ impl SectionState {
 pub(crate) enum SettingsOverlayMode {
     Menu(MenuState),
     Section(SectionState),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SettingsOverviewRow {
+    pub(crate) section: SettingsSection,
+    pub(crate) summary: Option<String>,
+}
+
+impl SettingsOverviewRow {
+    pub(crate) fn new(section: SettingsSection, summary: Option<String>) -> Self {
+        Self { section, summary }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SettingsHelpOverlay {
+    lines: Vec<Line<'static>>,
+}
+
+impl SettingsHelpOverlay {
+    fn overview() -> Self {
+        let title = Style::default()
+            .fg(crate::colors::text())
+            .add_modifier(Modifier::BOLD);
+        let hint = Style::default().fg(crate::colors::text_dim());
+        let mut lines = vec![Line::from(vec![Span::styled("Settings Overview", title)]), Line::default()];
+        for text in [
+            "• ↑/↓  Move between sections",
+            "• Enter  Open selected section",
+            "• Tab    Jump forward between sections",
+            "• Esc    Close settings",
+            "• ?      Toggle this help",
+        ] {
+            lines.push(Line::from(vec![Span::styled(text.to_string(), hint)]));
+        }
+        lines.push(Line::default());
+        lines.push(Line::from(vec![Span::styled(
+            "Press Esc to close",
+            Style::default().fg(crate::colors::text_dim()),
+        )]));
+        Self { lines }
+    }
+
+    fn section(section: SettingsSection) -> Self {
+        let title = Style::default()
+            .fg(crate::colors::text())
+            .add_modifier(Modifier::BOLD);
+        let hint = Style::default().fg(crate::colors::text_dim());
+        let mut lines = vec![
+            Line::from(vec![Span::styled(
+                format!("{} Shortcuts", section.label()),
+                title,
+            )]),
+            Line::default(),
+            Line::from(vec![Span::styled("• Esc    Return to overview", hint)]),
+            Line::from(vec![Span::styled("• Tab    Cycle sections", hint)]),
+            Line::from(vec![Span::styled("• Shift+Tab  Cycle backwards", hint)]),
+        ];
+        if matches!(section, SettingsSection::Agents | SettingsSection::Mcp) {
+            lines.push(Line::from(vec![Span::styled(
+                "• Enter  Activate focused action",
+                hint,
+            )]));
+        }
+        lines.push(Line::from(vec![Span::styled("• ?      Toggle this help", hint)]));
+        lines.push(Line::default());
+        lines.push(Line::from(vec![Span::styled(
+            "Press Esc to close",
+            Style::default().fg(crate::colors::text_dim()),
+        )]));
+        Self { lines }
+    }
 }
 
 pub(crate) struct ModelSettingsContent {
@@ -916,8 +993,10 @@ impl SettingsContent for ChromeSettingsContent {
 
 /// Full-screen settings overlay rendered by the chat widget.
 pub(crate) struct SettingsOverlayView {
+    overview_rows: Vec<SettingsOverviewRow>,
     mode: SettingsOverlayMode,
     last_section: SettingsSection,
+    help: Option<SettingsHelpOverlay>,
     model_content: Option<ModelSettingsContent>,
     theme_content: Option<ThemeSettingsContent>,
     updates_content: Option<UpdatesSettingsContent>,
@@ -935,8 +1014,10 @@ impl SettingsOverlayView {
     pub(crate) fn new(section: SettingsSection) -> Self {
         let section_state = SectionState::new(section);
         Self {
+            overview_rows: Vec::new(),
             mode: SettingsOverlayMode::Section(section_state),
             last_section: section,
+            help: None,
             model_content: None,
             theme_content: None,
             updates_content: None,
@@ -965,11 +1046,43 @@ impl SettingsOverlayView {
     pub(crate) fn set_mode_menu(&mut self, selected: Option<SettingsSection>) {
         let section = selected.unwrap_or(self.last_section);
         self.mode = SettingsOverlayMode::Menu(MenuState::new(section));
+        if self.help.is_some() {
+            self.show_help(true);
+        }
     }
 
     pub(crate) fn set_mode_section(&mut self, section: SettingsSection) {
         self.mode = SettingsOverlayMode::Section(SectionState::new(section));
         self.last_section = section;
+        if self.help.is_some() {
+            self.show_help(false);
+        }
+    }
+
+    pub(crate) fn is_help_visible(&self) -> bool {
+        self.help.is_some()
+    }
+
+    pub(crate) fn show_help(&mut self, menu_active: bool) {
+        self.help = Some(if menu_active {
+            SettingsHelpOverlay::overview()
+        } else {
+            SettingsHelpOverlay::section(self.active_section())
+        });
+    }
+
+    pub(crate) fn hide_help(&mut self) {
+        self.help = None;
+    }
+
+    pub(crate) fn set_overview_rows(&mut self, rows: Vec<SettingsOverviewRow>) {
+        let fallback = rows.first().map(|row| row.section).unwrap_or(self.last_section);
+        if let SettingsOverlayMode::Menu(state) = &mut self.mode {
+            if !rows.iter().any(|row| row.section == state.selected()) {
+                state.set_selected(fallback);
+            }
+        }
+        self.overview_rows = rows;
     }
 
     pub(crate) fn set_model_content(&mut self, content: ModelSettingsContent) {
@@ -1038,31 +1151,44 @@ impl SettingsOverlayView {
             SettingsOverlayMode::Menu(state) => state.set_selected(section),
             SettingsOverlayMode::Section(state) => state.set_active(section),
         }
+        if self.help.is_some() {
+            self.show_help(self.is_menu_active());
+        }
         true
     }
 
     pub(crate) fn select_next(&mut self) -> bool {
+        if !self.overview_rows.is_empty() {
+            let sections: Vec<SettingsSection> =
+                self.overview_rows.iter().map(|row| row.section).collect();
+            if let Some(idx) = sections
+                .iter()
+                .position(|section| *section == self.active_section())
+            {
+                let next = sections[(idx + 1) % sections.len()];
+                return self.set_section(next);
+            }
+        }
         let mut idx = self.index_of(self.active_section());
         idx = (idx + 1) % SettingsSection::ALL.len();
         self.set_section(SettingsSection::ALL[idx])
     }
 
     pub(crate) fn select_previous(&mut self) -> bool {
+        if !self.overview_rows.is_empty() {
+            let sections: Vec<SettingsSection> =
+                self.overview_rows.iter().map(|row| row.section).collect();
+            if let Some(idx) = sections
+                .iter()
+                .position(|section| *section == self.active_section())
+            {
+                let new_idx = idx.checked_sub(1).unwrap_or(sections.len() - 1);
+                return self.set_section(sections[new_idx]);
+            }
+        }
         let mut idx = self.index_of(self.active_section());
         idx = idx.checked_sub(1).unwrap_or(SettingsSection::ALL.len() - 1);
         self.set_section(SettingsSection::ALL[idx])
-    }
-
-    pub(crate) fn select_by_shortcut(&mut self, ch: char) -> bool {
-        let needle = ch.to_ascii_lowercase();
-        if let Some(section) = SettingsSection::ALL
-            .iter()
-            .copied()
-            .find(|section| section.shortcut().map(|s| s == needle).unwrap_or(false))
-        {
-            return self.set_section(section);
-        }
-        false
     }
 
     fn index_of(&self, section: SettingsSection) -> usize {
@@ -1077,20 +1203,10 @@ impl SettingsOverlayView {
             return;
         }
 
-        let dim = Style::default().fg(crate::colors::text_dim());
-        let fg = Style::default().fg(crate::colors::text());
-
-        let title = Line::from(vec![
-            Span::styled(" ", dim),
-            Span::styled("Settings", fg),
-            Span::styled(" ——— ", dim),
-            Span::styled("Esc", fg),
-            Span::styled(" close ", dim),
-        ]);
-
         let block = Block::default()
+            .title(self.block_title_line())
+            .title_alignment(Alignment::Left)
             .borders(Borders::ALL)
-            .title(title)
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()
@@ -1100,7 +1216,6 @@ impl SettingsOverlayView {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Paint inner background for a clean canvas
         let bg = Style::default().bg(crate::colors::background());
         for y in inner.y..inner.y.saturating_add(inner.height) {
             for x in inner.x..inner.x.saturating_add(inner.width) {
@@ -1113,146 +1228,383 @@ impl SettingsOverlayView {
             return;
         }
 
-        let [header_area, body_area] = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Fill(1),
-        ])
-        .areas(content);
+        if self.is_menu_active() {
+            self.render_overview(content, buf);
+        } else {
+            self.render_section_layout(content, buf);
+        }
 
-        self.render_header(header_area, buf);
-        self.render_body(body_area, buf);
+        if let Some(help) = &self.help {
+            self.render_help_overlay(inner, buf, help);
+        }
     }
 
-    fn render_header(&self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-        let [crumb_area, hint_area] = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
-
-        let crumb = {
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            spans.push(Span::styled("Settings", Style::default().fg(crate::colors::text())));
-            spans.push(Span::styled(" ▸ ", Style::default().fg(crate::colors::text_dim())));
-            let section_label = if self.is_menu_active() {
-                "Menu".to_string()
-            } else {
-                self.active_section().label().to_string()
-            };
-            spans.push(Span::styled(section_label, Style::default().fg(crate::colors::text())));
-            Line::from(spans)
-        };
-        Paragraph::new(crumb)
-            .style(Style::default().bg(crate::colors::background()))
-            .render(crumb_area, buf);
-
-        if hint_area.height == 0 {
-            return;
-        }
-
-        let hints = if self.is_menu_active() {
+    fn block_title_line(&self) -> Line<'static> {
+        if self.is_menu_active() {
             Line::from(vec![
-                Span::styled("↑↓", Style::default().fg(crate::colors::text())),
-                Span::styled(" move  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Enter", Style::default().fg(crate::colors::text())),
-                Span::styled(" open  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Esc", Style::default().fg(crate::colors::text())),
-                Span::styled(" close", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Settings", Style::default().fg(crate::colors::text())),
+                Span::styled(" ▸ ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Overview", Style::default().fg(crate::colors::text())),
             ])
         } else {
             Line::from(vec![
-                Span::styled("←", Style::default().fg(crate::colors::text())),
-                Span::styled(" back  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("Esc", Style::default().fg(crate::colors::text())),
-                Span::styled(" menu  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("↑↓", Style::default().fg(crate::colors::text())),
-                Span::styled(" navigate", Style::default().fg(crate::colors::text_dim())),
+                Span::styled("Settings", Style::default().fg(crate::colors::text())),
+                Span::styled(" ▸ ", Style::default().fg(crate::colors::text_dim())),
+                Span::styled(
+                    self.active_section().label(),
+                    Style::default().fg(crate::colors::text()),
+                ),
             ])
-        };
-
-        Paragraph::new(hints)
-            .style(Style::default().bg(crate::colors::background()))
-            .render(hint_area, buf);
+        }
     }
 
-    fn render_body(&self, area: Rect, buf: &mut Buffer) {
+    fn render_overview(&self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;
         }
 
-        if self.is_menu_active() {
-            self.render_menu(area, buf);
+        let (list_area, hint_area) = match area.height {
+            0 => return,
+            1 => (area, None),
+            _ => {
+                let [list, hint] =
+                    Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
+                (list, Some(hint))
+            }
+        };
+
+        self.render_overview_list(list_area, buf);
+        if let Some(hint_area) = hint_area {
+            self.render_footer_hints(hint_area, buf);
+        }
+    }
+
+    fn render_overview_list(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
             return;
         }
 
-        let [sidebar, main] = Layout::horizontal([
-            Constraint::Length(22),
-            Constraint::Fill(1),
-        ])
-        .areas(area);
+        fill_rect(
+            buf,
+            area,
+            Some(' '),
+            Style::default().bg(crate::colors::background()),
+        );
+
+        if self.overview_rows.is_empty() {
+            let line = Line::from(vec![Span::styled(
+                "No settings available.",
+                Style::default().fg(crate::colors::text_dim()),
+            )]);
+            Paragraph::new(line)
+                .style(Style::default().bg(crate::colors::background()))
+                .render(area, buf);
+            return;
+        }
+
+        let active_section = self.active_section();
+        let content_width = area.width as usize;
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        for (idx, row) in self.overview_rows.iter().enumerate() {
+            let is_active = row.section == active_section;
+            let indicator = if is_active { "›" } else { " " };
+
+            if row.section == SettingsSection::Limits && !lines.is_empty() {
+                lines.push(Line::from(""));
+                let dash_count = content_width.saturating_sub(2);
+                if dash_count > 0 {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {}", "─".repeat(dash_count)),
+                        Style::default().fg(crate::colors::border_dim()),
+                    )]));
+                    lines.push(Line::from(""));
+                }
+            }
+
+            let label_style = if is_active {
+                Style::default()
+                    .fg(crate::colors::text_bright())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(crate::colors::text_mid())
+            };
+
+            let label_text = format!("{:<width$}", row.section.label(), width = LABEL_COLUMN_WIDTH);
+
+            let summary_src = row.summary.as_deref().unwrap_or("—");
+            let base_width = 1 + 1 + LABEL_COLUMN_WIDTH;
+            let available_tail = content_width.saturating_sub(base_width);
+
+            let mut summary_line = Line::from(vec![
+                Span::styled(indicator.to_string(), Style::default().fg(crate::colors::text())),
+                Span::raw(" "),
+                Span::styled(label_text, label_style),
+            ]);
+
+            if available_tail > 0 {
+                summary_line.spans.push(Span::raw(" "));
+                let summary_budget = available_tail.saturating_sub(1);
+
+                if summary_budget > 0 {
+                    let summary_trimmed = self.trim_with_ellipsis(summary_src, summary_budget);
+                    if !summary_trimmed.is_empty() {
+                        self.push_summary_spans(&mut summary_line, &summary_trimmed);
+                    }
+                }
+            }
+
+            if is_active {
+                summary_line = summary_line.style(
+                    Style::default()
+                        .bg(crate::colors::selection())
+                        .fg(crate::colors::text()),
+                );
+            }
+            lines.push(summary_line);
+
+            let info_text = row.section.help_line();
+            let info_trimmed = self.trim_with_ellipsis(info_text, content_width.saturating_sub(8));
+            let info_style = Style::default().fg(crate::colors::text_dim());
+            let mut info_line = Line::from(vec![
+                Span::raw("  "),
+                Span::styled("└ ", info_style),
+                Span::styled(info_trimmed, info_style),
+            ]);
+            if is_active {
+                info_line = info_line.style(
+                    Style::default()
+                        .bg(crate::colors::selection())
+                        .fg(crate::colors::text()),
+                );
+            }
+            lines.push(info_line);
+
+            if idx != self.overview_rows.len().saturating_sub(1) {
+                lines.push(Line::from(""));
+                if matches!(row.section, SettingsSection::Updates) {
+                    let dash_count = content_width.saturating_sub(2);
+                    if dash_count > 0 {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("  {}", "─".repeat(dash_count)),
+                            Style::default().fg(crate::colors::border_dim()),
+                        )]));
+                        lines.push(Line::from(""));
+                    }
+                }
+            }
+        }
+
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()))
+            .render(area, buf);
+    }
+
+    fn trim_with_ellipsis(&self, text: &str, max_width: usize) -> String {
+        if max_width == 0 || text.is_empty() {
+            return String::new();
+        }
+        if UnicodeWidthStr::width(text) <= max_width {
+            return text.to_string();
+        }
+        if max_width <= 3 {
+            return "...".chars().take(max_width).collect();
+        }
+        let keep = max_width.saturating_sub(3);
+        let (prefix, _, _) = take_prefix_by_width(text, keep);
+        let mut result = prefix;
+        result.push_str("...");
+        result
+    }
+
+    fn push_summary_spans(&self, line: &mut Line<'static>, summary: &str) {
+        let label_style = Style::default().fg(crate::colors::text_mid());
+        let dim_style = Style::default().fg(crate::colors::text_dim());
+        let mut first = true;
+        for raw_segment in summary.split(" · ") {
+            let segment = raw_segment.trim();
+            if segment.is_empty() {
+                continue;
+            }
+            if !first {
+                line.spans
+                    .push(Span::styled(" · ".to_string(), dim_style));
+            }
+            first = false;
+
+            if let Some((label, value)) = segment.split_once(':') {
+                let label_trim = label.trim_end();
+                let value_trim = value.trim_start();
+                line.spans.push(Span::styled(
+                    format!("{}:", label_trim),
+                    label_style,
+                ));
+                if !value_trim.is_empty() {
+                    line.spans
+                        .push(Span::styled(" ".to_string(), dim_style));
+                    let value_style = self.summary_value_style(value_trim);
+                    line.spans
+                        .push(Span::styled(value_trim.to_string(), value_style));
+                }
+            } else {
+                let value_style = self.summary_value_style(segment);
+                line.spans
+                    .push(Span::styled(segment.to_string(), value_style));
+            }
+        }
+    }
+
+    fn summary_value_style(&self, value: &str) -> Style {
+        let trimmed = value.trim();
+        let normalized = trimmed
+            .trim_end_matches(|c: char| matches!(c, '.' | '!' | ','))
+            .to_ascii_lowercase();
+        if matches!(normalized.as_str(), "on" | "enabled" | "yes") {
+            Style::default().fg(crate::colors::success())
+        } else if matches!(normalized.as_str(), "off" | "disabled" | "no") {
+            Style::default().fg(crate::colors::error())
+        } else {
+            Style::default().fg(crate::colors::info())
+        }
+    }
+
+    fn render_footer_hints(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let line = Line::from(vec![
+            Span::styled("↑ ↓", Style::default().fg(crate::colors::text())),
+            Span::styled(" Move    ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Enter", Style::default().fg(crate::colors::text())),
+            Span::styled(" Open    ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("Esc", Style::default().fg(crate::colors::text())),
+            Span::styled(" Close    ", Style::default().fg(crate::colors::text_dim())),
+            Span::styled("?", Style::default().fg(crate::colors::text())),
+            Span::styled(" Help", Style::default().fg(crate::colors::text_dim())),
+        ]);
+
+        Paragraph::new(line)
+            .style(Style::default().bg(crate::colors::background()))
+            .alignment(Alignment::Left)
+            .render(area, buf);
+    }
+
+    fn render_section_layout(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let (main_area, hint_area) = if area.height <= 1 {
+            (area, None)
+        } else {
+            let [main, hint] = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
+            (main, Some(hint))
+        };
+
+        self.render_section_main(main_area, buf);
+        if let Some(hint_area) = hint_area {
+            self.render_footer_hints(hint_area, buf);
+        }
+    }
+
+    fn render_section_main(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let [sidebar, main] =
+            Layout::horizontal([Constraint::Length(22), Constraint::Fill(1)]).areas(area);
 
         self.render_sidebar(sidebar, buf);
         self.render_content(main, buf);
     }
 
-    fn render_menu(&self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 {
+    fn render_help_overlay(&self, area: Rect, buf: &mut Buffer, help: &SettingsHelpOverlay) {
+        if area.width < 4 || area.height < 4 {
             return;
         }
 
-        let items: Vec<ListItem> = SettingsSection::ALL
-            .iter()
-            .map(|section| {
-                let is_active = *section == self.active_section();
-                let mut spans: Vec<Span<'static>> = Vec::new();
-                let prefix = if is_active { "›" } else { " " };
-                spans.push(Span::styled(prefix, Style::default().fg(crate::colors::text())));
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(
-                    section.label(),
-                    if is_active {
-                        Style::default()
-                            .fg(crate::colors::text())
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(crate::colors::text_dim())
-                    },
-                ));
-                if let Some(shortcut) = section.shortcut() {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
-                        format!("({})", shortcut.to_ascii_uppercase()),
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
-                }
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
+        fill_rect(buf, area, None, Style::default().bg(crate::colors::overlay_scrim()));
 
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(Span::styled("Sections", Style::default().fg(crate::colors::text()))),
+        let content_width = help
+            .lines
+            .iter()
+            .map(Line::width)
+            .max()
+            .unwrap_or(0);
+        let content_height = help.lines.len() as u16;
+
+        let max_box_width = area.width.saturating_sub(2);
+        let mut box_width = content_width
+            .saturating_add(4)
+            .min(max_box_width as usize)
+            .max(20.min(max_box_width as usize));
+        if box_width == 0 {
+            box_width = max_box_width as usize;
+        }
+        let box_width = box_width.min(area.width as usize) as u16;
+
+        let max_box_height = area.height.saturating_sub(2);
+        let mut box_height = content_height.saturating_add(2).min(max_box_height);
+        if box_height < 4 {
+            box_height = max_box_height.min(4);
+        }
+        if box_height == 0 {
+            box_height = area.height;
+        }
+
+        let box_x = area.x + (area.width.saturating_sub(box_width)) / 2;
+        let box_y = area.y + (area.height.saturating_sub(box_height)) / 2;
+        let box_area = Rect::new(box_x, box_y, box_width, box_height);
+
+        fill_rect(
+            buf,
+            box_area,
+            Some(' '),
+            Style::default().bg(crate::colors::background()),
         );
 
-        let mut state = ListState::default();
-        let selected_idx = SettingsSection::ALL
-            .iter()
-            .position(|section| *section == self.active_section());
-        state.select(selected_idx);
-        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(crate::colors::border()))
+            .style(Style::default().bg(crate::colors::background()))
+            .render(box_area, buf);
+
+        let inner = box_area.inner(Margin::new(1, 1));
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        Paragraph::new(help.lines.clone())
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
+            .wrap(Wrap { trim: true })
+            .render(inner, buf);
     }
 
     fn render_sidebar(&self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;
         }
-        let items: Vec<ListItem> = SettingsSection::ALL
+
+        let sections: Vec<SettingsSection> = if self.overview_rows.is_empty() {
+            SettingsSection::ALL.to_vec()
+        } else {
+            self.overview_rows.iter().map(|row| row.section).collect()
+        };
+
+        let items: Vec<ListItem> = sections
             .iter()
             .map(|section| {
                 let is_active = *section == self.active_section();
                 let mut spans: Vec<Span<'static>> = Vec::new();
                 let prefix = if is_active { "›" } else { " " };
-                spans.push(Span::styled(prefix, Style::default().fg(crate::colors::text())));
+                spans.push(Span::styled(
+                    prefix,
+                    Style::default().fg(crate::colors::text()),
+                ));
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(
                     section.label(),
@@ -1264,13 +1616,6 @@ impl SettingsOverlayView {
                         Style::default().fg(crate::colors::text_dim())
                     },
                 ));
-                if let Some(shortcut) = section.shortcut() {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
-                        format!("({})", shortcut.to_ascii_uppercase()),
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
-                }
                 ListItem::new(Line::from(spans))
             })
             .collect();
@@ -1283,7 +1628,7 @@ impl SettingsOverlayView {
                     .add_modifier(Modifier::BOLD),
             );
         let mut state = ListState::default();
-        let selected_idx = SettingsSection::ALL
+        let selected_idx = sections
             .iter()
             .position(|section| *section == self.active_section());
         state.select(selected_idx);

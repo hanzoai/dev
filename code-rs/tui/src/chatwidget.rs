@@ -21,6 +21,7 @@ use ratatui::style::Style;
 use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
 use crate::auto_drive_strings;
 use crate::auto_drive_style::AutoDriveVariant;
+use crate::spinner;
 use crate::thread_spawner;
 
 use code_common::elapsed::format_duration;
@@ -1429,6 +1430,7 @@ use self::settings_overlay::{
     UpdatesSettingsContent,
     ValidationSettingsContent,
     SettingsOverlayView,
+    SettingsOverviewRow,
 };
 use ratatui::text::Line as RtLine;
 use ratatui::text::Span as RtSpan;
@@ -9421,6 +9423,7 @@ impl ChatWidget<'_> {
                     self.rate_limit_snapshot = Some(snapshot);
                     self.rate_limit_last_fetch_at = Some(Utc::now());
                     self.rate_limit_fetch_inflight = false;
+                    self.refresh_settings_overview_rows();
                     let refresh_limits_settings = self
                         .settings
                         .overlay
@@ -11046,14 +11049,6 @@ impl ChatWidget<'_> {
     }
 
     pub(crate) fn handle_update_command(&mut self, command_args: &str) {
-        if !crate::updates::upgrade_ui_enabled() {
-            self.send_background_tail_ordered(
-                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
-                    to_string(),
-            );
-            return;
-        }
-
         let trimmed = command_args.trim();
         if trimmed.eq_ignore_ascii_case("settings")
             || trimmed.eq_ignore_ascii_case("ui")
@@ -11065,6 +11060,10 @@ impl ChatWidget<'_> {
 
         // Always surface the update settings overlay before kicking off any upgrade flow.
         self.ensure_updates_settings_overlay();
+
+        if !crate::updates::upgrade_ui_enabled() {
+            return;
+        }
 
         match crate::updates::resolve_upgrade_resolution() {
             crate::updates::UpgradeResolution::Command { command, display } => {
@@ -11463,16 +11462,10 @@ impl ChatWidget<'_> {
     }
 
     fn prepare_update_settings_view(&mut self) -> Option<UpdateSettingsView> {
-        if !crate::updates::upgrade_ui_enabled() {
-            self.send_background_tail_ordered(
-                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
-                    to_string(),
-            );
-            return None;
-        }
+        let allow_refresh = crate::updates::upgrade_ui_enabled();
 
         let shared_state = std::sync::Arc::new(std::sync::Mutex::new(UpdateSharedState {
-            checking: true,
+            checking: allow_refresh,
             latest_version: None,
             error: None,
         }));
@@ -11500,7 +11493,9 @@ impl ChatWidget<'_> {
             shared_state.clone(),
         );
 
-        self.spawn_update_refresh(shared_state);
+        if allow_refresh {
+            self.spawn_update_refresh(shared_state);
+        }
         Some(view)
     }
 
@@ -12594,6 +12589,7 @@ fi\n\
             tracing::warn!("Could not locate config home to persist Auto Drive settings");
         }
 
+        self.refresh_settings_overview_rows();
         self.refresh_auto_drive_visuals();
         self.request_redraw();
     }
@@ -14416,11 +14412,6 @@ fi\n\
         latest_version: Option<String>,
     ) -> Option<TerminalLaunch> {
         if !crate::updates::upgrade_ui_enabled() {
-            self.history_push_plain_state(history_cell::new_error_event(
-                "`/update` — updates are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
-                    to_string(),
-            ));
-            self.request_redraw();
             return None;
         }
 
@@ -15295,12 +15286,15 @@ fi\n\
         } else {
             self.config.subagent_commands.push(cmd);
         }
+
+        self.refresh_settings_overview_rows();
     }
 
     pub(crate) fn delete_subagent_by_name(&mut self, name: &str) {
         self.config
             .subagent_commands
             .retain(|c| !c.name.eq_ignore_ascii_case(name));
+        self.refresh_settings_overview_rows();
     }
 
     pub(crate) fn apply_agent_update(
@@ -15357,6 +15351,8 @@ fi\n\
                 .await;
             });
         }
+
+        self.refresh_settings_overview_rows();
     }
 
     pub(crate) fn show_diffs_popup(&mut self) {
@@ -15772,6 +15768,7 @@ fi\n\
                 resume_path: None,
             };
             self.submit_op(op);
+            self.refresh_settings_overview_rows();
         }
 
         let placement = self.ui_placement_for_now();
@@ -16028,6 +16025,7 @@ fi\n\
             "system",
             Some(HistoryDomainRecord::Plain(state)),
         );
+        self.refresh_settings_overview_rows();
     }
 
     pub(crate) fn set_text_verbosity(&mut self, new_verbosity: TextVerbosity) {
@@ -16059,15 +16057,6 @@ fi\n\
     }
 
     pub(crate) fn set_auto_upgrade_enabled(&mut self, enabled: bool) {
-        if !crate::updates::upgrade_ui_enabled() {
-            self.bottom_pane.flash_footer_notice(
-                "Automatic upgrades are disabled in debug builds. Set SHOW_UPGRADE=1 to preview.".
-                    to_string(),
-            );
-            self.request_redraw();
-            return;
-        }
-
         if self.config.auto_upgrade_enabled == enabled {
             return;
         }
@@ -16109,6 +16098,7 @@ fi\n\
                 }
             }
         }
+        self.refresh_settings_overview_rows();
         self.request_redraw();
     }
 
@@ -16154,6 +16144,8 @@ fi\n\
         overlay.set_github_content(self.build_github_settings_content());
         overlay.set_limits_content(self.build_limits_settings_content());
         overlay.set_chrome_content(self.build_chrome_settings_content(None));
+        let overview_rows = self.build_settings_overview_rows();
+        overlay.set_overview_rows(overview_rows);
 
         match section {
             Some(section) => overlay.set_mode_section(section),
@@ -16397,6 +16389,235 @@ fi\n\
         LimitsSettingsContent::new(content)
     }
 
+    fn build_settings_overview_rows(&mut self) -> Vec<SettingsOverviewRow> {
+        SettingsSection::ALL
+            .iter()
+            .copied()
+            .map(|section| {
+                let summary = match section {
+                    SettingsSection::Model => self.settings_summary_model(),
+                    SettingsSection::Theme => self.settings_summary_theme(),
+                    SettingsSection::Updates => self.settings_summary_updates(),
+                    SettingsSection::Agents => self.settings_summary_agents(),
+                    SettingsSection::AutoDrive => self.settings_summary_auto_drive(),
+                    SettingsSection::Validation => self.settings_summary_validation(),
+                    SettingsSection::Github => self.settings_summary_github(),
+                    SettingsSection::Limits => self.settings_summary_limits(),
+                    SettingsSection::Chrome => self.settings_summary_chrome(),
+                    SettingsSection::Mcp => self.settings_summary_mcp(),
+                    SettingsSection::Notifications => self.settings_summary_notifications(),
+                };
+                SettingsOverviewRow::new(section, summary)
+            })
+            .collect()
+    }
+
+    fn settings_summary_model(&self) -> Option<String> {
+        let mut parts: Vec<String> = Vec::new();
+        let model = self.config.model.trim();
+        let model_display = if model.is_empty() { "—" } else { model };
+        parts.push(format!("Model: {}", model_display));
+        parts.push(format!(
+            "Effort: {}",
+            Self::format_reasoning_effort(self.config.model_reasoning_effort)
+        ));
+        if let Some(profile) = self
+            .config
+            .active_profile
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(format!("Profile: {}", profile));
+        }
+        Some(parts.join(" · "))
+    }
+
+    fn settings_summary_theme(&self) -> Option<String> {
+        let theme_label = Self::theme_display_name(self.config.tui.theme.name);
+        let spinner_name = &self.config.tui.spinner.name;
+        let spinner_label = spinner::spinner_label_for(spinner_name);
+        Some(format!("Theme: {} · Spinner: {}", theme_label, spinner_label))
+    }
+
+    fn settings_summary_updates(&self) -> Option<String> {
+        if !crate::updates::upgrade_ui_enabled() {
+            return Some("Auto update: Disabled".to_string());
+        }
+        let status = if self.config.auto_upgrade_enabled {
+            "Enabled"
+        } else {
+            "Disabled"
+        };
+        let mut parts = vec![format!("Auto update: {}", status)];
+        if let Some(latest) = self
+            .latest_upgrade_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(format!("Latest available: {}", latest));
+        }
+        Some(parts.join(" · "))
+    }
+
+    fn settings_summary_agents(&self) -> Option<String> {
+        let total = self.config.agents.len();
+        let enabled = self
+            .config
+            .agents
+            .iter()
+            .filter(|agent| agent.enabled)
+            .count();
+        let commands = self.config.subagent_commands.len();
+        let mut parts = vec![format!("Enabled: {}/{}", enabled, total)];
+        if commands > 0 {
+            parts.push(format!("Custom commands: {}", commands));
+        }
+        Some(parts.join(" · "))
+    }
+
+    fn settings_summary_auto_drive(&self) -> Option<String> {
+        Some(format!(
+            "Review: {} · Agents: {} · Continue: {}",
+            Self::on_off_label(self.auto_state.review_enabled),
+            Self::on_off_label(self.auto_state.subagents_enabled),
+            self.auto_state.continue_mode.label()
+        ))
+    }
+
+    fn settings_summary_validation(&self) -> Option<String> {
+        let groups = &self.config.validation.groups;
+        Some(format!(
+            "Functional: {} · Stylistic: {}",
+            Self::on_off_label(groups.functional),
+            Self::on_off_label(groups.stylistic)
+        ))
+    }
+
+    fn settings_summary_github(&self) -> Option<String> {
+        Some(format!(
+            "Workflows on push: {}",
+            if self.config.github.check_workflows_on_push { "On" } else { "Off" }
+        ))
+    }
+
+    fn settings_summary_limits(&self) -> Option<String> {
+        if let Some(snapshot) = &self.rate_limit_snapshot {
+            let primary = snapshot.primary_used_percent.clamp(0.0, 100.0).round() as i64;
+            let secondary = snapshot.secondary_used_percent.clamp(0.0, 100.0).round() as i64;
+            Some(format!("Primary: {}% · Secondary: {}%", primary, secondary))
+        } else if self.rate_limit_fetch_inflight {
+            Some("Refreshing usage...".to_string())
+        } else {
+            Some("Usage data not loaded".to_string())
+        }
+    }
+
+    fn settings_summary_chrome(&self) -> Option<String> {
+        if self.browser_is_external {
+            Some("Browser: external".to_string())
+        } else {
+            Some("Browser: available".to_string())
+        }
+    }
+
+    fn settings_summary_mcp(&self) -> Option<String> {
+        Some(format!(
+            "Servers configured: {}",
+            self.config.mcp_servers.len()
+        ))
+    }
+
+    fn settings_summary_notifications(&self) -> Option<String> {
+        match &self.config.tui.notifications {
+            Notifications::Enabled(enabled) => {
+                Some(format!("Desktop alerts: {}", Self::on_off_label(*enabled)))
+            }
+            Notifications::Custom(entries) => Some(format!("Custom rules: {}", entries.len())),
+        }
+    }
+
+    fn refresh_settings_overview_rows(&mut self) {
+        if self.settings.overlay.is_none() {
+            return;
+        }
+        let rows = self.build_settings_overview_rows();
+        if let Some(overlay) = self.settings.overlay.as_mut() {
+            overlay.set_overview_rows(rows);
+        }
+        self.request_redraw();
+    }
+
+    fn format_reasoning_effort(effort: ReasoningEffort) -> &'static str {
+        match effort {
+            ReasoningEffort::Minimal | ReasoningEffort::None => "Minimal",
+            ReasoningEffort::Low => "Low",
+            ReasoningEffort::Medium => "Medium",
+            ReasoningEffort::High => "High",
+        }
+    }
+
+    fn on_off_label(value: bool) -> &'static str {
+        if value { "On" } else { "Off" }
+    }
+
+    fn theme_display_name(theme: code_core::config_types::ThemeName) -> String {
+        match theme {
+            code_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
+            code_core::config_types::ThemeName::LightPhotonAnsi16 => {
+                "Light - Photon (16-color)".to_string()
+            }
+            code_core::config_types::ThemeName::LightPrismRainbow => {
+                "Light - Prism Rainbow".to_string()
+            }
+            code_core::config_types::ThemeName::LightVividTriad => {
+                "Light - Vivid Triad".to_string()
+            }
+            code_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
+            code_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
+            code_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
+            code_core::config_types::ThemeName::DarkCarbonNight => {
+                "Dark - Carbon Night".to_string()
+            }
+            code_core::config_types::ThemeName::DarkCarbonAnsi16 => {
+                "Dark - Carbon (16-color)".to_string()
+            }
+            code_core::config_types::ThemeName::DarkShinobiDusk => {
+                "Dark - Shinobi Dusk".to_string()
+            }
+            code_core::config_types::ThemeName::DarkOledBlackPro => {
+                "Dark - OLED Black Pro".to_string()
+            }
+            code_core::config_types::ThemeName::DarkAmberTerminal => {
+                "Dark - Amber Terminal".to_string()
+            }
+            code_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
+            code_core::config_types::ThemeName::DarkCharcoalRainbow => {
+                "Dark - Charcoal Rainbow".to_string()
+            }
+            code_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
+            code_core::config_types::ThemeName::DarkPaperLightPro => {
+                "Dark - Paper Light Pro".to_string()
+            }
+            code_core::config_types::ThemeName::Custom => {
+                let mut label =
+                    crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
+                for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
+                    if label.starts_with(pref) {
+                        label = label[pref.len()..].trim().to_string();
+                        break;
+                    }
+                }
+                if crate::theme::custom_theme_is_dark().unwrap_or(false) {
+                    format!("Dark - {}", label)
+                } else {
+                    format!("Light - {}", label)
+                }
+            }
+        }
+    }
+
     pub(crate) fn close_settings_overlay(&mut self) {
         if let Some(overlay) = self.settings.overlay.as_mut() {
             overlay.notify_close();
@@ -16514,61 +16735,7 @@ fi\n\
         self.restyle_history_after_theme_change();
 
         // Add confirmation message to history (replaceable system notice)
-        let theme_name = match mapped_theme {
-            // Light themes
-            code_core::config_types::ThemeName::LightPhoton => "Light - Photon".to_string(),
-            code_core::config_types::ThemeName::LightPhotonAnsi16 => {
-                "Light - Photon (16-color)".to_string()
-            }
-            code_core::config_types::ThemeName::LightPrismRainbow => {
-                "Light - Prism Rainbow".to_string()
-            }
-            code_core::config_types::ThemeName::LightVividTriad => {
-                "Light - Vivid Triad".to_string()
-            }
-            code_core::config_types::ThemeName::LightPorcelain => "Light - Porcelain".to_string(),
-            code_core::config_types::ThemeName::LightSandbar => "Light - Sandbar".to_string(),
-            code_core::config_types::ThemeName::LightGlacier => "Light - Glacier".to_string(),
-            // Dark themes
-            code_core::config_types::ThemeName::DarkCarbonNight => {
-                "Dark - Carbon Night".to_string()
-            }
-            code_core::config_types::ThemeName::DarkCarbonAnsi16 => {
-                "Dark - Carbon (16-color)".to_string()
-            }
-            code_core::config_types::ThemeName::DarkShinobiDusk => {
-                "Dark - Shinobi Dusk".to_string()
-            }
-            code_core::config_types::ThemeName::DarkOledBlackPro => {
-                "Dark - OLED Black Pro".to_string()
-            }
-            code_core::config_types::ThemeName::DarkAmberTerminal => {
-                "Dark - Amber Terminal".to_string()
-            }
-            code_core::config_types::ThemeName::DarkAuroraFlux => "Dark - Aurora Flux".to_string(),
-            code_core::config_types::ThemeName::DarkCharcoalRainbow => {
-                "Dark - Charcoal Rainbow".to_string()
-            }
-            code_core::config_types::ThemeName::DarkZenGarden => "Dark - Zen Garden".to_string(),
-            code_core::config_types::ThemeName::DarkPaperLightPro => {
-                "Dark - Paper Light Pro".to_string()
-            }
-            code_core::config_types::ThemeName::Custom => {
-                let mut label =
-                    crate::theme::custom_theme_label().unwrap_or_else(|| "Custom".to_string());
-                for pref in ["Light - ", "Dark - ", "Light ", "Dark "] {
-                    if label.starts_with(pref) {
-                        label = label[pref.len()..].trim().to_string();
-                        break;
-                    }
-                }
-                if crate::theme::custom_theme_is_dark().unwrap_or(false) {
-                    format!("Dark - {}", label)
-                } else {
-                    format!("Light - {}", label)
-                }
-            }
-        };
+        let theme_name = Self::theme_display_name(mapped_theme);
         let message = format!("Theme changed to {}", theme_name);
         let placement = self.ui_placement_for_now();
         let cell = history_cell::new_background_event(message);
@@ -16581,6 +16748,7 @@ fi\n\
             "background",
             Some(record),
         );
+        self.refresh_settings_overview_rows();
     }
 
     pub(crate) fn set_spinner(&mut self, spinner_name: String) {
@@ -16610,6 +16778,9 @@ fi\n\
             "background",
             Some(record),
         );
+
+        self.refresh_settings_overview_rows();
+        self.request_redraw();
     }
 
     fn apply_access_mode_indicator_from_config(&mut self) {
@@ -19450,6 +19621,8 @@ fi\n\
                 if enable { "enabled" } else { "disabled" }
             ));
         }
+
+        self.refresh_settings_overview_rows();
     }
 
     fn apply_validation_tool_toggle(&mut self, name: &str, enable: bool) {
@@ -19509,6 +19682,8 @@ fi\n\
                 if enable { "enabled" } else { "disabled" }
             ));
         }
+
+        self.refresh_settings_overview_rows();
     }
 
     fn build_validation_status_message(&self) -> String {
@@ -28717,6 +28892,8 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+
+        self.refresh_settings_overview_rows();
     }
 
     pub(crate) fn set_tui_notifications(&mut self, enabled: bool) {
@@ -28751,6 +28928,8 @@ impl ChatWidget<'_> {
                 self.push_background_tail(msg);
             }
         }
+
+        self.refresh_settings_overview_rows();
     }
 
     fn emit_turn_complete_notification(&self, last_agent_message: Option<String>) {
