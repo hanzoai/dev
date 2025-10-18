@@ -12801,11 +12801,13 @@ fi\n\
 
         let mut promoted_agents: Vec<String> = Vec::new();
         if matches!(status, AutoCoordinatorStatus::Continue) {
+
             let resolved_agents: Vec<AutoTurnAgentsAction> = agents
                 .into_iter()
                 .map(|mut action| {
                     let original = action.write;
-                    let resolved = self.resolve_agent_write_flag(action.write_requested);
+                    let requested = action.write_requested;
+                    let resolved = self.resolve_agent_write_flag(requested);
                     if resolved && !original {
                         promoted_agents.push(action.prompt.clone());
                     }
@@ -13640,11 +13642,10 @@ fi\n\
     }
 
     fn auto_agents_can_write(&self) -> bool {
-        match self.config.sandbox_policy {
-            SandboxPolicy::DangerFullAccess => true,
-            SandboxPolicy::WorkspaceWrite { allow_git_writes, .. } => allow_git_writes,
-            SandboxPolicy::ReadOnly => false,
-        }
+        matches!(
+            self.config.sandbox_policy,
+            SandboxPolicy::DangerFullAccess | SandboxPolicy::WorkspaceWrite { .. }
+        )
     }
 
     fn resolve_agent_write_flag(&self, requested_write: Option<bool>) -> bool {
@@ -13654,7 +13655,10 @@ fi\n\
         if !self.auto_state.subagents_enabled {
             return requested_write.unwrap_or(false);
         }
-        requested_write.unwrap_or(true)
+        match requested_write {
+            Some(flag) => flag,
+            None => true,
+        }
     }
 
     fn default_agent_command(name: &str) -> String {
@@ -15410,14 +15414,24 @@ fi\n\
             self.config.agents.push(new_cfg);
         }
         // Persist asynchronously
+        let command_for_persist = self
+            .config
+            .agents
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+            .map(|a| a.command.clone())
+            .unwrap_or_else(|| Self::default_agent_command(name));
+
         if let Ok(home) = code_core::config::find_code_home() {
             let name_s = name.to_string();
+            let command_s = command_for_persist.clone();
             let (en2, ro2, wr2, ins2) = (enabled, args_ro, args_wr, instr);
             tokio::spawn(async move {
                 let _ = code_core::config_edit::upsert_agent_config(
                     &home,
                     &name_s,
                     Some(en2),
+                    Some(command_s.as_str()),
                     None, // keep plain args as‑is
                     ro2.as_deref(),
                     wr2.as_deref(),

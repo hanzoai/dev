@@ -203,6 +203,7 @@ pub async fn upsert_agent_config(
     code_home: &Path,
     name: &str,
     enabled: Option<bool>,
+    command: Option<&str>,
     args: Option<&[String]>,
     args_read_only: Option<&[String]>,
     args_write: Option<&[String]>,
@@ -223,7 +224,7 @@ pub async fn upsert_agent_config(
     // Search existing [[agents]] for a case‑insensitive name match
     let mut found = false;
     if let Some(item) = doc.as_table().get("agents").cloned() {
-        let Some(arr) = item.as_array_of_tables() else { /* not an array, treat as missing */ return write_new_or_append(doc, code_home, config_path, name, enabled, args, args_read_only, args_write, instructions).await };
+        let Some(arr) = item.as_array_of_tables() else { /* not an array, treat as missing */ return write_new_or_append(doc, code_home, config_path, name, enabled, command, args, args_read_only, args_write, instructions).await };
         let mut new_arr = toml_edit::ArrayOfTables::new();
         for tbl_ref in arr.iter() {
             let mut tbl = tbl_ref.clone();
@@ -235,6 +236,7 @@ pub async fn upsert_agent_config(
             if same {
                 if let Some(val) = enabled { tbl["enabled"] = toml_edit::value(val); }
                 if let Some(a) = args { tbl["args"] = toml_edit::value(toml_edit::Array::from_iter(a.iter().cloned())); }
+                if let Some(cmd) = command { tbl["command"] = toml_edit::value(cmd.to_string()); }
                 if let Some(ro) = args_read_only {
                     tbl["args-read-only"] = toml_edit::value(toml_edit::Array::from_iter(ro.iter().cloned()));
                 }
@@ -254,7 +256,7 @@ pub async fn upsert_agent_config(
 
     if !found {
         // Append a new entry safely
-        append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions);
+        append_agent_entry(&mut doc, name, enabled, command, args, args_read_only, args_write, instructions);
     }
 
     // Write back atomically
@@ -269,6 +271,7 @@ fn append_agent_entry(
     doc: &mut DocumentMut,
     name: &str,
     enabled: Option<bool>,
+    command: Option<&str>,
     args: Option<&[String]>,
     args_read_only: Option<&[String]>,
     args_write: Option<&[String]>,
@@ -278,6 +281,7 @@ fn append_agent_entry(
     t.set_implicit(true);
     t["name"] = toml_edit::value(name.to_string());
     if let Some(val) = enabled { t["enabled"] = toml_edit::value(val); }
+    if let Some(cmd) = command { t["command"] = toml_edit::value(cmd.to_string()); }
     if let Some(a) = args { t["args"] = toml_edit::value(toml_edit::Array::from_iter(a.iter().cloned())); }
     if let Some(ro) = args_read_only { t["args-read-only"] = toml_edit::value(toml_edit::Array::from_iter(ro.iter().cloned())); }
     if let Some(w) = args_write { t["args-write"] = toml_edit::value(toml_edit::Array::from_iter(w.iter().cloned())); }
@@ -298,12 +302,13 @@ async fn write_new_or_append(
     config_path: std::path::PathBuf,
     name: &str,
     enabled: Option<bool>,
+    command: Option<&str>,
     args: Option<&[String]>,
     args_read_only: Option<&[String]>,
     args_write: Option<&[String]>,
     instructions: Option<&str>,
 ) -> Result<()> {
-    append_agent_entry(&mut doc, name, enabled, args, args_read_only, args_write, instructions);
+    append_agent_entry(&mut doc, name, enabled, command, args, args_read_only, args_write, instructions);
     let tmp_file = NamedTempFile::new_in(code_home)?;
     tokio::fs::write(tmp_file.path(), doc.to_string()).await?;
     tmp_file.persist(config_path)?;
