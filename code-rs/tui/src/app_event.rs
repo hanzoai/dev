@@ -590,6 +590,7 @@ pub(crate) enum AppEvent {
         args_read_only: Option<Vec<String>>,
         args_write: Option<Vec<String>>,
         instructions: Option<String>,
+        command: String,
     },
     
 }

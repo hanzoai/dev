@@ -13661,31 +13661,25 @@ fi\n\
         }
     }
 
-    fn default_agent_command(name: &str) -> String {
-        agent_model_spec(name)
-            .map(|spec| spec.cli.to_string())
-            .unwrap_or_else(|| name.to_string())
-    }
-
     fn auto_stop(&mut self, message: Option<String>) {
         self.auto_flush_observer_banners();
-        if let Some(handle) = self.auto_handle.take() {
-            handle.cancel();
-            let _ = handle.send(AutoCoordinatorCommand::Stop);
-        }
         let duration = self
             .auto_state
             .started_at
             .map(|start| start.elapsed())
             .unwrap_or_default();
         let turns_completed = self.auto_state.turns_completed;
-
+        let goal = self.auto_state.goal.clone();
+        if let Some(handle) = self.auto_handle.take() {
+            handle.cancel();
+            let _ = handle.send(AutoCoordinatorCommand::Stop);
+        }
+        self.bottom_pane.clear_auto_coordinator_view(true);
         if let Some(msg) = message.clone() {
             self.push_background_tail(msg);
         }
 
-        self.bottom_pane
-            .set_standard_terminal_hint(Some("Press Esc again to exit Auto Drive".to_string()));
+        self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_history.clear();
         self.auto_turn_review_state = None;
         let any_exec_running = !self.exec.running_commands.is_empty();
@@ -13706,7 +13700,6 @@ fi\n\
         if ENABLE_WARP_STRIPES {
             self.header_wave.set_enabled(false, Instant::now());
         }
-        let goal = self.auto_state.goal.clone();
         let summary = AutoRunSummary {
             duration,
             turns_completed,
@@ -13968,6 +13961,7 @@ fi\n\
             self
                 .bottom_pane
                 .show_auto_coordinator_view(model);
+            self.bottom_pane.release_auto_drive_style();
             self.bottom_pane.set_standard_terminal_hint(None);
             return;
         }
@@ -15292,8 +15286,11 @@ fi\n\
             let cfg_name = cfg.name.clone();
             let cfg_enabled = cfg.enabled;
             let cfg_instructions = cfg.instructions.clone();
-            let cfg_command = cfg.command.clone();
-            let default_cmd = Self::default_agent_command(&cfg_name);
+            let cfg_command = Self::resolve_agent_command(
+                &cfg.name,
+                Some(cfg.command.as_str()),
+                Some(cfg.command.as_str()),
+            );
             let build_editor = || {
                 AgentEditorView::new(
                     cfg_name.clone(),
@@ -15301,11 +15298,7 @@ fi\n\
                     ro.clone(),
                     wr.clone(),
                     cfg_instructions.clone(),
-                    if cfg_command.trim().is_empty() {
-                        default_cmd.clone()
-                    } else {
-                        cfg_command.clone()
-                    },
+                    cfg_command.clone(),
                     app_event_tx.clone(),
                 )
             };
@@ -15320,7 +15313,7 @@ fi\n\
             self.request_redraw();
         } else {
             // Fallback: synthesize defaults
-            let cmd = Self::default_agent_command(&name);
+            let cmd = Self::resolve_agent_command(&name, None, None);
             let ro = code_core::agent_defaults::default_params_for(&name, true /*read_only*/);
             let wr =
                 code_core::agent_defaults::default_params_for(&name, false /*read_only*/);
@@ -15377,8 +15370,11 @@ fi\n\
         args_ro: Option<Vec<String>>,
         args_wr: Option<Vec<String>>,
         instr: Option<String>,
+        command: String,
     ) {
         let mut updated_existing = false;
+        let provided_command = if command.trim().is_empty() { None } else { Some(command.as_str()) };
+        let mut command_to_persist: Option<String> = None;
         if let Some(slot) = self
             .config
             .agents
@@ -15389,19 +15385,17 @@ fi\n\
             slot.args_read_only = args_ro.clone();
             slot.args_write = args_wr.clone();
             slot.instructions = instr.clone();
-            if let Some(spec) = agent_model_spec(name) {
-                if slot.command.trim().is_empty() || slot.command.eq_ignore_ascii_case(name) {
-                    slot.command = spec.cli.to_string();
-                }
-            }
+            let resolved = Self::resolve_agent_command(name, provided_command, Some(slot.command.as_str()));
+            slot.command = resolved.clone();
+            command_to_persist = Some(resolved);
             updated_existing = true;
         }
 
         if !updated_existing {
-            let command = Self::default_agent_command(name);
+            let resolved = Self::resolve_agent_command(name, provided_command, None);
             let new_cfg = AgentConfig {
                 name: name.to_string(),
-                command,
+                command: resolved.clone(),
                 args: Vec::new(),
                 read_only: false,
                 enabled,
@@ -15412,34 +15406,68 @@ fi\n\
                 instructions: instr.clone(),
             };
             self.config.agents.push(new_cfg);
+            command_to_persist = Some(resolved);
         }
         // Persist asynchronously
-        let command_for_persist = self
-            .config
-            .agents
-            .iter()
-            .find(|a| a.name.eq_ignore_ascii_case(name))
-            .map(|a| a.command.clone())
-            .unwrap_or_else(|| Self::default_agent_command(name));
-
         if let Ok(home) = code_core::config::find_code_home() {
             let name_s = name.to_string();
-            let command_s = command_for_persist.clone();
             let (en2, ro2, wr2, ins2) = (enabled, args_ro, args_wr, instr);
+            let cmd2 = command_to_persist.clone();
             tokio::spawn(async move {
                 let _ = code_core::config_edit::upsert_agent_config(
                     &home,
                     &name_s,
                     Some(en2),
-                    Some(command_s.as_str()),
                     None, // keep plain args as‑is
                     ro2.as_deref(),
                     wr2.as_deref(),
                     ins2.as_deref(),
+                    cmd2.as_deref(),
                 )
                 .await;
             });
         }
+    }
+
+    fn resolve_agent_command(
+        name: &str,
+        provided: Option<&str>,
+        existing: Option<&str>,
+    ) -> String {
+        let spec = agent_model_spec(name);
+        if let Some(cmd) = provided {
+            if let Some(resolved) = Self::normalize_agent_command(cmd, name, spec) {
+                return resolved;
+            }
+        }
+        if let Some(cmd) = existing {
+            if let Some(resolved) = Self::normalize_agent_command(cmd, name, spec) {
+                return resolved;
+            }
+        }
+        if let Some(spec) = spec {
+            return spec.cli.to_string();
+        }
+        name.to_string()
+    }
+
+    fn normalize_agent_command(
+        candidate: &str,
+        name: &str,
+        spec: Option<&code_core::agent_defaults::AgentModelSpec>,
+    ) -> Option<String> {
+        if candidate.trim().is_empty() {
+            return None;
+        }
+        if let Some(spec) = spec {
+            if candidate.eq_ignore_ascii_case(name) && !spec.cli.eq_ignore_ascii_case(name) {
+                return Some(spec.cli.to_string());
+            }
+            if candidate.eq_ignore_ascii_case(spec.slug) && !spec.cli.eq_ignore_ascii_case(spec.slug) {
+                return Some(spec.cli.to_string());
+            }
+        }
+        Some(candidate.to_string())
     }
 
     pub(crate) fn show_diffs_popup(&mut self) {
