@@ -17,7 +17,7 @@ Progress
 
 Planning for Long Missions
 - Establish a clear North Star (metric/acceptance check) and periodically re‑validate against it.
-- Early: fan out 2–3 independent avenues (research, repro/proto, market/metrics). Use agents for breadth; keep them read‑only unless isolated writes are needed.
+- Early: fan out 2–3 independent avenues (research, repro/proto, market/metrics). Use agents for breadth; in Full Auto default to launching them with `write: true` so they can prototype in isolated worktrees. Drop to `write: false` only when the task is strictly analysis or review.
 - Mid: converge—prioritize the avenue with the strongest evidence; keep one “scout” agent probing risk or upside.
 - Late: lock down—tests, focused review, and polish before declaring success.
 
@@ -28,7 +28,7 @@ Choosing Instructions
 
 - Agents (background):
   - Use for repros, benchmarks, data/market scans, prototypes, or long-running checks.
-  - Keep prompts outcome-oriented (what artifact/insight to produce). Enabling writes gives the agents isolated worktrees to use.
+  - Keep prompts outcome-oriented (what artifact/insight to produce). Prefer `write: true` in Full Auto so agents can create commits safely in their own worktrees; flip to `write: false` when you only need research or review output.
   - Set `agents.timing`:
     - `parallel` when the CLI should continue its prompt while the agents run (it may call `agent.wait` later when convenient).
     - `blocking` when the CLI must wait on `agent.wait` before progressing with its own prompt.

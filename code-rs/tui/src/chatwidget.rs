@@ -12697,6 +12697,7 @@ fi\n\
         self.auto_state.current_cli_context = None;
         self.auto_state.pending_agent_actions.clear();
         self.auto_state.pending_agent_timing = None;
+
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
 
@@ -12797,13 +12798,48 @@ fi\n\
 
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
+
+        let mut promoted_agents: Vec<String> = Vec::new();
         if matches!(status, AutoCoordinatorStatus::Continue) {
-            self.auto_state.pending_agent_actions = agents.clone();
-            self.auto_state.pending_agent_timing =
-                agents_timing.filter(|_| !self.auto_state.pending_agent_actions.is_empty());
+
+            let resolved_agents: Vec<AutoTurnAgentsAction> = agents
+                .into_iter()
+                .map(|mut action| {
+                    let original = action.write;
+                    let requested = action.write_requested;
+                    let resolved = self.resolve_agent_write_flag(requested);
+                    if resolved && !original {
+                        promoted_agents.push(action.prompt.clone());
+                    }
+                    action.write = resolved;
+                    action
+                })
+                .collect();
+
+            self.auto_state.pending_agent_actions = resolved_agents;
+            self.auto_state.pending_agent_timing = agents_timing
+                .filter(|_| !self.auto_state.pending_agent_actions.is_empty());
         } else {
             self.auto_state.pending_agent_actions.clear();
             self.auto_state.pending_agent_timing = None;
+        }
+
+        if !promoted_agents.is_empty() {
+            let joined = promoted_agents
+                .into_iter()
+                .map(|prompt| {
+                    let trimmed = prompt.trim();
+                    if trimmed.is_empty() {
+                        "<empty prompt>".to_string()
+                    } else {
+                        format!("\"{trimmed}\"")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.push_background_tail(format!(
+                "Auto Drive enabled write mode for agent prompt(s): {joined}"
+            ));
         }
 
         if let Some(review_action) = code_review {
@@ -13564,9 +13600,9 @@ fi\n\
                     .trim()
                     .replace('\n', " ")
                     .replace('"', "\\\"");
-                let read_only_text = if action.write { "read_only: false" } else { "read_only: true" };
+                let write_text = if action.write { "write: true" } else { "write: false" };
                 let mut line = format!(
-                    "Please run agent.create with {read_only_text} and prompt like \"{prompt}\"."
+                    "Please run agent.create with {write_text} and prompt like \"{prompt}\"."
                 );
                 if let Some(ctx) = action
                     .context
@@ -13602,6 +13638,26 @@ fi\n\
             None
         } else {
             Some(combined)
+        }
+    }
+
+    fn auto_agents_can_write(&self) -> bool {
+        matches!(
+            self.config.sandbox_policy,
+            SandboxPolicy::DangerFullAccess | SandboxPolicy::WorkspaceWrite { .. }
+        )
+    }
+
+    fn resolve_agent_write_flag(&self, requested_write: Option<bool>) -> bool {
+        if !self.auto_agents_can_write() {
+            return false;
+        }
+        if !self.auto_state.subagents_enabled {
+            return requested_write.unwrap_or(false);
+        }
+        match requested_write {
+            Some(flag) => flag,
+            None => true,
         }
     }
 
@@ -21488,6 +21544,7 @@ mod tests {
                 prompt: "Draft alternative fix".to_string(),
                 context: None,
                 write: false,
+                write_requested: Some(false),
                 models: None,
             }],
             Some(AutoTurnCodeReviewAction {
@@ -21517,7 +21574,20 @@ mod tests {
         );
         let action = &chat.auto_state.pending_agent_actions[0];
         assert_eq!(action.prompt, "Draft alternative fix");
-        assert!(!action.write);
+        assert!(action.write);
+
+        let notice = "Auto Drive enabled write mode";
+        let write_notice_present = chat
+            .history_cells
+            .iter()
+            .any(|cell| {
+                cell.display_lines_trimmed().iter().any(|line| {
+                    line.spans
+                        .iter()
+                        .any(|span| span.content.contains(notice))
+                })
+            });
+        assert!(write_notice_present);
     }
 
     #[test]
@@ -21608,6 +21678,7 @@ mod tests {
             prompt: "Draft alternative fix".to_string(),
             context: Some("Focus on parser module".to_string()),
             write: false,
+            write_requested: Some(false),
             models: Some(vec![
                 "claude-sonnet-4.5".to_string(),
                 "gemini-2.5-pro".to_string(),
@@ -21623,7 +21694,7 @@ mod tests {
         assert!(message.contains("Workspace root: /tmp"));
         assert!(message.contains("Run diagnostics"));
         assert!(message.contains("Please run agent.create"));
-        assert!(message.contains("read_only: true"));
+        assert!(message.contains("write: false"));
         assert!(message.contains("Models: [claude-sonnet-4.5, gemini-2.5-pro]"));
         assert!(message.contains("Draft alternative fix"));
         assert!(message.contains("Focus on parser module"));
