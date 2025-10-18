@@ -1,0 +1,31 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+expression: section_closed
+---
+ +------------------------------------------------------------------------------------------------+
+ |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251017-050546/code-rs/tui   |
+ +------------------------------------------------------------------------------------------------+
+ +Settings ▸ Model--------------------------------------------------------------------------------+
+ |                                                                                                |
+ | › Model              |+---------------------- Select Model & Reasoning ----------------------+ |
+ |   Theme              || Current model: gpt-5-codex                                           | |
+ |   Updates            || Reasoning effort: medium                                             | |
+ |   Agents             ||                                                                      | |
+ |   Auto Drive         || GPT-5-Codex                                                          | |
+ |   Validation         ||    High - Deep reasoning. Useful when solving difficult problems. (sl| |
+ |   GitHub             ||    Medium (current) - Balanced reasoning. Ideal for most tasks. (defa| |
+ |   Chrome             ||    Low - Basic reasoning. Works quickly in simple code bases. (fast) | |
+ |   MCP                ||                                                                      | |
+ |   Notifications      || GPT-5                                                                | |
+ |   Limits             ||    High - Deep reasoning. Useful when solving difficult problems. (sl| |
+ |                      ||    Medium - Balanced reasoning. Ideal for most tasks. (default)      | |
+ |                      ||    Low - Basic reasoning. Works quickly in simple code bases. (fast) | |
+ |                      |+----------------------------------------------------------------------+ |
+ | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
+ |                                                                                                |
+ +------------------------------------------------------------------------------------------------+
+
+ +------------------------------------------------------------------------------------------------+
+ | What can I code for you today?                                                                 |
+ +------------------------------------------------------------------------------------------------+
+   Read Only  (Shift+Tab change)                                                       Ctrl+H help

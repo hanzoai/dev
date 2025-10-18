@@ -22,10 +22,10 @@ impl SettingsSection {
         SettingsSection::AutoDrive,
         SettingsSection::Validation,
         SettingsSection::Github,
-        SettingsSection::Limits,
         SettingsSection::Chrome,
         SettingsSection::Mcp,
         SettingsSection::Notifications,
+        SettingsSection::Limits,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -44,6 +44,22 @@ impl SettingsSection {
         }
     }
 
+    pub(crate) const fn help_line(self) -> &'static str {
+        match self {
+            SettingsSection::Model => "Choose the language model used for new completions.",
+            SettingsSection::Theme => "Switch between preset color palettes and adjust contrast.",
+            SettingsSection::Updates => "Control CLI auto-update cadence and release channels.",
+            SettingsSection::Agents => "Configure linked agents and default task permissions.",
+            SettingsSection::AutoDrive => "Manage Auto Drive defaults for review and cadence.",
+            SettingsSection::Validation => "Toggle validation groups and tool availability.",
+            SettingsSection::Github => "Monitor GitHub workflows after pushes.",
+            SettingsSection::Limits => "Inspect API usage, rate limits, and reset windows.",
+            SettingsSection::Chrome => "Connect to Chrome or switch browser integrations.",
+            SettingsSection::Mcp => "Enable and manage local MCP servers for tooling.",
+            SettingsSection::Notifications => "Adjust desktop and terminal notification preferences.",
+        }
+    }
+
     pub(crate) const fn placeholder(self) -> &'static str {
         match self {
             SettingsSection::Model => "Model settings coming soon.",
@@ -57,22 +73,6 @@ impl SettingsSection {
             SettingsSection::Chrome => "Chrome integration settings coming soon.",
             SettingsSection::Mcp => "MCP server management coming soon.",
             SettingsSection::Notifications => "Notification preferences coming soon.",
-        }
-    }
-
-    pub(crate) fn shortcut(self) -> Option<char> {
-        match self {
-            SettingsSection::Model => Some('m'),
-            SettingsSection::Theme => Some('t'),
-            SettingsSection::Updates => Some('u'),
-            SettingsSection::Agents => Some('a'),
-            SettingsSection::AutoDrive => Some('d'),
-            SettingsSection::Validation => Some('v'),
-            SettingsSection::Github => Some('g'),
-            SettingsSection::Limits => Some('l'),
-            SettingsSection::Chrome => Some('c'),
-            SettingsSection::Mcp => Some('p'),
-            SettingsSection::Notifications => Some('n'),
         }
     }
 

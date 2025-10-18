@@ -29,6 +29,7 @@ use code_tui::test_helpers::{
     AutoContinueModeFixture,
     ChatWidgetHarness,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use regex_lite::Regex;
 use serde_json::json;
 use std::path::PathBuf;
@@ -42,6 +43,15 @@ fn normalize_output(text: String) -> String {
         .collect::<String>()
         .pipe(normalize_timers)
         .pipe(normalize_spacer_rows)
+}
+
+fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    }
 }
 
 fn normalize_glyph(ch: char) -> char {
@@ -1253,4 +1263,108 @@ fn plan_agent_keeps_single_aggregate_block() {
     let output = render_chat_widget_to_vt100(&mut harness, 80, 40);
     let agent_blocks = harness.count_agent_run_cells();
     assert_eq!(agent_blocks, 1, "expected a single aggregate agent block, saw {}\n{}", agent_blocks, output);
+}
+
+#[test]
+fn settings_overlay_overview_layout() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 100, 28);
+    let output = normalize_output(frame);
+    insta::assert_snapshot!("settings_overlay_overview_layout", output);
+}
+
+#[test]
+fn settings_overlay_overview_truncates() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 60, 20);
+    let output = normalize_output(frame);
+    insta::assert_snapshot!("settings_overlay_overview_truncates", output);
+}
+
+#[test]
+fn settings_overview_hints_clean() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 100, 22);
+    let output = normalize_output(frame);
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("Settings ▸ Overview")),
+        "border title should show settings breadcrumb\n{}",
+        output
+    );
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("↑ ↓ Move    Enter Open    Esc Close    ? Help")),
+        "footer hints should appear on the last row\n{}",
+        output
+    );
+    insta::assert_snapshot!("settings_overview_hints_clean", output);
+}
+
+#[test]
+fn settings_overlay_theme_swatch_visible() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    let frame = render_chat_widget_to_vt100(&mut harness, 100, 28);
+    let normalized = normalize_output(frame.clone());
+    assert!(
+        normalized.contains("Theme: "),
+        "theme summary should include labeled theme value\n{}",
+        frame
+    );
+    assert!(
+        normalized.contains("Spinner:"),
+        "theme summary should include spinner label\n{}",
+        frame
+    );
+}
+
+#[test]
+fn settings_help_overlay_toggles() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    harness.send_key(make_key(KeyCode::Char('?'), KeyModifiers::NONE));
+    let open = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_open", open);
+
+    harness.send_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+    let closed = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_closed", closed);
+}
+
+#[test]
+fn settings_help_overlay_from_section() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.suppress_rate_limit_refresh();
+    harness.open_settings_overlay_overview();
+
+    harness.send_key(make_key(KeyCode::Enter, KeyModifiers::NONE));
+    harness.send_key(make_key(KeyCode::Char('?'), KeyModifiers::NONE));
+    let section_open = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_section_open", section_open);
+
+    harness.send_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
+    let section_closed = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
+    insta::assert_snapshot!("settings_help_overlay_section_closed", section_closed);
 }
