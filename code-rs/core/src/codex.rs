@@ -52,6 +52,7 @@ use uuid::Uuid;
 use crate::AuthManager;
 use crate::CodexAuth;
 use crate::agent_tool::AgentStatusUpdatePayload;
+use crate::git_worktree;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::protocol::WebSearchBeginEvent;
 use crate::protocol::WebSearchCompleteEvent;
@@ -8450,6 +8451,23 @@ async fn handle_container_exec_with_params(
         .await
     {
         MaybeApplyPatchVerified::Body(action) => {
+            if let Some(branch_root) = git_worktree::branch_worktree_root(sess.get_cwd()) {
+                if let Some(guidance) = guard_apply_patch_outside_branch(&branch_root, &action) {
+                    let order = sess.next_background_order(&sub_id, attempt_req, output_index);
+                    sess
+                        .notify_background_event_with_order(
+                            &sub_id,
+                            order,
+                            format!("Command guard: {}", guidance.clone()),
+                        )
+                        .await;
+
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id,
+                        output: FunctionCallOutputPayload { content: guidance, success: None },
+                    };
+                }
+            }
             let changes = convert_apply_patch_to_protocol(&action);
             turn_diff_tracker.on_patch_begin(&changes);
 
@@ -10756,6 +10774,86 @@ fn line_contains_cat_heredoc_write(line: &str) -> bool {
     }
 
     false
+}
+
+fn guard_apply_patch_outside_branch(branch_root: &Path, action: &ApplyPatchAction) -> Option<String> {
+    let branch_norm = match normalize_absolute(branch_root) {
+        Some(path) => path,
+        None => {
+            return Some(format!(
+                "apply_patch blocked: failed to resolve /branch worktree root {}. Stay inside the worktree until you finish with `/merge`.",
+                branch_root.display()
+            ));
+        }
+    };
+    let action_cwd_norm = match normalize_absolute(&action.cwd) {
+        Some(path) => path,
+        None => {
+            return Some(format!(
+                "apply_patch blocked: the command resolved outside the /branch worktree (cwd {}). Stay inside {} until you finish with `/merge`.",
+                action.cwd.display(),
+                branch_root.display()
+            ));
+        }
+    };
+    if !path_within(&action_cwd_norm, &branch_norm) {
+        return Some(format!(
+            "apply_patch blocked: the active /branch worktree is {} but the command tried to run from {}. Stay inside the worktree until you finish with `/merge`.",
+            branch_root.display(),
+            action.cwd.display()
+        ));
+    }
+
+    for path in action.changes().keys() {
+        let normalized = match normalize_absolute(path) {
+            Some(value) => value,
+            None => {
+                return Some(format!(
+                    "apply_patch blocked: could not resolve patch target {} inside worktree {}. Keep edits within the /branch directory.",
+                    path.display(),
+                    branch_root.display()
+                ));
+            }
+        };
+        if !path_within(&normalized, &branch_norm) {
+            return Some(format!(
+                "apply_patch blocked: patch would modify {} outside the active /branch worktree {}. Apply changes from within the worktree before `/merge`.",
+                path.display(),
+                branch_root.display()
+            ));
+        }
+    }
+
+    None
+}
+
+fn normalize_absolute(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => result.push(prefix.as_os_str()),
+            Component::RootDir => result.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !result.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(part) => result.push(part),
+        }
+    }
+    if result.as_os_str().is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
+fn path_within(path: &Path, base: &Path) -> bool {
+    path.starts_with(base)
 }
 
 fn guidance_for_cat_write(suggestion: &CatWriteSuggestion) -> String {

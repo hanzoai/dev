@@ -6,6 +6,41 @@ use std::path::{Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::process::Command;
 
+/// Returns the `/.../.code/branches/<worktree>` root when `path` resides inside a branch worktree.
+pub fn branch_worktree_root(path: &Path) -> Option<PathBuf> {
+    use std::ffi::OsStr;
+
+    let mut candidate: Option<PathBuf> = None;
+    for ancestor in path.ancestors() {
+        let parent = ancestor.parent()?;
+        if parent
+            .file_name()
+            .map(|name| name == OsStr::new("branches"))
+            .unwrap_or(false)
+        {
+            let mut higher = parent.parent();
+            while let Some(dir) = higher {
+                if dir
+                    .file_name()
+                    .map(|name| name == OsStr::new(".code"))
+                    .unwrap_or(false)
+                {
+                    candidate = Some(ancestor.to_path_buf());
+                    break;
+                }
+                higher = dir.parent();
+            }
+        }
+    }
+
+    candidate
+}
+
+/// Returns true when `path` resides inside a `/.../.code/branches/<worktree>` directory.
+pub fn is_branch_worktree_path(path: &Path) -> bool {
+    branch_worktree_root(path).is_some()
+}
+
 /// Sanitize a string to be used as a single git refname component.
 ///
 /// Converts to lowercase, keeps [a-z0-9-], collapses other runs into '-'.
