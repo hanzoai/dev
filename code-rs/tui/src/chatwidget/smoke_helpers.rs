@@ -1,17 +1,19 @@
 #![allow(dead_code)]
 
 use super::ChatWidget;
-use crate::bottom_pane::SettingsSection;
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::history_cell::{self, HistoryCellType};
 use crate::markdown_render::render_markdown_text;
 use crate::tui::TerminalInfo;
+use crate::bottom_pane::SettingsSection;
+use crossterm::event::KeyEvent;
 use code_core::config::{Config, ConfigOverrides, ConfigToml};
 use code_core::history::state::HistoryRecord;
 use code_core::protocol::{BackgroundEventEvent, Event, EventMsg, OrderMeta};
 use once_cell::sync::Lazy;
+use chrono::Utc;
 use ratatui::text::Line;
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver};
@@ -162,6 +164,11 @@ impl ChatWidgetHarness {
         }
     }
 
+    pub fn send_key(&mut self, key_event: KeyEvent) {
+        self.chat.handle_key_event(key_event);
+        self.flush_into_widget();
+    }
+
     pub(crate) fn drain_events(&self) -> Vec<AppEvent> {
         let mut out = Vec::new();
         while let Ok(ev) = self.events.try_recv() {
@@ -178,6 +185,16 @@ impl ChatWidgetHarness {
         self.chat.ensure_settings_overlay_section(SettingsSection::Agents);
         self.chat.show_agents_overview_ui();
         self.flush_into_widget();
+    }
+
+    pub fn open_settings_overlay_overview(&mut self) {
+        self.chat.show_settings_overlay(None);
+        self.flush_into_widget();
+    }
+
+    pub fn suppress_rate_limit_refresh(&mut self) {
+        self.chat.rate_limit_last_fetch_at = Some(Utc::now());
+        self.chat.rate_limit_fetch_inflight = false;
     }
 
     pub fn show_agent_editor(&mut self, name: impl Into<String>) {
