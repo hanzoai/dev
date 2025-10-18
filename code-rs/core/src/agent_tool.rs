@@ -1207,10 +1207,18 @@ pub fn create_agent_tool(allowed_models: &[String]) -> OpenAiTool {
         },
     );
     create_properties.insert(
+        "write".to_string(),
+        JsonSchema::Boolean {
+            description: Some(
+                "Enable isolated write worktrees for each agent (default: true). Set false to keep the agent read-only.".to_string(),
+            ),
+        },
+    );
+    create_properties.insert(
         "read_only".to_string(),
         JsonSchema::Boolean {
             description: Some(
-                "When true, run in read-only mode (default: false)".to_string(),
+                "Deprecated: inverse of `write`. Prefer setting `write` instead.".to_string(),
             ),
         },
     );
@@ -1378,6 +1386,9 @@ pub struct RunAgentParams {
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub write: Option<bool>,
+    #[serde(default)]
     pub read_only: Option<bool>,
     pub name: Option<String>,
 }
@@ -1390,6 +1401,9 @@ pub struct AgentCreateOptions {
     pub context: Option<String>,
     pub output: Option<String>,
     pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub write: Option<bool>,
+    #[serde(default)]
     pub read_only: Option<bool>,
     pub name: Option<String>,
 }

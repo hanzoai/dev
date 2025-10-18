@@ -82,7 +82,7 @@ pub fn default_instructions_for(name: &str) -> Option<String> {
 
 1. If you do not fully understand the task, research it briefly. Do not attempt to code or solve it, just understand the task in the context of the current code base.
 2. Provide full context to the agents so they can work on the task themselves. You do not need to guide them on how to write the code - focus on describing the current task and desired outcome.
-3. Start agents with read-only: false - each agents will work in a separate worktree and can:
+3. Start agents with write: true - each agent will work in a separate worktree and can:
 - Read and analyze existing code
 - Create new files
 - Modify existing files
@@ -133,11 +133,12 @@ pub fn format_subagent_command(
         .or_else(|| default_instructions_for(name))
         .unwrap_or_default();
 
+    let write_flag = !read_only;
     let prompt = format!(
-        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent {{\"action\":\"create\",\"create\":{{\"models\":[{models}],\"read_only\":{ro}}}}}` to start a batch of agents.\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using the create action starts all agents at once and returns a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"<batch_id>\",\"return_all\":true}}}}` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results.\n    Use `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"<agent_id>\"}}}}` to fetch detailed output, or inspect the worktree directly if `read_only` is false.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instructions}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
+        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent {{\"action\":\"create\",\"create\":{{\"models\":[{models}],\"write\":{write_flag}}}}}` to start a batch of agents.\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using the create action starts all agents at once and returns a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"<batch_id>\",\"return_all\":true}}}}` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results.\n    Use `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"<agent_id>\"}}}}` to fetch detailed output, or inspect the worktree directly when `write` is true.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instructions}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
         name = name,
         models = models_str,
-        ro = read_only,
+        write_flag = write_flag,
         instructions = instr_text,
         task = task,
     );
