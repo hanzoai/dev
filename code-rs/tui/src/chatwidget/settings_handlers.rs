@@ -14,18 +14,39 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
 
     let Some(ref mut overlay) = chat.settings.overlay else { return true };
 
+    if overlay.is_help_visible() {
+        match key_event.code {
+            KeyCode::Esc => {
+                overlay.hide_help();
+                chat.request_redraw();
+            }
+            KeyCode::Char('?') => {
+                overlay.hide_help();
+                chat.request_redraw();
+            }
+            _ => {}
+        }
+        return true;
+    }
+
+    if matches!(key_event.code, KeyCode::Char('?')) {
+        overlay.show_help(overlay.is_menu_active());
+        chat.request_redraw();
+        return true;
+    }
+
     if overlay.is_menu_active() {
         let mut handled = true;
         let mut changed = false;
 
         match key_event.code {
-            KeyCode::Enter | KeyCode::Right => {
+            KeyCode::Enter => {
                 let section = overlay.active_section();
                 overlay.set_mode_section(section);
                 chat.request_redraw();
                 return true;
             }
-            KeyCode::Esc | KeyCode::Left => {
+            KeyCode::Esc => {
                 chat.close_settings_overlay();
                 return true;
             }
@@ -34,9 +55,6 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 changed = overlay.select_next();
-            }
-            KeyCode::Char(c) => {
-                changed = overlay.select_by_shortcut(c);
             }
             KeyCode::Home => {
                 changed = overlay.set_section(crate::bottom_pane::SettingsSection::Model);
@@ -61,7 +79,7 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
     }
 
     match key_event.code {
-        KeyCode::Esc | KeyCode::Left if key_event.modifiers.is_empty() => {
+        KeyCode::Esc if key_event.modifiers.is_empty() => {
             overlay.set_mode_menu(None);
             chat.request_redraw();
             return true;
@@ -101,7 +119,7 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         KeyCode::BackTab => {
             changed = overlay.select_previous();
         }
-        KeyCode::Right | KeyCode::Tab => {
+        KeyCode::Tab => {
             changed = overlay.select_next();
         }
         KeyCode::Up | KeyCode::Char('k') => {
@@ -109,9 +127,6 @@ pub(super) fn handle_settings_key(chat: &mut ChatWidget<'_>, key_event: KeyEvent
         }
         KeyCode::Down | KeyCode::Char('j') => {
             changed = overlay.select_next();
-        }
-        KeyCode::Char(c) => {
-            changed = overlay.select_by_shortcut(c);
         }
         KeyCode::Home => {
             changed = overlay.set_section(crate::bottom_pane::SettingsSection::Model);
