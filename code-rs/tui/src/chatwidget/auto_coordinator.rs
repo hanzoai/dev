@@ -28,6 +28,7 @@ use uuid::Uuid;
 use crate::app_event::{
     AppEvent,
     AutoCoordinatorStatus,
+    AutoObserverReason,
     AutoObserverStatus,
     AutoObserverTelemetry,
     AutoReviewCommit,
@@ -53,6 +54,7 @@ use super::auto_observer::{
     start_auto_observer,
     AutoObserverHandle,
     AutoObserverCommand,
+    ObserverEvaluation,
     ObserverOutcome,
     ObserverReason,
     ObserverTrigger,
@@ -880,19 +882,24 @@ fn run_auto_loop(
     let mut last_cli_context: Option<String> = None;
     let mut last_cli_prompt: Option<String> = None;
     let mut last_progress_summary: Option<String> = None;
-    let mut observer_handle = match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
-        Ok(handle) => Some(handle),
-        Err(err) => {
-            tracing::error!("failed to start auto observer: {err:#}");
-            None
+    let observer_enabled = config.tui.auto_drive.observer_enabled;
+    let mut observer_handle = if observer_enabled {
+        match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                tracing::error!("failed to start auto observer: {err:#}");
+                None
+            }
         }
-    };
-    let observer_cadence_interval = if observer_cadence == 0 {
-        None
     } else {
+        None
+    };
+    let observer_cadence_interval = if observer_enabled && observer_cadence != 0 {
         observer_handle
             .as_ref()
             .map(|handle| handle.cadence() as u64)
+    } else {
+        None
     };
 
     loop {
@@ -1047,6 +1054,9 @@ fn run_auto_loop(
                         let final_focus = cross_check
                             .as_ref()
                             .and_then(|data| data.focus.clone());
+                        let final_summary_for_event = final_summary.clone();
+                        let final_focus_for_event = final_focus.clone();
+                        let observer_conversation_for_event = observer_conversation.clone();
 
                         let validation_result = run_final_cross_check(
                             &runtime,
@@ -1060,12 +1070,18 @@ fn run_auto_loop(
                             cross_check_tools.clone(),
                         );
 
-                        if let Ok((observer_status, replace_message, additional_instructions)) =
-                            &validation_result
-                        {
+                        if let Ok(evaluation) = validation_result {
+                            let ObserverEvaluation {
+                                status: observer_status,
+                                replace_message,
+                                additional_instructions,
+                                raw_output,
+                                parsed_response,
+                            } = evaluation;
+
                             let telemetry = AutoObserverTelemetry {
                                 trigger_count: observer_telemetry.trigger_count.saturating_add(1),
-                                last_status: *observer_status,
+                                last_status: observer_status,
                                 last_intervention: summarize_intervention(
                                     replace_message.as_deref(),
                                     additional_instructions.as_deref(),
@@ -1073,10 +1089,18 @@ fn run_auto_loop(
                             };
                             observer_telemetry = telemetry.clone();
                             let observer_event = AppEvent::AutoObserverReport {
-                                status: *observer_status,
+                                status: observer_status,
                                 telemetry,
                                 replace_message: replace_message.clone(),
                                 additional_instructions: additional_instructions.clone(),
+                                reason: AutoObserverReason::CrossCheck {
+                                    forced: true,
+                                    summary: final_summary_for_event,
+                                    focus: final_focus_for_event,
+                                },
+                                conversation: observer_conversation_for_event,
+                                raw_output: Some(raw_output),
+                                parsed_response: Some(parsed_response),
                             };
                             app_event_tx.send(observer_event);
 
@@ -1175,8 +1199,10 @@ fn run_auto_loop(
                     additional_instructions,
                     telemetry,
                     reason,
-                    conversation: _conversation,
+                    conversation,
                     turn_snapshot,
+                    raw_output,
+                    parsed_response,
                 } = outcome;
 
                 if let Some(instr) = additional_instructions.as_deref() {
@@ -1189,6 +1215,10 @@ fn run_auto_loop(
                     telemetry,
                     replace_message: replace_message.clone(),
                     additional_instructions: additional_instructions.clone(),
+                    reason: AutoObserverReason::from(reason.clone()),
+                    conversation: conversation.clone(),
+                    raw_output,
+                    parsed_response,
                 };
                 app_event_tx.send(event);
 
@@ -1419,7 +1449,15 @@ fn dispatch_cross_check(
     }
 
     match run_observer_once(runtime, client, trigger.clone()) {
-        Ok((status, replace_message, additional_instructions)) => {
+        Ok(evaluation) => {
+            let ObserverEvaluation {
+                status,
+                replace_message,
+                additional_instructions,
+                raw_output,
+                parsed_response,
+            } = evaluation;
+
             let outcome = ObserverOutcome {
                 status,
                 replace_message,
@@ -1428,6 +1466,8 @@ fn dispatch_cross_check(
                 reason,
                 conversation,
                 turn_snapshot,
+                raw_output: Some(raw_output),
+                parsed_response: Some(parsed_response),
             };
             let _ = coordinator_tx.send(AutoCoordinatorCommand::ObserverResult(outcome));
         }
@@ -1451,7 +1491,7 @@ fn run_final_cross_check(
     focus: Option<String>,
     turn_snapshot: Option<CrossCheckTurnSnapshot>,
     tools: Vec<OpenAiTool>,
-) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
+) -> Result<ObserverEvaluation> {
     let trigger = ObserverTrigger {
         conversation,
         goal_text: goal_text.to_string(),
@@ -1483,6 +1523,17 @@ fn read_coordinator_prompt(_config: &Config) -> Option<String> {
                 COORDINATOR_PROMPT_PATH
             );
             None
+        }
+    }
+}
+
+impl From<ObserverReason> for AutoObserverReason {
+    fn from(reason: ObserverReason) -> Self {
+        match reason {
+            ObserverReason::Cadence => AutoObserverReason::Cadence,
+            ObserverReason::CrossCheck { forced, summary, focus } => {
+                AutoObserverReason::CrossCheck { forced, summary, focus }
+            }
         }
     }
 }
