@@ -190,7 +190,7 @@ impl AgentRunCell {
         });
     }
 
-    pub(crate) fn summary_label(&self) -> Option<String> {
+    pub(crate) fn display_title(&self) -> Option<String> {
         if let Some(label) = self.batch_label.as_ref() {
             let trimmed = label.trim();
             if !trimmed.is_empty() {
@@ -198,10 +198,11 @@ impl AgentRunCell {
             }
         }
         let trimmed_name = self.agent_name.trim();
-        if !trimmed_name.is_empty() {
-            return Some(trimmed_name.to_string());
+        if trimmed_name.is_empty() || trimmed_name.eq_ignore_ascii_case("(pending)") {
+            None
+        } else {
+            Some(trimmed_name.to_string())
         }
-        None
     }
 
     pub(crate) fn set_plan(&mut self, plan: Vec<String>) {

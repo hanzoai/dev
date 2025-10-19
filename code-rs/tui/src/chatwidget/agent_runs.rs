@@ -264,8 +264,7 @@ fn clean_label(value: &str) -> Option<String> {
 
 fn insert_agent_start_message(chat: &mut ChatWidget<'_>, order_key: OrderKey, tracker: &AgentRunTracker) {
     let line = agent_start_line(tracker);
-    let lines = vec![Line::from(String::new()), line];
-    let state = plain_message_state_from_lines(lines, HistoryCellType::BackgroundEvent);
+    let state = plain_message_state_from_lines(vec![line], HistoryCellType::BackgroundEvent);
     let cell = PlainHistoryCell::from_state(state);
     let _ = chat.history_insert_with_key_global_tagged(Box::new(cell), order_key, "background", None);
 }

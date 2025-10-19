@@ -1397,6 +1397,7 @@ pub struct AgentCreateOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentIdentifierOptions {
     pub agent_id: Option<String>,
+    pub batch_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1590,11 +1591,13 @@ mod tests {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckAgentStatusParams {
     pub agent_id: String,
+    pub batch_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetAgentResultParams {
     pub agent_id: String,
+    pub batch_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,14 +10,14 @@ expression: output
 
 
  ★ Popular commands:
-   /agents - open Settings at Agents section
+   /agents - open Settings overlay at Agents section
    /model - open Settings at Model section NEW with GPT-5-Codex!
    /chrome - connect to Chrome (opens Settings at Chrome)
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
    /branch - work in an isolated /branch then /merge when done (great for
    parallel work)
-   /limits - visualize rate limits (opens Settings at Limits)
+   /limits - open Settings overlay at Limits section
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
