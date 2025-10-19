@@ -7,7 +7,7 @@ expression: frame
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
    parallel work)
-   /limits - visualize rate limits (opens Settings at Limits)
+   /limits - open Settings overlay at Limits section
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
@@ -15,7 +15,8 @@ expression: frame
   Auto Drive > Working                                Awaiting input (0 turns)
  Auto Drive will send:
  Prompt:
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
+ justfile run manual
+
+
+
    Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel

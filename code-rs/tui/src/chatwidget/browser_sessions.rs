@@ -3,10 +3,12 @@ use super::tool_cards::ToolCardSlot;
 use crate::history_cell::{
     BrowserSessionCell,
     PlainHistoryCell,
-    plain_message_state_from_paragraphs,
+    HistoryCellType,
+    plain_message_state_from_lines,
 };
-use crate::history::state::{PlainMessageKind, PlainMessageRole};
 use code_core::protocol::OrderMeta;
+use ratatui::style::{Style, Stylize};
+use ratatui::text::{Line, Span};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -43,41 +45,37 @@ fn insert_browser_anchor(
     order_key: OrderKey,
     tracker: &BrowserSessionTracker,
 ) {
-    let message = browser_anchor_text(tracker);
-    let state = plain_message_state_from_paragraphs(
-        PlainMessageKind::Plain,
-        PlainMessageRole::System,
-        [message],
-    );
+    let line = browser_anchor_line(tracker);
+    let state = plain_message_state_from_lines(vec![line], HistoryCellType::BackgroundEvent);
     let cell = PlainHistoryCell::from_state(state);
-    let _ = chat.history_insert_with_key_global(Box::new(cell), order_key);
+    let _ = chat.history_insert_with_key_global_tagged(Box::new(cell), order_key, "background", None);
 }
 
-fn browser_anchor_text(tracker: &BrowserSessionTracker) -> String {
+fn browser_anchor_line(tracker: &BrowserSessionTracker) -> Line<'static> {
     let label = tracker.cell.summary_label();
-    let url = tracker.cell.current_url();
+    let url = tracker.cell.current_url().map(|value| value.to_string());
 
-    match url {
-        Some(url) if url == label => format!(
-            "Browser session {} started here; latest view is shown below.",
-            url
-        ),
-        Some(url) => format!(
-            "Browser session \"{}\" ({}) started here; latest view is shown below.",
-            label,
-            url
-        ),
-        None => {
-            if label.is_empty() {
-                "Browser session started here; latest view is shown below.".to_string()
-            } else {
-                format!(
-                    "Browser session \"{}\" started here; latest view is shown below.",
-                    label
-                )
-            }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::raw("Started "));
+
+    let mut title = label.clone();
+    if title.trim().is_empty() {
+        title = url
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| "browser session".to_string());
+    }
+    spans.push(Span::styled(title.clone(), Style::new().bold()));
+
+    if let Some(url) = url.as_ref() {
+        if url != &title {
+            spans.push(Span::raw(format!(" ({})", url)));
         }
     }
+
+    spans.push(Span::raw(" — latest view is shown below."));
+
+    Line::from(spans)
 }
 
 fn ensure_cell_picker(chat: &ChatWidget<'_>, cell: &BrowserSessionCell) {
@@ -160,10 +158,6 @@ pub(super) fn handle_custom_tool_end(
         return false;
     }
 
-    let order_key = order
-        .map(|meta| chat.provider_order_key_from_order_meta(meta))
-        .unwrap_or_else(|| chat.next_internal_key());
-
     let key = chat
         .tools_state
         .browser_session_by_call
@@ -175,6 +169,10 @@ pub(super) fn handle_custom_tool_end(
         Some(tracker) => tracker,
         None => return false,
     };
+
+    let order_key = order
+        .map(|meta| chat.provider_order_key_from_order_meta(meta))
+        .unwrap_or(tracker.slot.order_key);
 
     tracker.slot.set_order_key(order_key);
 
@@ -248,7 +246,7 @@ pub(super) fn handle_background_event(
 
     let order_key = order
         .map(|meta| chat.provider_order_key_from_order_meta(meta))
-        .unwrap_or_else(|| chat.next_internal_key());
+        .unwrap_or(tracker.slot.order_key);
     tracker.slot.set_order_key(order_key);
 
     let console_line = if message.starts_with("⚠️") {
@@ -296,7 +294,7 @@ pub(super) fn handle_screenshot_update(
 
     let order_key = order
         .map(|meta| chat.provider_order_key_from_order_meta(meta))
-        .unwrap_or_else(|| chat.next_internal_key());
+        .unwrap_or(tracker.slot.order_key);
     tracker.slot.set_order_key(order_key);
 
     tracker.cell.set_url(url.to_string());

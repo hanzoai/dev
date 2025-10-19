@@ -126,7 +126,7 @@ pub(super) fn replace_tool_card<C: ToolCardCell>(
     cell: &C,
 ) -> usize {
     if slot.has_order_change() {
-        remove_existing_card(chat, slot);
+        remove_existing_card::<C>(chat, slot);
     }
 
     let idx = ensure_tool_card(chat, slot, cell);
@@ -139,29 +139,41 @@ pub(super) fn replace_tool_card<C: ToolCardCell>(
     idx
 }
 
-fn remove_existing_card(chat: &mut ChatWidget<'_>, slot: &mut ToolCardSlot) {
-    let mut removed = false;
+fn remove_existing_card<C: ToolCardCell>(chat: &mut ChatWidget<'_>, slot: &mut ToolCardSlot) {
+    let signature = slot.signature().map(|s| s.to_string());
 
-    if let Some(id) = slot.history_id {
+    let mut target_idx = if let Some(id) = slot.history_id {
         if let Some(idx) = chat.cell_index_for_history_id(id) {
-            chat.history_remove_at(idx);
-            removed = true;
+            if cell_matches::<C>(chat, idx, slot, signature.as_deref()) {
+                Some(idx)
+            } else {
+                None
+            }
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
-    if !removed {
+    if target_idx.is_none() {
         if let Some(idx) = slot.cell_index {
-            if idx < chat.history_cells.len() {
-                chat.history_remove_at(idx);
-                removed = true;
+            if idx < chat.history_cells.len() && cell_matches::<C>(chat, idx, slot, signature.as_deref()) {
+                target_idx = Some(idx);
             }
         }
     }
 
-    if removed {
-        slot.cell_index = None;
-        slot.history_id = None;
+    if target_idx.is_none() {
+        target_idx = find_card_index::<C>(chat, slot, signature.as_deref());
     }
+
+    if let Some(idx) = target_idx {
+        chat.history_remove_at(idx);
+    }
+
+    slot.cell_index = None;
+    slot.history_id = None;
 }
 
 fn prune_tool_card_duplicates<C: ToolCardCell>(

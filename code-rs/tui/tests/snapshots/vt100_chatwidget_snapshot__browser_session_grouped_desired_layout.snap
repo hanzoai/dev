@@ -1,6 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 918
+assertion_line: 921
 expression: output
 ---
  +----------------------------------------------------------------------------+
@@ -9,12 +9,12 @@ expression: output
  + Browser -------------------------------------------------------------------+
  | • https://example.com/docs                                   Ctrl+B expand |
  +----------------------------------------------------------------------------+
+   /limits - open Settings overlay at Limits section
+   /review - review your changes for potential issues
+   /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
  › Open docs and find login button
-
-   Browser session "example.com" (https://example.com/docs) started here;
-   latest view is shown below.
 
    +- +Browser--------------------------------+
    |  |Screenshot:                            |
