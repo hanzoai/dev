@@ -16434,7 +16434,18 @@ fi\n\
                 .find(|a| a.name.eq_ignore_ascii_case(name))
             {
                 let builtin = is_builtin_agent(&cfg.name, &cfg.command);
-                let installed = builtin || command_exists(&cfg.command);
+                let spec_cli = agent_model_spec(&cfg.name)
+                    .or_else(|| agent_model_spec(&cfg.command))
+                    .map(|spec| spec.cli);
+                let installed = if builtin {
+                    true
+                } else if command_exists(&cfg.command) {
+                    true
+                } else if let Some(cli) = spec_cli {
+                    command_exists(cli)
+                } else {
+                    false
+                };
                 agent_rows.push(AgentOverviewRow {
                     name: cfg.name.clone(),
                     enabled: cfg.enabled,
@@ -16443,7 +16454,14 @@ fi\n\
             } else {
                 let cmd = name.clone();
                 let builtin = is_builtin_agent(name, &cmd);
-                let installed = builtin || command_exists(&cmd);
+                let spec_cli = agent_model_spec(name).map(|spec| spec.cli);
+                let installed = if builtin {
+                    true
+                } else if let Some(cli) = spec_cli {
+                    command_exists(cli)
+                } else {
+                    command_exists(&cmd)
+                };
                 agent_rows.push(AgentOverviewRow {
                     name: name.clone(),
                     enabled: true,
