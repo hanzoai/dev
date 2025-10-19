@@ -2,7 +2,7 @@ use crate::codex::ApprovedCommandPattern;
 use crate::protocol::ApprovedCommandMatchKind;
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
-use crate::agent_defaults::default_agent_configs;
+use crate::agent_defaults::{agent_model_spec, default_agent_configs};
 use crate::config_types::AutoDriveContinueMode;
 use crate::config_types::AutoDriveSettings;
 use crate::config_types::AllowedCommand;
@@ -2168,7 +2168,15 @@ impl Config {
             .agents
             .into_iter()
             .map(|mut a| {
-                if a.command.trim().is_empty() { a.command = a.name.clone(); }
+                let command_trimmed = a.command.trim();
+                if command_trimmed.is_empty() {
+                    if let Some(spec) = agent_model_spec(&a.name) {
+                        a.command = spec.cli.to_string();
+                    } else {
+                        a.command = a.name.clone();
+                    }
+                }
+
                 a
             })
             .collect();
