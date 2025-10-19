@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app_event::AppEvent;
@@ -13,6 +13,7 @@ use crate::bottom_pane::{
     agents_settings_view::SubagentEditorView,
     AutoDriveSettingsView,
     BottomPaneView,
+    settings_panel::{render_panel, PanelFrameStyle},
     GithubSettingsView,
     McpSettingsView,
     ModelSelectionView,
@@ -164,7 +165,7 @@ impl ModelSettingsContent {
 
 impl SettingsContent for ModelSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.view.render(area, buf);
+        self.view.render_without_frame(area, buf);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -236,7 +237,7 @@ impl UpdatesSettingsContent {
 
 impl SettingsContent for UpdatesSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.view.render(area, buf);
+        self.view.render_without_frame(area, buf);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -311,7 +312,7 @@ impl AutoDriveSettingsContent {
 
 impl SettingsContent for AutoDriveSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.view.render(area, buf);
+        self.view.render_without_frame(area, buf);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -735,45 +736,73 @@ impl LimitsSettingsContent {
             .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text()))
             .render(area, buf);
     }
+
+    fn render_hint_row(&self, area: Rect, buf: &mut Buffer) {
+        use ratatui::widgets::Paragraph;
+
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let hint_style = Style::default().fg(crate::colors::text_dim());
+        let accent_style = Style::default().fg(crate::colors::function());
+        let line = Line::from(vec![
+            Span::styled("↑↓", accent_style),
+            Span::styled(" scroll  ", hint_style),
+            Span::styled("PgUp/PgDn", accent_style),
+            Span::styled(" page  ", hint_style),
+            Span::styled("◂ ▸", accent_style),
+            Span::styled(" change tab", hint_style),
+        ]);
+
+        Paragraph::new(line)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()).fg(crate::colors::text_dim()))
+            .render(area, buf);
+    }
 }
 
 impl SettingsContent for LimitsSettingsContent {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(vec![
-                Span::styled(" Rate limits ", Style::default().fg(crate::colors::text())),
-                Span::styled("——— ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("↑↓", Style::default().fg(crate::colors::function())),
-                Span::styled(" scroll  ", Style::default().fg(crate::colors::text_dim())),
-                Span::styled("◂ ▸", Style::default().fg(crate::colors::function())),
-                Span::styled(" change", Style::default().fg(crate::colors::text_dim())),
-            ]))
-            .style(Style::default().bg(crate::colors::background()))
-            .border_style(Style::default().fg(crate::colors::border()));
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        if inner.width == 0 || inner.height == 0 {
+        if area.width == 0 || area.height == 0 {
+            self.overlay.set_visible_rows(0);
+            self.overlay.set_max_scroll(0);
             return;
         }
 
-        let (tabs_area, body_area) = if self.overlay.tab_count() > 1 {
-            let [tabs_area, body_area] =
-                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(inner);
-            (Some(tabs_area), body_area)
+        fill_rect(
+            buf,
+            area,
+            Some(' '),
+            Style::default().bg(crate::colors::background()),
+        );
+
+        let has_tabs = self.overlay.tab_count() > 1;
+        let constraints = if has_tabs {
+            vec![Constraint::Length(1), Constraint::Length(2), Constraint::Fill(1)]
         } else {
-            (None, inner)
+            vec![Constraint::Length(1), Constraint::Fill(1)]
         };
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(area);
+
+        let hint_area = chunks[0];
+        let (tabs_area, body_area) = if has_tabs {
+            (Some(chunks[1]), chunks[2])
+        } else {
+            (None, chunks[1])
+        };
+
+        self.render_hint_row(hint_area, buf);
 
         if let Some(tabs_rect) = tabs_area {
             self.render_tabs(tabs_rect, buf);
         }
 
-        self.render_body(body_area.inner(Margin::new(1, 1)), buf);
+        self.render_body(body_area, buf);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -1305,10 +1334,13 @@ impl SettingsOverlayView {
         let active_section = self.active_section();
         let content_width = area.width as usize;
         let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut selected_range: Option<(usize, usize)> = None;
 
         for (idx, row) in self.overview_rows.iter().enumerate() {
             let is_active = row.section == active_section;
             let indicator = if is_active { "›" } else { " " };
+
+            let row_start = lines.len();
 
             if row.section == SettingsSection::Limits && !lines.is_empty() {
                 lines.push(Line::from(""));
@@ -1380,6 +1412,11 @@ impl SettingsOverlayView {
             }
             lines.push(info_line);
 
+            if is_active {
+                let row_end = lines.len().saturating_sub(1);
+                selected_range = Some((row_start, row_end));
+            }
+
             if idx != self.overview_rows.len().saturating_sub(1) {
                 lines.push(Line::from(""));
                 if matches!(row.section, SettingsSection::Updates) {
@@ -1395,9 +1432,38 @@ impl SettingsOverlayView {
             }
         }
 
+        let total_lines = lines.len();
+        let visible_lines = area.height as usize;
+        let mut scroll = 0usize;
+        if visible_lines > 0 && total_lines > visible_lines {
+            if let Some((start, end)) = selected_range {
+                let max_scroll = total_lines.saturating_sub(visible_lines);
+                let mut candidate = end
+                    .saturating_add(1)
+                    .saturating_sub(visible_lines);
+                if candidate > max_scroll {
+                    candidate = max_scroll;
+                }
+                if start < candidate {
+                    candidate = start.min(max_scroll);
+                }
+                if end >= candidate.saturating_add(visible_lines) {
+                    candidate = end
+                        .saturating_add(1)
+                        .saturating_sub(visible_lines)
+                        .min(max_scroll);
+                }
+                scroll = candidate;
+            } else {
+                scroll = total_lines.saturating_sub(visible_lines);
+            }
+        }
+        let scroll = scroll.min(u16::MAX as usize) as u16;
+
         Paragraph::new(lines)
             .alignment(Alignment::Left)
             .style(Style::default().bg(crate::colors::background()))
+            .scroll((scroll, 0))
             .render(area, buf);
     }
 
@@ -1518,7 +1584,141 @@ impl SettingsOverlayView {
             Layout::horizontal([Constraint::Length(22), Constraint::Fill(1)]).areas(area);
 
         self.render_sidebar(sidebar, buf);
-        self.render_content(main, buf);
+        self.render_section_panel(main, buf);
+    }
+
+    fn render_section_panel(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let title = Self::section_panel_title(self.active_section());
+        render_panel(
+            area,
+            buf,
+            title,
+            PanelFrameStyle::overlay().with_margin(Margin::new(1, 1)),
+            |inner, buf| {
+                self.render_content(inner, buf);
+                self.strip_child_border(inner, buf);
+            },
+        );
+    }
+
+    fn section_panel_title(section: SettingsSection) -> &'static str {
+        match section {
+            SettingsSection::Model => "Select Model & Reasoning",
+            SettingsSection::Theme => "Theme Settings",
+            SettingsSection::Updates => "Upgrade",
+            SettingsSection::Agents => "Agents",
+            SettingsSection::AutoDrive => "Auto Drive Settings",
+            SettingsSection::Validation => "Validation Settings",
+            SettingsSection::Github => "GitHub Settings",
+            SettingsSection::Limits => "Rate Limits",
+            SettingsSection::Chrome => "Chrome Launch Options",
+            SettingsSection::Notifications => "Notifications",
+            SettingsSection::Mcp => "MCP Servers",
+        }
+    }
+
+    fn strip_child_border(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let background = Style::default().bg(crate::colors::background()).fg(crate::colors::text());
+        let end_x = area.x + area.width - 1;
+        let end_y = area.y + area.height - 1;
+
+        let top_left_symbol = buf[(area.x, area.y)].symbol();
+        let top_right_symbol = buf[(end_x, area.y)].symbol();
+        let bottom_left_symbol = buf[(area.x, end_y)].symbol();
+        let bottom_right_symbol = buf[(end_x, end_y)].symbol();
+
+        let top_has_corners = Self::is_corner_symbol(top_left_symbol) && Self::is_corner_symbol(top_right_symbol);
+        let bottom_has_corners = Self::is_corner_symbol(bottom_left_symbol) && Self::is_corner_symbol(bottom_right_symbol);
+
+        let top_is_frame = top_has_corners
+            && (area.x..=end_x).all(|x| {
+                let symbol = buf[(x, area.y)].symbol();
+                Self::is_border_symbol(symbol) || Self::is_corner_symbol(symbol)
+            });
+        let bottom_is_frame = if area.height > 1 {
+            Some(
+                bottom_has_corners
+                    && (area.x..=end_x).all(|x| {
+                        let symbol = buf[(x, end_y)].symbol();
+                        Self::is_border_symbol(symbol) || Self::is_corner_symbol(symbol)
+                    }),
+            )
+        } else {
+            None
+        };
+
+        let left_has_corners = Self::is_corner_symbol(top_left_symbol) && Self::is_corner_symbol(bottom_left_symbol);
+        let right_has_corners = Self::is_corner_symbol(top_right_symbol) && Self::is_corner_symbol(bottom_right_symbol);
+
+        let left_is_frame = left_has_corners
+            && (area.y..=end_y).all(|y| {
+                let symbol = buf[(area.x, y)].symbol();
+                Self::is_border_symbol(symbol) || Self::is_corner_symbol(symbol)
+            });
+        let right_is_frame = if area.width > 1 {
+            Some(
+                right_has_corners
+                    && (area.y..=end_y).all(|y| {
+                        let symbol = buf[(end_x, y)].symbol();
+                        Self::is_border_symbol(symbol) || Self::is_corner_symbol(symbol)
+                    }),
+            )
+        } else {
+            None
+        };
+
+        if top_is_frame {
+            for x in area.x..=end_x {
+                let cell = &mut buf[(x, area.y)];
+                cell.set_symbol(" ");
+                cell.set_style(background);
+            }
+        }
+
+        if let Some(true) = bottom_is_frame {
+            for x in area.x..=end_x {
+                let cell = &mut buf[(x, end_y)];
+                cell.set_symbol(" ");
+                cell.set_style(background);
+            }
+        }
+
+        if left_is_frame {
+            for y in area.y..=end_y {
+                let cell = &mut buf[(area.x, y)];
+                cell.set_symbol(" ");
+                cell.set_style(background);
+            }
+        }
+
+        if let Some(true) = right_is_frame {
+            for y in area.y..=end_y {
+                let cell = &mut buf[(end_x, y)];
+                cell.set_symbol(" ");
+                cell.set_style(background);
+            }
+        }
+    }
+
+    fn is_border_symbol(symbol: &str) -> bool {
+        matches!(
+            symbol,
+            "│" | "┃" | "║" | "╎" | "┆" | "┊" | "┇" | "╏" | "╿"
+                | "─" | "━" | "═" | "╼" | "╾" | "┄" | "┈" | "╍"
+                | "┬" | "┴" | "├" | "┤" | "┼" | "╞" | "╡" | "╪" | "╫"
+        )
+    }
+
+    fn is_corner_symbol(symbol: &str) -> bool {
+        matches!(symbol, "┌" | "┐" | "└" | "┘" | "╭" | "╮" | "╰" | "╯")
     }
 
     fn render_help_overlay(&self, area: Rect, buf: &mut Buffer, help: &SettingsHelpOverlay) {
@@ -1595,44 +1795,97 @@ impl SettingsOverlayView {
             self.overview_rows.iter().map(|row| row.section).collect()
         };
 
-        let items: Vec<ListItem> = sections
-            .iter()
-            .map(|section| {
-                let is_active = *section == self.active_section();
-                let mut spans: Vec<Span<'static>> = Vec::new();
-                let prefix = if is_active { "›" } else { " " };
-                spans.push(Span::styled(
-                    prefix,
-                    Style::default().fg(crate::colors::text()),
-                ));
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(
-                    section.label(),
-                    if is_active {
-                        Style::default()
-                            .fg(crate::colors::text())
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(crate::colors::text_dim())
-                    },
-                ));
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
+        fill_rect(
+            buf,
+            area,
+            Some(' '),
+            Style::default().bg(crate::colors::background()),
+        );
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::RIGHT))
-            .highlight_style(
-                Style::default()
-                    .fg(crate::colors::primary())
-                    .add_modifier(Modifier::BOLD),
-            );
-        let mut state = ListState::default();
+        if sections.is_empty() {
+            return;
+        }
+
+        let visible = area.height as usize;
+        if visible == 0 {
+            return;
+        }
+
         let selected_idx = sections
             .iter()
-            .position(|section| *section == self.active_section());
-        state.select(selected_idx);
-        ratatui::widgets::StatefulWidget::render(list, area, buf, &mut state);
+            .position(|section| *section == self.active_section())
+            .unwrap_or(0);
+
+        let total = sections.len();
+        let mut start = 0usize;
+        if total > visible {
+            let half = visible / 2;
+            if selected_idx > half {
+                start = selected_idx - half;
+            }
+            if start + visible > total {
+                start = total - visible;
+            }
+        }
+        let end = (start + visible).min(total);
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for idx in start..end {
+            let section = sections[idx];
+            let is_active = idx == selected_idx;
+            let is_first_visible = idx == start;
+            let is_last_visible = idx + 1 == end;
+
+            let selection_indicator = if is_active { "›" } else { " " };
+            let overflow_indicator = if is_first_visible && start > 0 {
+                "↑"
+            } else if is_last_visible && end < total {
+                "↓"
+            } else {
+                " "
+            };
+
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            spans.push(Span::styled(
+                selection_indicator.to_string(),
+                Style::default().fg(crate::colors::text()),
+            ));
+            spans.push(Span::styled(
+                overflow_indicator.to_string(),
+                Style::default().fg(crate::colors::text_dim()),
+            ));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                section.label(),
+                if is_active {
+                    Style::default()
+                        .fg(crate::colors::text())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(crate::colors::text_dim())
+                },
+            ));
+
+            let line = if is_active {
+                Line::from(spans).style(
+                    Style::default()
+                        .bg(crate::colors::selection())
+                        .fg(crate::colors::text()),
+                )
+            } else {
+                Line::from(spans)
+            };
+            lines.push(line);
+        }
+
+        while lines.len() < visible {
+            lines.push(Line::from(" "));
+        }
+
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .style(Style::default().bg(crate::colors::background()))
+            .render(area, buf);
     }
 
     fn render_content(&self, area: Rect, buf: &mut Buffer) {

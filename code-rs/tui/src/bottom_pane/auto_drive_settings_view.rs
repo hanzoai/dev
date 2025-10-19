@@ -7,10 +7,11 @@ use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 use super::bottom_pane_view::{BottomPaneView, ConditionalUpdate};
 use super::BottomPane;
+use super::settings_panel::{render_panel, PanelFrameStyle};
 
 pub(crate) struct AutoDriveSettingsView {
     app_event_tx: AppEventSender,
@@ -22,6 +23,8 @@ pub(crate) struct AutoDriveSettingsView {
 }
 
 impl AutoDriveSettingsView {
+    const PANEL_TITLE: &'static str = "Auto Drive Settings";
+
     pub fn new(
         app_event_tx: AppEventSender,
         review_enabled: bool,
@@ -75,6 +78,22 @@ impl AutoDriveSettingsView {
         } else {
             self.cycle_continue_mode(true);
         }
+    }
+
+    fn render_panel_body(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let lines = self.info_lines();
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().bg(colors::background()).fg(colors::text()))
+            .render(area, buf);
+    }
+
+    pub(crate) fn render_without_frame(&self, area: Rect, buf: &mut Buffer) {
+        self.render_panel_body(area, buf);
     }
 
     fn close(&mut self) {
@@ -267,27 +286,13 @@ impl<'a> BottomPaneView<'a> for AutoDriveSettingsView {
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        if area.height == 0 {
-            return;
-        }
-
-        let block = Block::default()
-            .title(Span::styled(
-                " Auto Drive Settings ",
-                Style::default()
-                    .fg(colors::text())
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(colors::border()));
-
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        let lines = self.info_lines();
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .render(inner, buf);
+        render_panel(
+            area,
+            buf,
+            Self::PANEL_TITLE,
+            PanelFrameStyle::bottom_pane(),
+            |inner, buf| self.render_panel_body(inner, buf),
+        );
     }
 
     fn update_status_text(&mut self, _text: String) -> ConditionalUpdate {
