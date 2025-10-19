@@ -1,43 +1,24 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 1295
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   parallel work)
-   /limits - open Settings overlay at Limits section
+ + Agents --------------------------------------------------------------------+
+ | • Orphan (running 0s) - trying something risky        Ctrl+A open terminal |
+ +----------------------------------------------------------------------------+
    /review - review your changes for potential issues
    /auto - work autonomously on long tasks with Auto Drive Experimental
    /cloud - browse, apply, and create cloud tasks NEW
 
- » Started qa-bot
+ › /agents
 
- › Can you gather details from the latest docs update?
+ ✖ ⚠️  status_update: missing agent batch_id. tool=agent_status
+   agents=orphan-agent
 
- ✔ Web Search, duration: Xms
-   + query: ratatui widget patterns
-
- ⚙ Web Search... (Xm Ys)
-   + query: async rust tui example
-
-   Browser session "Browser Session" started here; latest view is shown below.
-
-   +- Browser (headless): Browser Session
-   |
-   |   Clicked  #login-button
-   |
-   +- [Ctrl+B] Expand · [Esc] Stop
-
-   +- deploy-helper
-   |
-   |   Run targeted regression suite
-   |
-   |   No agent updates yet
-   |
-   +- [Ctrl+A] Expand · [Esc] Stop
-
- +----------------------------------------------------------------------------+
+ +----------------------------- ✶ Using tools... -----------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
    Read Only  (Shift+Tab change)                                   Ctrl+H help
