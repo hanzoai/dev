@@ -1771,12 +1771,16 @@ impl App<'_> {
                 AppEvent::AutoDriveSettingsChanged {
                     review_enabled,
                     agents_enabled,
+                    cross_check_enabled,
+                    observer_enabled,
                     continue_mode,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.apply_auto_drive_settings(
                             review_enabled,
                             agents_enabled,
+                            cross_check_enabled,
+                            observer_enabled,
                             continue_mode,
                         );
                     }
@@ -1843,6 +1847,10 @@ impl App<'_> {
                     telemetry,
                     replace_message,
                     additional_instructions,
+                    reason,
+                    conversation,
+                    raw_output,
+                    parsed_response,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_observer_report(
@@ -1850,6 +1858,10 @@ impl App<'_> {
                             telemetry,
                             replace_message,
                             additional_instructions,
+                            reason,
+                            conversation,
+                            raw_output,
+                            parsed_response,
                         );
                     }
                 }
