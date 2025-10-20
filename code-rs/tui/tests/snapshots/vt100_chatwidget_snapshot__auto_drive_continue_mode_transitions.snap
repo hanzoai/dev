@@ -1,20 +1,19 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 289
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
   Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive will send:
- Prompt:
+ Auto Drive prompt
+ Prompt
  cargo nextest run --no-fail-fast
 
 
@@ -25,15 +24,15 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
   Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive will send:
- Prompt:
+ Auto Drive prompt
+ Prompt
  cargo nextest run --no-fail-fast
 
 
@@ -44,9 +43,12 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+
+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
@@ -54,4 +56,4 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-  Agents Enabled  •  Review Enabled  •  Cross-check Enabled  •  Observer Enabled  •  Ctrl+S Settings  •  Ctrl+O Threads   Esc stop Auto Drive
+   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive

@@ -323,16 +323,6 @@ impl AutoCoordinatorView {
         style
     }
 
-    fn effective_elapsed(model: &AutoActiveViewModel) -> Option<Duration> {
-        if let Some(duration) = model.elapsed {
-            Some(duration)
-        } else {
-            model
-                .started_at
-                .map(|started| Instant::now().saturating_duration_since(started))
-        }
-    }
-
     fn status_label(model: &AutoActiveViewModel) -> &'static str {
         if model.waiting_for_review {
             "Awaiting review"
@@ -395,14 +385,8 @@ impl AutoCoordinatorView {
 
     fn runtime_text(&self, model: &AutoActiveViewModel) -> String {
         let label = Self::status_label(model);
-        let mut details: Vec<String> = Vec::new();
-        if let Some(duration) = Self::effective_elapsed(model) {
-            if duration.as_secs() > 0 {
-                details.push(Self::format_elapsed(duration));
-            }
-        }
-        details.push(Self::format_turns(model.turns_completed));
-        format!("{} ({})", label, details.join(", "))
+        let turns = Self::format_turns(model.turns_completed);
+        format!("{} ({})", label, turns)
     }
 
     fn render_header(
@@ -577,13 +561,14 @@ impl AutoCoordinatorView {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(Line::from(vec![
             Span::raw("   "),
-            Span::styled("Auto Drive will send:", header_style),
+            Span::styled("Auto Drive prompt", header_style),
         ]));
 
         if let Some(value) = context {
+            lines.push(Line::default());
             lines.push(Line::from(vec![
-                Span::raw("     "),
-                Span::styled("Preface:", context_label_style),
+                Span::raw("   "),
+                Span::styled("Preface", context_label_style),
             ]));
             for line in value.lines() {
                 let trimmed = line.trim_end();
@@ -591,21 +576,20 @@ impl AutoCoordinatorView {
                     lines.push(Line::default());
                 } else {
                     lines.push(Line::from(vec![
-                        Span::raw("       "),
-                        Span::styled(trimmed.to_string(), context_body_style),
+                        Span::raw("   "),
+                        Span::styled(format!("  {trimmed}"), context_body_style),
                     ]));
                 }
             }
         }
 
-        if context.is_some() && prompt.is_some() {
-            lines.push(Line::default());
-        }
-
         if let Some(value) = prompt {
+            if context.is_some() {
+                lines.push(Line::default());
+            }
             lines.push(Line::from(vec![
-                Span::raw("     "),
-                Span::styled("Prompt:", prompt_label_style),
+                Span::raw("   "),
+                Span::styled("Prompt", prompt_label_style),
             ]));
             for line in value.lines() {
                 let trimmed = line.trim_end();
@@ -613,20 +597,23 @@ impl AutoCoordinatorView {
                     lines.push(Line::default());
                 } else {
                     lines.push(Line::from(vec![
-                        Span::raw("       "),
-                        Span::styled(trimmed.to_string(), prompt_body_style),
+                        Span::raw("   "),
+                        Span::styled(format!("  {trimmed}"), prompt_body_style),
                     ]));
                 }
             }
         } else {
+            if context.is_some() {
+                lines.push(Line::default());
+            }
             lines.push(Line::from(vec![
-                Span::raw("     "),
-                Span::styled("Prompt:", prompt_label_style),
+                Span::raw("   "),
+                Span::styled("Prompt", prompt_label_style),
             ]));
             lines.push(Line::from(vec![
-                Span::raw("       "),
+                Span::raw("   "),
                 Span::styled(
-                    "(Coordinator did not supply a prompt)".to_string(),
+                    "  (Coordinator did not supply a prompt)".to_string(),
                     prompt_body_style.add_modifier(Modifier::ITALIC),
                 ),
             ]));
@@ -1095,29 +1082,6 @@ impl AutoCoordinatorView {
             };
             acc.saturating_add(segments.max(1))
         })
-    }
-
-    fn format_elapsed(duration: Duration) -> String {
-        let total_seconds = duration.as_secs();
-        let hours = total_seconds / 3600;
-        let minutes = (total_seconds % 3600) / 60;
-        let seconds = total_seconds % 60;
-
-        if hours > 0 {
-            if minutes > 0 {
-                format!("{}h {:02}m", hours, minutes)
-            } else {
-                format!("{}h", hours)
-            }
-        } else if minutes > 0 {
-            if seconds > 0 {
-                format!("{}m {:02}s", minutes, seconds)
-            } else {
-                format!("{}m", minutes)
-            }
-        } else {
-            format!("{}s", seconds)
-        }
     }
 
     fn format_turns(turns: usize) -> String {

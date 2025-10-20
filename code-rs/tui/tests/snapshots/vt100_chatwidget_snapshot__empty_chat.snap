@@ -1,18 +1,23 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 260
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
 
+     
+     
+     
+     
+     
+
 
 
  ★ Popular commands:
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
