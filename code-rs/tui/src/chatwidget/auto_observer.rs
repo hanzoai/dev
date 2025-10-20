@@ -60,6 +60,15 @@ pub(super) struct ObserverTrigger {
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct ObserverEvaluation {
+    pub status: AutoObserverStatus,
+    pub replace_message: Option<String>,
+    pub additional_instructions: Option<String>,
+    pub raw_output: String,
+    pub parsed_response: Value,
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct ObserverOutcome {
     pub status: AutoObserverStatus,
     pub replace_message: Option<String>,
@@ -68,6 +77,8 @@ pub(super) struct ObserverOutcome {
     pub reason: ObserverReason,
     pub conversation: Vec<ResponseItem>,
     pub turn_snapshot: Option<CrossCheckTurnSnapshot>,
+    pub raw_output: Option<String>,
+    pub parsed_response: Option<Value>,
 }
 
 const OBSERVER_SCHEMA_NAME: &str = "auto_coordinator_observer";
@@ -101,7 +112,7 @@ pub(super) fn run_observer_once(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     trigger: ObserverTrigger,
-) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
+) -> Result<ObserverEvaluation> {
     evaluate_observer(runtime, client, trigger)
 }
 
@@ -126,7 +137,15 @@ fn run_observer_loop(
             AutoObserverCommand::Trigger(trigger) => {
                 telemetry.trigger_count += 1;
                 match evaluate_observer(&runtime, client.clone(), trigger.clone()) {
-                    Ok((status, replace_message, additional_instructions)) => {
+                    Ok(eval) => {
+                        let ObserverEvaluation {
+                            status,
+                            replace_message,
+                            additional_instructions,
+                            raw_output,
+                            parsed_response,
+                        } = eval;
+
                         telemetry.last_status = status;
                         telemetry.last_intervention = summarize_intervention(
                             replace_message.as_deref(),
@@ -141,6 +160,8 @@ fn run_observer_loop(
                             reason: trigger.reason.clone(),
                             conversation: trigger.conversation.clone(),
                             turn_snapshot: trigger.turn_snapshot.clone(),
+                            raw_output: Some(raw_output),
+                            parsed_response: Some(parsed_response),
                         };
 
                         if coordinator_tx
@@ -162,6 +183,8 @@ fn run_observer_loop(
                             reason: trigger.reason,
                             conversation: Vec::new(),
                             turn_snapshot: None,
+                            raw_output: None,
+                            parsed_response: None,
                         };
                         if coordinator_tx
                             .send(AutoCoordinatorCommand::ObserverResult(outcome))
@@ -183,7 +206,7 @@ fn evaluate_observer(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     trigger: ObserverTrigger,
-) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
+) -> Result<ObserverEvaluation> {
     let preferred_slug = match trigger.reason {
         ObserverReason::CrossCheck { .. } => "gpt-5",
         _ => MODEL_SLUG,
@@ -217,12 +240,12 @@ fn run_observer_prompt(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     prompt: Prompt,
-) -> Result<(AutoObserverStatus, Option<String>, Option<String>)> {
+) -> Result<ObserverEvaluation> {
     let raw = runtime.block_on(async {
         request_observer_response(client.clone(), &prompt).await
     })?;
 
-    let (response, _value) = parse_observer_response(&raw)?;
+    let (response, value) = parse_observer_response(&raw)?;
 
     let status = match response.status.as_str() {
         "ok" => AutoObserverStatus::Ok,
@@ -258,7 +281,13 @@ fn run_observer_prompt(
         additional_instructions.is_some()
     );
 
-    Ok((status, replace_message, additional_instructions))
+    Ok(ObserverEvaluation {
+        status,
+        replace_message,
+        additional_instructions,
+        raw_output: raw,
+        parsed_response: value,
+    })
 }
 
 fn partition_observer_guidance(

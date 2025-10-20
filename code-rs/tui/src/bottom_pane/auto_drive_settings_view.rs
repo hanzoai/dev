@@ -7,25 +7,32 @@ use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 use super::bottom_pane_view::{BottomPaneView, ConditionalUpdate};
 use super::BottomPane;
+use super::settings_panel::{render_panel, PanelFrameStyle};
 
 pub(crate) struct AutoDriveSettingsView {
     app_event_tx: AppEventSender,
     selected_index: usize,
     review_enabled: bool,
     agents_enabled: bool,
+    cross_check_enabled: bool,
+    observer_enabled: bool,
     continue_mode: AutoContinueMode,
     closing: bool,
 }
 
 impl AutoDriveSettingsView {
+    const PANEL_TITLE: &'static str = "Auto Drive Settings";
+
     pub fn new(
         app_event_tx: AppEventSender,
         review_enabled: bool,
         agents_enabled: bool,
+        cross_check_enabled: bool,
+        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) -> Self {
         Self {
@@ -33,19 +40,23 @@ impl AutoDriveSettingsView {
             selected_index: 0,
             review_enabled,
             agents_enabled,
+            cross_check_enabled,
+            observer_enabled,
             continue_mode,
             closing: false,
         }
     }
 
     fn option_count() -> usize {
-        3
+        5
     }
 
     fn selected_mut(&mut self) -> &mut bool {
         match self.selected_index {
             0 => &mut self.review_enabled,
             1 => &mut self.agents_enabled,
+            2 => &mut self.cross_check_enabled,
+            3 => &mut self.observer_enabled,
             _ => unreachable!(),
         }
     }
@@ -54,6 +65,8 @@ impl AutoDriveSettingsView {
         self.app_event_tx.send(AppEvent::AutoDriveSettingsChanged {
             review_enabled: self.review_enabled,
             agents_enabled: self.agents_enabled,
+            cross_check_enabled: self.cross_check_enabled,
+            observer_enabled: self.observer_enabled,
             continue_mode: self.continue_mode,
         });
     }
@@ -68,13 +81,29 @@ impl AutoDriveSettingsView {
     }
 
     fn toggle_selected(&mut self) {
-        if self.selected_index <= 1 {
+        if self.selected_index <= 3 {
             let slot = self.selected_mut();
             *slot = !*slot;
             self.send_update();
         } else {
             self.cycle_continue_mode(true);
         }
+    }
+
+    fn render_panel_body(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let lines = self.info_lines();
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().bg(colors::background()).fg(colors::text()))
+            .render(area, buf);
+    }
+
+    pub(crate) fn render_without_frame(&self, area: Rect, buf: &mut Buffer) {
+        self.render_panel_body(area, buf);
     }
 
     fn close(&mut self) {
@@ -91,7 +120,9 @@ impl AutoDriveSettingsView {
         let (label, enabled) = match index {
             0 => ("Automatic review", self.review_enabled),
             1 => ("Agents enabled", self.agents_enabled),
-            2 => (
+            2 => ("Cross-check QA", self.cross_check_enabled),
+            3 => ("Observer watchdog", self.observer_enabled),
+            4 => (
                 "Auto-continue delay",
                 matches!(self.continue_mode, AutoContinueMode::Manual),
             ),
@@ -108,14 +139,14 @@ impl AutoDriveSettingsView {
 
         let mut spans = vec![Span::styled(prefix, label_style)];
         match index {
-            0 | 1 => {
+            0 | 1 | 2 | 3 => {
                 let checkbox = if enabled { "[x]" } else { "[ ]" };
                 spans.push(Span::styled(
                     format!("{checkbox} {label}"),
                     label_style,
                 ));
             }
-            2 => {
+            4 => {
                 spans.push(Span::styled(label.to_string(), label_style));
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
@@ -136,6 +167,8 @@ impl AutoDriveSettingsView {
         lines.push(self.option_label(0));
         lines.push(self.option_label(1));
         lines.push(self.option_label(2));
+        lines.push(self.option_label(3));
+        lines.push(self.option_label(4));
         lines.push(Line::default());
 
         let footer_style = Style::default().fg(colors::text_dim());
@@ -187,13 +220,13 @@ impl AutoDriveSettingsView {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             KeyCode::Left => {
-                if self.selected_index == 2 {
+                if self.selected_index == 4 {
                     self.cycle_continue_mode(false);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
             }
             KeyCode::Right => {
-                if self.selected_index == 2 {
+                if self.selected_index == 4 {
                     self.cycle_continue_mode(true);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
@@ -243,13 +276,13 @@ impl<'a> BottomPaneView<'a> for AutoDriveSettingsView {
                 pane.request_redraw();
             }
             KeyCode::Left => {
-                if self.selected_index == 2 {
+                if self.selected_index == 4 {
                     self.cycle_continue_mode(false);
                     pane.request_redraw();
                 }
             }
             KeyCode::Right => {
-                if self.selected_index == 2 {
+                if self.selected_index == 4 {
                     self.cycle_continue_mode(true);
                     pane.request_redraw();
                 }
@@ -263,31 +296,17 @@ impl<'a> BottomPaneView<'a> for AutoDriveSettingsView {
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
-        7
+        9
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        if area.height == 0 {
-            return;
-        }
-
-        let block = Block::default()
-            .title(Span::styled(
-                " Auto Drive Settings ",
-                Style::default()
-                    .fg(colors::text())
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(colors::border()));
-
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        let lines = self.info_lines();
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .render(inner, buf);
+        render_panel(
+            area,
+            buf,
+            Self::PANEL_TITLE,
+            PanelFrameStyle::bottom_pane(),
+            |inner, buf| self.render_panel_body(inner, buf),
+        );
     }
 
     fn update_status_text(&mut self, _text: String) -> ConditionalUpdate {

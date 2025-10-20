@@ -741,6 +741,9 @@ pub struct AutoDriveSettings {
     #[serde(default = "default_true")]
     pub cross_check_enabled: bool,
 
+    #[serde(default = "default_true")]
+    pub observer_enabled: bool,
+
     #[serde(default)]
     pub continue_mode: AutoDriveContinueMode,
 }
@@ -751,6 +754,7 @@ impl Default for AutoDriveSettings {
             review_enabled: false,
             agents_enabled: false,
             cross_check_enabled: true,
+            observer_enabled: true,
             continue_mode: AutoDriveContinueMode::TenSeconds,
         }
     }

@@ -307,6 +307,7 @@ use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
     AutoCoordinatorStatus,
+    AutoObserverReason,
     AutoObserverStatus,
     AutoObserverTelemetry,
     AutoContinueMode,
@@ -627,6 +628,7 @@ struct AutoCoordinatorUiState {
     review_enabled: bool,
     subagents_enabled: bool,
     cross_check_enabled: bool,
+    observer_enabled: bool,
     pending_agent_actions: Vec<AutoTurnAgentsAction>,
     pending_agent_timing: Option<AutoTurnAgentsTiming>,
     continue_mode: AutoContinueMode,
@@ -729,6 +731,7 @@ impl Default for AutoCoordinatorUiState {
             review_enabled: false,
             subagents_enabled: false,
             cross_check_enabled: true,
+            observer_enabled: true,
             pending_agent_actions: Vec::new(),
             pending_agent_timing: None,
             continue_mode,
@@ -960,6 +963,7 @@ pub(crate) struct ChatWidget<'a> {
 
     // State for the Agents Terminal view
     agents_terminal: AgentsTerminalState,
+    auto_threads_overlay: AutoThreadsOverlayState,
 
     pending_upgrade_notice: Option<(u64, String)>,
 
@@ -1359,6 +1363,143 @@ enum AgentsTerminalFocus {
     Detail,
 }
 
+const AUTO_THREADS_MAX_ENTRIES: usize = 50;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutoThreadsOverlayFocus {
+    List,
+    Detail,
+}
+
+struct AutoThreadEntry {
+    list_label: String,
+    detail_text: String,
+    detail_scroll: u16,
+}
+
+impl AutoThreadEntry {
+    fn reset_scroll(&mut self) {
+        self.detail_scroll = 0;
+    }
+}
+
+struct AutoThreadsOverlayState {
+    active: bool,
+    entries: Vec<AutoThreadEntry>,
+    selected_index: usize,
+    focus: AutoThreadsOverlayFocus,
+}
+
+impl AutoThreadsOverlayState {
+    fn new() -> Self {
+        Self {
+            active: false,
+            entries: Vec::new(),
+            selected_index: 0,
+            focus: AutoThreadsOverlayFocus::List,
+        }
+    }
+
+    fn activate(&mut self) {
+        self.active = true;
+        if self.selected_index >= self.entries.len() {
+            self.selected_index = self.entries.len().saturating_sub(1);
+        }
+        if let Some(entry) = self.selected_entry_mut() {
+            entry.reset_scroll();
+        }
+    }
+
+    fn deactivate(&mut self) {
+        self.active = false;
+        self.focus = AutoThreadsOverlayFocus::List;
+    }
+
+    fn is_active(&self) -> bool {
+        self.active
+    }
+
+    fn focus(&self) -> AutoThreadsOverlayFocus {
+        self.focus
+    }
+
+    fn set_focus(&mut self, focus: AutoThreadsOverlayFocus) {
+        self.focus = focus;
+    }
+
+    fn push_entry(&mut self, entry: AutoThreadEntry) {
+        if self.entries.len() >= AUTO_THREADS_MAX_ENTRIES {
+            self.entries.remove(0);
+            if self.selected_index > 0 {
+                self.selected_index -= 1;
+            }
+        }
+
+        self.entries.push(entry);
+        self.selected_index = self.entries.len().saturating_sub(1);
+        if let Some(entry) = self.selected_entry_mut() {
+            entry.reset_scroll();
+        }
+    }
+
+    fn entries(&self) -> &Vec<AutoThreadEntry> {
+        &self.entries
+    }
+
+    fn selected_index(&self) -> usize {
+        self.selected_index
+    }
+
+    fn selected_entry_mut(&mut self) -> Option<&mut AutoThreadEntry> {
+        self.entries.get_mut(self.selected_index)
+    }
+
+    fn navigate(&mut self, delta: isize) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let len = self.entries.len() as isize;
+        let mut idx = self.selected_index as isize + delta;
+        if idx < 0 {
+            idx = 0;
+        } else if idx >= len {
+            idx = len - 1;
+        }
+        if self.selected_index != idx as usize {
+            self.selected_index = idx as usize;
+            if let Some(entry) = self.selected_entry_mut() {
+                entry.reset_scroll();
+            }
+        }
+    }
+
+    fn scroll_detail(&mut self, delta: i16) {
+        if let Some(entry) = self.selected_entry_mut() {
+            let current = entry.detail_scroll as i32;
+            let new = (current + delta as i32).max(0);
+            entry.detail_scroll = new as u16;
+        }
+    }
+}
+
+fn format_response_items_for_overlay(items: &[ResponseItem]) -> String {
+    if items.is_empty() {
+        return "None".to_string();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        let header = format!("Message {}", idx.saturating_add(1));
+        let body = serde_json::to_string_pretty(item).unwrap_or_else(|_| format!("{item:?}"));
+        parts.push(format!("{header}:\n{body}"));
+    }
+
+    parts.join("\n\n")
+}
+
+fn format_json_value_for_overlay(value: &JsonValue) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
 // ---------- Stable ordering & routing helpers ----------
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OrderKey {
@@ -3821,6 +3962,7 @@ impl ChatWidget<'_> {
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             agents_terminal: AgentsTerminalState::new(),
+            auto_threads_overlay: AutoThreadsOverlayState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             render_theme_epoch: 0,
@@ -3920,6 +4062,8 @@ impl ChatWidget<'_> {
         let auto_defaults = w.config.tui.auto_drive.clone();
         w.auto_state.review_enabled = auto_defaults.review_enabled;
         w.auto_state.subagents_enabled = auto_defaults.agents_enabled;
+        w.auto_state.cross_check_enabled = auto_defaults.cross_check_enabled;
+        w.auto_state.observer_enabled = auto_defaults.observer_enabled;
         w.auto_state.continue_mode = auto_continue_from_config(auto_defaults.continue_mode);
         w.auto_state.reset_countdown();
         w.set_standard_terminal_mode(!config.tui.alternate_screen);
@@ -4128,6 +4272,7 @@ impl ChatWidget<'_> {
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             agents_terminal: AgentsTerminalState::new(),
+            auto_threads_overlay: AutoThreadsOverlayState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             render_theme_epoch: 0,
@@ -4657,6 +4802,11 @@ impl ChatWidget<'_> {
         if self.diffs.overlay.is_some() {
             return;
         }
+        if self.auto_threads_overlay.is_active() {
+            if self.handle_auto_threads_overlay_key(key_event) {
+                return;
+            }
+        }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
         }
@@ -4703,6 +4853,20 @@ impl ChatWidget<'_> {
         {
             self.toggle_agents_hud();
             return;
+        }
+        if let KeyEvent {
+            code: crossterm::event::KeyCode::Char(c),
+            modifiers,
+            kind: KeyEventKind::Press | KeyEventKind::Repeat,
+            ..
+        } = key_event
+        {
+            if (c == 'o' || c == 'O')
+                && modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+            {
+                self.toggle_auto_threads_overlay();
+                return;
+            }
         }
 
         if self.agents_terminal.active {
@@ -10537,6 +10701,7 @@ impl ChatWidget<'_> {
                 }
                 let hint = self.active_review_hint.take();
                 let prompt = self.active_review_prompt.take();
+                self.record_auto_review_thread(hint.clone(), prompt.clone(), review_output.clone());
                 match review_output {
                     Some(output) => {
                         let summary_cell = self.build_review_summary_cell(
@@ -11564,11 +11729,15 @@ impl ChatWidget<'_> {
     fn build_auto_drive_settings_content(&mut self) -> AutoDriveSettingsContent {
         let review = self.auto_state.review_enabled;
         let agents = self.auto_state.subagents_enabled;
+        let cross = self.auto_state.cross_check_enabled;
+        let observer = self.auto_state.observer_enabled;
         let mode = self.auto_state.continue_mode;
         let view = AutoDriveSettingsView::new(
             self.app_event_tx.clone(),
             review,
             agents,
+            cross,
+            observer,
             mode,
         );
         AutoDriveSettingsContent::new(view)
@@ -11972,6 +12141,140 @@ impl ChatWidget<'_> {
         self.request_redraw();
     }
 
+
+    fn open_auto_threads_overlay(&mut self) {
+        if self.agents_terminal.active {
+            self.exit_agents_terminal_mode();
+        }
+        self.auto_threads_overlay.activate();
+        self.request_redraw();
+    }
+
+    fn close_auto_threads_overlay(&mut self) {
+        if !self.auto_threads_overlay.is_active() {
+            return;
+        }
+        self.auto_threads_overlay.deactivate();
+        self.request_redraw();
+        self.bottom_pane.ensure_input_focus();
+    }
+
+    fn toggle_auto_threads_overlay(&mut self) {
+        if self.auto_threads_overlay.is_active() {
+            self.close_auto_threads_overlay();
+        } else {
+            self.open_auto_threads_overlay();
+        }
+    }
+
+    fn handle_auto_threads_overlay_key(&mut self, key_event: KeyEvent) -> bool {
+        if !self.auto_threads_overlay.is_active() {
+            return false;
+        }
+
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return true;
+        }
+
+        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
+
+        if ctrl && shift && matches!(key_event.code, KeyCode::Char('c') | KeyCode::Char('C')) {
+            self.close_auto_threads_overlay();
+            return true;
+        }
+
+        match key_event.code {
+            KeyCode::Esc => {
+                self.close_auto_threads_overlay();
+            }
+            KeyCode::Tab => {
+                let new_focus = match self.auto_threads_overlay.focus() {
+                    AutoThreadsOverlayFocus::List => AutoThreadsOverlayFocus::Detail,
+                    AutoThreadsOverlayFocus::Detail => AutoThreadsOverlayFocus::List,
+                };
+                self.auto_threads_overlay.set_focus(new_focus);
+                if let Some(entry) = self.auto_threads_overlay.selected_entry_mut() {
+                    if matches!(new_focus, AutoThreadsOverlayFocus::Detail) {
+                        entry.reset_scroll();
+                    }
+                }
+                self.request_redraw();
+            }
+            KeyCode::Left => {
+                self.auto_threads_overlay.set_focus(AutoThreadsOverlayFocus::List);
+                self.request_redraw();
+            }
+            KeyCode::Right => {
+                self.auto_threads_overlay.set_focus(AutoThreadsOverlayFocus::Detail);
+                if let Some(entry) = self.auto_threads_overlay.selected_entry_mut() {
+                    entry.reset_scroll();
+                }
+                self.request_redraw();
+            }
+            KeyCode::Up => {
+                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
+                    self.auto_threads_overlay.navigate(-1);
+                } else {
+                    self.auto_threads_overlay.scroll_detail(-1);
+                }
+                self.request_redraw();
+            }
+            KeyCode::Down => {
+                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
+                    self.auto_threads_overlay.navigate(1);
+                } else {
+                    self.auto_threads_overlay.scroll_detail(1);
+                }
+                self.request_redraw();
+            }
+            KeyCode::PageUp => {
+                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::Detail) {
+                    self.auto_threads_overlay.scroll_detail(-8);
+                    self.request_redraw();
+                }
+            }
+            KeyCode::PageDown => {
+                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::Detail) {
+                    self.auto_threads_overlay.scroll_detail(8);
+                    self.request_redraw();
+                }
+            }
+            KeyCode::Home => {
+                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
+                    let current = self.auto_threads_overlay.selected_index() as isize;
+                    if current > 0 {
+                        self.auto_threads_overlay.navigate(-current);
+                        self.request_redraw();
+                    }
+                } else {
+                    self.auto_threads_overlay.scroll_detail(-i16::MAX);
+                    self.request_redraw();
+                }
+            }
+            KeyCode::End => {
+                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
+                    let remaining = self
+                        .auto_threads_overlay
+                        .entries()
+                        .len()
+                        .saturating_sub(self.auto_threads_overlay.selected_index())
+                        as isize
+                        - 1;
+                    if remaining > 0 {
+                        self.auto_threads_overlay.navigate(remaining);
+                        self.request_redraw();
+                    }
+                } else {
+                    self.auto_threads_overlay.scroll_detail(i16::MAX);
+                    self.request_redraw();
+                }
+            }
+            _ => {}
+        }
+
+        true
+    }
 
     fn resolve_agent_install_command(&self, agent_name: &str) -> Option<(Vec<String>, String)> {
         let cmd = self
@@ -12388,10 +12691,12 @@ fi\n\
         review_enabled: bool,
         subagents_enabled: bool,
         cross_check_enabled: bool,
+        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
         self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
+        self.config.tui.auto_drive.observer_enabled = observer_enabled;
         match start_auto_coordinator(
             self.app_event_tx.clone(),
             goal.clone(),
@@ -12406,6 +12711,7 @@ fi\n\
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.cross_check_enabled = cross_check_enabled;
+                self.auto_state.observer_enabled = observer_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
                 if self.auto_state.take_intro_pending() {
@@ -12448,6 +12754,7 @@ fi\n\
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.cross_check_enabled = cross_check_enabled;
+                self.auto_state.observer_enabled = observer_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
                 self.auto_state.mark_intro_pending();
@@ -12514,6 +12821,7 @@ fi\n\
             defaults.review_enabled,
             defaults.agents_enabled,
             defaults.cross_check_enabled,
+            defaults.observer_enabled,
             default_mode,
         );
     }
@@ -12548,6 +12856,8 @@ fi\n\
         &mut self,
         review_enabled: bool,
         agents_enabled: bool,
+        cross_check_enabled: bool,
+        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
         let mut changed = false;
@@ -12557,6 +12867,14 @@ fi\n\
         }
         if self.auto_state.subagents_enabled != agents_enabled {
             self.auto_state.subagents_enabled = agents_enabled;
+            changed = true;
+        }
+        if self.auto_state.cross_check_enabled != cross_check_enabled {
+            self.auto_state.cross_check_enabled = cross_check_enabled;
+            changed = true;
+        }
+        if self.auto_state.observer_enabled != observer_enabled {
+            self.auto_state.observer_enabled = observer_enabled;
             changed = true;
         }
         if self.auto_state.continue_mode != continue_mode {
@@ -12577,6 +12895,8 @@ fi\n\
 
         self.config.tui.auto_drive.review_enabled = review_enabled;
         self.config.tui.auto_drive.agents_enabled = agents_enabled;
+        self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
+        self.config.tui.auto_drive.observer_enabled = observer_enabled;
         self.config.tui.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
 
         if let Ok(home) = code_core::config::find_code_home() {
@@ -13193,6 +13513,7 @@ fi\n\
         };
 
         let cross_check_enabled = self.auto_state.cross_check_enabled;
+        let observer_enabled = self.auto_state.observer_enabled;
         let continue_mode = self.auto_state.continue_mode;
         let previous_turns = self.auto_state.turns_completed;
         let previous_started_at = self.auto_state.started_at;
@@ -13220,6 +13541,7 @@ fi\n\
             review_enabled,
             agents_enabled,
             cross_check_enabled,
+            observer_enabled,
             continue_mode,
         );
 
@@ -13238,13 +13560,210 @@ fi\n\
         self.rebuild_auto_history();
     }
 
+    fn record_auto_observer_thread(
+        &mut self,
+        reason: AutoObserverReason,
+        status: AutoObserverStatus,
+        telemetry: AutoObserverTelemetry,
+        replace_message: Option<String>,
+        additional_instructions: Option<String>,
+        conversation: Vec<ResponseItem>,
+        raw_output: Option<String>,
+        parsed_response: Option<JsonValue>,
+    ) {
+        let kind_label = match reason {
+            AutoObserverReason::Cadence => "Observer",
+            AutoObserverReason::CrossCheck { .. } => "Cross-check",
+        };
+
+        let heading = match reason {
+            AutoObserverReason::Cadence => "Observer cadence".to_string(),
+            AutoObserverReason::CrossCheck { forced, ref summary, .. } => {
+                let base = if forced { "Cross-check (forced)" } else { "Cross-check" };
+                let summary_snippet = summary
+                    .as_ref()
+                    .and_then(|text| {
+                        let trimmed = text.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(Self::truncate_with_ellipsis(trimmed, 48))
+                        }
+                    });
+                match summary_snippet {
+                    Some(snippet) => format!("{base}: {snippet}"),
+                    None => base.to_string(),
+                }
+            }
+        };
+
+        let status_label = match status {
+            AutoObserverStatus::Ok => "OK",
+            AutoObserverStatus::Failing => "Failing",
+        }
+        .to_string();
+
+        let mut detail_sections: Vec<String> = Vec::new();
+        detail_sections.push(format!("Kind: {kind_label}"));
+        detail_sections.push(format!("Status: {status_label}"));
+
+        if let AutoObserverReason::CrossCheck { forced, ref summary, ref focus } = reason {
+            detail_sections.push(format!("Forced: {}", if forced { "yes" } else { "no" }));
+            if let Some(text) = summary.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                detail_sections.push(format!("Summary focus:\n{}", text));
+            }
+            if let Some(text) = focus.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                detail_sections.push(format!("Inspection targets:\n{}", text));
+            }
+        }
+
+        let mut telemetry_section = format!(
+            "Telemetry: triggers={} • last_status={:?}",
+            telemetry.trigger_count,
+            telemetry.last_status
+        );
+        if let Some(intervention) = telemetry
+            .last_intervention
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            telemetry_section.push_str(&format!(" • last_intervention={}", intervention));
+        }
+        detail_sections.push(telemetry_section);
+
+        if let Some(text) = replace_message
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            detail_sections.push(format!("Replacement prompt:\n{}", text));
+        }
+        if let Some(text) = additional_instructions.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            detail_sections.push(format!("Additional instructions:\n{}", text));
+        }
+
+        if let Some(raw) = raw_output.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            detail_sections.push(format!("Raw output:\n{}", raw));
+        }
+
+        if let Some(value) = parsed_response.as_ref() {
+            detail_sections.push(format!("Parsed response:\n{}", format_json_value_for_overlay(value)));
+        }
+
+        let conversation_block = format_response_items_for_overlay(&conversation);
+        if !conversation_block.trim().is_empty() {
+            detail_sections.push(format!("Conversation:\n{}", conversation_block));
+        }
+
+        let detail_text = detail_sections
+            .into_iter()
+            .filter(|section| !section.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let entry = AutoThreadEntry {
+            list_label: format!("{heading} · {status_label}"),
+            detail_text,
+            detail_scroll: 0,
+        };
+
+        self.auto_threads_overlay.push_entry(entry);
+    }
+
+    fn record_auto_review_thread(
+        &mut self,
+        hint: Option<String>,
+        prompt: Option<String>,
+        output: Option<ReviewOutputEvent>,
+    ) {
+        let heading = hint
+            .as_ref()
+            .and_then(|h| {
+                let trimmed = h.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(format!("Review – {}", Self::truncate_with_ellipsis(trimmed, 48)))
+                }
+            })
+            .unwrap_or_else(|| "Review".to_string());
+
+        let status_label = match output {
+            Some(ref out) if out.findings.is_empty() => "No findings".to_string(),
+            Some(ref out) => format!("Findings {}", out.findings.len()),
+            None => "No response".to_string(),
+        };
+
+        let mut sections: Vec<String> = Vec::new();
+        if let Some(h) = hint
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            sections.push(format!("Hint:\n{}", h));
+        }
+        if let Some(p) = prompt
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            sections.push(format!("Prompt:\n{}", p));
+        }
+
+        match output {
+            Some(ref review) => {
+                let json = serde_json::to_string_pretty(review)
+                    .unwrap_or_else(|_| format!("{review:?}"));
+                sections.push(format!("Review output:\n{}", json));
+            }
+            None => sections.push("Review output: <none>".to_string()),
+        }
+
+        let detail_text = sections
+            .into_iter()
+            .filter(|section| !section.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let entry = AutoThreadEntry {
+            list_label: format!("{heading} · {status_label}"),
+            detail_text,
+            detail_scroll: 0,
+        };
+
+        self.auto_threads_overlay.push_entry(entry);
+    }
+
     pub(crate) fn auto_handle_observer_report(
         &mut self,
         status: AutoObserverStatus,
         telemetry: AutoObserverTelemetry,
         replace_message: Option<String>,
         additional_instructions: Option<String>,
+        reason: AutoObserverReason,
+        conversation: Vec<ResponseItem>,
+        raw_output: Option<String>,
+        parsed_response: Option<JsonValue>,
     ) {
+        let reason_for_check = reason.clone();
+        if matches!(reason_for_check, AutoObserverReason::Cadence)
+            && !self.auto_state.observer_enabled
+        {
+            return;
+        }
+
+        self.record_auto_observer_thread(
+            reason,
+            status,
+            telemetry.clone(),
+            replace_message.clone(),
+            additional_instructions.clone(),
+            conversation,
+            raw_output,
+            parsed_response,
+        );
+
         if !self.auto_state.active {
             return;
         }
@@ -14203,14 +14722,27 @@ fi\n\
         } else {
             "Review Disabled"
         };
+        let cross_label = if self.auto_state.cross_check_enabled {
+            "Cross-check Enabled"
+        } else {
+            "Cross-check Disabled"
+        };
+        let observer_label = if self.auto_state.observer_enabled {
+            "Observer Enabled"
+        } else {
+            "Observer Disabled"
+        };
 
         let left = if self.auto_state.awaiting_submission {
             format!(
-                "Awaiting approval  •  {}  •  {}  •  Ctrl+S Settings",
-                agents_label, review_label
+                "Awaiting approval  •  {}  •  {}  •  {}  •  {}  •  Ctrl+S Settings  •  Ctrl+O Threads",
+                agents_label, review_label, cross_label, observer_label
             )
         } else {
-            format!("{}  •  {}  •  Ctrl+S Settings", agents_label, review_label)
+            format!(
+                "{}  •  {}  •  {}  •  {}  •  Ctrl+S Settings  •  Ctrl+O Threads",
+                agents_label, review_label, cross_label, observer_label
+            )
         };
 
         let right = if self.auto_state.awaiting_submission {
@@ -25891,6 +26423,193 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn render_auto_threads_overlay(
+        &self,
+        frame_area: Rect,
+        history_area: Rect,
+        bottom_pane_area: Rect,
+        buf: &mut Buffer,
+    ) {
+        use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect as RtRect};
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+        use ratatui::widgets::StatefulWidget;
+
+        let scrim_style = Style::default()
+            .bg(crate::colors::overlay_scrim())
+            .fg(crate::colors::text_dim());
+        fill_rect(buf, frame_area, None, scrim_style);
+
+        let padding = 1u16;
+        let footer_reserved = bottom_pane_area.height.min(1);
+        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
+        let overlay_height = overlay_bottom
+            .saturating_sub(history_area.y)
+            .max(1)
+            .min(frame_area.height);
+
+        let window_area = Rect {
+            x: history_area.x + padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(padding * 2),
+            height: overlay_height,
+        };
+        Clear.render(window_area, buf);
+
+        let title_spans = vec![
+            Span::styled(" Auto QA Threads ", Style::default().fg(crate::colors::text())),
+            Span::styled(
+                "— Ctrl+O to close",
+                Style::default().fg(crate::colors::text_dim()),
+            ),
+        ];
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(title_spans))
+            .style(Style::default().bg(crate::colors::background()))
+            .border_style(Style::default().fg(crate::colors::border()));
+        let inner = block.inner(window_area);
+        block.render(window_area, buf);
+
+        let inner_bg = Style::default().bg(crate::colors::background());
+        for y in inner.y..inner.y + inner.height {
+            for x in inner.x..inner.x + inner.width {
+                buf[(x, y)].set_style(inner_bg);
+            }
+        }
+
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+
+        let content = inner.inner(Margin::new(1, 1));
+        if content.width == 0 || content.height == 0 {
+            return;
+        }
+
+        let hint_height = if content.height >= 2 { 1 } else { 0 };
+        let body_height = content.height.saturating_sub(hint_height);
+        let body_area = RtRect {
+            x: content.x,
+            y: content.y,
+            width: content.width,
+            height: body_height,
+        };
+        let hint_area = RtRect {
+            x: content.x,
+            y: content.y.saturating_add(body_height),
+            width: content.width,
+            height: hint_height,
+        };
+
+        let entries = self.auto_threads_overlay.entries();
+        let sidebar_target = 28u16;
+        let sidebar_width = if body_area.width <= sidebar_target + 12 {
+            body_area.width.saturating_mul(35).saturating_div(100).clamp(16, body_area.width)
+        } else {
+            sidebar_target.min(body_area.width.saturating_sub(12)).max(16)
+        };
+
+        let constraints = if body_area.width <= sidebar_width {
+            [Constraint::Length(body_area.width), Constraint::Length(0)]
+        } else {
+            [Constraint::Length(sidebar_width), Constraint::Min(12)]
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(constraints)
+            .split(body_area);
+
+        let list_area = chunks[0];
+        let detail_area = if chunks.len() > 1 { chunks[1] } else { chunks[0] };
+
+        let mut list_items: Vec<ListItem> = Vec::new();
+        if entries.is_empty() {
+            list_items.push(ListItem::new(Line::from(vec![Span::styled(
+                "No QA threads yet",
+                Style::default().fg(crate::colors::text_dim()),
+            )])));
+        } else {
+            for entry in entries {
+                list_items.push(ListItem::new(Line::from(vec![Span::raw(entry.list_label.clone())])));
+            }
+        }
+
+        let mut list_state = ListState::default();
+        if !entries.is_empty() {
+            list_state.select(Some(self.auto_threads_overlay.selected_index()));
+        }
+
+        StatefulWidget::render(
+            List::new(list_items)
+                .highlight_style(
+                    Style::default()
+                        .fg(crate::colors::primary())
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("› "),
+            list_area,
+            buf,
+            &mut list_state,
+        );
+
+        let focus = self.auto_threads_overlay.focus();
+        let detail_border = if matches!(focus, AutoThreadsOverlayFocus::Detail) {
+            crate::colors::primary()
+        } else {
+            crate::colors::border()
+        };
+
+        let detail_block = Block::default()
+            .borders(if chunks.len() > 1 { Borders::LEFT } else { Borders::NONE })
+            .border_style(Style::default().fg(detail_border))
+            .style(Style::default().bg(crate::colors::background()));
+        let detail_inner = detail_block.inner(detail_area);
+        detail_block.render(detail_area, buf);
+
+        for y in detail_inner.y..detail_inner.y + detail_inner.height {
+            for x in detail_inner.x..detail_inner.x + detail_inner.width {
+                buf[(x, y)].set_style(inner_bg);
+            }
+        }
+
+        let detail_text = if let Some(entry) = entries
+            .get(self.auto_threads_overlay.selected_index())
+        {
+            entry.detail_text.clone()
+        } else {
+            "Run Auto Drive with observer, cross-check, or review enabled to capture QA threads.".to_string()
+        };
+
+        let scroll = entries
+            .get(self.auto_threads_overlay.selected_index())
+            .map(|entry| entry.detail_scroll)
+            .unwrap_or(0);
+
+        Paragraph::new(detail_text)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(crate::colors::text()))
+            .scroll((scroll, 0))
+            .render(detail_inner, buf);
+
+        if hint_area.height > 0 {
+            let list_focus = matches!(focus, AutoThreadsOverlayFocus::List);
+            let hint_text = if list_focus {
+                "Up/Down navigate · Tab detail · Esc close"
+            } else {
+                "Up/Down scroll · Tab list · Esc close"
+            };
+            Paragraph::new(Line::from(vec![Span::styled(
+                hint_text,
+                Style::default().fg(crate::colors::text_dim()),
+            )]))
+            .render(hint_area, buf);
+        }
+    }
+
     fn render_agents_terminal_overlay(
         &self,
         frame_area: Rect,
@@ -28117,6 +28836,11 @@ impl WidgetRef for &ChatWidget<'_> {
                     .alignment(ratatui::layout::Alignment::Left)
                     .render(instructions_area, buf);
             }
+        }
+
+        if self.terminal.overlay().is_none() && self.auto_threads_overlay.is_active() {
+            self.render_auto_threads_overlay(area, history_area, bottom_pane_area, buf);
+            return;
         }
 
         if self.terminal.overlay().is_none() && self.agents_terminal.active {
