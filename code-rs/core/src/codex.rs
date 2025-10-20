@@ -6604,24 +6604,40 @@ pub(crate) async fn handle_agent_tool(
             }
         }
         "status" => {
-            let agent_id = match req
-                .status
-                .as_mut()
-                .and_then(|opts| opts.agent_id.take())
-            {
-                Some(id) => id,
+            let mut status_opts = match req.status.take() {
+                Some(opts) => opts,
                 None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=status requires a 'status' object",
+                    );
+                }
+            };
+            let agent_id = match status_opts.agent_id.take() {
+                Some(id) if !id.trim().is_empty() => id,
+                _ => {
                     return agent_tool_failure(
                         ctx,
                         "action=status requires 'status.agent_id'",
                     );
                 }
             };
+            let batch_id = match status_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=status requires 'status.batch_id'",
+                    );
+                }
+            };
             let params = CheckAgentStatusParams {
                 agent_id: agent_id.clone(),
+                batch_id: batch_id.clone(),
             };
             let mut status_event = serde_json::Map::new();
             status_event.insert("agent_id".to_string(), serde_json::Value::String(agent_id));
+            status_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             let mut status_event_root = serde_json::Map::new();
             status_event_root.insert("action".to_string(), serde_json::Value::String("status".to_string()));
             status_event_root.insert("status".to_string(), serde_json::Value::Object(status_event));
@@ -6632,24 +6648,40 @@ pub(crate) async fn handle_agent_tool(
             }
         }
         "result" => {
-            let agent_id = match req
-                .result
-                .as_mut()
-                .and_then(|opts| opts.agent_id.take())
-            {
-                Some(id) => id,
+            let mut result_opts = match req.result.take() {
+                Some(opts) => opts,
                 None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=result requires a 'result' object",
+                    );
+                }
+            };
+            let agent_id = match result_opts.agent_id.take() {
+                Some(id) if !id.trim().is_empty() => id,
+                _ => {
                     return agent_tool_failure(
                         ctx,
                         "action=result requires 'result.agent_id'",
                     );
                 }
             };
+            let batch_id = match result_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=result requires 'result.batch_id'",
+                    );
+                }
+            };
             let params = GetAgentResultParams {
                 agent_id: agent_id.clone(),
+                batch_id: batch_id.clone(),
             };
             let mut result_event = serde_json::Map::new();
             result_event.insert("agent_id".to_string(), serde_json::Value::String(agent_id));
+            result_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             let mut result_event_root = serde_json::Map::new();
             result_event_root.insert("action".to_string(), serde_json::Value::String("result".to_string()));
             result_event_root.insert("result".to_string(), serde_json::Value::Object(result_event));
@@ -6669,22 +6701,25 @@ pub(crate) async fn handle_agent_tool(
                     );
                 }
             };
-            if cancel_opts.agent_id.is_none() && cancel_opts.batch_id.is_none() {
-                return agent_tool_failure(ctx, "action=cancel requires 'cancel.agent_id' or 'cancel.batch_id'");
-            }
             let cancel_agent_id = cancel_opts.agent_id.clone();
-            let cancel_batch_id = cancel_opts.batch_id.clone();
+            let cancel_batch_id = match cancel_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=cancel requires 'cancel.batch_id'",
+                    );
+                }
+            };
             let params = CancelAgentParams {
                 agent_id: cancel_opts.agent_id.take(),
-                batch_id: cancel_opts.batch_id.take(),
+                batch_id: Some(cancel_batch_id.clone()),
             };
             let mut cancel_event = serde_json::Map::new();
             if let Some(id) = cancel_agent_id {
                 cancel_event.insert("agent_id".to_string(), serde_json::Value::String(id));
             }
-            if let Some(batch) = cancel_batch_id {
-                cancel_event.insert("batch_id".to_string(), serde_json::Value::String(batch));
-            }
+            cancel_event.insert("batch_id".to_string(), serde_json::Value::String(cancel_batch_id));
             let mut cancel_event_root = serde_json::Map::new();
             cancel_event_root.insert("action".to_string(), serde_json::Value::String("cancel".to_string()));
             cancel_event_root.insert("cancel".to_string(), serde_json::Value::Object(cancel_event));
@@ -6704,16 +6739,21 @@ pub(crate) async fn handle_agent_tool(
                     );
                 }
             };
-            if wait_opts.agent_id.is_none() && wait_opts.batch_id.is_none() {
-                return agent_tool_failure(ctx, "action=wait requires 'wait.agent_id' or 'wait.batch_id'");
-            }
             let wait_agent_id = wait_opts.agent_id.clone();
-            let wait_batch_id = wait_opts.batch_id.clone();
+            let wait_batch_id = match wait_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=wait requires 'wait.batch_id'",
+                    );
+                }
+            };
             let wait_timeout = wait_opts.timeout_seconds;
             let wait_return_all = wait_opts.return_all;
             let params = WaitForAgentParams {
                 agent_id: wait_opts.agent_id.take(),
-                batch_id: wait_opts.batch_id.take(),
+                batch_id: Some(wait_batch_id.clone()),
                 timeout_seconds: wait_timeout,
                 return_all: wait_return_all,
             };
@@ -6721,9 +6761,7 @@ pub(crate) async fn handle_agent_tool(
             if let Some(id) = wait_agent_id {
                 wait_event.insert("agent_id".to_string(), serde_json::Value::String(id));
             }
-            if let Some(batch) = wait_batch_id {
-                wait_event.insert("batch_id".to_string(), serde_json::Value::String(batch));
-            }
+            wait_event.insert("batch_id".to_string(), serde_json::Value::String(wait_batch_id));
             if let Some(timeout) = wait_timeout {
                 wait_event.insert("timeout_seconds".to_string(), serde_json::Value::from(timeout));
             }
@@ -6742,18 +6780,27 @@ pub(crate) async fn handle_agent_tool(
         "list" => {
             let mut list_opts = match req.list.take() {
                 Some(opts) => opts,
-                None => crate::agent_tool::AgentListOptions {
-                    status_filter: None,
-                    batch_id: None,
-                    recent_only: None,
-                },
+                None => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=list requires a 'list' object",
+                    );
+                }
             };
             let status_filter = list_opts.status_filter.take();
-            let batch_id = list_opts.batch_id.take();
+            let batch_id = match list_opts.batch_id.take() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return agent_tool_failure(
+                        ctx,
+                        "action=list requires 'list.batch_id'",
+                    );
+                }
+            };
             let recent_only = list_opts.recent_only;
             let params = ListAgentsParams {
                 status_filter: status_filter.clone(),
-                batch_id: batch_id.clone(),
+                batch_id: Some(batch_id.clone()),
                 recent_only,
             };
             let mut list_event = serde_json::Map::new();
@@ -6762,11 +6809,7 @@ pub(crate) async fn handle_agent_tool(
                     list_event.insert("status_filter".to_string(), serde_json::Value::String(status.clone()));
                 }
             }
-            if let Some(ref batch) = batch_id {
-                if !batch.is_empty() {
-                    list_event.insert("batch_id".to_string(), serde_json::Value::String(batch.clone()));
-                }
-            }
+            list_event.insert("batch_id".to_string(), serde_json::Value::String(batch_id));
             if let Some(recent) = recent_only {
                 list_event.insert("recent_only".to_string(), serde_json::Value::Bool(recent));
             }
@@ -6791,12 +6834,25 @@ pub(crate) async fn handle_run_agent(
 ) -> ResponseInputItem {
     let arguments_clone = arguments.clone();
     let call_id_clone = ctx.call_id.clone();
+    let generated_batch_id = Uuid::new_v4().to_string();
+    let payload_with_batch = match event_payload {
+        serde_json::Value::Object(mut map) => {
+            map.insert(
+                "batch_id".to_string(),
+                serde_json::Value::String(generated_batch_id.clone()),
+            );
+            serde_json::Value::Object(map)
+        }
+        other => other,
+    };
+    let closure_batch_id = generated_batch_id.clone();
     execute_custom_tool(
         sess,
         ctx,
         "agent".to_string(),
-        Some(event_payload),
-        || async move {
+        Some(payload_with_batch),
+        move || async move {
+            let batch_id = closure_batch_id.clone();
     match serde_json::from_str::<RunAgentParams>(&arguments_clone) {
         Ok(mut params) => {
             let trimmed_task = params.task.trim().to_string();
@@ -6922,12 +6978,6 @@ pub(crate) async fn handle_run_agent(
                 }
             }
 
-            let batch_id = if models.len() > 1 {
-                Some(Uuid::new_v4().to_string())
-            } else {
-                None
-            };
-
             let multi_model = models.len() > 1;
             let display_label_for = |model: &str| -> String {
                 agent_name
@@ -6982,7 +7032,7 @@ pub(crate) async fn handle_run_agent(
                             params.output.clone(),
                             params.files.clone().unwrap_or_default(),
                             read_only,
-                            batch_id.clone(),
+                            Some(batch_id.clone()),
                             config.clone(),
                         )
                         .await;
@@ -7006,7 +7056,7 @@ pub(crate) async fn handle_run_agent(
                             params.output.clone(),
                             params.files.clone().unwrap_or_default(),
                             read_only,
-                            batch_id.clone(),
+                            Some(batch_id.clone()),
                         )
                         .await;
                     agent_ids.push(agent_id);
@@ -7027,7 +7077,7 @@ pub(crate) async fn handle_run_agent(
                         params.output.clone(),
                         params.files.clone().unwrap_or_default(),
                         read_only,
-                        None,
+                        Some(batch_id.clone()),
                     )
                     .await;
                 agent_ids.push(agent_id);
@@ -7041,8 +7091,8 @@ pub(crate) async fn handle_run_agent(
                 send_agent_status_update(sess).await;
             }
 
-            let launch_hint = if let Some(batch) = &batch_id {
-                let short_batch = short_id(batch);
+            let launch_hint = if agent_ids.len() > 1 {
+                let short_batch = short_id(&batch_id);
                 let agent_phrase = agent_labels
                     .iter()
                     .map(|(id, label)| format!("{} [{}]", short_id(id), label))
@@ -7051,48 +7101,79 @@ pub(crate) async fn handle_run_agent(
                 let first_agent = agent_labels
                     .first()
                     .map(|(id, _)| id.as_str())
-                    .unwrap_or(batch.as_str());
+                    .unwrap_or(batch_id.as_str());
                 format!(
-                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to wait for all agents, then `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{first_agent}\"}}}}` for a detailed report."
+                    "🤖 Agent batch {short_batch} started: {agent_phrase}.\nUse `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to wait for all agents, then `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{first_agent}\"}}}}` for a detailed report.",
+                    batch = batch_id,
                 )
             } else {
                 let (single_id, single_model) = agent_labels
                     .first()
                     .map(|(id, model)| (id.as_str(), model.as_str()))
                     .unwrap();
+                let short_batch = short_id(&batch_id);
                 format!(
-                    "🤖 Agent {} [{}] started. Use `agent {{\"action\":\"wait\",\"wait\":{{\"agent_id\":\"{}\",\"return_all\":true}}}}` to follow progress, or `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}` when it finishes.",
-                    short_id(single_id),
-                    single_model,
-                    single_id,
-                    single_id
+                    "🤖 Agent batch {short_batch} started with {model}. Use `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"{batch}\",\"return_all\":true}}}}` to follow progress, or `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{agent}\"}}}}` when it finishes.",
+                    model = single_model,
+                    batch = batch_id,
+                    agent = single_id,
                 )
             };
 
-            let req = sess.current_request_ordinal();
-            let order = sess.background_order_for_ctx(ctx, req);
-            sess
-                .notify_background_event_with_order(&ctx.sub_id, order, launch_hint.clone())
-                .await;
-
-            let response = if let Some(batch_id) = batch_id {
-                serde_json::json!({
-                    "batch_id": batch_id,
-                    "agent_ids": agent_ids,
-                    "status": "started",
-                    "message": format!("Started {} agents", agent_labels.len()),
-                    "next_steps": launch_hint,
-                    "skipped": if skipped.is_empty() { None } else { Some(skipped) }
-                })
+            let mut response_map = serde_json::Map::new();
+            response_map.insert(
+                "batch_id".to_string(),
+                serde_json::Value::String(batch_id.clone()),
+            );
+            response_map.insert(
+                "agent_ids".to_string(),
+                serde_json::Value::Array(
+                    agent_ids
+                        .iter()
+                        .cloned()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+            response_map.insert(
+                "status".to_string(),
+                serde_json::Value::String("started".to_string()),
+            );
+            let message = if agent_ids.len() > 1 {
+                format!("Started {} agents", agent_labels.len())
             } else {
-                serde_json::json!({
-                    "agent_id": agent_ids[0],
-                    "status": "started",
-                    "message": "Agent started successfully",
-                    "next_steps": launch_hint,
-                    "skipped": if skipped.is_empty() { None } else { Some(skipped) }
-                })
+                "Agent started successfully".to_string()
             };
+            response_map.insert(
+                "message".to_string(),
+                serde_json::Value::String(message),
+            );
+            response_map.insert(
+                "next_steps".to_string(),
+                serde_json::Value::String(launch_hint.clone()),
+            );
+            if agent_ids.len() == 1 {
+                if let Some(first) = agent_ids.first() {
+                    response_map.insert(
+                        "agent_id".to_string(),
+                        serde_json::Value::String(first.clone()),
+                    );
+                }
+            }
+            if skipped.is_empty() {
+                response_map.insert("skipped".to_string(), serde_json::Value::Null);
+            } else {
+                response_map.insert(
+                    "skipped".to_string(),
+                    serde_json::Value::Array(
+                        skipped
+                            .into_iter()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+            let response = serde_json::Value::Object(response_map);
 
             ResponseInputItem::FunctionCallOutput {
                 call_id: call_id_clone,
@@ -7110,7 +7191,7 @@ pub(crate) async fn handle_run_agent(
             },
         },
     }
-        },
+        }
     ).await
 }
 
@@ -7157,6 +7238,22 @@ async fn handle_check_agent_status(
             let manager = AGENT_MANAGER.read().await;
 
             if let Some(agent) = manager.get_agent(&params.agent_id) {
+                match agent.batch_id.as_deref() {
+                    Some(batch) if batch == params.batch_id => {}
+                    _ => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: format!(
+                                    "Agent {} does not belong to batch {}",
+                                    params.agent_id, params.batch_id
+                                ),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
+
                 // Limit progress in the response; write full progress to file if large
                 let max_progress_lines = 50usize;
                 let total_progress = agent.progress.len();
@@ -7213,6 +7310,7 @@ async fn handle_check_agent_status(
                     "name": agent.name,
                     "status": agent.status,
                     "model": agent.model,
+                    "batch_id": agent.batch_id,
                     "created_at": agent.created_at,
                     "started_at": agent.started_at,
                     "completed_at": agent.completed_at,
@@ -7272,6 +7370,21 @@ async fn handle_get_agent_result(
             let manager = AGENT_MANAGER.read().await;
 
             if let Some(agent) = manager.get_agent(&params.agent_id) {
+                match agent.batch_id.as_deref() {
+                    Some(batch) if batch == params.batch_id => {}
+                    _ => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: format!(
+                                    "Agent {} does not belong to batch {}",
+                                    params.agent_id, params.batch_id
+                                ),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
                 let cwd = sess.get_cwd().to_path_buf();
                 let dir = match ensure_agent_dir(&cwd, &params.agent_id) {
                     Ok(d) => d,
@@ -7296,6 +7409,7 @@ async fn handle_get_agent_result(
                         };
                         let response = serde_json::json!({
                             "agent_id": params.agent_id,
+                            "batch_id": params.batch_id.clone(),
                             "status": agent.status,
                             "output_preview": preview,
                             "output_total_lines": total_lines,
@@ -7318,6 +7432,7 @@ async fn handle_get_agent_result(
                         };
                         let response = serde_json::json!({
                             "agent_id": params.agent_id,
+                            "batch_id": params.batch_id.clone(),
                             "status": agent.status,
                             "error_preview": preview,
                             "error_total_lines": total_lines,
@@ -7384,6 +7499,32 @@ async fn handle_cancel_agent(
             let mut manager = AGENT_MANAGER.write().await;
 
             if let Some(agent_id) = params.agent_id {
+                let batch_id = match params.batch_id.as_ref() {
+                    Some(batch) => batch,
+                    None => {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: "action=cancel requires 'cancel.batch_id'".to_string(),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                };
+                if let Some(agent) = manager.get_agent(&agent_id) {
+                    if agent.batch_id.as_deref() != Some(batch_id.as_str()) {
+                        return ResponseInputItem::FunctionCallOutput {
+                            call_id: call_id_clone,
+                            output: FunctionCallOutputPayload {
+                                content: format!(
+                                    "Agent {} does not belong to batch {}",
+                                    agent_id, batch_id
+                                ),
+                                success: Some(false),
+                            },
+                        };
+                    }
+                }
                 if manager.cancel_agent(&agent_id).await {
                     ResponseInputItem::FunctionCallOutput {
                         call_id: call_id_clone,
@@ -7448,6 +7589,18 @@ async fn handle_wait_for_agent(
         || async move {
     match serde_json::from_str::<WaitForAgentParams>(&arguments_clone) {
         Ok(params) => {
+            let batch_id = match params.batch_id.as_ref() {
+                Some(batch) if !batch.trim().is_empty() => batch.clone(),
+                _ => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: "action=wait requires 'wait.batch_id'".to_string(),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
             let timeout =
                 std::time::Duration::from_secs(params.timeout_seconds.unwrap_or(300).min(600));
             let start = std::time::Instant::now();
@@ -7467,6 +7620,21 @@ async fn handle_wait_for_agent(
 
                 if let Some(agent_id) = &params.agent_id {
                     if let Some(agent) = manager.get_agent(agent_id) {
+                        match agent.batch_id.as_deref() {
+                            Some(batch) if batch == batch_id => {}
+                            _ => {
+                                return ResponseInputItem::FunctionCallOutput {
+                                    call_id: call_id_clone,
+                                    output: FunctionCallOutputPayload {
+                                        content: format!(
+                                            "Agent {} does not belong to batch {}",
+                                            agent_id, batch_id
+                                        ),
+                                        success: Some(false),
+                                    },
+                                };
+                            }
+                        }
                         if matches!(
                             agent.status,
                             AgentStatus::Completed | AgentStatus::Failed | AgentStatus::Cancelled
@@ -7516,16 +7684,18 @@ async fn handle_wait_for_agent(
                             };
 
                             let hint = format!(
-                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
-                                agent.id
+                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\",\"batch_id\":\"{}\"}}}}",
+                                agent.id,
+                                batch_id
                             );
                             let mut response = serde_json::json!({
                                 "agent_id": agent.id,
+                                "batch_id": batch_id,
                                 "status": agent.status,
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "action": "result", "result": { "agent_id": agent.id } },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": agent.id, "batch_id": batch_id } },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7540,7 +7710,7 @@ async fn handle_wait_for_agent(
                             };
                         }
                     }
-                } else if let Some(batch_id) = &params.batch_id {
+                } else {
                     let agents = manager.list_agents(None, Some(batch_id.clone()), false);
 
                     // Separate terminal vs non-terminal agents
@@ -7610,15 +7780,16 @@ async fn handle_wait_for_agent(
                                 };
 
                                 let hint = format!(
-                                    "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
-                                    a.id
+                                    "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\",\"batch_id\":\"{}\"}}}}",
+                                    a.id,
+                                    batch_id
                                 );
                                 let mut obj = serde_json::json!({
                                     "agent_id": a.id,
                                     "status": a.status,
                                     "total_lines": total_lines,
                                     "agent_result_hint": hint,
-                                    "agent_result_params": { "action": "result", "result": { "agent_id": a.id } },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": a.id, "batch_id": batch_id } },
                                 });
                                 if let Some(map) = obj.as_object_mut() {
                                     map.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7704,8 +7875,9 @@ async fn handle_wait_for_agent(
                             };
 
                             let hint = format!(
-                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\"}}}}",
-                                unseen.id
+                                "agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"{}\",\"batch_id\":\"{}\"}}}}",
+                                unseen.id,
+                                batch_id
                             );
                             let mut response = serde_json::json!({
                                 "agent_id": unseen.id,
@@ -7713,7 +7885,7 @@ async fn handle_wait_for_agent(
                                 "wait_time_seconds": start.elapsed().as_secs(),
                                 "total_lines": total_lines,
                                 "agent_result_hint": hint,
-                                "agent_result_params": { "action": "result", "result": { "agent_id": unseen.id } },
+                                "agent_result_params": { "action": "result", "result": { "agent_id": unseen.id, "batch_id": batch_id } },
                             });
                             if let Some(obj) = response.as_object_mut() {
                                 obj.insert(preview_key.to_string(), serde_json::Value::String(preview));
@@ -7786,6 +7958,19 @@ async fn handle_list_agents(
         Ok(params) => {
             let manager = AGENT_MANAGER.read().await;
 
+            let batch_id = match params.batch_id.clone() {
+                Some(batch) if !batch.trim().is_empty() => batch,
+                _ => {
+                    return ResponseInputItem::FunctionCallOutput {
+                        call_id: call_id_clone,
+                        output: FunctionCallOutputPayload {
+                            content: "action=list requires 'list.batch_id'".to_string(),
+                            success: Some(false),
+                        },
+                    };
+                }
+            };
+
             let status_filter =
                 params
                     .status_filter
@@ -7800,7 +7985,7 @@ async fn handle_list_agents(
 
             let agents = manager.list_agents(
                 status_filter,
-                params.batch_id,
+                Some(batch_id.clone()),
                 params.recent_only.unwrap_or(false),
             );
 
@@ -7853,6 +8038,7 @@ async fn handle_list_agents(
                     "failed": failed_count,
                     "cancelled": cancelled_count,
                 },
+                "batch_id": batch_id,
                 "agents": agents.iter().map(|t| {
                     serde_json::json!({
                         "id": t.id,
