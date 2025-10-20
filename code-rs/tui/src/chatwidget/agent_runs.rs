@@ -70,10 +70,7 @@ fn begin_action_for(tool_name: &str, metadata: &InvocationMetadata) -> Option<St
 
     match action {
         "create" => Some(format!("Started agent run for {}", label)),
-        "wait" => metadata
-            .batch_id
-            .as_ref()
-            .map(|batch| format!("Waiting for agents in batch {}", batch)),
+        "wait" => Some("Waiting for agents".to_string()),
         "result" => Some(format!("Requested results for {}", label)),
         "cancel" => Some(format!("Cancelling agent batch for {}", label)),
         "status" => Some(format!("Checking agent status for {}", label)),
@@ -103,7 +100,7 @@ fn end_action_for(
     match action {
         "create" => {
             if success {
-                Some(format!("Agent run completed in {}", elapsed))
+                None
             } else {
                 let detail = message.unwrap_or("unknown error");
                 Some(format!("Agent run failed in {} — {}", elapsed, detail))
@@ -111,7 +108,7 @@ fn end_action_for(
         }
         "wait" => {
             if success {
-                Some(format!("Finished waiting in {}", elapsed))
+                None
             } else {
                 let detail = message.unwrap_or("wait failed");
                 Some(format!("Wait failed in {} — {}", elapsed, detail))
@@ -119,7 +116,7 @@ fn end_action_for(
         }
         "result" => {
             if success {
-                Some(format!("Fetched agent results in {}", elapsed))
+                None
             } else {
                 let detail = message.unwrap_or("result error");
                 Some(format!("Result fetch failed in {} — {}", elapsed, detail))
@@ -130,6 +127,119 @@ fn end_action_for(
         "list" => Some("Listed agents".to_string()),
         _ => None,
     }
+}
+
+fn friendly_agent_names(metadata: &InvocationMetadata, tracker: &AgentRunTracker) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for id in &metadata.agent_ids {
+        if let Some(name) = tracker.cell.agent_name_for_id(id) {
+            names.push(name);
+        } else if !looks_like_uuid(id.as_str()) {
+            names.push(id.clone());
+        }
+    }
+    if names.is_empty() {
+        if let Some(label) = metadata
+            .label
+            .as_ref()
+            .and_then(|value| clean_label(value))
+            .filter(|value| !looks_like_uuid(value))
+        {
+            names.push(label);
+        }
+    }
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+fn normalize_begin_action_text(
+    tracker: &AgentRunTracker,
+    metadata: &InvocationMetadata,
+    action: String,
+) -> Option<String> {
+    if action.is_empty() {
+        return None;
+    }
+
+    if action.starts_with("Waiting for agents") {
+        return Some("Waiting for agents".to_string());
+    }
+
+    if action.starts_with("Requested results for ") {
+        let names = friendly_agent_names(metadata, tracker);
+        if names.is_empty() {
+            return Some("Requested results".to_string());
+        }
+        return Some(format!("Requested results for {}", names.join(", ")));
+    }
+
+    if action.starts_with("Cancelling agent batch for ") {
+        let names = friendly_agent_names(metadata, tracker);
+        if names.is_empty() {
+            return Some("Cancelling agent batch".to_string());
+        }
+        return Some(format!("Cancelling agents {}", names.join(", ")));
+    }
+
+    if action.starts_with("Checking agent status for ") {
+        let names = friendly_agent_names(metadata, tracker);
+        if names.is_empty() {
+            return Some("Checking agent status".to_string());
+        }
+        return Some(format!("Checking agent status for {}", names.join(", ")));
+    }
+
+    if action.starts_with("Started agent run for ") {
+        let names = friendly_agent_names(metadata, tracker);
+        if names.is_empty() {
+            if let Some(label) = metadata
+                .label
+                .as_ref()
+                .and_then(|value| clean_label(value))
+                .filter(|value| !looks_like_uuid(value))
+            {
+                return Some(format!("Started agent run for {}", label));
+            }
+            return Some(action);
+        }
+        return Some(format!("Started agent run for {}", names.join(", ")));
+    }
+
+    Some(action)
+}
+
+fn normalize_end_action_text(
+    tracker: &AgentRunTracker,
+    metadata: &InvocationMetadata,
+    action: String,
+) -> Option<String> {
+    if action.is_empty() {
+        return None;
+    }
+
+    if action.starts_with("Agent run failed") {
+        let names = friendly_agent_names(metadata, tracker);
+        if names.is_empty() {
+            return Some(action);
+        }
+        return Some(format!("{} — {}", names.join(", "), action));
+    }
+
+    if action.starts_with("Wait failed") {
+        return Some(action);
+    }
+
+    if action.starts_with("Result fetch failed") {
+        let names = friendly_agent_names(metadata, tracker);
+        if names.is_empty() {
+            return Some(action);
+        }
+        let detail = action.trim_start_matches("Result fetch failed in ");
+        return Some(format!("Result fetch failed for {} in {}", names.join(", "), detail));
+    }
+
+    Some(action)
 }
 
 pub(super) struct AgentRunTracker {
@@ -632,7 +742,9 @@ pub(super) fn handle_custom_tool_begin(
     tracker.set_task(metadata.task.clone());
 
     if let Some(action) = begin_action_for(tool_name, &metadata) {
-        tracker.cell.record_action(action);
+        if let Some(message) = normalize_begin_action_text(&tracker, &metadata, action) {
+            tracker.cell.record_action(message);
+        }
     }
 
     let key = update_mappings(
@@ -745,14 +857,18 @@ pub(super) fn handle_custom_tool_end(
             tracker.cell.set_status_label("Completed");
             tracker.cell.mark_completed();
             if let Some(action) = end_action_for(tool_name, &metadata, duration, true, Some(text.as_str())) {
-                tracker.cell.record_action(action);
+                if let Some(message) = normalize_end_action_text(&tracker, &metadata, action) {
+                    tracker.cell.record_action(message);
+                }
             }
         }
         Err(err) => {
             tracker.cell.set_latest_result(vec![err.clone()]);
             tracker.cell.mark_failed();
             if let Some(action) = end_action_for(tool_name, &metadata, duration, false, Some(err.as_str())) {
-                tracker.cell.record_action(action);
+                if let Some(message) = normalize_end_action_text(&tracker, &metadata, action) {
+                    tracker.cell.record_action(message);
+                }
             }
         }
     }
@@ -1008,15 +1124,38 @@ fn process_status_update_for_batch(
         tracker.cell.set_latest_result(Vec::new());
     }
 
-    if !previews.is_empty() {
-        let summary = previews
-            .iter()
-            .map(|preview| format!("{}: {}", preview.name, preview.status))
-            .collect::<Vec<_>>()
-            .join("; ");
-        tracker
+    let mut status_updates: Vec<String> = Vec::new();
+    for preview in &previews {
+        let label = tracker
             .cell
-            .record_action(format!("Status update — {}", summary));
+            .agent_name_for_id(preview.id.as_str())
+            .or_else(|| {
+                clean_label(preview.name.as_str()).filter(|value| !looks_like_uuid(value))
+            })
+            .unwrap_or_else(|| {
+                let trimmed = preview.name.trim();
+                if trimmed.is_empty() || looks_like_uuid(trimmed) {
+                    preview.id.clone()
+                } else {
+                    trimmed.to_string()
+                }
+            });
+
+        match preview.status_kind {
+            AgentStatusKind::Completed => status_updates.push(format!("{} completed", label)),
+            AgentStatusKind::Failed => status_updates.push(format!("{} failed", label)),
+            AgentStatusKind::Cancelled => status_updates.push(format!("{} cancelled", label)),
+            _ => {}
+        }
+    }
+
+    if !status_updates.is_empty() {
+        let message = if status_updates.len() == 1 {
+            status_updates.remove(0)
+        } else {
+            status_updates.join("; ")
+        };
+        tracker.cell.record_action(message);
     }
 
     let mut current_key = resolved_key;
