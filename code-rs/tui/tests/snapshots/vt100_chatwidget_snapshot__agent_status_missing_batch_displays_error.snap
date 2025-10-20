@@ -9,9 +9,9 @@ expression: output
  + Agents --------------------------------------------------------------------+
  | • Orphan (running 0s) - trying something risky        Ctrl+A open terminal |
  +----------------------------------------------------------------------------+
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
+   /chrome - connect to Chrome (opens Settings at Chrome)
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
 
  › /agents
 
