@@ -3,6 +3,7 @@ use crate::protocol::ApprovedCommandMatchKind;
 use crate::config_profile::ConfigProfile;
 use crate::config_types::AgentConfig;
 use crate::agent_defaults::{agent_model_spec, default_agent_configs};
+use std::collections::HashSet;
 use crate::config_types::AutoDriveContinueMode;
 use crate::config_types::AutoDriveSettings;
 use crate::config_types::AllowedCommand;
@@ -2185,6 +2186,22 @@ impl Config {
 
         if agents.is_empty() {
             agents = default_agent_configs();
+        } else {
+            let mut seen = HashSet::new();
+            for agent in &agents {
+                let canonical = agent_model_spec(&agent.name)
+                    .map(|spec| spec.slug.to_ascii_lowercase())
+                    .unwrap_or_else(|| agent.name.to_ascii_lowercase());
+                seen.insert(canonical);
+            }
+
+            for default_agent in default_agent_configs() {
+                let key = default_agent.name.to_ascii_lowercase();
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    agents.push(default_agent);
+                }
+            }
         }
 
         for agent in &agents {
@@ -3262,6 +3279,49 @@ model_verbosity = "high"
             &gpt5_profile_config.model_providers
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_custom_agent_entries_extend_defaults() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+
+        let mut cfg = fixture.cfg.clone();
+        cfg.agents = vec![AgentConfig {
+            name: "code-gpt-5-codex".to_string(),
+            command: String::new(),
+            args: Vec::new(),
+            read_only: false,
+            enabled: true,
+            description: None,
+            env: None,
+            args_read_only: None,
+            args_write: None,
+            instructions: None,
+        }];
+
+        let overrides = ConfigOverrides {
+            cwd: Some(fixture.cwd()),
+            ..Default::default()
+        };
+
+        let loaded = Config::load_from_base_config_with_overrides(
+            cfg,
+            overrides,
+            fixture.code_home(),
+        )?;
+
+        let enabled_names: std::collections::HashSet<String> = loaded
+            .agents
+            .into_iter()
+            .filter(|agent| agent.enabled)
+            .map(|agent| agent.name.to_ascii_lowercase())
+            .collect();
+
+        assert!(enabled_names.contains("code-gpt-5-codex"));
+        assert!(enabled_names.contains("claude-sonnet-4.5"));
+        assert!(enabled_names.contains("gemini-2.5-pro"));
+        assert!(enabled_names.contains("qwen-3-coder"));
         Ok(())
     }
 
