@@ -762,6 +762,7 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-demo",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -778,6 +779,7 @@ fn tool_activity_showcase() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-demo",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -800,6 +802,7 @@ fn tool_activity_showcase() {
                 "action": "wait",
                 "wait": {
                     "agent_id": "deploy-helper",
+                    "batch_id": "batch-demo",
                     "timeout_seconds": 600
                 }
             })),
@@ -1034,6 +1037,7 @@ fn agent_run_grouped_desired_layout() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-qa",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -1052,7 +1056,7 @@ fn agent_run_grouped_desired_layout() {
                     id: "qa-bot".into(),
                     name: "QA Bot".into(),
                     status: "running tests".into(),
-                    batch_id: None,
+                    batch_id: Some("batch-qa".into()),
                     model: None,
                     last_progress: None,
                     result: None,
@@ -1064,7 +1068,7 @@ fn agent_run_grouped_desired_layout() {
                     id: "doc-writer".into(),
                     name: "Doc Writer".into(),
                     status: "planning".into(),
-                    batch_id: None,
+                    batch_id: Some("batch-qa".into()),
                     model: None,
                     last_progress: None,
                     result: None,
@@ -1095,6 +1099,7 @@ fn agent_run_grouped_desired_layout() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-qa",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -1131,6 +1136,7 @@ fn agent_run_grouped_plain_tool_name() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-plain",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -1148,7 +1154,7 @@ fn agent_run_grouped_plain_tool_name() {
                     id: "qa-bot".into(),
                     name: "QA Bot".into(),
                     status: "running".into(),
-                    batch_id: Some("batch-001".into()),
+                    batch_id: Some("batch-plain".into()),
                     model: Some("claude".into()),
                     last_progress: Some("Executing smoke tests".into()),
                     result: None,
@@ -1178,6 +1184,7 @@ fn agent_run_grouped_plain_tool_name() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-plain",
                 "create": {
                     "name": "qa-bot",
                     "task": "Run targeted regression suite"
@@ -1211,6 +1218,7 @@ fn plan_agent_keeps_single_aggregate_block() {
             tool_name: "agent".into(),
             parameters: Some(json!({
                 "action": "create",
+                "batch_id": "batch-plan",
                 "create": {
                     "name": "planner",
                     "task": "Draft implementation plan"
@@ -1367,4 +1375,224 @@ fn settings_help_overlay_from_section() {
     harness.send_key(make_key(KeyCode::Esc, KeyModifiers::NONE));
     let section_closed = normalize_output(render_chat_widget_to_vt100(&mut harness, 100, 28));
     insta::assert_snapshot!("settings_help_overlay_section_closed", section_closed);
+}
+
+#[test]
+fn agent_status_missing_batch_displays_error() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("/agents");
+
+    harness.handle_event(Event {
+        id: "agent-status-missing-batch".into(),
+        event_seq: 0,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![AgentInfo {
+                id: "orphan-agent".into(),
+                name: "Orphan".into(),
+                status: "running".into(),
+                batch_id: None,
+                model: Some("code".into()),
+                last_progress: Some("trying something risky".into()),
+                result: None,
+                error: None,
+                elapsed_ms: Some(8_000),
+                token_count: Some(3_200),
+            }],
+            context: Some("debug orphan".into()),
+            task: Some("Investigate logs".into()),
+        }),
+        order: None,
+    });
+
+    let output = render_chat_widget_to_vt100(&mut harness, 80, 20);
+    let output = normalize_output(output);
+    insta::assert_snapshot!("agent_status_missing_batch_displays_error", output);
+}
+
+#[test]
+fn agent_parallel_batches_do_not_duplicate_cells() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Run parallel meal plans");
+
+    let mut event_seq = 0u64;
+    let mut order_seq = 0u64;
+
+    // Begin pizza batch
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-pizza".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-pizza",
+                "create": {
+                    "name": "Pizza Plan",
+                    "task": "Plan how to make a pizza with prep and bake timelines"
+                }
+            })),
+        }),
+    );
+
+    // Begin burger batch
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-burger".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-burger",
+                "create": {
+                    "name": "Burger Plan",
+                    "task": "Plan how to make a burger with toppings and timing"
+                }
+            })),
+        }),
+    );
+
+    // Status update for both batches while running
+    harness.handle_event(Event {
+        id: "status-running".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "pizza-agent".into(),
+                    name: "Pizza Plan".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-pizza".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("assembling ingredient checklist".into()),
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(4_000),
+                    token_count: Some(2_400),
+                },
+                AgentInfo {
+                    id: "burger-agent".into(),
+                    name: "Burger Plan".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-burger".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("drafting grill timing".into()),
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(3_200),
+                    token_count: Some(1_900),
+                },
+            ],
+            context: Some("Parallel meal planning".into()),
+            task: Some("Plan how to make a pizza.".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(1),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    // Completion update with results
+    harness.handle_event(Event {
+        id: "status-complete".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "pizza-agent".into(),
+                    name: "Pizza Plan".into(),
+                    status: "completed".into(),
+                    batch_id: Some("batch-pizza".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("documented bake schedule".into()),
+                    result: Some("1. Prep dough\n2. Simmer sauce\n3. Bake at 475°F".into()),
+                    error: None,
+                    elapsed_ms: Some(9_500),
+                    token_count: Some(4_200),
+                },
+                AgentInfo {
+                    id: "burger-agent".into(),
+                    name: "Burger Plan".into(),
+                    status: "completed".into(),
+                    batch_id: Some("batch-burger".into()),
+                    model: Some("code".into()),
+                    last_progress: Some("outlined topping staging".into()),
+                    result: Some("1. Toast buns\n2. Grill patties\n3. Layer toppings".into()),
+                    error: None,
+                    elapsed_ms: Some(8_100),
+                    token_count: Some(3_600),
+                },
+            ],
+            context: Some("Parallel meal planning".into()),
+            task: Some("Plan how to make a pizza.".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(2),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    // End events for each batch
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-pizza".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-pizza",
+                "create": {
+                    "name": "Pizza Plan",
+                    "task": "Plan how to make a pizza with prep and bake timelines"
+                }
+            })),
+            duration: Duration::from_secs(12),
+            result: Ok("Pizza plan ready".into()),
+        }),
+    );
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallEnd(CustomToolCallEndEvent {
+            call_id: "agent-burger".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-burger",
+                "create": {
+                    "name": "Burger Plan",
+                    "task": "Plan how to make a burger with toppings and timing"
+                }
+            })),
+            duration: Duration::from_secs(10),
+            result: Ok("Burger plan ready".into()),
+        }),
+    );
+
+    let output = normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 32));
+    assert_eq!(harness.count_agent_run_cells(), 2, "expected one card per batch\n{output}");
+    assert!(output.contains("Pizza Plan"), "missing pizza batch details\n{output}");
+    assert!(output.contains("Burger Plan"), "missing burger batch details\n{output}");
+    assert!(
+        output.contains("Plan how to make a pizza with prep and bake timelines"),
+        "pizza task missing\n{output}"
+    );
+    assert!(
+        output.contains("Plan how to make a burger with toppings and timing"),
+        "burger task missing or overwritten\n{output}"
+    );
+    assert!(!output.contains("batch-pizza"), "raw pizza batch id leaked into header\n{output}");
 }

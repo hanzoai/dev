@@ -181,6 +181,8 @@ pub struct BrowserManager {
 }
 
 impl BrowserManager {
+    const SCREENSHOT_TTL_MS: u64 = 86_400_000; // 24 hours
+
     pub fn new(config: BrowserConfig) -> Self {
         Self {
             config: Arc::new(RwLock::new(config)),
@@ -1551,7 +1553,7 @@ impl BrowserManager {
                     screenshot.format,
                     screenshot.width,
                     screenshot.height,
-                    300000, // 5 minute TTL
+                    Self::SCREENSHOT_TTL_MS,
                 )
                 .await?;
             paths.push(std::path::PathBuf::from(image_ref.path));
@@ -1928,7 +1930,15 @@ impl BrowserManager {
                                     tokio::time::sleep(Duration::from_millis(400)).await;
                                     if let Ok(shots) = page_for_shot.screenshot(mode).await {
                                         for s in shots {
-                                            let _ = assets.store_screenshot(&s.data, s.format, s.width, s.height, 300000).await;
+                                            let _ = assets
+                                                .store_screenshot(
+                                                    &s.data,
+                                                    s.format,
+                                                    s.width,
+                                                    s.height,
+                                                    Self::SCREENSHOT_TTL_MS,
+                                                )
+                                                .await;
                                         }
                                     }
                                 }
