@@ -22,6 +22,7 @@ use crate::app::ChatWidgetArgs;
 use crate::chrome_launch::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 use code_protocol::models::ResponseItem;
+use serde_json::Value as JsonValue;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
@@ -149,6 +150,16 @@ pub(crate) struct AutoObserverTelemetry {
     pub trigger_count: u64,
     pub last_status: AutoObserverStatus,
     pub last_intervention: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AutoObserverReason {
+    Cadence,
+    CrossCheck {
+        forced: bool,
+        summary: Option<String>,
+        focus: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,12 +290,18 @@ pub(crate) enum AppEvent {
         telemetry: AutoObserverTelemetry,
         replace_message: Option<String>,
         additional_instructions: Option<String>,
+        reason: AutoObserverReason,
+        conversation: Vec<ResponseItem>,
+        raw_output: Option<String>,
+        parsed_response: Option<JsonValue>,
     },
     ShowAutoDriveSettings,
     CloseAutoDriveSettings,
     AutoDriveSettingsChanged {
         review_enabled: bool,
         agents_enabled: bool,
+        cross_check_enabled: bool,
+        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     },
 

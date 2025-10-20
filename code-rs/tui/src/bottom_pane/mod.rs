@@ -56,6 +56,7 @@ mod undo_timeline_view;
 mod notifications_settings_view;
 mod settings_overlay;
 pub(crate) use settings_overlay::SettingsSection;
+pub mod settings_panel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CancellationEvent {

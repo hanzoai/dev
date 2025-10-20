@@ -998,6 +998,8 @@ pub fn set_tui_auto_drive_settings(
     doc["tui"]["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
     doc["tui"]["auto_drive"]["cross_check_enabled"] =
         toml_edit::value(settings.cross_check_enabled);
+    doc["tui"]["auto_drive"]["observer_enabled"] =
+        toml_edit::value(settings.observer_enabled);
 
     let mode_str = match settings.continue_mode {
         AutoDriveContinueMode::Immediate => "immediate",
