@@ -2096,18 +2096,18 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Style::default().fg(crate::colors::text_bright()),
     ));
     lines.push(Line::from(vec![
-        Span::styled("/agents", Style::default().fg(crate::colors::primary())),
+        Span::styled("/settings", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
-        Span::from(SlashCommand::Agents.description())
+        Span::from(SlashCommand::Settings.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("/model", Style::default().fg(crate::colors::primary())),
+        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
         Span::from(" - "),
-        Span::from(SlashCommand::Model.description())
+        Span::from(SlashCommand::Auto.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
         Span::styled(
-            " NEW with GPT-5-Codex!",
+            " Experimental",
             Style::default().fg(crate::colors::primary()),
         ),
     ]));
@@ -2128,41 +2128,6 @@ fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
         Span::from(" - "),
         Span::from(SlashCommand::Code.description())
             .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/branch", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Branch.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/limits", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Limits.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/review", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Review.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Auto.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(
-            " Experimental",
-            Style::default().fg(crate::colors::primary()),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("/cloud", Style::default().fg(crate::colors::primary())),
-        Span::from(" - "),
-        Span::from(SlashCommand::Cloud.description())
-            .style(Style::default().add_modifier(Modifier::DIM)),
-        Span::styled(" NEW", Style::default().fg(crate::colors::primary())),
     ]));
 
     lines
