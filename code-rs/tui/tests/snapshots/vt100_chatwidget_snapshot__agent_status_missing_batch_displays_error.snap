@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 1295
 expression: output
 ---
  +----------------------------------------------------------------------------+
@@ -9,7 +8,7 @@ expression: output
  + Agents --------------------------------------------------------------------+
  | • Orphan (running 0s) - trying something risky        Ctrl+A open terminal |
  +----------------------------------------------------------------------------+
-  /chrome - connect to your Chrome browser
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
