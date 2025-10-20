@@ -14,15 +14,15 @@ Notes
 ## Navigation & Session
 
 - `/browser`: open internal browser.
-- `/chrome`: connect to Chrome DevTools (opens Settings at Chrome section).
+- `/chrome`: connect to your Chrome browser.
 - `/new`: start a new chat during a conversation.
 - `/resume`: resume a past session for this folder.
 - `/quit`: exit Codex.
 - `/logout`: log out of Codex.
 - `/login`: manage Code sign-ins (select, add, or disconnect accounts).
-- `/settings [section]`: open the unified Settings overlay. Optional section
-  argument jumps directly to a section such as `model`, `theme`, `agents`,
-  `limits`, `chrome`, `mcp`, or `notifications`.
+- `/settings [section]`: open the settings panel. Optional section argument
+  jumps directly to `model`, `theme`, `agents`, `limits`, `chrome`, `mcp`, or
+  `notifications`.
 
 ## Workspace & Git
 
@@ -49,23 +49,23 @@ Notes
 
 ## UX & Display
 
-- `/theme`: open Settings at Theme section.
+- `/theme`: customize the app theme.
 - `/verbosity (high|medium|low)`: change text verbosity.
-- `/model`: open Settings at Model section.
+- `/model`: choose your default model.
 - `/reasoning (minimal|low|medium|high)`: change reasoning effort.
 - `/prompts`: show example prompts.
 - `/status`: show current session configuration and token usage.
-- `/limits`: open the Settings overlay at Limits to visualize hourly and weekly
-  rate-limit usage.
+- `/limits`: adjust session limits and visualize hourly and weekly rate-limit
+  usage.
 - `/update`: check the installed version, detect available upgrades, and open a
   guided upgrade terminal that runs the installer interactively when possible.
-- `/notifications [status|on|off]`: manage notification settings. Opens an
-  interactive Settings overlay when called without arguments. With arguments:
-  `status` shows current config, `on` enables all, `off` disables all.
-- `/mcp [status|on|off <name>|add]`: manage MCP servers. Opens an interactive
-  Settings overlay when called without arguments, showing all servers with toggle
-  controls. With arguments: `status` lists servers, `on <name>` enables, `off <name>`
-  disables, and `add` starts the new server workflow.
+- `/notifications [status|on|off]`: manage notification settings. Without
+  arguments, shows the notifications panel. With arguments: `status` shows
+  current config, `on` enables all, `off` disables all.
+- `/mcp [status|on|off <name>|add]`: manage MCP servers. Without arguments,
+  shows all servers with toggle controls. With arguments: `status` lists
+  servers, `on <name>` enables, `off <name>` disables, and `add` starts the new
+  server workflow.
 - `/validation [status|on|off|<tool> (on|off)]`: inspect or toggle validation
   harness settings.
 
@@ -76,9 +76,8 @@ Notes
 ## Performance & Agents
 
 - `/perf (on|off|show|reset)`: performance tracing controls.
-- `/agents`: open the Settings overlay at Agents to manage agents and subagent
-  commands (including autonomous follow-ups and observer status; available in
-  dev, dev-fast, and perf builds).
+- `/agents`: configure agents and subagent commands (including autonomous
+  follow-ups and observer status; available in dev, dev-fast, and perf builds).
 - `/auto [goal]`: start the maintainer-style auto coordinator. If no goal is
   provided it defaults to "review the git log for recent changes and come up
   with sensible follow up work".

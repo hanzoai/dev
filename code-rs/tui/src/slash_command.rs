@@ -97,7 +97,7 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Chrome => "connect to Chrome (opens Settings at Chrome)",
+            SlashCommand::Chrome => "connect to your Chrome browser",
             SlashCommand::Browser => "open internal browser",
             SlashCommand::Resume => "resume a past session for this folder",
             SlashCommand::Plan => "create a comprehensive plan (multiple agents)",
@@ -116,14 +116,14 @@ impl SlashCommand {
             SlashCommand::Mention => "mention a file",
             SlashCommand::Cmd => "run a project command",
             SlashCommand::Status => "show current session configuration and token usage",
-            SlashCommand::Limits => "open Settings overlay at Limits section",
+            SlashCommand::Limits => "adjust session limits",
             SlashCommand::Update => "check for updates and optionally upgrade",
-            SlashCommand::Notifications => "manage notification settings (opens Settings when no args)",
-            SlashCommand::Theme => "open Settings at Theme section",
-            SlashCommand::Settings => "open Settings (sections: model, theme, agents, limits, chrome, mcp, notifications)",
+            SlashCommand::Notifications => "manage notification settings",
+            SlashCommand::Theme => "customize the app theme",
+            SlashCommand::Settings => "manage all settings in one place",
             SlashCommand::Prompts => "show example prompts",
-            SlashCommand::Model => "open Settings at Model section",
-            SlashCommand::Agents => "open Settings overlay at Agents section",
+            SlashCommand::Model => "choose your default model",
+            SlashCommand::Agents => "configure agents",
             SlashCommand::Auto => "work autonomously on long tasks with Auto Drive",
             SlashCommand::Branch => {
                 "work in an isolated /branch then /merge when done (great for parallel work)"
@@ -131,7 +131,7 @@ impl SlashCommand {
             SlashCommand::Merge => "merge current worktree branch back to default",
             SlashCommand::Github => "GitHub Actions watcher (status/on/off)",
             SlashCommand::Validation => "control validation harness (status/on/off)",
-            SlashCommand::Mcp => "manage MCP servers (opens Settings when no args)",
+            SlashCommand::Mcp => "manage MCP servers",
             SlashCommand::Perf => "performance tracing (on/off/show/reset)",
             SlashCommand::Demo => "populate history with demo cells (dev/perf only)",
             SlashCommand::Login => "manage Code sign-ins (add/select/disconnect)",
