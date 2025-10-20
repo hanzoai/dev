@@ -178,8 +178,6 @@ pub struct ComposerStyle {
     pub border_style: Style,
     pub border_type: BorderType,
     pub background_style: Style,
-    pub auto_title_prefix: &'static str,
-    pub auto_title_suffix: &'static str,
     pub goal_title_prefix: &'static str,
     pub goal_title_suffix: &'static str,
     pub title_style: Style,
@@ -213,8 +211,6 @@ fn sentinel_style() -> AutoDriveStyle {
             border_style: Style::default().fg(primary),
             border_type: BorderType::Rounded,
             background_style: Style::default().bg(colors::background()),
-            auto_title_prefix: " ▶ ",
-            auto_title_suffix: " ",
             goal_title_prefix: " ▶ Goal ",
             goal_title_suffix: " ",
             title_style: Style::default()
@@ -254,8 +250,6 @@ fn whisper_style() -> AutoDriveStyle {
             border_style: Style::default().fg(border),
             border_type: BorderType::Plain,
             background_style: Style::default().bg(colors::background()),
-            auto_title_prefix: " ∙ ",
-            auto_title_suffix: " ∙",
             goal_title_prefix: " ∙ Goal ",
             goal_title_suffix: " ∙",
             title_style: Style::default()
@@ -302,8 +296,6 @@ fn beacon_style() -> AutoDriveStyle {
                 .add_modifier(Modifier::BOLD),
             border_type: BorderType::Thick,
             background_style: Style::default().bg(colors::background()),
-            auto_title_prefix: " █ ",
-            auto_title_suffix: " ",
             goal_title_prefix: " █ Goal ",
             goal_title_suffix: " ",
             title_style: Style::default()
@@ -347,8 +339,6 @@ fn horizon_style() -> AutoDriveStyle {
                 .add_modifier(Modifier::BOLD),
             border_type: BorderType::Double,
             background_style: Style::default().bg(colors::assistant_bg()),
-            auto_title_prefix: " ═ ",
-            auto_title_suffix: " ═",
             goal_title_prefix: " ═ Goal ",
             goal_title_suffix: " ═",
             title_style: Style::default()
@@ -392,8 +382,6 @@ fn pulse_style() -> AutoDriveStyle {
                 .add_modifier(Modifier::BOLD),
             border_type: BorderType::Rounded,
             background_style: Style::default().bg(colors::background()),
-            auto_title_prefix: " ◆ ",
-            auto_title_suffix: " ◆",
             goal_title_prefix: " ◆ Goal ",
             goal_title_suffix: " ◆",
             title_style: Style::default()

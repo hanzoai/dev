@@ -2424,23 +2424,18 @@ impl WidgetRef for ChatComposer {
         if self.is_task_running && !self.embedded_mode {
             if self.auto_drive_active {
                 if let Some(style) = self.auto_drive_style.as_ref() {
-                    let title_text = if self
+                    if self
                         .status_message
                         .eq_ignore_ascii_case("auto drive goal")
                     {
-                        format!(
+                        let title_text = format!(
                             "{}Auto Drive Goal{}",
                             style.goal_title_prefix, style.goal_title_suffix
-                        )
-                    } else {
-                        format!(
-                            "{}Auto Drive{}",
-                            style.auto_title_prefix, style.auto_title_suffix
-                        )
-                    };
-                    let title_line =
-                        Line::from(Span::styled(title_text, style.title_style.clone()));
-                    input_block = input_block.title(title_line);
+                        );
+                        let title_line =
+                            Line::from(Span::styled(title_text, style.title_style.clone()));
+                        input_block = input_block.title(title_line);
+                    }
                 }
             } else {
                 use std::time::{SystemTime, UNIX_EPOCH};
