@@ -43,6 +43,7 @@ pub(crate) struct AgentRunCell {
     actions: Vec<String>,
     cell_key: Option<String>,
     batch_label: Option<String>,
+    write_enabled: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -217,6 +218,12 @@ impl AgentRunCell {
         self.agents = agents;
     }
 
+    pub(crate) fn set_write_mode(&mut self, write_enabled: Option<bool>) {
+        if write_enabled.is_some() {
+            self.write_enabled = write_enabled;
+        }
+    }
+
     pub(crate) fn set_duration(&mut self, duration: Option<Duration>) {
         self.duration = duration;
     }
@@ -347,7 +354,21 @@ impl AgentRunCell {
             remaining = remaining.saturating_sub(1);
             let truncated = truncate_with_ellipsis(text_value, remaining);
             if !truncated.is_empty() {
+                let name_width = string_width(truncated.as_str());
                 segments.push(CardSegment::new(truncated, primary_text_style(style)));
+                remaining = remaining.saturating_sub(name_width);
+
+                if let Some(write_label) = self.write_mode_label() {
+                    if remaining > 0 {
+                        let truncated_label = truncate_with_ellipsis(write_label.as_str(), remaining);
+                        if !truncated_label.is_empty() {
+                            segments.push(CardSegment::new(
+                                truncated_label,
+                                secondary_text_style(style),
+                            ));
+                        }
+                    }
+                }
             }
         }
 
@@ -500,6 +521,16 @@ impl AgentRunCell {
         rows.push(self.bottom_border_row(body_width, style));
 
         rows
+    }
+
+    fn write_mode_label(&self) -> Option<String> {
+        self.write_enabled.map(|flag| {
+            if flag {
+                " • (write)".to_string()
+            } else {
+                " • (read only)".to_string()
+            }
+        })
     }
 
     fn context_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {

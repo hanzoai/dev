@@ -147,6 +147,7 @@ pub(super) struct AgentRunTracker {
     agent_elapsed: HashMap<String, Duration>,
     agent_token_counts: HashMap<String, u64>,
     anchor_inserted: bool,
+    write_enabled: Option<bool>,
 }
 
 impl AgentRunTracker {
@@ -166,6 +167,7 @@ impl AgentRunTracker {
             agent_elapsed: HashMap::new(),
             agent_token_counts: HashMap::new(),
             anchor_inserted: false,
+            write_enabled: None,
         }
     }
 
@@ -221,6 +223,13 @@ impl AgentRunTracker {
                 self.cell.set_agent_name(name);
                 self.has_custom_name = true;
             }
+        }
+    }
+
+    fn set_write_mode(&mut self, write_flag: Option<bool>) {
+        if let Some(flag) = write_flag {
+            self.write_enabled = Some(flag);
+            self.cell.set_write_mode(Some(flag));
         }
     }
 }
@@ -363,6 +372,8 @@ struct InvocationMetadata {
     label: Option<String>,
     action: Option<String>,
     context: Option<String>,
+    write: Option<bool>,
+    read_only: Option<bool>,
 }
 
 impl InvocationMetadata {
@@ -374,6 +385,12 @@ impl InvocationMetadata {
             }
             if let Some(batch) = map.get("batch_id").and_then(|v| v.as_str()) {
                 meta.batch_id = Some(batch.to_string());
+            }
+            if let Some(write_flag) = map.get("write").and_then(|v| v.as_bool()) {
+                meta.write = Some(write_flag);
+            }
+            if let Some(ro_flag) = map.get("read_only").and_then(|v| v.as_bool()) {
+                meta.read_only = Some(ro_flag);
             }
             if let Some(agent_id) = map.get("agent_id").and_then(|v| v.as_str()) {
                 meta.agent_ids.push(agent_id.to_string());
@@ -417,6 +434,16 @@ impl InvocationMetadata {
                         if let Some(backend) = obj.get("backend").and_then(|v| v.as_str()) {
                             meta.models.push(backend.to_string());
                         }
+                        if meta.write.is_none() {
+                            if let Some(write_flag) = obj.get("write").and_then(|v| v.as_bool()) {
+                                meta.write = Some(write_flag);
+                            }
+                        }
+                        if meta.read_only.is_none() {
+                            if let Some(ro_flag) = obj.get("read_only").and_then(|v| v.as_bool()) {
+                                meta.read_only = Some(ro_flag);
+                            }
+                        }
                     }
                 }
             }
@@ -432,6 +459,16 @@ impl InvocationMetadata {
                 if meta.context.is_none() {
                     if let Some(context) = create.get("context").and_then(|v| v.as_str()) {
                         meta.context = Some(context.to_string());
+                    }
+                }
+                if meta.write.is_none() {
+                    if let Some(write_flag) = create.get("write").and_then(|v| v.as_bool()) {
+                        meta.write = Some(write_flag);
+                    }
+                }
+                if meta.read_only.is_none() {
+                    if let Some(ro_flag) = create.get("read_only").and_then(|v| v.as_bool()) {
+                        meta.read_only = Some(ro_flag);
                     }
                 }
                 if meta.plan.is_empty() {
@@ -502,6 +539,16 @@ impl InvocationMetadata {
             // Leave plan empty; the UI will render a placeholder.
         }
         meta
+    }
+
+    fn resolved_write_flag(&self) -> Option<bool> {
+        if let Some(flag) = self.write {
+            Some(flag)
+        } else if let Some(ro_flag) = self.read_only {
+            Some(!ro_flag)
+        } else {
+            None
+        }
     }
 }
 
@@ -577,6 +624,7 @@ pub(super) fn handle_custom_tool_begin(
         .effective_label()
         .or_else(|| tracker.batch_id.clone());
     tracker.cell.set_batch_label(header_label);
+    tracker.set_write_mode(metadata.resolved_write_flag());
     if !metadata.plan.is_empty() {
         tracker.cell.set_plan(metadata.plan.clone());
     }
@@ -678,6 +726,9 @@ pub(super) fn handle_custom_tool_end(
         .or(raw_label.clone())
         .filter(|value| !looks_like_uuid(value));
     tracker.set_agent_name(name_for_cell, true);
+    if tracker.write_enabled.is_none() {
+        tracker.set_write_mode(metadata.resolved_write_flag());
+    }
     if !metadata.plan.is_empty() {
         tracker.cell.set_plan(metadata.plan.clone());
     }
