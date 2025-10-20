@@ -6,14 +6,12 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+   /settings - open Settings (sections: model, theme, agents, limits, chrome,
+   mcp, notifications)
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /chrome - connect to Chrome (opens Settings at Chrome)
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
-   /branch - work in an isolated /branch then /merge when done (great for
-   parallel work)
-   /limits - open Settings overlay at Limits section
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
 
   Auto Drive > Working                                       Running (0 turns)
  +----------------------------------------------------------------------------+
@@ -25,11 +23,11 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   parallel work)
-   /limits - open Settings overlay at Limits section
-   /review - review your changes for potential issues
+   mcp, notifications)
    /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
+   /chrome - connect to Chrome (opens Settings at Chrome)
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
 
   Auto Drive > Working                                Awaiting input (0 turns)
  Completed git status check. Comparing diffs against last run.
@@ -44,14 +42,12 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+   /settings - open Settings (sections: model, theme, agents, limits, chrome,
+   mcp, notifications)
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /chrome - connect to Chrome (opens Settings at Chrome)
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
-   /branch - work in an isolated /branch then /merge when done (great for
-   parallel work)
-   /limits - open Settings overlay at Limits section
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
 
   Auto Drive > Working                               Awaiting review (0 turns)
  +----------------------------------------------------------------------------+
@@ -63,14 +59,12 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+   /settings - open Settings (sections: model, theme, agents, limits, chrome,
+   mcp, notifications)
+   /auto - work autonomously on long tasks with Auto Drive Experimental
+   /chrome - connect to Chrome (opens Settings at Chrome)
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
-   /branch - work in an isolated /branch then /merge when done (great for
-   parallel work)
-   /limits - open Settings overlay at Limits section
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
 
   Auto Drive > Working                                       Running (0 turns)
  +----------------------------------------------------------------------------+
