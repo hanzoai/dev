@@ -12179,6 +12179,11 @@ impl ChatWidget<'_> {
         let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
 
+        if ctrl && matches!(key_event.code, KeyCode::Char('o') | KeyCode::Char('O')) {
+            self.close_auto_threads_overlay();
+            return true;
+        }
+
         if ctrl && shift && matches!(key_event.code, KeyCode::Char('c') | KeyCode::Char('C')) {
             self.close_auto_threads_overlay();
             return true;
