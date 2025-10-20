@@ -11355,7 +11355,7 @@ impl ChatWidget<'_> {
         lines.push(Line::from(""));
         lines.push(Line::from("Manage in the overlay:".bold()));
         lines.push(Line::from(
-            "  /agents  — open Settings › Agents (↑↓ navigate • Enter edit • Esc back)"
+            "  /agents  — configure agents (↑↓ navigate • Enter edit • Esc back)"
                 .fg(crate::colors::text_dim()),
         ));
         lines.push(Line::from(""));

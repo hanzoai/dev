@@ -6,9 +6,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   mcp, notifications)
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /chrome - connect to Chrome (opens Settings at Chrome)
+ /settings - manage all settings in one place NEW
+ /auto - work autonomously on long tasks with Auto Drive UPDATED
+  /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
@@ -25,9 +25,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   mcp, notifications)
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /chrome - connect to Chrome (opens Settings at Chrome)
+ /settings - manage all settings in one place NEW
+ /auto - work autonomously on long tasks with Auto Drive UPDATED
+  /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
@@ -44,10 +44,9 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-   /settings - open Settings (sections: model, theme, agents, limits, chrome,
-   mcp, notifications)
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /chrome - connect to Chrome (opens Settings at Chrome)
+ /settings - manage all settings in one place NEW
+ /auto - work autonomously on long tasks with Auto Drive UPDATED
+  /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
