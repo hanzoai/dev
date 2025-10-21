@@ -103,6 +103,15 @@ sandbox_mode = "workspace-write"
 allow_git_writes = false   # default is true; set false to protect .git
 ```
 
+### TUI anti-truncation fallback
+
+If the transcript's last line intermittently clips, you can opt into a guarded
+bottom spacer by exporting `CODE_TUI_ANTICUTOFF=1` before launching Codex. The
+TUI adds a 1–2 row overscan pad when the computed history height looks like it
+might land flush with the viewport, reducing the chance the final row
+disappears mid-stream. Enable `RUST_LOG=debug` with the flag to log when the
+fallback fires while you iterate on layouts.
+
 ### Debugging Virtual Cursor
 
 Use these console helpers to diagnose motion/cancellation behavior when testing in a real browser:
