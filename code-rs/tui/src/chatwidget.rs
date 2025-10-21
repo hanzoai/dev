@@ -642,6 +642,7 @@ struct AutoCoordinatorUiState {
     intro_started_at: Option<Instant>,
     intro_reduced_motion: bool,
     intro_pending: bool,
+    elapsed_override: Option<Duration>,
 }
 
 impl AutoCoordinatorUiState {
@@ -745,6 +746,7 @@ impl Default for AutoCoordinatorUiState {
             intro_started_at: None,
             intro_reduced_motion: false,
             intro_pending: false,
+            elapsed_override: None,
         }
     }
 }
@@ -12677,6 +12679,7 @@ fi\n\
             elapsed: None,
             progress_past: None,
             progress_current: None,
+            editing_prompt: false,
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });
@@ -14475,6 +14478,7 @@ fi\n\
                     elapsed: Some(summary.duration),
                     progress_past: None,
                     progress_current: None,
+                    editing_prompt: false,
                     intro_started_at: self.auto_state.intro_started_at,
                     intro_reduced_motion: self.auto_state.intro_reduced_motion,
                 });
@@ -14613,39 +14617,35 @@ fi\n\
                 label,
                 enabled: true,
             })
-        } else if self.auto_state.waiting_for_response {
-            None
         } else {
             None
         };
-
-        let show_composer = !self.auto_state.awaiting_submission || self.auto_state.paused_for_manual_edit;
 
         let manual_hint = if self.auto_state.awaiting_submission {
             if self.auto_state.paused_for_manual_edit {
                 Some("Edit the prompt, then press Enter to continue.".to_string())
             } else if countdown_active {
-                Some("Enter to send now • Esc/E to edit prompt".to_string())
+                Some("Enter to send now • Esc to edit".to_string())
             } else {
-                Some("Enter to send • E to edit prompt • Esc to cancel Auto Drive".to_string())
+                Some("Enter to send • Esc to edit".to_string())
             }
         } else {
             None
         };
 
         let ctrl_switch_hint = if self.auto_state.awaiting_submission {
-            if countdown_active {
-                "Esc to edit prompt".to_string()
-            } else if self.auto_state.paused_for_manual_edit {
+            if self.auto_state.paused_for_manual_edit {
                 "Esc to cancel".to_string()
             } else {
-                "E edit prompt • Esc cancel Auto Drive".to_string()
+                "Esc to edit".to_string()
             }
         } else if self.auto_state.waiting_for_response {
             String::new()
         } else {
             String::new()
         };
+
+        let show_composer = !self.auto_state.awaiting_submission || self.auto_state.paused_for_manual_edit;
 
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
             goal: self.auto_state.goal.clone(),
@@ -14663,12 +14663,17 @@ fi\n\
             started_at: self.auto_state.started_at,
             elapsed: self
                 .auto_state
-                .started_at
-                .map(|started| Duration::from_secs(started.elapsed().as_secs())),
+                .elapsed_override
+                .or_else(|| {
+                    self.auto_state.started_at.map(|started| {
+                        Duration::from_secs(started.elapsed().as_secs())
+                    })
+                }),
             progress_past: self.auto_state.current_progress_past.clone(),
             progress_current: self.auto_state.current_progress_current.clone(),
             cli_context,
             show_composer,
+            editing_prompt: self.auto_state.paused_for_manual_edit,
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });

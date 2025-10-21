@@ -11,13 +11,13 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive prompt
- Prompt
- cargo fmt --check
-
-
-
+  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo fmt --check                                                         |
+ +----------------------------------------------------------------------------+
+ +------------------+
+ | Send prompt (3s) |   Esc to edit
+ +------------------+
    Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
 
 ---FRAME---
@@ -30,13 +30,13 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive prompt
- Prompt
- cargo fmt --check
-
-
-
+  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo fmt --check                                                         |
+ +----------------------------------------------------------------------------+
+ +------------------+
+ | Send prompt (1s) |   Esc to edit
+ +------------------+
    Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
 
 ---FRAME---
@@ -52,7 +52,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
  › cargo fmt --check
 
-  Auto Drive > Running cargo fmt --check.                    Running (0 turns)
+  Auto Drive > Running cargo fmt --check.                Running (1s, 0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
