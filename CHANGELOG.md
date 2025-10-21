@@ -6,9 +6,16 @@
 ## [Unreleased]
 
 - Auto Drive: retire coordinator-driven `cross_check`/`code_review` actions; QA scheduling now lives in the standalone orchestrator thread.
-- TUI: new QA orchestrator emits `AppEvent::AutoQaUpdate` cadence notes and `AppEvent::AutoReviewRequest` when a diff passes the review cooldown.
+- QA/Observer: bootstrap each run with a read-only validation pass,
+  track deltas-only between turns, and reuse observer history for
+  cross-check before completion.
+- TUI: surface `AutoObserverThinking` streams in the Auto Threads
+  overlay, label observer entries by mode, and show banners for
+  bootstrap and cross-check milestones.
+- Debug: `--debug` request logs now land in helper-specific directories
+  under `~/.code/debug_logs/` (for example `auto/coordinator`,
+  `auto/observer/cadence`, `guided_terminal/agent_install_flow`).
 - Ops: tune QA cadence with `CODE_QA_CADENCE` (turns between updates) and `CODE_QA_REVIEW_COOLDOWN_TURNS` (turns between automated reviews).
-- Auto Drive: force a cross-check observer pass before honoring coordinator success to prevent premature exits.
 - QA: post-turn code review is now triggered exclusively via QA automation events instead of every write turn.
 
 ## [0.2.188] - 2025-10-06

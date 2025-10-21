@@ -197,8 +197,9 @@ impl ModelClient {
     /// the provider config.  Public callers always invoke `stream()` – the
     /// specialised helpers are private to avoid accidental misuse.
     pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
+        let log_tag = prompt.log_tag.as_deref();
         match self.provider.wire_api {
-            WireApi::Responses => self.stream_responses(prompt).await,
+            WireApi::Responses => self.stream_responses(prompt, log_tag).await,
             WireApi::Chat => {
                 let effective_family = prompt
                     .model_family_override
@@ -218,6 +219,7 @@ impl ModelClient {
                     &self.debug_logger,
                     self.auth_manager.clone(),
                     self.otel_event_manager.clone(),
+                    log_tag,
                 )
                 .await?;
 
@@ -250,7 +252,7 @@ impl ModelClient {
     }
 
     /// Implementation for the OpenAI *Responses* experimental API.
-    async fn stream_responses(&self, prompt: &Prompt) -> Result<ResponseStream> {
+    async fn stream_responses(&self, prompt: &Prompt, log_tag: Option<&str>) -> Result<ResponseStream> {
         if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
@@ -398,7 +400,7 @@ impl ModelClient {
         // Start logging the request and get a request_id to track the response
         let request_id = if let Ok(logger) = self.debug_logger.lock() {
             logger
-                .start_request_log(&endpoint, &payload_json)
+                .start_request_log(&endpoint, &payload_json, log_tag)
                 .unwrap_or_default()
         } else {
             String::new()
@@ -648,7 +650,7 @@ impl ModelClient {
                     if attempt > max_retries {
                         // Log network error
                         if let Ok(logger) = self.debug_logger.lock() {
-                            let _ = logger.log_error(&endpoint, &format!("Network error: {}", e));
+                            let _ = logger.log_error(&endpoint, &format!("Network error: {}", e), log_tag);
                         }
                         return Err(e.into());
                     }

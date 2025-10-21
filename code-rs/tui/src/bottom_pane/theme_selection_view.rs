@@ -411,6 +411,7 @@ impl ThemeSelectionView {
                 prompt.input = input;
                 prompt.store = true;
                 prompt.text_format = Some(format);
+                prompt.set_log_tag("ui/theme_spinner");
 
                 // Stream and collect final JSON
                 use futures::StreamExt;
@@ -763,6 +764,7 @@ impl ThemeSelectionView {
                 prompt.input = input;
                 prompt.store = true;
                 prompt.text_format = Some(format);
+                prompt.set_log_tag("ui/theme_builder");
 
                 use futures::StreamExt;
                 let _ = progress_tx.send(ProgressMsg::ThinkingDelta("(connecting to model)".to_string()));
