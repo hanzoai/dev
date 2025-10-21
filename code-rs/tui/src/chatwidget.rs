@@ -891,6 +891,16 @@ pub(super) static GIT_DIFF_NAME_ONLY_BETWEEN_STUB: Lazy<Mutex<Option<GitDiffName
 #[cfg(test)]
 pub(super) static AUTO_STUB_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+static HISTORY_BOTTOM_SPACER_ENABLED: Lazy<bool> = Lazy::new(|| {
+    match std::env::var("CODE_TUI_ANTICUTOFF") {
+        Ok(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            !matches!(normalized.as_str(), "" | "0" | "false" | "off" | "no")
+        }
+        Err(_) => false,
+    }
+});
+
 #[derive(Clone)]
 struct AutoResolveState {
     prompt: String,
@@ -27938,7 +27948,36 @@ impl WidgetRef for &ChatWidget<'_> {
             rendered_cells_full = Some(cells);
         }
 
-        let total_height = self.history_render.last_total_height();
+        let mut total_height = self.history_render.last_total_height();
+        if *HISTORY_BOTTOM_SPACER_ENABLED
+            && total_height > 0
+            && content_area.height > 0
+            && request_count > 0
+        {
+            let viewport_rows = content_area.height;
+            let remainder = total_height % viewport_rows;
+            let near_edge = viewport_rows >= 4
+                && (remainder <= 2 || remainder >= viewport_rows.saturating_sub(2));
+            let mut spacer_lines = 0u16;
+            if remainder == 0 {
+                spacer_lines = 2;
+            } else if near_edge {
+                spacer_lines = 1;
+            }
+            if spacer_lines > 0 {
+                let base_total = total_height;
+                total_height = total_height.saturating_add(spacer_lines);
+                tracing::debug!(
+                    target: "code_tui::history_render",
+                    lines = spacer_lines,
+                    base_height = base_total,
+                    padded_height = total_height,
+                    viewport = viewport_rows,
+                    remainder = remainder,
+                    "CODE_TUI_ANTICUTOFF: adding bottom spacer",
+                );
+            }
+        }
         // Calculate scroll position and vertical alignment
         // Stabilize viewport when input area height changes while scrolled up.
         let prev_viewport_h = self.layout.last_history_viewport_height.get();
