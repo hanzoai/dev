@@ -21,6 +21,7 @@ pub(crate) struct AutoDriveSettingsView {
     cross_check_enabled: bool,
     qa_automation_enabled: bool,
     observer_enabled: bool,
+    diagnostics_enabled: bool,
     continue_mode: AutoContinueMode,
     closing: bool,
 }
@@ -37,6 +38,8 @@ impl AutoDriveSettingsView {
         observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) -> Self {
+        let diagnostics_enabled = qa_automation_enabled
+            && (review_enabled || cross_check_enabled || observer_enabled);
         Self {
             app_event_tx,
             selected_index: 0,
@@ -45,24 +48,14 @@ impl AutoDriveSettingsView {
             cross_check_enabled,
             qa_automation_enabled,
             observer_enabled,
+            diagnostics_enabled,
             continue_mode,
             closing: false,
         }
     }
 
     fn option_count() -> usize {
-        6
-    }
-
-    fn selected_mut(&mut self) -> &mut bool {
-        match self.selected_index {
-            0 => &mut self.review_enabled,
-            1 => &mut self.agents_enabled,
-            2 => &mut self.cross_check_enabled,
-            3 => &mut self.qa_automation_enabled,
-            4 => &mut self.observer_enabled,
-            _ => unreachable!(),
-        }
+        3
     }
 
     fn send_update(&self) {
@@ -76,6 +69,15 @@ impl AutoDriveSettingsView {
         });
     }
 
+    fn set_diagnostics(&mut self, enabled: bool) {
+        self.review_enabled = enabled;
+        self.cross_check_enabled = enabled;
+        self.qa_automation_enabled = enabled;
+        self.observer_enabled = enabled;
+        self.diagnostics_enabled = self.qa_automation_enabled
+            && (self.review_enabled || self.cross_check_enabled || self.observer_enabled);
+    }
+
     fn cycle_continue_mode(&mut self, forward: bool) {
         self.continue_mode = if forward {
             self.continue_mode.cycle_forward()
@@ -86,12 +88,18 @@ impl AutoDriveSettingsView {
     }
 
     fn toggle_selected(&mut self) {
-        if self.selected_index <= 4 {
-            let slot = self.selected_mut();
-            *slot = !*slot;
-            self.send_update();
-        } else {
-            self.cycle_continue_mode(true);
+        match self.selected_index {
+            0 => {
+                self.agents_enabled = !self.agents_enabled;
+                self.send_update();
+            }
+            1 => {
+                let next = !self.diagnostics_enabled;
+                self.set_diagnostics(next);
+                self.send_update();
+            }
+            2 => self.cycle_continue_mode(true),
+            _ => {}
         }
     }
 
@@ -123,15 +131,15 @@ impl AutoDriveSettingsView {
         let indicator = if selected { "›" } else { " " };
         let prefix = format!("{indicator} ");
         let (label, enabled) = match index {
-            0 => ("Automatic review", self.review_enabled),
-            1 => ("Agents enabled", self.agents_enabled),
-            2 => ("Cross-check QA", self.cross_check_enabled),
-            3 => (
-                "QA automation (observer + cross-check + review)",
-                self.qa_automation_enabled,
+            0 => (
+                "Agents enabled (uses multiple agents to speed up complex tasks)",
+                self.agents_enabled,
             ),
-            4 => ("Observer watchdog", self.observer_enabled),
-            5 => (
+            1 => (
+                "Diagnostics enabled (monitors and adjusts system in real time)",
+                self.diagnostics_enabled,
+            ),
+            2 => (
                 "Auto-continue delay",
                 matches!(self.continue_mode, AutoContinueMode::Manual),
             ),
@@ -148,14 +156,14 @@ impl AutoDriveSettingsView {
 
         let mut spans = vec![Span::styled(prefix, label_style)];
         match index {
-            0 | 1 | 2 | 3 | 4 => {
+            0 | 1 => {
                 let checkbox = if enabled { "[x]" } else { "[ ]" };
                 spans.push(Span::styled(
                     format!("{checkbox} {label}"),
                     label_style,
                 ));
             }
-            5 => {
+            2 => {
                 spans.push(Span::styled(label.to_string(), label_style));
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
@@ -176,9 +184,6 @@ impl AutoDriveSettingsView {
         lines.push(self.option_label(0));
         lines.push(self.option_label(1));
         lines.push(self.option_label(2));
-        lines.push(self.option_label(3));
-        lines.push(self.option_label(4));
-        lines.push(self.option_label(5));
         lines.push(Line::default());
 
         let footer_style = Style::default().fg(colors::text_dim());
@@ -230,13 +235,13 @@ impl AutoDriveSettingsView {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             KeyCode::Left => {
-                if self.selected_index == 5 {
+                if self.selected_index == 2 {
                     self.cycle_continue_mode(false);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
             }
             KeyCode::Right => {
-                if self.selected_index == 5 {
+                if self.selected_index == 2 {
                     self.cycle_continue_mode(true);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
@@ -286,13 +291,13 @@ impl<'a> BottomPaneView<'a> for AutoDriveSettingsView {
                 pane.request_redraw();
             }
             KeyCode::Left => {
-                if self.selected_index == 5 {
+                if self.selected_index == 2 {
                     self.cycle_continue_mode(false);
                     pane.request_redraw();
                 }
             }
             KeyCode::Right => {
-                if self.selected_index == 5 {
+                if self.selected_index == 2 {
                     self.cycle_continue_mode(true);
                     pane.request_redraw();
                 }

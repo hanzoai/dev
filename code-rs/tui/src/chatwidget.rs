@@ -730,8 +730,8 @@ impl Default for AutoCoordinatorUiState {
             observer_status: AutoObserverStatus::default(),
             pending_observer_banners: Vec::new(),
             coordinator_waiting: false,
-            review_enabled: false,
-            subagents_enabled: false,
+            review_enabled: true,
+            subagents_enabled: true,
             cross_check_enabled: true,
             qa_automation_enabled: true,
             observer_enabled: true,
@@ -14851,41 +14851,16 @@ fi\n\
         } else {
             "Agents Disabled"
         };
-        let review_label = if self.auto_state.review_enabled {
-            "Review Enabled"
+        let diagnostics_enabled = self.auto_should_run_qa_orchestrator();
+        let diagnostics_label = if diagnostics_enabled {
+            "Diagnostics Enabled"
         } else {
-            "Review Disabled"
-        };
-        let cross_label = if self.auto_state.cross_check_enabled {
-            "Cross-check Enabled"
-        } else {
-            "Cross-check Disabled"
-        };
-        let observer_label = if self.auto_state.observer_enabled {
-            "Observer Enabled"
-        } else {
-            "Observer Disabled"
+            "Diagnostics Disabled"
         };
 
-        let left = if self.auto_state.awaiting_submission {
-            format!(
-                "Awaiting approval  •  {}  •  {}  •  {}  •  {}  •  Ctrl+S Settings  •  Ctrl+O Threads",
-                agents_label, review_label, cross_label, observer_label
-            )
-        } else {
-            format!(
-                "{}  •  {}  •  {}  •  {}  •  Ctrl+S Settings  •  Ctrl+O Threads",
-                agents_label, review_label, cross_label, observer_label
-            )
-        };
+        let left = format!("{}  •  {}", agents_label, diagnostics_label);
 
-        let right = if self.auto_state.awaiting_submission {
-            "Enter approve  •  Esc cancel"
-        } else {
-            "Esc stop Auto Drive"
-        };
-
-        let hint = format!("{left}\t{right}");
+        let hint = left.to_string();
         self.bottom_pane
             .set_standard_terminal_hint(Some(hint));
     }
@@ -17273,10 +17248,11 @@ fi\n\
     }
 
     fn settings_summary_auto_drive(&self) -> Option<String> {
+        let diagnostics_enabled = self.auto_should_run_qa_orchestrator();
         Some(format!(
-            "Review: {} · Agents: {} · Continue: {}",
-            Self::on_off_label(self.auto_state.review_enabled),
+            "Agents: {} · Diagnostics: {} · Continue: {}",
             Self::on_off_label(self.auto_state.subagents_enabled),
+            Self::on_off_label(diagnostics_enabled),
             self.auto_state.continue_mode.label()
         ))
     }
