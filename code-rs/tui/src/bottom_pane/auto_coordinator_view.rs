@@ -478,11 +478,13 @@ impl AutoCoordinatorView {
             " > ",
             Style::default().fg(colors::text_dim()),
         ));
-        base_spans.push(Span::styled(
-            display_message.to_string(),
-            Style::default().fg(colors::text()),
-        ));
-        let base_line = Line::from(base_spans.clone());
+        let message_style = Style::default().fg(colors::text());
+        let default_message_span = Span::styled(display_message.to_string(), message_style);
+        let base_line = {
+            let mut spans = base_spans.clone();
+            spans.push(default_message_span.clone());
+            Line::from(spans)
+        };
 
         let runtime_text = self.runtime_text(model);
         let mut right_spans: Vec<Span<'static>> = Vec::new();
@@ -517,48 +519,43 @@ impl AutoCoordinatorView {
 
         let left_available = chunks[0].width;
         let mut left_line = base_line.clone();
-        if model.cli_running && left_available > 0 {
+        let show_progress_hint = model.cli_running
+            || model.awaiting_submission
+            || (model.waiting_for_response && !model.coordinator_waiting);
+        if show_progress_hint && left_available > 0 {
             let (progress_past, progress_current) = Self::progress_labels(model);
             let progress_style = Style::default().fg(colors::text_dim());
-            let mut applied = false;
-            if let (Some(past), Some(current)) = (progress_past.as_ref(), progress_current.as_ref()) {
+
+            let try_apply = |content: &str| -> Option<Line<'static>> {
                 let mut candidate_spans = base_spans.clone();
-                candidate_spans.push(Span::styled(
-                    format!(" > {} > {}", past, current),
-                    progress_style,
-                ));
+                candidate_spans.push(Span::styled(content.to_string(), progress_style));
                 let candidate_line = Line::from(candidate_spans.clone());
                 if candidate_line.width() <= left_available as usize {
-                    left_line = candidate_line;
-                    applied = true;
+                    Some(candidate_line)
+                } else {
+                    None
                 }
-            }
-            if !applied {
-                if let Some(current) = progress_current.as_ref() {
-                    let mut candidate_spans = base_spans.clone();
-                    candidate_spans.push(Span::styled(
-                        format!(" > {}", current),
-                        progress_style,
-                    ));
-                    let candidate_line = Line::from(candidate_spans.clone());
-                    if candidate_line.width() <= left_available as usize {
-                        left_line = candidate_line;
-                        applied = true;
+            };
+
+            match (progress_past.as_ref(), progress_current.as_ref()) {
+                (Some(past), Some(current)) => {
+                    if let Some(line) = try_apply(&format!("{} > {}", past, current)) {
+                        left_line = line;
+                    } else if let Some(line) = try_apply(current) {
+                        left_line = line;
                     }
                 }
-                if !applied {
-                    if let Some(past) = progress_past.as_ref() {
-                        let mut candidate_spans = base_spans.clone();
-                        candidate_spans.push(Span::styled(
-                            format!(" > {}", past),
-                            progress_style,
-                        ));
-                        let candidate_line = Line::from(candidate_spans.clone());
-                        if candidate_line.width() <= left_available as usize {
-                            left_line = candidate_line;
-                        }
+                (None, Some(current)) => {
+                    if let Some(line) = try_apply(current) {
+                        left_line = line;
                     }
                 }
+                (Some(past), None) => {
+                    if let Some(line) = try_apply(past) {
+                        left_line = line;
+                    }
+                }
+                (None, None) => {}
             }
         }
 

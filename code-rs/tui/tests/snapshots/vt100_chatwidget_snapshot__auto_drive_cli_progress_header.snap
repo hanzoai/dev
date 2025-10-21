@@ -1,0 +1,42 @@
+---
+source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 380
+expression: "frames.join(\"\\n---FRAME---\\n\")"
+---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Installed dependencies > Running cargo check...   ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo check                                                               |
+ +----------------------------------------------------------------------------+
+   Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Installed dependencies > Running cargo check...  ✶ Thinking (1s)
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive
+
+---FRAME---
+ +----------------------------------------------------------------------------+
+ |                                    Code                                    |
+ +----------------------------------------------------------------------------+
+   /plan - create a comprehensive plan (multiple agents)
+   /code - perform a coding task (multiple agents)
+
+  Auto Drive > Installed dependencies > Running cargo check...   ✶ Running (1s)
+ +----------------------------------------------------------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive
