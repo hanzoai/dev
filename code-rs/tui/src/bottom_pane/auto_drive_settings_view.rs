@@ -19,6 +19,7 @@ pub(crate) struct AutoDriveSettingsView {
     review_enabled: bool,
     agents_enabled: bool,
     cross_check_enabled: bool,
+    qa_automation_enabled: bool,
     observer_enabled: bool,
     continue_mode: AutoContinueMode,
     closing: bool,
@@ -32,6 +33,7 @@ impl AutoDriveSettingsView {
         review_enabled: bool,
         agents_enabled: bool,
         cross_check_enabled: bool,
+        qa_automation_enabled: bool,
         observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) -> Self {
@@ -41,6 +43,7 @@ impl AutoDriveSettingsView {
             review_enabled,
             agents_enabled,
             cross_check_enabled,
+            qa_automation_enabled,
             observer_enabled,
             continue_mode,
             closing: false,
@@ -48,7 +51,7 @@ impl AutoDriveSettingsView {
     }
 
     fn option_count() -> usize {
-        5
+        6
     }
 
     fn selected_mut(&mut self) -> &mut bool {
@@ -56,7 +59,8 @@ impl AutoDriveSettingsView {
             0 => &mut self.review_enabled,
             1 => &mut self.agents_enabled,
             2 => &mut self.cross_check_enabled,
-            3 => &mut self.observer_enabled,
+            3 => &mut self.qa_automation_enabled,
+            4 => &mut self.observer_enabled,
             _ => unreachable!(),
         }
     }
@@ -66,6 +70,7 @@ impl AutoDriveSettingsView {
             review_enabled: self.review_enabled,
             agents_enabled: self.agents_enabled,
             cross_check_enabled: self.cross_check_enabled,
+            qa_automation_enabled: self.qa_automation_enabled,
             observer_enabled: self.observer_enabled,
             continue_mode: self.continue_mode,
         });
@@ -81,7 +86,7 @@ impl AutoDriveSettingsView {
     }
 
     fn toggle_selected(&mut self) {
-        if self.selected_index <= 3 {
+        if self.selected_index <= 4 {
             let slot = self.selected_mut();
             *slot = !*slot;
             self.send_update();
@@ -121,8 +126,12 @@ impl AutoDriveSettingsView {
             0 => ("Automatic review", self.review_enabled),
             1 => ("Agents enabled", self.agents_enabled),
             2 => ("Cross-check QA", self.cross_check_enabled),
-            3 => ("Observer watchdog", self.observer_enabled),
-            4 => (
+            3 => (
+                "QA automation (observer + cross-check + review)",
+                self.qa_automation_enabled,
+            ),
+            4 => ("Observer watchdog", self.observer_enabled),
+            5 => (
                 "Auto-continue delay",
                 matches!(self.continue_mode, AutoContinueMode::Manual),
             ),
@@ -139,14 +148,14 @@ impl AutoDriveSettingsView {
 
         let mut spans = vec![Span::styled(prefix, label_style)];
         match index {
-            0 | 1 | 2 | 3 => {
+            0 | 1 | 2 | 3 | 4 => {
                 let checkbox = if enabled { "[x]" } else { "[ ]" };
                 spans.push(Span::styled(
                     format!("{checkbox} {label}"),
                     label_style,
                 ));
             }
-            4 => {
+            5 => {
                 spans.push(Span::styled(label.to_string(), label_style));
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
@@ -169,6 +178,7 @@ impl AutoDriveSettingsView {
         lines.push(self.option_label(2));
         lines.push(self.option_label(3));
         lines.push(self.option_label(4));
+        lines.push(self.option_label(5));
         lines.push(Line::default());
 
         let footer_style = Style::default().fg(colors::text_dim());
@@ -220,13 +230,13 @@ impl AutoDriveSettingsView {
                 self.app_event_tx.send(AppEvent::RequestRedraw);
             }
             KeyCode::Left => {
-                if self.selected_index == 4 {
+                if self.selected_index == 5 {
                     self.cycle_continue_mode(false);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
             }
             KeyCode::Right => {
-                if self.selected_index == 4 {
+                if self.selected_index == 5 {
                     self.cycle_continue_mode(true);
                     self.app_event_tx.send(AppEvent::RequestRedraw);
                 }
@@ -276,13 +286,13 @@ impl<'a> BottomPaneView<'a> for AutoDriveSettingsView {
                 pane.request_redraw();
             }
             KeyCode::Left => {
-                if self.selected_index == 4 {
+                if self.selected_index == 5 {
                     self.cycle_continue_mode(false);
                     pane.request_redraw();
                 }
             }
             KeyCode::Right => {
-                if self.selected_index == 4 {
+                if self.selected_index == 5 {
                     self.cycle_continue_mode(true);
                     pane.request_redraw();
                 }

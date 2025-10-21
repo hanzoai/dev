@@ -3,6 +3,14 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [Unreleased]
+
+- Auto Drive: retire coordinator-driven `cross_check`/`code_review` actions; QA scheduling now lives in the standalone orchestrator thread.
+- TUI: new QA orchestrator emits `AppEvent::AutoQaUpdate` cadence notes and `AppEvent::AutoReviewRequest` when a diff passes the review cooldown.
+- Ops: tune QA cadence with `CODE_QA_CADENCE` (turns between updates) and `CODE_QA_REVIEW_COOLDOWN_TURNS` (turns between automated reviews).
+- Auto Drive: force a cross-check observer pass before honoring coordinator success to prevent premature exits.
+- QA: post-turn code review is now triggered exclusively via QA automation events instead of every write turn.
+
 ## [0.2.188] - 2025-10-06
 
 - MCP: Validate stdio tool commands on PATH and surface clearer spawn errors during setup. (3a51d30)

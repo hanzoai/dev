@@ -57,6 +57,7 @@ use code_protocol::num_format::format_with_separators;
 pub(crate) mod auto_coordinator;
 mod auto_drive_history;
 mod auto_observer;
+mod qa_orchestrator;
 #[cfg(feature = "dev-faults")]
 mod faults;
 mod retry;
@@ -101,6 +102,7 @@ use self::auto_coordinator::{
     TurnDescriptor,
     CROSS_CHECK_RESTART_BANNER,
 };
+use self::qa_orchestrator::start_qa_orchestrator;
 use self::limits_overlay::{LimitsOverlayContent, LimitsTab};
 use crate::chrome_launch::ChromeLaunchOption;
 use self::rate_limit_refresh::start_rate_limit_refresh;
@@ -628,6 +630,7 @@ struct AutoCoordinatorUiState {
     review_enabled: bool,
     subagents_enabled: bool,
     cross_check_enabled: bool,
+    qa_automation_enabled: bool,
     observer_enabled: bool,
     pending_agent_actions: Vec<AutoTurnAgentsAction>,
     pending_agent_timing: Option<AutoTurnAgentsTiming>,
@@ -731,6 +734,7 @@ impl Default for AutoCoordinatorUiState {
             review_enabled: false,
             subagents_enabled: false,
             cross_check_enabled: true,
+            qa_automation_enabled: true,
             observer_enabled: true,
             pending_agent_actions: Vec::new(),
             pending_agent_timing: None,
@@ -1014,6 +1018,7 @@ pub(crate) struct ChatWidget<'a> {
     auto_drive_variant: AutoDriveVariant,
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
+    qa_handle: Option<qa_orchestrator::QaOrchestratorHandle>,
     auto_history: AutoDriveHistory,
     auto_turn_review_state: Option<AutoTurnReviewState>,
     cloud_tasks_selected_env: Option<CloudEnvironment>,
@@ -4008,6 +4013,7 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
@@ -4063,6 +4069,7 @@ impl ChatWidget<'_> {
         w.auto_state.review_enabled = auto_defaults.review_enabled;
         w.auto_state.subagents_enabled = auto_defaults.agents_enabled;
         w.auto_state.cross_check_enabled = auto_defaults.cross_check_enabled;
+        w.auto_state.qa_automation_enabled = auto_defaults.qa_automation_enabled;
         w.auto_state.observer_enabled = auto_defaults.observer_enabled;
         w.auto_state.continue_mode = auto_continue_from_config(auto_defaults.continue_mode);
         w.auto_state.reset_countdown();
@@ -4318,6 +4325,7 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
@@ -9359,19 +9367,6 @@ impl ChatWidget<'_> {
                 if self.auto_resolve_enabled() {
                     self.auto_resolve_on_task_complete(last_agent_message.clone());
                 }
-                // Auto-review: if the coordinator marked this as a write turn, kick off a review pass
-                if let Some(cfg) = self.pending_auto_turn_config.clone() {
-                    // `waiting_for_review` may already be true here to pause Auto Drive until
-                    // the review pipeline kicks in, so always attempt to launch the post-turn
-                    // review when the coordinator provides a write turn.
-                    if self.auto_state.active
-                        && self.auto_state.review_enabled
-                        && !self.is_review_flow_active()
-                    {
-                        let descriptor = self.pending_turn_descriptor.clone();
-                        self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
-                    }
-                }
                 // Defensive: mark any lingering agent state as complete so the spinner can quiesce
                 self.finalize_agent_activity();
                 // Convert any lingering running exec/tool cells to completed so the UI doesn't hang
@@ -11730,6 +11725,7 @@ impl ChatWidget<'_> {
         let review = self.auto_state.review_enabled;
         let agents = self.auto_state.subagents_enabled;
         let cross = self.auto_state.cross_check_enabled;
+        let qa = self.auto_state.qa_automation_enabled;
         let observer = self.auto_state.observer_enabled;
         let mode = self.auto_state.continue_mode;
         let view = AutoDriveSettingsView::new(
@@ -11737,6 +11733,7 @@ impl ChatWidget<'_> {
             review,
             agents,
             cross,
+            qa,
             observer,
             mode,
         );
@@ -12691,11 +12688,13 @@ fi\n\
         review_enabled: bool,
         subagents_enabled: bool,
         cross_check_enabled: bool,
+        qa_automation_enabled: bool,
         observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
         self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
+        self.config.tui.auto_drive.qa_automation_enabled = qa_automation_enabled;
         self.config.tui.auto_drive.observer_enabled = observer_enabled;
         match start_auto_coordinator(
             self.app_event_tx.clone(),
@@ -12706,11 +12705,20 @@ fi\n\
             self.config.auto_drive_observer_cadence,
         ) {
             Ok(handle) => {
+                if let Some(handle) = self.qa_handle.take() {
+                    handle.stop();
+                }
+                let should_spawn_qa =
+                    qa_automation_enabled && (review_enabled || cross_check_enabled || observer_enabled);
+                if should_spawn_qa {
+                    self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
+                }
                 self.auto_handle = Some(handle);
                 self.auto_state.reset();
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.cross_check_enabled = cross_check_enabled;
+                self.auto_state.qa_automation_enabled = qa_automation_enabled;
                 self.auto_state.observer_enabled = observer_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
@@ -12754,6 +12762,7 @@ fi\n\
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.cross_check_enabled = cross_check_enabled;
+                self.auto_state.qa_automation_enabled = qa_automation_enabled;
                 self.auto_state.observer_enabled = observer_enabled;
                 self.auto_state.continue_mode = continue_mode;
                 self.auto_state.reset_countdown();
@@ -12761,6 +12770,13 @@ fi\n\
                 self.auto_show_goal_entry_panel();
             }
         }
+    }
+
+    fn auto_should_run_qa_orchestrator(&self) -> bool {
+        self.auto_state.qa_automation_enabled
+            && (self.auto_state.review_enabled
+                || self.auto_state.cross_check_enabled
+                || self.auto_state.observer_enabled)
     }
 
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
@@ -12797,6 +12813,7 @@ fi\n\
             self.auto_state.review_enabled = defaults.review_enabled;
             self.auto_state.subagents_enabled = defaults.agents_enabled;
             self.auto_state.cross_check_enabled = defaults.cross_check_enabled;
+            self.auto_state.qa_automation_enabled = defaults.qa_automation_enabled;
             self.auto_state.continue_mode = auto_continue_from_config(defaults.continue_mode);
             self.auto_state.reset_countdown();
             self.auto_state.mark_intro_pending();
@@ -12821,6 +12838,7 @@ fi\n\
             defaults.review_enabled,
             defaults.agents_enabled,
             defaults.cross_check_enabled,
+            defaults.qa_automation_enabled,
             defaults.observer_enabled,
             default_mode,
         );
@@ -12857,6 +12875,7 @@ fi\n\
         review_enabled: bool,
         agents_enabled: bool,
         cross_check_enabled: bool,
+        qa_automation_enabled: bool,
         observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
@@ -12871,6 +12890,10 @@ fi\n\
         }
         if self.auto_state.cross_check_enabled != cross_check_enabled {
             self.auto_state.cross_check_enabled = cross_check_enabled;
+            changed = true;
+        }
+        if self.auto_state.qa_automation_enabled != qa_automation_enabled {
+            self.auto_state.qa_automation_enabled = qa_automation_enabled;
             changed = true;
         }
         if self.auto_state.observer_enabled != observer_enabled {
@@ -12896,6 +12919,7 @@ fi\n\
         self.config.tui.auto_drive.review_enabled = review_enabled;
         self.config.tui.auto_drive.agents_enabled = agents_enabled;
         self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
+        self.config.tui.auto_drive.qa_automation_enabled = qa_automation_enabled;
         self.config.tui.auto_drive.observer_enabled = observer_enabled;
         self.config.tui.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
 
@@ -12907,6 +12931,25 @@ fi\n\
             }
         } else {
             tracing::warn!("Could not locate config home to persist Auto Drive settings");
+        }
+
+        let should_run_qa = self.auto_should_run_qa_orchestrator();
+        if self.auto_state.active {
+            match (self.qa_handle.is_some(), should_run_qa) {
+                (false, true) => {
+                    self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
+                }
+                (true, false) => {
+                    if let Some(handle) = self.qa_handle.take() {
+                        handle.stop();
+                    }
+                }
+                _ => {}
+            }
+        } else if !should_run_qa {
+            if let Some(handle) = self.qa_handle.take() {
+                handle.stop();
+            }
         }
 
         self.refresh_settings_overview_rows();
@@ -13071,8 +13114,6 @@ fi\n\
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
-        code_review: Option<AutoTurnCodeReviewAction>,
-        cross_check: Option<AutoTurnCrossCheckAction>,
         transcript: Vec<code_protocol::models::ResponseItem>,
     ) {
         if !self.auto_state.active {
@@ -13116,28 +13157,34 @@ fi\n\
         self.pending_auto_turn_config = None;
 
         let mut promoted_agents: Vec<String> = Vec::new();
-        if matches!(status, AutoCoordinatorStatus::Continue) {
+        let continue_status = matches!(status, AutoCoordinatorStatus::Continue);
 
-            let resolved_agents: Vec<AutoTurnAgentsAction> = agents
-                .into_iter()
-                .map(|mut action| {
-                    let original = action.write;
-                    let requested = action.write_requested;
-                    let resolved = self.resolve_agent_write_flag(requested);
-                    if resolved && !original {
-                        promoted_agents.push(action.prompt.clone());
-                    }
-                    action.write = resolved;
-                    action
-                })
-                .collect();
+        let resolved_agents: Vec<AutoTurnAgentsAction> = agents
+            .into_iter()
+            .map(|mut action| {
+                let original = action.write;
+                let requested = action.write_requested;
+                let resolved = self.resolve_agent_write_flag(requested);
+                if resolved && !original {
+                    promoted_agents.push(action.prompt.clone());
+                }
+                action.write = resolved;
+                action
+            })
+            .collect();
 
+        if continue_status {
             self.auto_state.pending_agent_actions = resolved_agents;
             self.auto_state.pending_agent_timing = agents_timing
                 .filter(|_| !self.auto_state.pending_agent_actions.is_empty());
         } else {
             self.auto_state.pending_agent_actions.clear();
             self.auto_state.pending_agent_timing = None;
+
+            let has_diff = self.auto_turn_has_diff();
+            if let Some(handle) = self.qa_handle.as_ref() {
+                handle.notify_turn_finished(has_diff);
+            }
         }
 
         if !promoted_agents.is_empty() {
@@ -13156,14 +13203,6 @@ fi\n\
             self.push_background_tail(format!(
                 "Auto Drive enabled write mode for agent prompt(s): {joined}"
             ));
-        }
-
-        if let Some(review_action) = code_review {
-            self.auto_trigger_review_action(review_action);
-        }
-
-        if let Some(cross_check_action) = cross_check {
-            self.auto_handle_cross_check_request(cross_check_action);
         }
 
         if !matches!(status, AutoCoordinatorStatus::Failed) {
@@ -13520,6 +13559,7 @@ fi\n\
         let restart_attempts = self.auto_state.transient_restart_attempts;
         let review_enabled = self.auto_state.review_enabled;
         let agents_enabled = self.auto_state.subagents_enabled;
+        let qa_automation_enabled = self.auto_state.qa_automation_enabled;
 
         self.auto_state.pending_restart = None;
         self.auto_state.waiting_for_transient_recovery = false;
@@ -13541,6 +13581,7 @@ fi\n\
             review_enabled,
             agents_enabled,
             cross_check_enabled,
+            qa_automation_enabled,
             observer_enabled,
             continue_mode,
         );
@@ -13927,6 +13968,74 @@ fi\n\
         })
     }
 
+    fn auto_turn_has_diff(&self) -> bool {
+        if self.worktree_has_uncommitted_changes().unwrap_or(false) {
+            return true;
+        }
+
+        if let Some(base_commit) = self
+            .auto_turn_review_state
+            .as_ref()
+            .and_then(|state| state.base_commit.as_ref())
+        {
+            if let Some(head) = self.current_head_commit_sha() {
+                if let Ok(paths) = self.git_diff_name_only_between(base_commit.id(), &head) {
+                    if !paths.is_empty() {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    pub(crate) fn handle_auto_qa_update(&mut self, note: String) {
+        let trimmed = note.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let banner = format!("Auto QA update: {trimmed}");
+        self.auto_queue_observer_banner(banner);
+        self.auto_flush_observer_banners();
+        self.bottom_pane.update_status_text(trimmed.to_string());
+        self.request_redraw();
+    }
+
+    pub(crate) fn handle_auto_review_request(&mut self, summary: Option<String>) {
+        let summary_text = summary
+            .as_ref()
+            .map(|text| text.trim())
+            .filter(|text| !text.is_empty())
+            .map(|text| text.to_string());
+
+        match summary_text.as_ref() {
+            Some(text) => self.push_background_tail(format!("QA review requested: {text}")),
+            None => self.push_background_tail("QA review requested.".to_string()),
+        }
+
+        if !self.auto_state.review_enabled {
+            self.push_background_tail(
+                "QA review skipped: Auto Drive reviews are disabled in settings.".to_string(),
+            );
+            self.request_redraw();
+            return;
+        }
+
+        self.prepare_auto_turn_review_state();
+        let cfg = self
+            .pending_auto_turn_config
+            .clone()
+            .unwrap_or_else(|| TurnConfig {
+                read_only: false,
+                complexity: None,
+            });
+
+        let descriptor = self.pending_turn_descriptor.clone();
+        self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
+    }
+
     fn prepare_auto_turn_review_state(&mut self) {
         if !self.auto_state.active || !self.auto_state.review_enabled {
             self.auto_turn_review_state = None;
@@ -14185,9 +14294,14 @@ fi\n\
             .unwrap_or_default();
         let turns_completed = self.auto_state.turns_completed;
         let goal = self.auto_state.goal.clone();
+        let has_diff = self.auto_turn_has_diff();
         if let Some(handle) = self.auto_handle.take() {
             handle.cancel();
             let _ = handle.send(AutoCoordinatorCommand::Stop);
+        }
+        if let Some(handle) = self.qa_handle.take() {
+            handle.notify_finalize(has_diff);
+            handle.stop();
         }
         self.bottom_pane.clear_auto_coordinator_view(true);
         if let Some(msg) = message.clone() {
@@ -22272,14 +22386,6 @@ mod tests {
                 write_requested: Some(false),
                 models: None,
             }],
-            Some(AutoTurnCodeReviewAction {
-                commit: AutoReviewCommit {
-                    source: AutoReviewCommitSource::Staged,
-                    sha: None,
-                    summary: Some("Pre-merge checklist".to_string()),
-                },
-            }),
-            None,
             Vec::new(),
         );
 
@@ -22287,11 +22393,7 @@ mod tests {
             chat.auto_state.current_cli_prompt.as_deref(),
             Some("Run cargo test")
         );
-        if chat.auto_state.waiting_for_review {
-            // Review remains pending; nothing else to assert.
-        } else {
-            assert!(chat.auto_state.current_cli_prompt.is_some());
-        }
+        assert!(!chat.auto_state.waiting_for_review);
         assert_eq!(chat.auto_state.pending_agent_actions.len(), 1);
         assert_eq!(
             chat.auto_state.pending_agent_timing,
@@ -22375,7 +22477,6 @@ mod tests {
             None,
             None,
             Vec::new(),
-            None,
             Vec::new(),
         );
 
