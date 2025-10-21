@@ -160,6 +160,34 @@ pub(crate) enum AgentDetail {
     Info(String),
 }
 
+#[derive(Clone)]
+struct AgentRowData {
+    name: String,
+    status: String,
+    meta: String,
+    color: Color,
+    name_width: usize,
+    status_width: usize,
+    meta_width: usize,
+}
+
+impl AgentRowData {
+    fn new(name: String, status: String, meta: String, color: Color) -> Self {
+        let name_width = string_width(name.as_str());
+        let status_width = string_width(status.as_str());
+        let meta_width = string_width(meta.as_str());
+        Self {
+            name,
+            status,
+            meta,
+            color,
+            name_width,
+            status_width,
+            meta_width,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ActionEntry {
     label: String,
@@ -624,49 +652,33 @@ impl AgentRunCell {
             return rows;
         }
 
-        let now = Instant::now();
-        for preview in self.agents.iter().take(MAX_AGENT_DISPLAY) {
-            let indent = " ".repeat(CONTENT_INDENT);
+        let displayed: Vec<&AgentStatusPreview> = self.agents.iter().take(MAX_AGENT_DISPLAY).collect();
+        let indent = " ".repeat(CONTENT_INDENT);
+        let bullet = "• ";
+        let indent_width = string_width(indent.as_str());
+        let bullet_width = string_width(bullet);
+        let available_rest = body_width
+            .saturating_sub(indent_width)
+            .saturating_sub(bullet_width);
 
-            let mut meta_parts: Vec<String> = Vec::new();
-            if let Some(duration_label) = Self::agent_duration_label(preview, now) {
-                meta_parts.push(duration_label);
-            }
-            if let Some(progress) = preview.step_progress.as_ref() {
-                meta_parts.push(format!("{}/{}", progress.completed, progress.total));
-            }
-            if let Some(tokens) = preview.token_count {
-                meta_parts.push(format!("{} tok", tokens));
-            }
+        let entries = self.build_agent_display_entries(&displayed);
 
-            let meta_text = if meta_parts.is_empty() {
-                String::new()
-            } else {
-                format!("  ({})", meta_parts.join(" · "))
-            };
-
-            let status_text = format!(" {}", Self::agent_status_text(preview));
-            let name_text = Self::agent_display_name(preview);
-
-            let rest_source = format!("{}{}{}", name_text, status_text, meta_text);
-
-            let available = body_width.saturating_sub(string_width(indent.as_str()));
-            let available_rest = available.saturating_sub(string_width("• "));
-            let rest_display = truncate_with_ellipsis(rest_source.as_str(), available_rest);
-
-            let mut segments = Vec::new();
-            segments.push(CardSegment::new(indent.clone(), primary_text_style(style)));
-            segments.push(CardSegment::new(
-                "• ".to_string(),
-                Style::default().fg(preview.status_kind.color()),
-            ));
-            segments.push(CardSegment::new(rest_display, primary_text_style(style)));
-
-            rows.push(CardRow::new(
-                BORDER_BODY.to_string(),
-                Self::accent_style(style),
-                segments,
-                None,
+        if let Some(mut aligned) = self.build_aligned_agent_rows(
+            &entries,
+            body_width,
+            style,
+            indent.as_str(),
+            bullet,
+            available_rest,
+        ) {
+            rows.append(&mut aligned);
+        } else {
+            rows.extend(self.build_agent_rows_fallback(
+                &entries,
+                body_width,
+                style,
+                indent.as_str(),
+                bullet,
             ));
         }
 
@@ -678,6 +690,279 @@ impl AgentRunCell {
                 style,
                 secondary_text_style(style),
                 CONTENT_INDENT,
+            ));
+        }
+
+        rows
+    }
+
+    fn build_agent_display_entries(
+        &self,
+        previews: &[&AgentStatusPreview],
+    ) -> Vec<AgentRowData> {
+        let now = Instant::now();
+        previews
+            .iter()
+            .map(|preview| {
+                let mut meta_parts: Vec<String> = Vec::new();
+                if let Some(duration_label) = Self::agent_duration_label(preview, now) {
+                    meta_parts.push(duration_label);
+                }
+                if let Some(progress) = preview.step_progress.as_ref() {
+                    meta_parts.push(format!("{}/{}", progress.completed, progress.total));
+                }
+                if let Some(tokens) = preview.token_count {
+                    meta_parts.push(format!("{} tok", tokens));
+                }
+
+                let meta = if meta_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!("({})", meta_parts.join(" · "))
+                };
+
+                let name = Self::agent_display_name(preview);
+                let status = Self::agent_status_text(preview);
+                let color = preview.status_kind.color();
+
+                AgentRowData::new(name, status, meta, color)
+            })
+            .collect()
+    }
+
+    fn build_aligned_agent_rows(
+        &self,
+        entries: &[AgentRowData],
+        _body_width: usize,
+        style: &CardStyle,
+        indent: &str,
+        bullet: &str,
+        available_rest: usize,
+    ) -> Option<Vec<CardRow>> {
+        if entries.is_empty() {
+            return Some(Vec::new());
+        }
+        if available_rest == 0 {
+            return None;
+        }
+
+        const COLUMN_GAP: usize = 2;
+
+        let has_status = entries.iter().any(|entry| !entry.status.is_empty());
+        let mut include_meta = entries.iter().any(|entry| !entry.meta.is_empty());
+
+        let mut max_status_width = if has_status {
+            entries
+                .iter()
+                .map(|entry| entry.status_width)
+                .max()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut max_meta_width = if include_meta {
+            entries
+                .iter()
+                .map(|entry| entry.meta_width)
+                .max()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut remaining = available_rest;
+
+        if has_status {
+            if remaining <= COLUMN_GAP {
+                return None;
+            }
+            remaining -= COLUMN_GAP;
+            max_status_width = max_status_width.min(remaining);
+            remaining = remaining.saturating_sub(max_status_width);
+        }
+
+        if include_meta {
+            if remaining <= COLUMN_GAP {
+                include_meta = false;
+                max_meta_width = 0;
+            } else {
+                remaining -= COLUMN_GAP;
+                max_meta_width = max_meta_width.min(remaining);
+                remaining = remaining.saturating_sub(max_meta_width);
+            }
+        }
+
+        if include_meta && max_meta_width == 0 {
+            include_meta = false;
+        }
+
+        if has_status && max_status_width == 0 {
+            return None;
+        }
+
+        let max_name_width_raw = entries
+            .iter()
+            .map(|entry| entry.name_width)
+            .max()
+            .unwrap_or(0);
+
+        let mut name_space = remaining;
+        if name_space == 0 {
+            if has_status && max_status_width > 1 {
+                max_status_width -= 1;
+                name_space = 1;
+            } else {
+                return None;
+            }
+        }
+
+        let max_name_width = max_name_width_raw.min(name_space).max(1);
+
+        let mut rows = Vec::new();
+        let indent_style = primary_text_style(style);
+        for entry in entries {
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent.to_string(), indent_style));
+            segments.push(CardSegment::new(
+                bullet.to_string(),
+                Style::default().fg(entry.color),
+            ));
+
+            let mut name_display = truncate_with_ellipsis(entry.name.as_str(), max_name_width);
+            let name_width = string_width(name_display.as_str());
+            if name_width < max_name_width {
+                let padding = " ".repeat(max_name_width - name_width);
+                name_display.push_str(&padding);
+            }
+            segments.push(CardSegment::new(name_display, primary_text_style(style)));
+
+            if has_status {
+                segments.push(CardSegment::new(" ".repeat(COLUMN_GAP), Style::default()));
+                let status_display = truncate_with_ellipsis(entry.status.as_str(), max_status_width);
+                let status_width = string_width(status_display.as_str());
+                if status_width > 0 {
+                    segments.push(CardSegment::new(
+                        status_display,
+                        Style::default().fg(entry.color),
+                    ));
+                }
+                if max_status_width > status_width {
+                    segments.push(CardSegment::new(
+                        " ".repeat(max_status_width - status_width),
+                        Style::default(),
+                    ));
+                }
+            }
+
+            if include_meta {
+                segments.push(CardSegment::new(" ".repeat(COLUMN_GAP), Style::default()));
+                let meta_display = truncate_with_ellipsis(entry.meta.as_str(), max_meta_width);
+                let meta_width = string_width(meta_display.as_str());
+                if meta_width > 0 {
+                    segments.push(CardSegment::new(
+                        meta_display,
+                        Style::default().fg(entry.color),
+                    ));
+                }
+                if max_meta_width > meta_width {
+                    segments.push(CardSegment::new(
+                        " ".repeat(max_meta_width - meta_width),
+                        Style::default(),
+                    ));
+                }
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            ));
+        }
+
+        Some(rows)
+    }
+
+    fn build_agent_rows_fallback(
+        &self,
+        entries: &[AgentRowData],
+        body_width: usize,
+        style: &CardStyle,
+        indent: &str,
+        bullet: &str,
+    ) -> Vec<CardRow> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        let indent_width = string_width(indent);
+        let bullet_width = string_width(bullet);
+        let available_rest = body_width
+            .saturating_sub(indent_width)
+            .saturating_sub(bullet_width);
+
+        let mut rows = Vec::new();
+        let indent_style = primary_text_style(style);
+
+        for entry in entries {
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent.to_string(), indent_style));
+            segments.push(CardSegment::new(
+                bullet.to_string(),
+                Style::default().fg(entry.color),
+            ));
+
+            let mut remaining = available_rest;
+            if remaining == 0 {
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    segments,
+                    None,
+                ));
+                continue;
+            }
+
+            let name_display = truncate_with_ellipsis(entry.name.as_str(), remaining);
+            let name_width = string_width(name_display.as_str());
+            remaining = remaining.saturating_sub(name_width);
+            segments.push(CardSegment::new(name_display, primary_text_style(style)));
+
+            if remaining > 0 && !entry.status.is_empty() {
+                segments.push(CardSegment::new(" ".to_string(), Style::default()));
+                remaining = remaining.saturating_sub(1);
+                if remaining > 0 {
+                    let status_display = truncate_with_ellipsis(entry.status.as_str(), remaining);
+                    let status_width = string_width(status_display.as_str());
+                    segments.push(CardSegment::new(
+                        status_display,
+                        Style::default().fg(entry.color),
+                    ));
+                    remaining = remaining.saturating_sub(status_width);
+                }
+            }
+
+            if remaining > 0 && !entry.meta.is_empty() {
+                let gap = 2.min(remaining);
+                if gap > 0 {
+                    segments.push(CardSegment::new(" ".repeat(gap), Style::default()));
+                    remaining = remaining.saturating_sub(gap);
+                }
+                if remaining > 0 {
+                    let meta_display = truncate_with_ellipsis(entry.meta.as_str(), remaining);
+                    segments.push(CardSegment::new(
+                        meta_display,
+                        Style::default().fg(entry.color),
+                    ));
+                }
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
             ));
         }
 
@@ -703,13 +988,39 @@ impl AgentRunCell {
             } else {
                 Self::format_elapsed_seconds(entry.elapsed)
             };
-            let text = format!("{} {}", elapsed, entry.label);
-            rows.push(self.body_text_row_with_indent(
-                text,
-                body_width,
-                style,
-                secondary_text_style(style),
-                CONTENT_INDENT,
+            let indent_str = " ".repeat(CONTENT_INDENT);
+            let indent_style = secondary_text_style(style);
+            let time_style = Style::default().fg(colors::text());
+            let label_style = secondary_text_style(style);
+
+            if body_width <= CONTENT_INDENT {
+                continue;
+            }
+
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent_str, indent_style));
+
+            let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
+            let time_display = truncate_with_ellipsis(elapsed.as_str(), remaining);
+            let time_width = string_width(time_display.as_str());
+            segments.push(CardSegment::new(time_display, time_style));
+            remaining = remaining.saturating_sub(time_width);
+
+            if remaining > 0 {
+                segments.push(CardSegment::new(" ".to_string(), Style::default()));
+                remaining = remaining.saturating_sub(1);
+            }
+
+            if remaining > 0 {
+                let desc_display = truncate_with_ellipsis(entry.label.as_str(), remaining);
+                segments.push(CardSegment::new(desc_display, label_style));
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
             ));
         }
 
@@ -774,7 +1085,7 @@ impl AgentRunCell {
             } else {
                 let minutes = duration.as_secs() / 60;
                 let seconds = duration.as_secs() % 60;
-                format!("{}m{:02}s", minutes, seconds)
+                format!("{}m {:02}s", minutes, seconds)
             }
         })
     }
