@@ -11,7 +11,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+  Auto Drive > Working                                           ✶ Waiting (1s)
  + Next Prompt ---------------------------------------------------------------+
  |  cargo fmt --check                                                         |
  +----------------------------------------------------------------------------+
@@ -30,7 +30,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+  Auto Drive > Working                                           ✶ Waiting (1s)
  + Next Prompt ---------------------------------------------------------------+
  |  cargo fmt --check                                                         |
  +----------------------------------------------------------------------------+
@@ -52,7 +52,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
 
  › cargo fmt --check
 
-  Auto Drive > Running cargo fmt --check.                Running (1s, 0 turns)
+  Auto Drive > Running cargo fmt --check.                       ✶ Thinking (1s)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

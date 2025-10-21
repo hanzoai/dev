@@ -12668,6 +12668,7 @@ fi\n\
             show_composer: true,
             awaiting_submission: false,
             waiting_for_response: false,
+            coordinator_waiting: false,
             waiting_for_review: false,
             countdown: None,
             button: None,
@@ -12703,6 +12704,11 @@ fi\n\
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
+        let seed_intro = self.auto_state.take_intro_pending();
+        self.auto_state.reset();
+        if seed_intro {
+            self.auto_state.mark_intro_pending();
+        }
         self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
         self.config.tui.auto_drive.observer_enabled = observer_enabled;
         match start_auto_coordinator(
@@ -12715,7 +12721,6 @@ fi\n\
         ) {
             Ok(handle) => {
                 self.auto_handle = Some(handle);
-                self.auto_state.reset();
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.cross_check_enabled = cross_check_enabled;
@@ -14465,9 +14470,10 @@ fi\n\
                     cli_prompt: None,
                     cli_context: None,
                     show_composer: true,
-                    awaiting_submission: false,
-                    waiting_for_response: false,
-                    waiting_for_review: false,
+            awaiting_submission: false,
+            waiting_for_response: false,
+            coordinator_waiting: false,
+            waiting_for_review: false,
                     countdown: None,
                     button: None,
                     manual_hint: None,
@@ -14653,6 +14659,7 @@ fi\n\
             cli_prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
+            coordinator_waiting: self.auto_state.coordinator_waiting,
             waiting_for_review: self.auto_state.waiting_for_review,
             countdown,
             button,
@@ -14661,14 +14668,7 @@ fi\n\
             cli_running,
             turns_completed: self.auto_state.turns_completed,
             started_at: self.auto_state.started_at,
-            elapsed: self
-                .auto_state
-                .elapsed_override
-                .or_else(|| {
-                    self.auto_state.started_at.map(|started| {
-                        Duration::from_secs(started.elapsed().as_secs())
-                    })
-                }),
+            elapsed: self.auto_state.elapsed_override,
             progress_past: self.auto_state.current_progress_past.clone(),
             progress_current: self.auto_state.current_progress_current.clone(),
             cli_context,

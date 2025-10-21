@@ -11,7 +11,7 @@ expression: frame
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+  Auto Drive > Working                                           ✶ Waiting (1s)
  + Next Prompt ---------------------------------------------------------------+
  |  justfile run manual                                                       |
  +----------------------------------------------------------------------------+

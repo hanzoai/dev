@@ -2,8 +2,9 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
-use crate::glitch_animation::{gradient_multi, mix_rgb};
 use crate::colors;
+use crate::glitch_animation::{gradient_multi, mix_rgb};
+use crate::spinner;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -13,7 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, WidgetRef, Wrap};
 use std::borrow::Cow;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
     bottom_pane_view::{BottomPaneView, ConditionalUpdate},
@@ -43,6 +44,7 @@ pub(crate) struct AutoActiveViewModel {
     pub editing_prompt: bool,
     pub awaiting_submission: bool,
     pub waiting_for_response: bool,
+    pub coordinator_waiting: bool,
     pub waiting_for_review: bool,
     pub countdown: Option<CountdownState>,
     pub button: Option<AutoCoordinatorButton>,
@@ -337,10 +339,14 @@ impl AutoCoordinatorView {
     fn status_label(model: &AutoActiveViewModel) -> &'static str {
         if model.waiting_for_review {
             "Awaiting review"
-        } else if model.waiting_for_response || model.cli_running {
-            "Running"
         } else if model.awaiting_submission {
-            "Awaiting input"
+            "Waiting"
+        } else if model.coordinator_waiting {
+            "Creating prompt"
+        } else if model.cli_running {
+            "Running"
+        } else if model.waiting_for_response {
+            "Thinking"
         } else if model.started_at.is_some() {
             "Running"
         } else if model.elapsed.is_some() && model.started_at.is_none() {
@@ -402,8 +408,14 @@ impl AutoCoordinatorView {
                 details.push(Self::format_elapsed(duration));
             }
         }
-        details.push(Self::format_turns(model.turns_completed));
-        format!("{} ({})", label, details.join(", "))
+        if model.turns_completed > 0 {
+            details.push(Self::format_turns(model.turns_completed));
+        }
+        if details.is_empty() {
+            label.to_string()
+        } else {
+            format!("{} ({})", label, details.join(", "))
+        }
     }
 
     fn render_header(
@@ -422,8 +434,8 @@ impl AutoCoordinatorView {
         }
 
         let animating = intro.schedule_next_in.is_some() && !model.intro_reduced_motion;
-        let mut left_spans: Vec<Span<'static>> = Vec::new();
-        left_spans.push(Span::raw(" "));
+        let mut base_spans: Vec<Span<'static>> = Vec::new();
+        base_spans.push(Span::raw(" "));
 
         let fallback_color = frame_style
             .border_style
@@ -447,7 +459,7 @@ impl AutoCoordinatorView {
                     } else if idx == visible_chars.len().saturating_sub(1) {
                         color = mix_rgb(color, Color::Rgb(255, 255, 255), 0.35);
                     }
-                    left_spans.push(Span::styled(
+                    base_spans.push(Span::styled(
                         ch.to_string(),
                         Style::default()
                             .fg(color)
@@ -459,26 +471,40 @@ impl AutoCoordinatorView {
             let mut title_style = frame_style.title_style.clone();
             title_style.fg = Some(fallback_color);
             title_style = title_style.add_modifier(Modifier::BOLD);
-            left_spans.push(Span::styled(header_label.to_string(), title_style));
+            base_spans.push(Span::styled(header_label.to_string(), title_style));
         }
 
-        left_spans.push(Span::styled(
+        base_spans.push(Span::styled(
             " > ",
             Style::default().fg(colors::text_dim()),
         ));
-        left_spans.push(Span::styled(
+        base_spans.push(Span::styled(
             display_message.to_string(),
             Style::default().fg(colors::text()),
         ));
-        let left_line = Line::from(left_spans);
+        let base_line = Line::from(base_spans.clone());
 
-        let runtime = self.runtime_text(model);
-        let runtime_display = if runtime.is_empty() {
-            String::new()
-        } else {
-            format!(" {} ", runtime)
-        };
-        let right_width = UnicodeWidthStr::width(runtime_display.as_str()).min(area.width as usize) as u16;
+        let runtime_text = self.runtime_text(model);
+        let mut right_spans: Vec<Span<'static>> = Vec::new();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let spinner_frame = spinner::frame_at_time(spinner::current_spinner(), now_ms);
+        right_spans.push(Span::raw(" "));
+        right_spans.push(Span::styled(
+            spinner_frame,
+            Style::default().fg(colors::text_dim()),
+        ));
+        if !runtime_text.is_empty() {
+            right_spans.push(Span::raw(" "));
+            right_spans.push(Span::styled(
+                runtime_text,
+                Style::default().fg(colors::text_dim()),
+            ));
+        }
+        let right_line = Line::from(right_spans.clone());
+        let right_width = right_line.width().min(area.width as usize) as u16;
         let constraints = if right_width == 0 {
             vec![Constraint::Fill(1)]
         } else {
@@ -489,15 +515,59 @@ impl AutoCoordinatorView {
             .constraints(constraints)
             .split(area);
 
+        let left_available = chunks[0].width;
+        let mut left_line = base_line.clone();
+        if model.cli_running && left_available > 0 {
+            let (progress_past, progress_current) = Self::progress_labels(model);
+            let progress_style = Style::default().fg(colors::text_dim());
+            let mut applied = false;
+            if let (Some(past), Some(current)) = (progress_past.as_ref(), progress_current.as_ref()) {
+                let mut candidate_spans = base_spans.clone();
+                candidate_spans.push(Span::styled(
+                    format!(" > {} > {}", past, current),
+                    progress_style,
+                ));
+                let candidate_line = Line::from(candidate_spans.clone());
+                if candidate_line.width() <= left_available as usize {
+                    left_line = candidate_line;
+                    applied = true;
+                }
+            }
+            if !applied {
+                if let Some(current) = progress_current.as_ref() {
+                    let mut candidate_spans = base_spans.clone();
+                    candidate_spans.push(Span::styled(
+                        format!(" > {}", current),
+                        progress_style,
+                    ));
+                    let candidate_line = Line::from(candidate_spans.clone());
+                    if candidate_line.width() <= left_available as usize {
+                        left_line = candidate_line;
+                        applied = true;
+                    }
+                }
+                if !applied {
+                    if let Some(past) = progress_past.as_ref() {
+                        let mut candidate_spans = base_spans.clone();
+                        candidate_spans.push(Span::styled(
+                            format!(" > {}", past),
+                            progress_style,
+                        ));
+                        let candidate_line = Line::from(candidate_spans.clone());
+                        if candidate_line.width() <= left_available as usize {
+                            left_line = candidate_line;
+                        }
+                    }
+                }
+            }
+        }
+
         Paragraph::new(left_line).render(chunks[0], buf);
 
         if right_width > 0 {
-            Paragraph::new(Line::from(Span::styled(
-                runtime_display,
-                self.style.summary_style.clone(),
-            )))
-            .alignment(Alignment::Right)
-            .render(chunks[chunks.len() - 1], buf);
+            Paragraph::new(right_line)
+                .alignment(Alignment::Right)
+                .render(chunks[chunks.len() - 1], buf);
         }
     }
 
@@ -1070,6 +1140,15 @@ impl AutoCoordinatorView {
         }
 
         let frame_style = self.frame_style_for_model(model);
+        if model.started_at.is_some()
+            && (model.waiting_for_response
+                || model.awaiting_submission
+                || model.waiting_for_review
+                || model.cli_running)
+        {
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
+        }
         let display_message = self.resolve_display_message(model);
         let intro = Self::intro_state(frame_style.title_text, model);
         if let Some(delay) = intro.schedule_next_in {
@@ -1419,24 +1498,39 @@ impl AutoCoordinatorView {
         format!("{} {}", turns, label)
     }
 
+    fn progress_labels(model: &AutoActiveViewModel) -> (Option<String>, Option<String>) {
+        let past = model
+            .progress_past
+            .as_ref()
+            .and_then(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+        let current = model
+            .progress_current
+            .as_ref()
+            .and_then(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+        (past, current)
+    }
+
     fn compose_progress_line(model: &AutoActiveViewModel) -> Option<String> {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(past) = model.progress_past.as_ref() {
-            let trimmed = past.trim();
-            if !trimmed.is_empty() {
-                parts.push(trimmed.to_string());
-            }
-        }
-        if let Some(current) = model.progress_current.as_ref() {
-            let trimmed = current.trim();
-            if !trimmed.is_empty() {
-                parts.push(trimmed.to_string());
-            }
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(" "))
+        let (past, current) = Self::progress_labels(model);
+        match (past, current) {
+            (Some(past), Some(current)) => Some(format!("{} > {}", past, current)),
+            (None, Some(current)) => Some(current),
+            (Some(past), None) => Some(past),
+            (None, None) => None,
         }
     }
 
