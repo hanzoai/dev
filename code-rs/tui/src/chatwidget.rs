@@ -27818,31 +27818,34 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         let mut total_height = self.history_render.last_total_height();
+        let base_total_height = total_height;
         if total_height > 0 && content_area.height > 0 && request_count > 0 {
             let viewport_rows = content_area.height;
-            let remainder = total_height % viewport_rows;
-            let near_edge = viewport_rows >= 4
-                && (remainder <= 2 || remainder >= viewport_rows.saturating_sub(2));
-            let mut spacer_lines = 0u16;
-            if remainder == 0 {
-                spacer_lines = 2;
-            } else if near_edge {
-                spacer_lines = 1;
-            }
-            if spacer_lines > 0 {
-                let base_total = total_height;
-                total_height = total_height.saturating_add(spacer_lines);
-                tracing::debug!(
-                    target: "code_tui::history_render",
-                    lines = spacer_lines,
-                    base_height = base_total,
-                    padded_height = total_height,
-                    viewport = viewport_rows,
-                    remainder = remainder,
-                    "history overscan: adding bottom spacer",
-                );
+            if base_total_height >= viewport_rows {
+                let remainder = base_total_height % viewport_rows;
+                let mut spacer_lines = 0u16;
+                if remainder == 0 {
+                    spacer_lines = if base_total_height == viewport_rows { 1 } else { 2 };
+                } else if viewport_rows >= 4
+                    && (remainder <= 2 || remainder >= viewport_rows.saturating_sub(2))
+                {
+                    spacer_lines = 1;
+                }
+                if spacer_lines > 0 {
+                    total_height = total_height.saturating_add(spacer_lines);
+                    tracing::debug!(
+                        target: "code_tui::history_render",
+                        lines = spacer_lines,
+                        base_height = base_total_height,
+                        padded_height = total_height,
+                        viewport = viewport_rows,
+                        remainder = remainder,
+                        "history overscan: adding bottom spacer",
+                    );
+                }
             }
         }
+        let overscan_extra = total_height.saturating_sub(base_total_height);
         // Calculate scroll position and vertical alignment
         // Stabilize viewport when input area height changes while scrolled up.
         let prev_viewport_h = self.layout.last_history_viewport_height.get();
@@ -27868,6 +27871,10 @@ impl WidgetRef for &ChatWidget<'_> {
             self.layout.last_max_scroll.set(max_scroll);
             let clamped_scroll_offset = self.layout.scroll_offset.min(max_scroll);
             let mut scroll_from_top = max_scroll.saturating_sub(clamped_scroll_offset);
+
+            if overscan_extra > 0 && clamped_scroll_offset == 0 {
+                scroll_from_top = scroll_from_top.saturating_sub(overscan_extra);
+            }
 
             // Viewport stabilization: when user is scrolled up (offset > 0) and the
             // history viewport height changes due to the input area growing/shrinking,
