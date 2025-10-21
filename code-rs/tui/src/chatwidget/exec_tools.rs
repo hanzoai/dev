@@ -7,6 +7,7 @@ use crate::history::state::{
     ExecAction,
     ExecRecord,
     ExecStatus,
+    ExecStreamChunk,
     ExecWaitNote,
     ExploreRecord,
     HistoryDomainEvent,
@@ -55,6 +56,19 @@ fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
         break;
     }
     None
+}
+
+fn stream_chunks_to_text(chunks: &[ExecStreamChunk]) -> String {
+    if chunks.is_empty() {
+        return String::new();
+    }
+    let mut ordered: Vec<&ExecStreamChunk> = chunks.iter().collect();
+    ordered.sort_by_key(|chunk| chunk.offset);
+    let mut combined = String::new();
+    for chunk in ordered {
+        combined.push_str(&chunk.content);
+    }
+    combined
 }
 
 fn explore_status_from_exec(action: ExecAction, record: &ExecRecord) -> history_cell::ExploreEntryStatus {
@@ -1194,17 +1208,73 @@ pub(super) fn handle_exec_end_now(
             streamed_stdout,
             streamed_stderr,
         ),
-        None => (
-            vec![format!("Command running ({call_id})")],
-            vec![],
-            None,
-            None,
-            None,
-            None,
-            Vec::new(),
-            String::new(),
-            String::new(),
-        ),
+        None => {
+            let mut history_id = chat
+                .history_state
+                .history_id_for_exec_call(call_id.as_ref());
+            let mut history_index = history_id.and_then(|id| chat.cell_index_for_history_id(id));
+            let mut command = vec![format!("Command running ({call_id})")];
+            let mut parsed: Vec<ParsedCommand> = Vec::new();
+            let mut wait_total: Option<std::time::Duration> = None;
+            let mut wait_notes_pairs: Vec<(String, bool)> = Vec::new();
+            let mut streamed_stdout = String::new();
+            let mut streamed_stderr = String::new();
+
+            if let Some(id) = history_id {
+                if let Some(HistoryRecord::Exec(record)) = chat.history_state.record(id).cloned() {
+                    command = record.command.clone();
+                    parsed = record.parsed.clone();
+                    wait_total = record.wait_total;
+                    wait_notes_pairs = ChatWidget::wait_pairs_from_exec_notes(&record.wait_notes);
+                    streamed_stdout = stream_chunks_to_text(&record.stdout_chunks);
+                    streamed_stderr = stream_chunks_to_text(&record.stderr_chunks);
+                    if history_index.is_none() {
+                        history_index = chat.cell_index_for_history_id(id);
+                    }
+                }
+            }
+
+            if history_index.is_none() {
+                if let Some((idx, exec_cell)) = chat
+                    .history_cells
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(idx, cell)| {
+                        cell.as_any()
+                            .downcast_ref::<history_cell::ExecCell>()
+                            .and_then(|exec_cell| {
+                                if exec_cell.record.call_id.as_deref() == Some(call_id.as_ref()) {
+                                    Some((idx, exec_cell))
+                                } else {
+                                    None
+                                }
+                            })
+                    })
+                {
+                    history_index = Some(idx);
+                    history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+                    command = exec_cell.command.clone();
+                    parsed = exec_cell.parsed.clone();
+                    wait_total = exec_cell.record.wait_total;
+                    wait_notes_pairs = ChatWidget::wait_pairs_from_exec_notes(&exec_cell.record.wait_notes);
+                    streamed_stdout = stream_chunks_to_text(&exec_cell.record.stdout_chunks);
+                    streamed_stderr = stream_chunks_to_text(&exec_cell.record.stderr_chunks);
+                }
+            }
+
+            (
+                command,
+                parsed,
+                history_id,
+                history_index,
+                None,
+                wait_total,
+                wait_notes_pairs,
+                streamed_stdout,
+                streamed_stderr,
+            )
+        }
     };
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
