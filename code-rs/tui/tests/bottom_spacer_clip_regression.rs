@@ -2,8 +2,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::sync::OnceLock;
 use regex_lite::Regex;
+use std::sync::OnceLock;
 use code_core::protocol::{
     AgentReasoningDeltaEvent, AgentReasoningEvent, Event, EventMsg, OrderMeta,
 };
@@ -11,7 +11,6 @@ use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
 fn bottom_spacer_short_wrapped_content_80x24() {
-    let _env = AnticutoffGuard::enable();
     let mut harness = ChatWidgetHarness::new();
     seed_short_wrapped_transcript(&mut harness);
 
@@ -23,7 +22,6 @@ fn bottom_spacer_short_wrapped_content_80x24() {
 
 #[test]
 fn bottom_spacer_overflow_wrapped_content_100x30() {
-    let _env = AnticutoffGuard::enable();
     let mut harness = ChatWidgetHarness::new();
     seed_overflow_wrapped_transcript(&mut harness);
 
@@ -35,7 +33,6 @@ fn bottom_spacer_overflow_wrapped_content_100x30() {
 
 #[test]
 fn bottom_spacer_collapsed_vs_expanded_reasoning_120x40() {
-    let _env = AnticutoffGuard::enable();
     let mut harness = ChatWidgetHarness::new();
     seed_reasoning_transcript(&mut harness);
 
@@ -57,25 +54,6 @@ fn bottom_spacer_collapsed_vs_expanded_reasoning_120x40() {
         "bottom_spacer_expanded_reasoning_120x40",
         expanded
     );
-}
-
-struct AnticutoffGuard;
-
-impl AnticutoffGuard {
-    fn enable() -> Self {
-        unsafe {
-            std::env::set_var("CODE_TUI_ANTICUTOFF", "1");
-        }
-        Self
-    }
-}
-
-impl Drop for AnticutoffGuard {
-    fn drop(&mut self) {
-        unsafe {
-            std::env::remove_var("CODE_TUI_ANTICUTOFF");
-        }
-    }
 }
 
 fn seed_short_wrapped_transcript(harness: &mut ChatWidgetHarness) {

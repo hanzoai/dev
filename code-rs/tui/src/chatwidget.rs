@@ -891,16 +891,6 @@ pub(super) static GIT_DIFF_NAME_ONLY_BETWEEN_STUB: Lazy<Mutex<Option<GitDiffName
 #[cfg(test)]
 pub(super) static AUTO_STUB_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-static HISTORY_BOTTOM_SPACER_ENABLED: Lazy<bool> = Lazy::new(|| {
-    match std::env::var("CODE_TUI_ANTICUTOFF") {
-        Ok(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            !matches!(normalized.as_str(), "" | "0" | "false" | "off" | "no")
-        }
-        Err(_) => false,
-    }
-});
-
 #[derive(Clone)]
 struct AutoResolveState {
     prompt: String,
@@ -27949,11 +27939,7 @@ impl WidgetRef for &ChatWidget<'_> {
         }
 
         let mut total_height = self.history_render.last_total_height();
-        if *HISTORY_BOTTOM_SPACER_ENABLED
-            && total_height > 0
-            && content_area.height > 0
-            && request_count > 0
-        {
+        if total_height > 0 && content_area.height > 0 && request_count > 0 {
             let viewport_rows = content_area.height;
             let remainder = total_height % viewport_rows;
             let near_edge = viewport_rows >= 4
@@ -27974,7 +27960,7 @@ impl WidgetRef for &ChatWidget<'_> {
                     padded_height = total_height,
                     viewport = viewport_rows,
                     remainder = remainder,
-                    "CODE_TUI_ANTICUTOFF: adding bottom spacer",
+                    "history overscan: adding bottom spacer",
                 );
             }
         }
