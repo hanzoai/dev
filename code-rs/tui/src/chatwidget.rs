@@ -3757,6 +3757,7 @@ impl ChatWidget<'_> {
         UserMessage {
             display_text,
             ordered_items,
+            suppress_persistence: false,
         }
     }
 
@@ -9048,6 +9049,7 @@ impl ChatWidget<'_> {
         let UserMessage {
             display_text,
             ordered_items,
+            suppress_persistence,
         } = message;
 
         let combined_message_text = {
@@ -9082,7 +9084,9 @@ impl ChatWidget<'_> {
             self.pending_dispatched_user_messages.push_back(model_echo);
         }
 
-        if !display_text.is_empty() {
+        let suppress_history = suppress_persistence;
+
+        if !display_text.is_empty() && !suppress_history {
             if let Err(e) = self
                 .code_op_tx
                 .send(Op::AddToHistory { text: display_text })
@@ -14231,7 +14235,10 @@ fi\n\
         }
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
-        self.submit_text_message(full_prompt);
+        use crate::chatwidget::message::UserMessage;
+        let mut message: UserMessage = full_prompt.into();
+        message.suppress_persistence = true;
+        self.submit_user_message(message);
         self.auto_state.pending_agent_actions.clear();
         self.auto_state.pending_agent_timing = None;
         self.auto_rebuild_live_ring();
@@ -21179,6 +21186,7 @@ fi\n\
         let msg = UserMessage {
             display_text: display,
             ordered_items: ordered,
+            suppress_persistence: false,
         };
         self.submit_user_message(msg);
     }
@@ -21202,6 +21210,7 @@ fi\n\
         let msg = UserMessage {
             display_text: visible,
             ordered_items: ordered,
+            suppress_persistence: false,
         };
         self.submit_user_message(msg);
     }
@@ -21228,6 +21237,7 @@ fi\n\
         let msg = UserMessage {
             display_text: String::new(),
             ordered_items: ordered,
+            suppress_persistence: false,
         };
         self.submit_user_message(msg);
     }
