@@ -319,7 +319,7 @@ impl BrowserSessionCell {
     }
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
-        let text_value = format!(" [Ctrl+B] Expand · [Esc] Stop");
+        let text_value = format!(" [Ctrl+B] View · [Esc] Stop");
         let text = truncate_with_ellipsis(text_value.as_str(), body_width);
         let segment = CardSegment::new(text, secondary_text_style(style));
         CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)
