@@ -78,19 +78,6 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoReviewCommitSource {
-    Staged,
-    Commit,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AutoReviewCommit {
-    pub source: AutoReviewCommitSource,
-    pub sha: Option<String>,
-    pub summary: Option<String>,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct AutoTurnCliAction {
     pub prompt: String,
@@ -114,16 +101,11 @@ pub(crate) struct AutoTurnAgentsAction {
     pub models: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnCodeReviewAction {
-    pub commit: AutoReviewCommit,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnCrossCheckAction {
-    pub summary: Option<String>,
-    pub focus: Option<String>,
-    pub forced: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ObserverMode {
+    Bootstrap,
+    Cadence,
+    CrossCheck,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,6 +224,12 @@ pub(crate) enum AppEvent {
         elapsed: Duration,
     },
 
+    /// Placeholder QA automation updates (no-op for now).
+    AutoQaUpdate { note: String },
+
+    /// Placeholder review requests routed from the QA orchestrator.
+    AutoReviewRequest { summary: Option<String> },
+
     /// Internal: flush any pending out-of-order ExecEnd events that did not
     /// receive a matching ExecBegin within a short pairing window. This lets
     /// the TUI render a fallback "Ran call_<id>" cell so output is not lost.
@@ -268,8 +256,6 @@ pub(crate) enum AppEvent {
         cli: Option<AutoTurnCliAction>,
         agents_timing: Option<AutoTurnAgentsTiming>,
         agents: Vec<AutoTurnAgentsAction>,
-        code_review: Option<AutoTurnCodeReviewAction>,
-        cross_check: Option<AutoTurnCrossCheckAction>,
         transcript: Vec<ResponseItem>,
     },
     AutoCoordinatorThinking {
@@ -286,6 +272,7 @@ pub(crate) enum AppEvent {
         attempt: u32,
     },
     AutoObserverReport {
+        mode: ObserverMode,
         status: AutoObserverStatus,
         telemetry: AutoObserverTelemetry,
         replace_message: Option<String>,
@@ -295,12 +282,22 @@ pub(crate) enum AppEvent {
         raw_output: Option<String>,
         parsed_response: Option<JsonValue>,
     },
+    AutoObserverThinking {
+        mode: ObserverMode,
+        delta: String,
+        summary_index: Option<u32>,
+    },
+    AutoObserverReady {
+        baseline_summary: Option<String>,
+        bootstrap_len: usize,
+    },
     ShowAutoDriveSettings,
     CloseAutoDriveSettings,
     AutoDriveSettingsChanged {
         review_enabled: bool,
         agents_enabled: bool,
         cross_check_enabled: bool,
+        qa_automation_enabled: bool,
         observer_enabled: bool,
         continue_mode: AutoContinueMode,
     },

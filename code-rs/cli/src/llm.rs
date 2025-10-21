@@ -118,6 +118,7 @@ async fn run_llm_request(
     prompt.status_items = vec![];
     prompt.base_instructions_override = None;
     prompt.text_format = Some(text_format);
+    prompt.set_log_tag("cli/manual_prompt");
 
     // Auth + provider
     let auth_mgr = AuthManager::shared_with_mode_and_originator(

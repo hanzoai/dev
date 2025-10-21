@@ -10,7 +10,7 @@ use code_core::config::Config;
 use code_core::config_types::{AutoDriveSettings, ReasoningEffort};
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::{get_openai_tools, OpenAiTool, ToolsConfig};
+use code_core::ToolsConfig;
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
@@ -29,15 +29,10 @@ use crate::app_event::{
     AppEvent,
     AutoCoordinatorStatus,
     AutoObserverReason,
-    AutoObserverStatus,
     AutoObserverTelemetry,
-    AutoReviewCommit,
-    AutoReviewCommitSource,
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
     AutoTurnCliAction,
-    AutoTurnCodeReviewAction,
-    AutoTurnCrossCheckAction,
 };
 use crate::app_event_sender::AppEventSender;
 use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
@@ -50,16 +45,15 @@ use chrono::{DateTime, Local, Utc};
 use rand::Rng;
 use super::auto_observer::{
     build_observer_conversation,
-    run_observer_once,
     start_auto_observer,
-    AutoObserverHandle,
+    observer_tools_for_mode,
     AutoObserverCommand,
-    ObserverEvaluation,
+    AutoObserverHandle,
     ObserverOutcome,
     ObserverReason,
     ObserverTrigger,
-    summarize_intervention,
 };
+use crate::app_event::{ObserverMode, AutoObserverStatus};
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
@@ -99,14 +93,39 @@ impl AutoCoordinatorHandle {
 pub(super) enum AutoCoordinatorCommand {
     UpdateConversation(Vec<ResponseItem>),
     ObserverResult(ObserverOutcome),
+    ObserverThinking {
+        mode: ObserverMode,
+        delta: String,
+        summary_index: Option<u32>,
+    },
+    ObserverBootstrapLen(usize),
+    ResetObserver,
     Stop,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct CrossCheckTurnSnapshot {
-    pub cli_prompt: Option<String>,
-    pub cli_context: Option<String>,
-    pub progress_summary: Option<String>,
+#[derive(Clone)]
+struct PendingDecision {
+    status: AutoCoordinatorStatus,
+    progress_past: Option<String>,
+    progress_current: Option<String>,
+    cli: Option<AutoTurnCliAction>,
+    agents_timing: Option<AutoTurnAgentsTiming>,
+    agents: Vec<AutoTurnAgentsAction>,
+    transcript: Vec<ResponseItem>,
+}
+
+impl PendingDecision {
+    fn into_event(self) -> AppEvent {
+        AppEvent::AutoCoordinatorDecision {
+            status: self.status,
+            progress_past: self.progress_past,
+            progress_current: self.progress_current,
+            cli: self.cli,
+            agents_timing: self.agents_timing,
+            agents: self.agents,
+            transcript: self.transcript,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -233,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_includes_cli_agents_code_review_and_cross_check() {
+    fn schema_includes_cli_and_agents() {
         let active_agents = vec![
             "codex-plan".to_string(),
             "codex-research".to_string(),
@@ -245,8 +264,8 @@ mod tests {
             .expect("schema properties");
         assert!(props.contains_key("cli"), "cli property missing");
         assert!(props.contains_key("agents"), "agents property missing");
-        assert!(props.contains_key("code_review"), "code_review property missing");
-        assert!(props.contains_key("cross_check"), "cross_check property missing");
+        assert!(!props.contains_key("code_review"));
+        assert!(!props.contains_key("cross_check"));
 
         let cli_required = props
             .get("cli")
@@ -298,24 +317,8 @@ mod tests {
             .collect();
         assert_eq!(*enum_values, expected_enum);
 
-        let review_required = props
-            .get("code_review")
-            .and_then(|v| v.as_object())
-            .and_then(|obj| obj.get("required"))
-            .and_then(|v| v.as_array())
-            .expect("review required");
-        assert!(review_required.contains(&json!("source")));
-        assert!(review_required.contains(&json!("sha")));
-        assert!(review_required.contains(&json!("summary")));
-
-        let cross_check_props = props
-            .get("cross_check")
-            .and_then(|v| v.as_object())
-            .and_then(|obj| obj.get("properties"))
-            .and_then(|v| v.as_object())
-            .expect("cross_check properties");
-        assert!(cross_check_props.contains_key("summary"));
-        assert!(cross_check_props.contains_key("focus"));
+        assert!(!props.contains_key("code_review"));
+        assert!(!props.contains_key("cross_check"));
     }
 
     #[test]
@@ -381,48 +384,6 @@ mod tests {
     }
 
     #[test]
-    fn schema_omits_code_review_when_disabled() {
-        let schema = build_schema(
-            &[],
-            SchemaFeatures {
-                include_review: false,
-                ..SchemaFeatures::default()
-            },
-        );
-        let props = schema
-            .get("properties")
-            .and_then(|v| v.as_object())
-            .expect("schema properties");
-        assert!(!props.contains_key("code_review"));
-        let required = schema
-            .get("required")
-            .and_then(|v| v.as_array())
-            .expect("required array");
-        assert!(!required.contains(&json!("code_review")));
-    }
-
-    #[test]
-    fn schema_omits_cross_check_when_disabled() {
-        let schema = build_schema(
-            &[],
-            SchemaFeatures {
-                include_cross_check: false,
-                ..SchemaFeatures::default()
-            },
-        );
-        let props = schema
-            .get("properties")
-            .and_then(|v| v.as_object())
-            .expect("schema properties");
-        assert!(!props.contains_key("cross_check"));
-        let required = schema
-            .get("required")
-            .and_then(|v| v.as_array())
-            .expect("required array");
-        assert!(!required.contains(&json!("cross_check")));
-    }
-
-    #[test]
     fn parse_decision_new_schema() {
         let raw = r#"{
             "finish_status": "continue",
@@ -433,9 +394,7 @@ mod tests {
                 "list": [
                     {"prompt": "Draft alternative fix", "write": false, "context": "Consider module B", "models": ["codex-plan"]}
                 ]
-            },
-            "code_review": {"source": "staged", "summary": "Pre-merge sanity"},
-            "cross_check": {"summary": "Verify database wiring", "focus": "CRUD paths"}
+            }
         }"#;
 
         let (decision, _) = parse_decision(raw).expect("parse new schema decision");
@@ -460,14 +419,6 @@ mod tests {
             Some(vec!["codex-plan".to_string()])
         );
 
-        let review = decision
-            .code_review
-            .expect("code_review action expected");
-        assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
-        assert_eq!(review.commit.summary.as_deref(), Some("Pre-merge sanity"));
-        let cross_check = decision.cross_check.expect("cross_check action expected");
-        assert_eq!(cross_check.summary.as_deref(), Some("Verify database wiring"));
-        assert_eq!(cross_check.focus.as_deref(), Some("CRUD paths"));
     }
 
     #[test]
@@ -495,12 +446,7 @@ mod tests {
             "progress_past": "Drafted fix",
             "progress_current": "Running unit tests",
             "cli_prompt": "Run cargo test --package core",
-            "cli_context": "Focus on flaky suite",
-            "review_commit": {
-                "source": "staged",
-                "sha": null,
-                "summary": "Smoke diff"
-            }
+            "cli_context": "Focus on flaky suite"
         }"#;
 
         let (decision, _) = parse_decision(raw).expect("parse legacy decision");
@@ -514,10 +460,6 @@ mod tests {
 
         assert!(decision.agents.is_empty());
         assert!(decision.agents_timing.is_none());
-        let review = decision
-            .code_review
-            .expect("code_review action expected");
-        assert!(matches!(review.commit.source, AutoReviewCommitSource::Staged));
     }
 
     #[test]
@@ -565,10 +507,6 @@ struct CoordinatorDecisionNew {
     cli: Option<CliPayload>,
     #[serde(default)]
     agents: Option<AgentsField>,
-    #[serde(default)]
-    code_review: Option<ReviewPayload>,
-    #[serde(default)]
-    cross_check: Option<CrossCheckPayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -637,23 +575,6 @@ impl From<AgentsTimingValue> for AutoTurnAgentsTiming {
 }
 
 #[derive(Debug, Deserialize)]
-struct ReviewPayload {
-    source: String,
-    #[serde(default)]
-    sha: Option<String>,
-    #[serde(default)]
-    summary: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CrossCheckPayload {
-    #[serde(default)]
-    summary: Option<String>,
-    #[serde(default)]
-    focus: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct CoordinatorDecisionLegacy {
     finish_status: String,
     #[serde(default)]
@@ -664,17 +585,6 @@ struct CoordinatorDecisionLegacy {
     cli_context: Option<String>,
     #[serde(default)]
     cli_prompt: Option<String>,
-    #[serde(default)]
-    review_commit: Option<ReviewCommitPayloadLegacy>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReviewCommitPayloadLegacy {
-    source: String,
-    #[serde(default)]
-    sha: Option<String>,
-    #[serde(default)]
-    summary: Option<String>,
 }
 
 struct ParsedCoordinatorDecision {
@@ -684,8 +594,6 @@ struct ParsedCoordinatorDecision {
     cli: Option<CliAction>,
     agents_timing: Option<AutoTurnAgentsTiming>,
     agents: Vec<AgentAction>,
-    code_review: Option<CodeReviewAction>,
-    cross_check: Option<CrossCheckAction>,
     response_items: Vec<ResponseItem>,
 }
 
@@ -701,18 +609,6 @@ struct AgentAction {
     context: Option<String>,
     write: Option<bool>,
     models: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone)]
-struct CodeReviewAction {
-    commit: AutoReviewCommit,
-}
-
-#[derive(Debug, Clone)]
-struct CrossCheckAction {
-    summary: Option<String>,
-    focus: Option<String>,
-    forced: bool,
 }
 
 pub(super) fn start_auto_coordinator(
@@ -805,7 +701,7 @@ fn run_auto_loop(
         .build()
         .context("creating runtime for auto coordinator")?;
 
-    let browser_enabled = runtime.block_on(async {
+    let _browser_enabled = runtime.block_on(async {
         browser_global::get_browser_manager().await.is_some()
     });
 
@@ -839,7 +735,6 @@ fn run_auto_loop(
     agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
     agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     tools_config.set_agent_models(agent_models);
-    let cross_check_tools: Vec<OpenAiTool> = get_openai_tools(&tools_config, None, browser_enabled, true);
 
     let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
         Ok(Some(text)) => {
@@ -867,8 +762,6 @@ fn run_auto_loop(
         build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
     let schema_features = SchemaFeatures::from_auto_settings(&config.tui.auto_drive);
     let include_agents = schema_features.include_agents;
-    let include_review = schema_features.include_review;
-    let include_cross_check = schema_features.include_cross_check;
     let schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;
     debug!("[Auto coordinator] starting: goal={goal_text} platform={platform}");
@@ -878,12 +771,20 @@ fn run_auto_loop(
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
     let mut observer_guidance: Vec<String> = Vec::new();
-    let mut observer_telemetry = AutoObserverTelemetry::default();
-    let mut last_cli_context: Option<String> = None;
-    let mut last_cli_prompt: Option<String> = None;
-    let mut last_progress_summary: Option<String> = None;
-    let observer_enabled = config.tui.auto_drive.observer_enabled;
-    let mut observer_handle = if observer_enabled {
+    let mut _observer_telemetry = AutoObserverTelemetry::default();
+    let mut _last_cli_context: Option<String> = None;
+    let mut _last_cli_prompt: Option<String> = None;
+    let mut _last_progress_summary: Option<String> = None;
+    let mut awaiting_cross_check = false;
+    let mut pending_success: Option<PendingDecision> = None;
+    let mut observer_last_sent = 0usize;
+    let mut observer_current_len = 0usize;
+    let mut observer_bootstrap_len = 0usize;
+    let cross_check_enabled = config.tui.auto_drive.cross_check_enabled;
+    let observer_cadence_enabled = config.tui.auto_drive.observer_enabled;
+    let observer_thread_enabled = observer_cadence_enabled || cross_check_enabled;
+    let mut observer_bootstrapped = !observer_thread_enabled;
+    let mut observer_handle = if observer_thread_enabled {
         match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
             Ok(handle) => Some(handle),
             Err(err) => {
@@ -894,10 +795,24 @@ fn run_auto_loop(
     } else {
         None
     };
-    let observer_cadence_interval = if observer_enabled && observer_cadence != 0 {
+    if let Some(handle) = observer_handle.as_ref() {
+        if handle
+            .tx
+            .send(AutoObserverCommand::Bootstrap {
+                goal_text: goal_text.clone(),
+                environment_details: environment_details.clone(),
+            })
+            .is_err()
+        {
+            warn!("failed to trigger observer bootstrap");
+        } else {
+            observer_bootstrapped = false;
+        }
+    }
+    let observer_cadence_interval = if observer_cadence_enabled && observer_cadence != 0 {
         observer_handle
             .as_ref()
-            .map(|handle| handle.cadence() as u64)
+            .map(|handle: &AutoObserverHandle| handle.cadence() as u64)
     } else {
         None
     };
@@ -914,6 +829,7 @@ fn run_auto_loop(
             }
 
             let conv_for_observer = conv.clone();
+            observer_current_len = conv_for_observer.len();
             let developer_intro =
                 compose_developer_intro(&base_developer_intro, &observer_guidance);
             match request_coordinator_decision(
@@ -934,19 +850,11 @@ fn run_auto_loop(
                     cli,
                     mut agents_timing,
                     mut agents,
-                    mut code_review,
-                    mut cross_check,
                     mut response_items,
                 }) => {
                     if !include_agents {
                         agents_timing = None;
                         agents.clear();
-                    }
-                    if !include_review {
-                        code_review = None;
-                    }
-                    if !include_cross_check {
-                        cross_check = None;
                     }
                     consecutive_decision_failures = 0;
                     let (turn_cli_prompt, turn_cli_context) = if let Some(cli_action) = &cli {
@@ -960,76 +868,50 @@ fn run_auto_loop(
                     } else {
                         (None, None)
                     };
-                    last_cli_prompt = turn_cli_prompt.clone();
-                    last_cli_context = turn_cli_context.clone();
+                    _last_cli_prompt = turn_cli_prompt.clone();
+                    _last_cli_context = turn_cli_context.clone();
 
                     let mut latest_summary = progress_current.clone();
                     if latest_summary.is_none() {
                         latest_summary = progress_past.clone();
                     }
                     if let Some(summary_text) = latest_summary.clone() {
-                        last_progress_summary = Some(summary_text);
+                        _last_progress_summary = Some(summary_text);
                     } else {
-                        last_progress_summary = None;
+                        _last_progress_summary = None;
                     }
-
-                    let turn_snapshot = CrossCheckTurnSnapshot {
-                        cli_prompt: turn_cli_prompt.clone(),
-                        cli_context: turn_cli_context.clone(),
-                        progress_summary: latest_summary.clone(),
-                    };
 
                     let cli_prompt_for_observer = turn_cli_prompt.as_deref();
 
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        if include_cross_check {
-                            if let Some(cross) = cross_check.clone() {
-                                dispatch_cross_check(
-                                    observer_handle.as_ref(),
-                                    &runtime,
-                                    client.clone(),
-                                    &cmd_tx,
-                                    conv_for_observer.clone(),
-                                    goal_text.clone(),
-                                    environment_details.clone(),
-                                    cross.summary.clone(),
-                                    cross.focus.clone(),
-                                    false,
-                                    Some(turn_snapshot.clone()),
-                                    cross_check_tools.clone(),
-                                );
-                            }
-                        }
-
-                        if let (Some(handle), Some(cadence)) =
-                            (observer_handle.as_ref(), observer_cadence_interval)
-                        {
-                            if should_trigger_observer(requests_completed, cadence) {
-                                let conversation = build_observer_conversation(
-                                    conv_for_observer,
-                                    cli_prompt_for_observer,
-                                );
-                                let trigger = ObserverTrigger {
-                                    conversation,
-                                    goal_text: goal_text.clone(),
-                                    environment_details: environment_details.clone(),
-                                    reason: ObserverReason::Cadence,
-                                    turn_snapshot: None,
-                                    tools: Vec::new(),
-                                };
-                                if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
-                                    warn!("failed to trigger auto observer");
+                        if observer_bootstrapped {
+                            let slice_start = observer_last_sent.min(observer_current_len);
+                            let delta_slice = conv_for_observer[slice_start..].to_vec();
+                            let conversation = build_observer_conversation(
+                                delta_slice,
+                                cli_prompt_for_observer,
+                            );
+                            if !conversation.is_empty() {
+                                if let (Some(handle), Some(cadence)) =
+                                    (observer_handle.as_ref(), observer_cadence_interval)
+                                {
+                                    if should_trigger_observer(requests_completed, cadence) {
+                                        observer_last_sent = observer_current_len;
+                                        let trigger = ObserverTrigger {
+                                            conversation,
+                                            goal_text: goal_text.clone(),
+                                            environment_details: environment_details.clone(),
+                                            reason: ObserverReason::Cadence,
+                                            turn_snapshot: None,
+                                            tools: observer_tools_for_mode(ObserverMode::Cadence),
+                                        };
+                                        if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
+                                            warn!("failed to trigger auto observer");
+                                        }
+                                    }
                                 }
                             }
                         }
-
-                        let cross_check_event = if include_cross_check {
-                            cross_check
-                                .as_ref()
-                                .map(|action| cross_check_action_to_event(action))
-                        } else {
-                            None
-                        };
                         let event = AppEvent::AutoCoordinatorDecision {
                             status,
                             progress_past,
@@ -1037,97 +919,59 @@ fn run_auto_loop(
                             cli: cli.as_ref().map(cli_action_to_event),
                             agents_timing,
                             agents: agents.iter().map(agent_action_to_event).collect(),
-                            code_review: code_review.as_ref().map(code_review_action_to_event),
-                            cross_check: cross_check_event,
                             transcript: std::mem::take(&mut response_items),
                         };
                         app_event_tx.send(event);
                         continue;
                     }
 
-                    if include_cross_check {
-                        let observer_conversation =
-                            build_observer_conversation(conv_for_observer.clone(), None);
-                        let final_summary = cross_check
-                            .as_ref()
-                            .and_then(|data| data.summary.clone());
-                        let final_focus = cross_check
-                            .as_ref()
-                            .and_then(|data| data.focus.clone());
-                        let final_summary_for_event = final_summary.clone();
-                        let final_focus_for_event = final_focus.clone();
-                        let observer_conversation_for_event = observer_conversation.clone();
-
-                        let validation_result = run_final_cross_check(
-                            &runtime,
-                            client.clone(),
-                            observer_conversation,
-                            &goal_text,
-                            &environment_details,
-                            final_summary,
-                            final_focus,
-                            Some(turn_snapshot),
-                            cross_check_tools.clone(),
-                        );
-
-                        if let Ok(evaluation) = validation_result {
-                            let ObserverEvaluation {
-                                status: observer_status,
-                                replace_message,
-                                additional_instructions,
-                                raw_output,
-                                parsed_response,
-                            } = evaluation;
-
-                            let telemetry = AutoObserverTelemetry {
-                                trigger_count: observer_telemetry.trigger_count.saturating_add(1),
-                                last_status: observer_status,
-                                last_intervention: summarize_intervention(
-                                    replace_message.as_deref(),
-                                    additional_instructions.as_deref(),
-                                ),
-                            };
-                            observer_telemetry = telemetry.clone();
-                            let observer_event = AppEvent::AutoObserverReport {
-                                status: observer_status,
-                                telemetry,
-                                replace_message: replace_message.clone(),
-                                additional_instructions: additional_instructions.clone(),
-                                reason: AutoObserverReason::CrossCheck {
-                                    forced: true,
-                                    summary: final_summary_for_event,
-                                    focus: final_focus_for_event,
-                                },
-                                conversation: observer_conversation_for_event,
-                                raw_output: Some(raw_output),
-                                parsed_response: Some(parsed_response),
-                            };
-                            app_event_tx.send(observer_event);
-
-                            if matches!(observer_status, AutoObserverStatus::Failing) {
-                                if let Some(instr) = additional_instructions.as_deref() {
-                                    push_unique_guidance(&mut observer_guidance, instr);
-                                }
-                                pending_conversation = Some(conv_for_observer);
-                                continue;
-                            }
-                        } else if let Err(err) = validation_result {
-                            warn!("final observer validation failed: {err:#}");
-                        }
-                    }
-
-                    let event = AppEvent::AutoCoordinatorDecision {
+                    let decision_event = PendingDecision {
                         status,
                         progress_past,
                         progress_current,
                         cli: cli.as_ref().map(cli_action_to_event),
                         agents_timing,
                         agents: agents.iter().map(agent_action_to_event).collect(),
-                        code_review: code_review.as_ref().map(code_review_action_to_event),
-                        cross_check: None,
                         transcript: response_items,
                     };
-                    app_event_tx.send(event);
+
+                    if observer_bootstrapped
+                        && matches!(decision_event.status, AutoCoordinatorStatus::Success)
+                        && cross_check_enabled
+                        && !awaiting_cross_check
+                    {
+                        if let Some(handle) = observer_handle.as_ref() {
+                            let start = observer_bootstrap_len.min(observer_current_len);
+                            let delta_slice = conv_for_observer[start..].to_vec();
+                            let conversation = build_observer_conversation(
+                                delta_slice,
+                                cli_prompt_for_observer,
+                            );
+                            match handle.tx.send(AutoObserverCommand::BeginCrossCheck {
+                                conversation,
+                                _from_index: start,
+                                forced: true,
+                                summary: latest_summary.clone(),
+                                focus: None,
+                            }) {
+                                Ok(()) => {
+                                    awaiting_cross_check = true;
+                                    observer_last_sent = observer_current_len;
+                                    pending_success = Some(decision_event);
+                                    continue;
+                                }
+                                Err(err) => {
+                                    warn!("failed to trigger cross-check observer: {err:#}");
+                                }
+                            }
+                        } else {
+                            warn!(
+                                "cross-check enabled but observer thread unavailable; finishing without cross-check"
+                            );
+                        }
+                    }
+
+                    app_event_tx.send(decision_event.into_event());
                     stopped = true;
                     continue;
                 }
@@ -1175,8 +1019,6 @@ fn run_auto_loop(
                         cli: None,
                         agents_timing: None,
                         agents: Vec::new(),
-                        code_review: None,
-                        cross_check: None,
                         transcript: Vec::new(),
                     };
                     app_event_tx.send(event);
@@ -1194,13 +1036,14 @@ fn run_auto_loop(
             }
             Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
                 let ObserverOutcome {
+                    mode,
                     status,
                     replace_message,
                     additional_instructions,
                     telemetry,
                     reason,
                     conversation,
-                    turn_snapshot,
+                    turn_snapshot: _turn_snapshot,
                     raw_output,
                     parsed_response,
                 } = outcome;
@@ -1209,143 +1052,111 @@ fn run_auto_loop(
                     push_unique_guidance(&mut observer_guidance, instr);
                 }
 
-                observer_telemetry = telemetry.clone();
+                _observer_telemetry = telemetry.clone();
+                let report_raw = raw_output.clone();
+                let report_parsed = parsed_response.clone();
+
                 let event = AppEvent::AutoObserverReport {
+                    mode,
                     status,
                     telemetry,
                     replace_message: replace_message.clone(),
                     additional_instructions: additional_instructions.clone(),
                     reason: AutoObserverReason::from(reason.clone()),
                     conversation: conversation.clone(),
-                    raw_output,
-                    parsed_response,
+                    raw_output: report_raw.clone(),
+                    parsed_response: report_parsed.clone(),
                 };
                 app_event_tx.send(event);
 
-                if let ObserverReason::CrossCheck { forced: _, summary, focus } = reason {
-                    if matches!(status, AutoObserverStatus::Failing) {
-                        let mut restart_prompt = String::new();
-                        let append_candidate = |target: &mut String, candidate: Option<&str>| {
-                            if let Some(text) = candidate {
-                                let trimmed = text.trim();
-                                if trimmed.is_empty() {
-                                    return;
-                                }
-                                if !target.is_empty() {
-                                    target.push_str("\n\n");
-                                }
-                                target.push_str(trimmed);
+                if matches!(mode, ObserverMode::Bootstrap) {
+                    observer_bootstrapped = true;
+                    observer_current_len = conversation.len();
+                    observer_bootstrap_len = observer_current_len;
+                    observer_last_sent = observer_current_len;
+                    let baseline = report_raw
+                        .or_else(|| replace_message.clone())
+                        .or_else(|| additional_instructions.clone());
+                    let ready_event = AppEvent::AutoObserverReady {
+                        baseline_summary: baseline,
+                        bootstrap_len: conversation.len(),
+                    };
+                    app_event_tx.send(ready_event);
+                }
+
+                if awaiting_cross_check && matches!(mode, ObserverMode::CrossCheck) {
+                    if let ObserverReason::CrossCheck { summary, .. } = reason {
+                        awaiting_cross_check = false;
+                        if matches!(status, AutoObserverStatus::Ok) {
+                            if let Some(decision) = pending_success.take() {
+                                app_event_tx.send(decision.into_event());
+                                stopped = true;
+                                continue;
+                            } else {
+                                warn!("cross-check completed but no pending success decision to finalize");
                             }
-                        };
-                        let snapshot_prompt = turn_snapshot
-                            .as_ref()
-                            .and_then(|snapshot| snapshot.cli_prompt.as_deref());
-                        let snapshot_context = turn_snapshot
-                            .as_ref()
-                            .and_then(|snapshot| snapshot.cli_context.as_deref());
-                        let snapshot_summary = turn_snapshot
-                            .as_ref()
-                            .and_then(|snapshot| snapshot.progress_summary.as_deref());
-
-                        append_candidate(&mut restart_prompt, replace_message.as_deref());
-
-                        let had_replacement = replace_message
-                            .as_deref()
-                            .map(|text| !text.trim().is_empty())
-                            .unwrap_or(false);
-
-                        if !had_replacement {
-                            append_candidate(
-                                &mut restart_prompt,
-                                snapshot_prompt.or_else(|| last_cli_prompt.as_deref()),
-                            );
-                        }
-
-                        append_candidate(
-                            &mut restart_prompt,
-                            snapshot_summary.or_else(|| last_progress_summary.as_deref()),
-                        );
-
-                        let mut context_sections: Vec<String> = Vec::new();
-                        if let Some(context_text) = snapshot_context
-                            .or_else(|| last_cli_context.as_deref())
-                            .map(str::trim)
-                            .filter(|text| !text.is_empty())
-                        {
-                            context_sections.push(format!("CLI context:\n{}", context_text));
-                        }
-                        if had_replacement {
-                            if let Some(previous_prompt) = snapshot_prompt
-                                .or_else(|| last_cli_prompt.as_deref())
-                                .map(str::trim)
-                                .filter(|text| !text.is_empty())
-                            {
-                                context_sections.push(format!("Previous CLI prompt:\n{}", previous_prompt));
-                            }
-                        }
-                        if !context_sections.is_empty() {
-                            if !restart_prompt.is_empty() {
-                                restart_prompt.push_str("\n\n");
-                            }
-                            restart_prompt.push_str(&context_sections.join("\n\n"));
-                        }
-
-                        append_candidate(&mut restart_prompt, summary.as_deref());
-                        append_candidate(&mut restart_prompt, focus.as_deref());
-
-                        let restart_prompt = if restart_prompt.is_empty() {
-                            None
                         } else {
-                            Some(restart_prompt)
-                        };
-
-                        let mut guidance_parts: Vec<String> = Vec::new();
-                        if let Some(instr) = additional_instructions
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            guidance_parts.push(instr.to_string());
+                            pending_success = None;
+                            let mut detail = additional_instructions
+                                .as_ref()
+                                .and_then(|text| {
+                                    let trimmed = text.trim();
+                                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                                });
+                            if detail.is_none() {
+                                detail = summary
+                                    .as_ref()
+                                    .and_then(|text| {
+                                        let trimmed = text.trim();
+                                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                                    });
+                            }
+                            let failure_message = detail
+                                .map(|text| format!("Cross-check failed: {text}"))
+                                .unwrap_or_else(|| "Cross-check failed".to_string());
+                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
+                                delta: CROSS_CHECK_RESTART_BANNER.to_string(),
+                                summary_index: None,
+                            });
+                            let fail_event = AppEvent::AutoCoordinatorDecision {
+                                status: AutoCoordinatorStatus::Failed,
+                                progress_past: None,
+                                progress_current: Some(failure_message),
+                                cli: None,
+                                agents_timing: None,
+                                agents: Vec::new(),
+                                transcript: Vec::new(),
+                            };
+                            app_event_tx.send(fail_event);
+                            stopped = true;
+                            continue;
                         }
-                        if let Some(summary_text) = summary
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            guidance_parts.push(format!("Cross-check summary: {summary_text}"));
-                        }
-                        if let Some(focus_text) = focus
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                        {
-                            guidance_parts.push(format!("Areas to inspect: {focus_text}"));
-                        }
-                        let guidance_bundle = if guidance_parts.is_empty() {
-                            None
-                        } else {
-                            Some(guidance_parts.join("\n\n"))
-                        };
-
-                        let compact_conversation = build_compact_conversation_seed(
-                            &goal_text,
-                            restart_prompt.as_ref().map(|text| text.as_str()),
-                            guidance_bundle.as_deref(),
-                        );
-
-                        pending_conversation = Some(compact_conversation);
-                        requests_completed = requests_completed.saturating_sub(1);
-                        consecutive_decision_failures = 0;
-                        last_cli_prompt = None;
-                        last_cli_context = None;
-                        last_progress_summary = None;
-                        let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
-                            delta: CROSS_CHECK_RESTART_BANNER.to_string(),
-                            summary_index: None,
-                        });
-                        continue;
                     }
                 }
+
+            }
+            Ok(AutoCoordinatorCommand::ObserverThinking {
+                mode,
+                delta,
+                summary_index,
+            }) => {
+                let _ = app_event_tx.send(AppEvent::AutoObserverThinking {
+                    mode,
+                    delta,
+                    summary_index,
+                });
+            }
+            Ok(AutoCoordinatorCommand::ObserverBootstrapLen(len)) => {
+                observer_bootstrap_len = len;
+                observer_last_sent = observer_bootstrap_len.min(observer_current_len);
+            }
+            Ok(AutoCoordinatorCommand::ResetObserver) => {
+                observer_bootstrapped = false;
+                observer_last_sent = 0;
+                observer_current_len = 0;
+                observer_bootstrap_len = 0;
+                awaiting_cross_check = false;
+                pending_success = None;
             }
             Ok(AutoCoordinatorCommand::Stop) | Err(_) => {
                 stopped = true;
@@ -1380,133 +1191,9 @@ fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
     intro
 }
 
-pub(super) fn build_compact_conversation_seed(
-    goal: &str,
-    last_prompt: Option<&str>,
-    guidance: Option<&str>,
-) -> Vec<ResponseItem> {
-    let mut items: Vec<ResponseItem> = Vec::with_capacity(2);
-
-    let trimmed_goal = goal.trim();
-    let mut developer_message = format!(
-        "You are resuming Auto Drive with minimal context.\nPrimary goal:\n{}",
-        trimmed_goal
-    );
-    if let Some(guidance_text) = guidance
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        developer_message.push_str("\n\nCross-check guidance:\n");
-        developer_message.push_str(guidance_text);
-    }
-    items.push(make_message("developer", developer_message));
-
-    let user_prompt = last_prompt
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(|text| text.to_string())
-        .unwrap_or_else(|| {
-            "Restart the plan and verify end-to-end behaviour satisfies the primary goal and the guidance above."
-                .to_string()
-        });
-    items.push(make_message("user", user_prompt));
-
-    items
-}
-
-fn dispatch_cross_check(
-    observer_handle: Option<&AutoObserverHandle>,
-    runtime: &tokio::runtime::Runtime,
-    client: Arc<ModelClient>,
-    coordinator_tx: &Sender<AutoCoordinatorCommand>,
-    conversation: Vec<ResponseItem>,
-    goal_text: String,
-    environment_details: String,
-    summary: Option<String>,
-    focus: Option<String>,
-    forced: bool,
-    turn_snapshot: Option<CrossCheckTurnSnapshot>,
-    tools: Vec<OpenAiTool>,
-) {
-    let reason = ObserverReason::CrossCheck {
-        forced,
-        summary: summary.clone(),
-        focus: focus.clone(),
-    };
-    let trigger = ObserverTrigger {
-        conversation: conversation.clone(),
-        goal_text,
-        environment_details,
-        reason: reason.clone(),
-        turn_snapshot: turn_snapshot.clone(),
-        tools: tools.clone(),
-    };
-
-    if let Some(handle) = observer_handle {
-        if handle.tx.send(AutoObserverCommand::Trigger(trigger.clone())).is_ok() {
-            return;
-        }
-    }
-
-    match run_observer_once(runtime, client, trigger.clone()) {
-        Ok(evaluation) => {
-            let ObserverEvaluation {
-                status,
-                replace_message,
-                additional_instructions,
-                raw_output,
-                parsed_response,
-            } = evaluation;
-
-            let outcome = ObserverOutcome {
-                status,
-                replace_message,
-                additional_instructions,
-                telemetry: AutoObserverTelemetry::default(),
-                reason,
-                conversation,
-                turn_snapshot,
-                raw_output: Some(raw_output),
-                parsed_response: Some(parsed_response),
-            };
-            let _ = coordinator_tx.send(AutoCoordinatorCommand::ObserverResult(outcome));
-        }
-        Err(err) => {
-            warn!("cross-check fallback evaluation failed: {err:#}");
-        }
-    }
-}
-
 fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
     cadence != 0 && requests_completed > 0 && requests_completed % cadence == 0
 }
-
-fn run_final_cross_check(
-    runtime: &tokio::runtime::Runtime,
-    client: Arc<ModelClient>,
-    conversation: Vec<ResponseItem>,
-    goal_text: &str,
-    environment_details: &str,
-    summary: Option<String>,
-    focus: Option<String>,
-    turn_snapshot: Option<CrossCheckTurnSnapshot>,
-    tools: Vec<OpenAiTool>,
-) -> Result<ObserverEvaluation> {
-    let trigger = ObserverTrigger {
-        conversation,
-        goal_text: goal_text.to_string(),
-        environment_details: environment_details.to_string(),
-        reason: ObserverReason::CrossCheck {
-            forced: true,
-            summary,
-            focus,
-        },
-        turn_snapshot,
-        tools,
-    };
-    run_observer_once(runtime, client, trigger)
-}
-
 fn read_coordinator_prompt(_config: &Config) -> Option<String> {
     match fs::read_to_string(COORDINATOR_PROMPT_PATH) {
         Ok(text) => {
@@ -1591,16 +1278,12 @@ fn run_git_command<const N: usize>(args: [&str; N]) -> Option<String> {
 #[derive(Clone, Copy)]
 struct SchemaFeatures {
     include_agents: bool,
-    include_review: bool,
-    include_cross_check: bool,
 }
 
 impl SchemaFeatures {
     fn from_auto_settings(settings: &AutoDriveSettings) -> Self {
         Self {
             include_agents: settings.agents_enabled,
-            include_review: settings.review_enabled,
-            include_cross_check: settings.cross_check_enabled,
         }
     }
 }
@@ -1609,8 +1292,6 @@ impl Default for SchemaFeatures {
     fn default() -> Self {
         Self {
             include_agents: true,
-            include_review: true,
-            include_cross_check: true,
         }
     }
 }
@@ -1799,62 +1480,6 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
             }),
         );
         required.push(Value::String("agents".to_string()));
-    }
-
-    if features.include_review {
-        properties.insert(
-            "code_review".to_string(),
-            json!({
-                "type": ["object", "null"],
-                "additionalProperties": false,
-                "description": "Starts an optional code review at the start of the turn. Use whenever substantial code has changed. Confirms there are no errors in the implementation using a specialized review model.",
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "enum": ["staged", "commit"],
-                        "description": "What to review."
-                    },
-                    "sha": {
-                        "type": ["string", "null"],
-                        "minLength": 7,
-                        "maxLength": 64,
-                        "description": "Required when source='commit'; otherwise null."
-                    },
-                    "summary": {
-                        "type": ["string", "null"],
-                        "maxLength": 200,
-                        "description": "Optional focus/risks/acceptance criteria."
-                    }
-                },
-                "required": ["source", "sha", "summary"]
-            }),
-        );
-        required.push(Value::String("code_review".to_string()));
-    }
-
-    if features.include_cross_check {
-        properties.insert(
-            "cross_check".to_string(),
-            json!({
-                "type": ["object", "null"],
-                "additionalProperties": false,
-                "description": "Optional QA-style cross check to validate the turn outcome. Runs alongside the CLI and prefers failing when anything looks incomplete.",
-                "properties": {
-                    "summary": {
-                        "type": ["string", "null"],
-                        "maxLength": 300,
-                        "description": "One-line reminder of what the cross check should confirm."
-                    },
-                    "focus": {
-                        "type": ["string", "null"],
-                        "maxLength": 400,
-                        "description": "Specific risks, flows, or acceptance criteria the cross check must probe."
-                    }
-                },
-                "required": ["summary", "focus"]
-            }),
-        );
-        required.push(Value::String("cross_check".to_string()));
     }
 
     let mut schema = serde_json::Map::new();
@@ -2167,6 +1792,7 @@ fn build_prompt_for_model(
     let family = find_family_for_model(model_slug)
         .unwrap_or_else(|| derive_default_model_family(model_slug));
     prompt.model_family_override = Some(family);
+    prompt.set_log_tag("auto/coordinator");
     prompt
 }
 
@@ -2484,28 +2110,6 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
         });
     }
 
-    if lower.contains("invalid code_review source") || lower.contains("invalid review source") {
-        return Some(RecoverableDecisionError {
-            summary: "invalid code_review source".to_string(),
-            guidance: Some(
-                "Set `code_review.source` to `\"staged\"` or `\"commit\"` only, matching the documented schema."
-                    .to_string(),
-            ),
-        });
-    }
-
-    if lower.contains("code_review requires sha when source='commit'")
-        || lower.contains("review requires sha when source='commit'")
-    {
-        return Some(RecoverableDecisionError {
-            summary: "commit code_review missing sha".to_string(),
-            guidance: Some(
-                "When `code_review.source` is `\"commit\"`, include a non-empty commit SHA in `code_review.sha`."
-                    .to_string(),
-            ),
-        });
-    }
-
     None
 }
 
@@ -2573,8 +2177,6 @@ fn convert_decision_new(
         progress,
         cli,
         agents: agent_payloads,
-        code_review,
-        cross_check,
     } = decision;
 
     let progress_past = clean_optional(progress.past);
@@ -2633,22 +2235,6 @@ fn convert_decision_new(
         }
     }
 
-    let code_review = match code_review {
-        Some(payload) => Some(CodeReviewAction {
-            commit: build_review_commit(payload.source, payload.sha, payload.summary)?,
-        }),
-        None => None,
-    };
-
-    let cross_check = match cross_check {
-        Some(payload) => Some(CrossCheckAction {
-            summary: clean_optional(payload.summary),
-            focus: clean_optional(payload.focus),
-            forced: false,
-        }),
-        None => None,
-    };
-
     Ok(ParsedCoordinatorDecision {
         status,
         progress_past,
@@ -2656,8 +2242,6 @@ fn convert_decision_new(
         cli,
         agents_timing,
         agents: agent_actions,
-        code_review,
-        cross_check,
         response_items: Vec::new(),
     })
 }
@@ -2672,7 +2256,6 @@ fn convert_decision_legacy(
         progress_current,
         cli_context,
         cli_prompt,
-        review_commit,
     } = decision;
 
     let progress_past = clean_optional(progress_past);
@@ -2694,13 +2277,6 @@ fn convert_decision_legacy(
         (_, None) => None,
     };
 
-    let code_review = match review_commit {
-        Some(payload) => Some(CodeReviewAction {
-            commit: payload.try_into_commit()?,
-        }),
-        None => None,
-    };
-
     Ok(ParsedCoordinatorDecision {
         status,
         progress_past,
@@ -2708,8 +2284,6 @@ fn convert_decision_legacy(
         cli,
         agents_timing: None,
         agents: Vec::new(),
-        code_review,
-        cross_check: None,
         response_items: Vec::new(),
     })
 }
@@ -2768,35 +2342,6 @@ fn clean_required(value: &str, field: &str) -> Result<String> {
     }
 }
 
-fn build_review_commit(
-    source: String,
-    sha: Option<String>,
-    summary: Option<String>,
-) -> Result<AutoReviewCommit> {
-    let source_enum = match source.trim().to_ascii_lowercase().as_str() {
-        "staged" => AutoReviewCommitSource::Staged,
-        "commit" => AutoReviewCommitSource::Commit,
-        other => return Err(anyhow!("invalid code_review source '{other}'")),
-    };
-
-    let sha_clean = clean_optional(sha);
-    if matches!(source_enum, AutoReviewCommitSource::Commit) && sha_clean.is_none() {
-        return Err(anyhow!("code_review requires sha when source='commit'"));
-    }
-
-    Ok(AutoReviewCommit {
-        source: source_enum,
-        sha: sha_clean,
-        summary: clean_optional(summary),
-    })
-}
-
-impl ReviewCommitPayloadLegacy {
-    fn try_into_commit(self) -> Result<AutoReviewCommit> {
-        build_review_commit(self.source, self.sha, self.summary)
-    }
-}
-
 fn cli_action_to_event(action: &CliAction) -> AutoTurnCliAction {
     AutoTurnCliAction {
         prompt: action.prompt.clone(),
@@ -2811,20 +2356,6 @@ fn agent_action_to_event(action: &AgentAction) -> AutoTurnAgentsAction {
         write: action.write.unwrap_or(false),
         write_requested: action.write,
         models: action.models.clone(),
-    }
-}
-
-fn code_review_action_to_event(action: &CodeReviewAction) -> AutoTurnCodeReviewAction {
-    AutoTurnCodeReviewAction {
-        commit: action.commit.clone(),
-    }
-}
-
-fn cross_check_action_to_event(action: &CrossCheckAction) -> AutoTurnCrossCheckAction {
-    AutoTurnCrossCheckAction {
-        summary: action.summary.clone(),
-        focus: action.focus.clone(),
-        forced: action.forced,
     }
 }
 

@@ -569,6 +569,7 @@ fn run_guided_loop(
             strict: Some(true),
             schema: Some(schema.clone()),
         });
+        prompt.set_log_tag(format!("guided_terminal/{schema_name}"));
 
         let raw = request_decision(runtime, &client, &prompt).context("model stream failed")?;
         let (decision, raw_value) = parse_decision(&raw)?;

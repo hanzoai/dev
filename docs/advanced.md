@@ -56,6 +56,24 @@ The TUI defaults to `RUST_LOG=codex_core=info,codex_tui=info` and log messages a
 tail -F ~/.code/log/codex-tui.log
 ```
 
+When you also enable the CLI `--debug` flag, request/response JSON is
+partitioned into helper-specific folders under `~/.code/debug_logs/`. Expect
+subdirectories such as:
+
+- `auto/coordinator`
+- `auto/observer/bootstrap`
+- `auto/observer/cadence`
+- `auto/observer/cross_check`
+- `guided_terminal/agent_install_flow`
+- `guided_terminal/upgrade_terminal_flow`
+- `tui/rate_limit_refresh`
+- `ui/theme_spinner`
+- `ui/theme_builder`
+- `cli/manual_prompt`
+
+Tags become nested path components, so custom helpers appear alongside the
+existing timestamped filenames.
+
 By comparison, the non-interactive mode (`codex exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
 
 See the Rust documentation on [`RUST_LOG`](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) for more information on the configuration options.

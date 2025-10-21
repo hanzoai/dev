@@ -45,6 +45,7 @@ pub(crate) async fn stream_chat_completions(
     debug_logger: &Arc<Mutex<DebugLogger>>,
     auth_manager: Option<Arc<AuthManager>>,
     otel_event_manager: Option<OtelEventManager>,
+    log_tag: Option<&str>,
 ) -> Result<ResponseStream> {
     if prompt.output_schema.is_some() {
         return Err(CodexErr::UnsupportedOperation(
@@ -346,7 +347,7 @@ pub(crate) async fn stream_chat_completions(
     // Start logging the request and get a request_id to track the response
     let request_id = if let Ok(logger) = debug_logger.lock() {
         logger
-            .start_request_log(&endpoint, &payload)
+            .start_request_log(&endpoint, &payload, log_tag)
             .unwrap_or_default()
     } else {
         String::new()
