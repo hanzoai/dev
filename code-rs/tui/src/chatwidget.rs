@@ -3102,16 +3102,41 @@ impl ChatWidget<'_> {
     }
 
     fn clear_reasoning_in_progress(&mut self) {
+        let last_reasoning_index = self
+            .history_cells
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(idx, cell)| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                    .map(|_| idx)
+            });
+
         let mut changed = false;
-        for cell in &self.history_cells {
+        for (idx, cell) in self.history_cells.iter().enumerate() {
             if let Some(reasoning_cell) = cell
                 .as_any()
                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
             {
+                if !reasoning_cell.is_in_progress() {
+                    continue;
+                }
+
+                let keep_in_progress = !self.config.tui.show_reasoning
+                    && Some(idx) == last_reasoning_index
+                    && reasoning_cell.is_collapsed()
+                    && !reasoning_cell.collapsed_has_summary();
+
+                if keep_in_progress {
+                    continue;
+                }
+
                 reasoning_cell.set_in_progress(false);
                 changed = true;
             }
         }
+
         if changed {
             self.invalidate_height_cache();
         }
@@ -27816,7 +27841,32 @@ impl WidgetRef for &ChatWidget<'_> {
             rendered_cells_full = Some(cells);
         }
 
-        let total_height = self.history_render.last_total_height();
+        let mut total_height = self.history_render.last_total_height();
+        if total_height > 0 && content_area.height > 0 && request_count > 0 {
+            let viewport_rows = content_area.height;
+            let remainder = total_height % viewport_rows;
+            let near_edge = viewport_rows >= 4
+                && (remainder <= 2 || remainder >= viewport_rows.saturating_sub(2));
+            let mut spacer_lines = 0u16;
+            if remainder == 0 {
+                spacer_lines = 2;
+            } else if near_edge {
+                spacer_lines = 1;
+            }
+            if spacer_lines > 0 {
+                let base_total = total_height;
+                total_height = total_height.saturating_add(spacer_lines);
+                tracing::debug!(
+                    target: "code_tui::history_render",
+                    lines = spacer_lines,
+                    base_height = base_total,
+                    padded_height = total_height,
+                    viewport = viewport_rows,
+                    remainder = remainder,
+                    "history overscan: adding bottom spacer",
+                );
+            }
+        }
         // Calculate scroll position and vertical alignment
         // Stabilize viewport when input area height changes while scrolled up.
         let prev_viewport_h = self.layout.last_history_viewport_height.get();
