@@ -732,10 +732,10 @@ impl Default for Tui {
 /// Auto Drive behavioral defaults persisted via `config.toml`.
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct AutoDriveSettings {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub review_enabled: bool,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub agents_enabled: bool,
 
     #[serde(default = "default_true")]
@@ -754,8 +754,8 @@ pub struct AutoDriveSettings {
 impl Default for AutoDriveSettings {
     fn default() -> Self {
         Self {
-            review_enabled: false,
-            agents_enabled: false,
+            review_enabled: true,
+            agents_enabled: true,
             qa_automation_enabled: true,
             cross_check_enabled: true,
             observer_enabled: true,
