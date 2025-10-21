@@ -56,6 +56,7 @@ pub(super) enum AutoObserverCommand {
     Bootstrap {
         goal_text: String,
         environment_details: String,
+        tools: Vec<OpenAiTool>,
     },
     Trigger(ObserverTrigger),
     BeginCrossCheck {
@@ -64,40 +65,9 @@ pub(super) enum AutoObserverCommand {
         forced: bool,
         summary: Option<String>,
         focus: Option<String>,
+        tools: Vec<OpenAiTool>,
     },
     Stop,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ObserverToolPolicy {
-    ReadOnly,
-    Limited,
-    FullAudit,
-}
-
-impl ObserverToolPolicy {
-    fn for_mode(mode: ObserverMode) -> Self {
-        match mode {
-            ObserverMode::Bootstrap => ObserverToolPolicy::ReadOnly,
-            ObserverMode::Cadence => ObserverToolPolicy::Limited,
-            ObserverMode::CrossCheck => ObserverToolPolicy::FullAudit,
-        }
-    }
-
-    fn tools(self) -> Vec<OpenAiTool> {
-        match self {
-            ObserverToolPolicy::ReadOnly => vec![OpenAiTool::WebSearch(Default::default())],
-            ObserverToolPolicy::Limited => vec![OpenAiTool::WebSearch(Default::default())],
-            ObserverToolPolicy::FullAudit => vec![
-                OpenAiTool::LocalShell {},
-                OpenAiTool::WebSearch(Default::default()),
-            ],
-        }
-    }
-}
-
-pub(super) fn observer_tools_for_mode(mode: ObserverMode) -> Vec<OpenAiTool> {
-    ObserverToolPolicy::for_mode(mode).tools()
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +150,11 @@ pub(super) fn run_observer_once(
     evaluate_observer(runtime, client, trigger, tx, ObserverMode::Cadence)
 }
 
-fn build_bootstrap_trigger(goal_text: &str, environment_details: &str) -> ObserverTrigger {
+fn build_bootstrap_trigger(
+    goal_text: &str,
+    environment_details: &str,
+    tools: Vec<OpenAiTool>,
+) -> ObserverTrigger {
     let prompt = format!(
         "You are the QA observer. Before automation begins, inspect the repository and outline how to validate completion of the primary goal.\n\nPrimary goal:\n{goal}\n\nEnvironment:\n{environment}\n\nReturn a concise readiness summary and any immediate risks to monitor.",
         goal = goal_text.trim(),
@@ -196,7 +170,7 @@ fn build_bootstrap_trigger(goal_text: &str, environment_details: &str) -> Observ
         environment_details: environment_details.to_string(),
         reason: ObserverReason::Cadence,
         turn_snapshot: None,
-        tools: observer_tools_for_mode(ObserverMode::Bootstrap),
+        tools,
     }
 }
 
@@ -221,8 +195,9 @@ fn run_observer_loop(
             AutoObserverCommand::Bootstrap {
                 goal_text,
                 environment_details,
+                tools,
             } => {
-                let trigger = build_bootstrap_trigger(&goal_text, &environment_details);
+                let trigger = build_bootstrap_trigger(&goal_text, &environment_details, tools);
                 telemetry.trigger_count += 1;
                 match evaluate_observer(
                     &runtime,
@@ -370,6 +345,7 @@ fn run_observer_loop(
                 forced,
                 summary,
                 focus,
+                tools,
             } => {
                 let summary_clone = summary.clone();
                 let focus_clone = focus.clone();
@@ -383,7 +359,7 @@ fn run_observer_loop(
                         focus,
                     },
                     turn_snapshot: None,
-                    tools: observer_tools_for_mode(ObserverMode::CrossCheck),
+                    tools,
                 };
                 telemetry.trigger_count += 1;
                 match evaluate_observer(
