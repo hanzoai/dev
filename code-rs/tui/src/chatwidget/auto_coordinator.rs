@@ -1414,7 +1414,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                 "prompt": {
                     "type": "string",
                     "minLength": 4,
-                    "maxLength": 240,
+                    "maxLength": 600,
                     "description": "Exactly one objective in 1–2 sentences. No step lists."
                 }
             },
