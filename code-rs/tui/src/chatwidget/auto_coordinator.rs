@@ -5,12 +5,11 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use code_browser::global as browser_global;
-use code_core::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
 use code_core::config::Config;
 use code_core::config_types::{AutoDriveSettings, ReasoningEffort};
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::ToolsConfig;
+use code_core::get_openai_tools;
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
@@ -46,7 +45,6 @@ use rand::Rng;
 use super::auto_observer::{
     build_observer_conversation,
     start_auto_observer,
-    observer_tools_for_mode,
     AutoObserverCommand,
     AutoObserverHandle,
     ObserverOutcome,
@@ -701,40 +699,29 @@ fn run_auto_loop(
         .build()
         .context("creating runtime for auto coordinator")?;
 
-    let _browser_enabled = runtime.block_on(async {
+    let browser_enabled = runtime.block_on(async {
         browser_global::get_browser_manager().await.is_some()
     });
 
-    let mut tools_config = ToolsConfig::new(
-        &config.model_family,
-        config.approval_policy,
-        config.sandbox_policy.clone(),
-        config.include_plan_tool,
-        config.include_apply_patch_tool,
-        config.tools_web_search_request,
-        config.use_experimental_streamable_shell_tool,
-        config.include_view_image_tool,
+    let read_only_tools_config = client
+        .as_ref()
+        .build_tools_config_with_sandbox(SandboxPolicy::ReadOnly);
+    let read_only_tools = get_openai_tools(
+        &read_only_tools_config,
+        None,
+        browser_enabled,
+        false,
     );
-    tools_config.web_search_allowed_domains = config.tools_web_search_allowed_domains.clone();
 
-    let mut agent_models: Vec<String> = if config.agents.is_empty() {
-        default_agent_configs()
-            .into_iter()
-            .filter(|cfg| cfg.enabled)
-            .map(|cfg| cfg.name)
-            .collect()
-    } else {
-        get_enabled_agents(&config.agents)
-    };
-    if agent_models.is_empty() {
-        agent_models = enabled_agent_model_specs()
-            .into_iter()
-            .map(|spec| spec.slug.to_string())
-            .collect();
-    }
-    agent_models.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
-    agent_models.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-    tools_config.set_agent_models(agent_models);
+    let full_access_tools_config = client
+        .as_ref()
+        .build_tools_config_with_sandbox(SandboxPolicy::DangerFullAccess);
+    let full_access_tools = get_openai_tools(
+        &full_access_tools_config,
+        None,
+        browser_enabled,
+        false,
+    );
 
     let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
         Ok(Some(text)) => {
@@ -801,6 +788,7 @@ fn run_auto_loop(
             .send(AutoObserverCommand::Bootstrap {
                 goal_text: goal_text.clone(),
                 environment_details: environment_details.clone(),
+                tools: read_only_tools.clone(),
             })
             .is_err()
         {
@@ -903,7 +891,7 @@ fn run_auto_loop(
                                             environment_details: environment_details.clone(),
                                             reason: ObserverReason::Cadence,
                                             turn_snapshot: None,
-                                            tools: observer_tools_for_mode(ObserverMode::Cadence),
+                                            tools: read_only_tools.clone(),
                                         };
                                         if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
                                             warn!("failed to trigger auto observer");
@@ -953,6 +941,7 @@ fn run_auto_loop(
                                 forced: true,
                                 summary: latest_summary.clone(),
                                 focus: None,
+                                tools: full_access_tools.clone(),
                             }) {
                                 Ok(()) => {
                                     awaiting_cross_check = true;
