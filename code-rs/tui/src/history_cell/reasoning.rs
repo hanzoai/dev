@@ -115,6 +115,37 @@ impl CollapsibleReasoningCell {
         self.state.borrow_mut().in_progress = in_progress;
     }
 
+    pub(crate) fn is_in_progress(&self) -> bool {
+        self.state.borrow().in_progress
+    }
+
+    pub(crate) fn collapsed_has_summary(&self) -> bool {
+        let state = self.state.borrow();
+        if state.sections.is_empty() {
+            return false;
+        }
+
+        let theme = crate::theme::current_theme();
+        let stored_lines = sections_to_ratatui_lines(&state.sections, &theme);
+        let normalized = normalized_lines(&stored_lines);
+
+        let mut titles = collect_section_summaries(&state.sections, &theme);
+        if titles.is_empty() {
+            titles = normalized
+                .into_iter()
+                .filter(|line| {
+                    line.spans
+                        .iter()
+                        .any(|span| !span.content.trim().is_empty())
+                })
+                .collect();
+        }
+
+        titles
+            .iter()
+            .any(|line| line.spans.iter().any(|span| !span.content.trim().is_empty()))
+    }
+
     pub(crate) fn toggle_collapsed(&self) {
         let current = self.collapsed.get();
         self.collapsed.set(!current);
