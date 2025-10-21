@@ -3102,16 +3102,41 @@ impl ChatWidget<'_> {
     }
 
     fn clear_reasoning_in_progress(&mut self) {
+        let last_reasoning_index = self
+            .history_cells
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(idx, cell)| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::CollapsibleReasoningCell>()
+                    .map(|_| idx)
+            });
+
         let mut changed = false;
-        for cell in &self.history_cells {
+        for (idx, cell) in self.history_cells.iter().enumerate() {
             if let Some(reasoning_cell) = cell
                 .as_any()
                 .downcast_ref::<history_cell::CollapsibleReasoningCell>()
             {
+                if !reasoning_cell.is_in_progress() {
+                    continue;
+                }
+
+                let keep_in_progress = !self.config.tui.show_reasoning
+                    && Some(idx) == last_reasoning_index
+                    && reasoning_cell.is_collapsed()
+                    && !reasoning_cell.collapsed_has_summary();
+
+                if keep_in_progress {
+                    continue;
+                }
+
                 reasoning_cell.set_in_progress(false);
                 changed = true;
             }
         }
+
         if changed {
             self.invalidate_height_cache();
         }
