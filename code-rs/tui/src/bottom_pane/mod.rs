@@ -281,7 +281,17 @@ impl BottomPane<'_> {
                 0
             };
             let composer_height = if is_auto {
-                self.composer.desired_height(width)
+                let composer_visible = view
+                    .as_ref()
+                    .as_any()
+                    .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+                    .map(|auto_view| auto_view.composer_visible())
+                    .unwrap_or(true);
+                if composer_visible {
+                    self.composer.desired_height(width)
+                } else {
+                    self.composer.footer_height()
+                }
             } else {
                 0
             };
@@ -1027,7 +1037,17 @@ impl WidgetRef for &BottomPane<'_> {
                 let is_auto = matches!(self.active_view_kind, ActiveViewKind::AutoCoordinator);
                 if is_auto {
                     let content_width = area.width.saturating_sub(horizontal_padding * 2);
-                    let composer_height = self.composer.desired_height(area.width);
+                    let composer_visible = view
+                        .as_ref()
+                        .as_any()
+                        .and_then(|any| any.downcast_ref::<AutoCoordinatorView>())
+                        .map(|auto_view| auto_view.composer_visible())
+                        .unwrap_or(true);
+                    let composer_height = if composer_visible {
+                        self.composer.desired_height(area.width)
+                    } else {
+                        self.composer.footer_height()
+                    };
                     let pad = BottomPane::BOTTOM_PAD_LINES;
                     let max_view_height = area
                         .height

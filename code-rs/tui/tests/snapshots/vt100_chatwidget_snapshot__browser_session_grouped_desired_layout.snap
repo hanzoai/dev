@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 921
 expression: output
 ---
  +----------------------------------------------------------------------------+
@@ -9,8 +8,8 @@ expression: output
  + Browser -------------------------------------------------------------------+
  | • https://example.com/docs                                   Ctrl+B expand |
  +----------------------------------------------------------------------------+
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 

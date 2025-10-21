@@ -3,24 +3,24 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: section_open
 ---
  +------------------------------------------------------------------------------------------------+
- |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251017-050546/code-rs/tui   |
+ |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251020-094810/code-rs/tui   |
  +------------------------------------------------------------------------------------------------+
  +Settings ▸ Model--------------------------------------------------------------------------------+
  |                                                                                                |
- | › Model              |+---------------------- Select Model & Reasoning ----------------------+ |
- |   Theme              || Current model: gpt-5-codex                                           | |
- |   Updates            || Reasoni+------------------------------+                              | |
- |   Agents             ||        |Model Shortcuts               |                              | |
- |   Auto Drive         || GPT-5-C|                              |                              | |
- |   Validation         ||    High|• Esc    Return to overview   |olving difficult problems. (sl| |
- |   GitHub             ||    Medi|• Tab    Cycle sections       |g. Ideal for most tasks. (defa| |
- |   Chrome             ||    Low |• Shift+Tab  Cycle backwards  | in simple code bases. (fast) | |
- |   MCP                ||        |• ?      Toggle this help     |                              | |
- |   Notifications      || GPT-5  |                              |                              | |
- |   Limits             ||    High|Press Esc to close            |olving difficult problems. (sl| |
- |                      ||    Medi+------------------------------+or most tasks. (default)      | |
- |                      ||    Low - Basic reasoning. Works quickly in simple code bases. (fast) | |
- |                      |+----------------------------------------------------------------------+ |
+ | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
+ |    Theme              |                                                                      | |
+ |    Updates            |  Curren+------------------------------+                              | |
+ |    Agents             |  Reason|Model Shortcuts               |                              | |
+ |    Auto Drive         |        |                              |                              | |
+ |    Validation         |  GPT-5-|• Esc    Return to overview   |                              | |
+ |    GitHub             |     Hig|• Tab    Cycle sections       |solving difficult problems. ( | |
+ |    Chrome             |     Med|• Shift+Tab  Cycle backwards  |ng. Ideal for most tasks. (de | |
+ |    MCP                |     Low|• ?      Toggle this help     |y in simple code bases. (fast | |
+ |    Notifications      |        |                              |                              | |
+ |    Limits             |  GPT-5 |Press Esc to close            |                              | |
+ |                       |     Hig+------------------------------+solving difficult problems. ( | |
+ |                       |                                                                      | |
+ |                       +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+

@@ -94,11 +94,13 @@ impl ChatWidgetHarness {
             None,
         );
 
-        Self {
+        let mut harness = Self {
             chat,
             events: rx,
             helper_seq: 0,
-        }
+        };
+        harness.chat.auto_state.elapsed_override = Some(Duration::from_secs(1));
+        harness
     }
 
     pub fn handle_event(&mut self, event: Event) {
@@ -305,13 +307,15 @@ impl ChatWidgetHarness {
             let placeholder = auto_drive_strings::next_auto_drive_phrase().to_string();
             let mode = continue_mode.into_internal();
             chat.auto_state.reset();
+            chat.auto_state.elapsed_override = Some(Duration::from_secs(1));
             chat.auto_state.active = true;
             chat.auto_state.goal = Some(goal);
             chat.auto_state.review_enabled = review_enabled;
             chat.auto_state.subagents_enabled = agents_enabled;
             chat.auto_state.continue_mode = mode;
             chat.auto_state.reset_countdown();
-            chat.auto_state.started_at = Some(Instant::now());
+            let started_at = Instant::now() - Duration::from_secs(1);
+            chat.auto_state.started_at = Some(started_at);
             chat.auto_state.waiting_for_response = true;
             chat.auto_state.coordinator_waiting = true;
             chat.auto_state.placeholder_phrase = Some(placeholder);

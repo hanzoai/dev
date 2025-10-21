@@ -1,22 +1,21 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 415
 expression: frame
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive will send:
- Prompt:
- justfile run manual
-
-
-
+  Auto Drive > Working                                           ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  justfile run manual                                                       |
+ +----------------------------------------------------------------------------+
+ +-------------+
+ | Send prompt |   Esc to edit
+ +-------------+
    Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel

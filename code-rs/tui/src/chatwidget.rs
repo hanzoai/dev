@@ -642,6 +642,7 @@ struct AutoCoordinatorUiState {
     intro_started_at: Option<Instant>,
     intro_reduced_motion: bool,
     intro_pending: bool,
+    elapsed_override: Option<Duration>,
 }
 
 impl AutoCoordinatorUiState {
@@ -745,6 +746,7 @@ impl Default for AutoCoordinatorUiState {
             intro_started_at: None,
             intro_reduced_motion: false,
             intro_pending: false,
+            elapsed_override: None,
         }
     }
 }
@@ -12666,6 +12668,7 @@ fi\n\
             show_composer: true,
             awaiting_submission: false,
             waiting_for_response: false,
+            coordinator_waiting: false,
             waiting_for_review: false,
             countdown: None,
             button: None,
@@ -12677,6 +12680,7 @@ fi\n\
             elapsed: None,
             progress_past: None,
             progress_current: None,
+            editing_prompt: false,
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });
@@ -12700,6 +12704,11 @@ fi\n\
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
+        let seed_intro = self.auto_state.take_intro_pending();
+        self.auto_state.reset();
+        if seed_intro {
+            self.auto_state.mark_intro_pending();
+        }
         self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
         self.config.tui.auto_drive.observer_enabled = observer_enabled;
         match start_auto_coordinator(
@@ -12712,7 +12721,6 @@ fi\n\
         ) {
             Ok(handle) => {
                 self.auto_handle = Some(handle);
-                self.auto_state.reset();
                 self.auto_state.review_enabled = review_enabled;
                 self.auto_state.subagents_enabled = subagents_enabled;
                 self.auto_state.cross_check_enabled = cross_check_enabled;
@@ -14462,9 +14470,10 @@ fi\n\
                     cli_prompt: None,
                     cli_context: None,
                     show_composer: true,
-                    awaiting_submission: false,
-                    waiting_for_response: false,
-                    waiting_for_review: false,
+            awaiting_submission: false,
+            waiting_for_response: false,
+            coordinator_waiting: false,
+            waiting_for_review: false,
                     countdown: None,
                     button: None,
                     manual_hint: None,
@@ -14475,6 +14484,7 @@ fi\n\
                     elapsed: Some(summary.duration),
                     progress_past: None,
                     progress_current: None,
+                    editing_prompt: false,
                     intro_started_at: self.auto_state.intro_started_at,
                     intro_reduced_motion: self.auto_state.intro_reduced_motion,
                 });
@@ -14613,39 +14623,35 @@ fi\n\
                 label,
                 enabled: true,
             })
-        } else if self.auto_state.waiting_for_response {
-            None
         } else {
             None
         };
-
-        let show_composer = !self.auto_state.awaiting_submission || self.auto_state.paused_for_manual_edit;
 
         let manual_hint = if self.auto_state.awaiting_submission {
             if self.auto_state.paused_for_manual_edit {
                 Some("Edit the prompt, then press Enter to continue.".to_string())
             } else if countdown_active {
-                Some("Enter to send now • Esc/E to edit prompt".to_string())
+                Some("Enter to send now • Esc to edit".to_string())
             } else {
-                Some("Enter to send • E to edit prompt • Esc to cancel Auto Drive".to_string())
+                Some("Enter to send • Esc to edit".to_string())
             }
         } else {
             None
         };
 
         let ctrl_switch_hint = if self.auto_state.awaiting_submission {
-            if countdown_active {
-                "Esc to edit prompt".to_string()
-            } else if self.auto_state.paused_for_manual_edit {
+            if self.auto_state.paused_for_manual_edit {
                 "Esc to cancel".to_string()
             } else {
-                "E edit prompt • Esc cancel Auto Drive".to_string()
+                "Esc to edit".to_string()
             }
         } else if self.auto_state.waiting_for_response {
             String::new()
         } else {
             String::new()
         };
+
+        let show_composer = !self.auto_state.awaiting_submission || self.auto_state.paused_for_manual_edit;
 
         let model = AutoCoordinatorViewModel::Active(AutoActiveViewModel {
             goal: self.auto_state.goal.clone(),
@@ -14653,6 +14659,7 @@ fi\n\
             cli_prompt,
             awaiting_submission: self.auto_state.awaiting_submission,
             waiting_for_response: self.auto_state.waiting_for_response,
+            coordinator_waiting: self.auto_state.coordinator_waiting,
             waiting_for_review: self.auto_state.waiting_for_review,
             countdown,
             button,
@@ -14661,14 +14668,12 @@ fi\n\
             cli_running,
             turns_completed: self.auto_state.turns_completed,
             started_at: self.auto_state.started_at,
-            elapsed: self
-                .auto_state
-                .started_at
-                .map(|started| Duration::from_secs(started.elapsed().as_secs())),
+            elapsed: self.auto_state.elapsed_override,
             progress_past: self.auto_state.current_progress_past.clone(),
             progress_current: self.auto_state.current_progress_current.clone(),
             cli_context,
             show_composer,
+            editing_prompt: self.auto_state.paused_for_manual_edit,
             intro_started_at: self.auto_state.intro_started_at,
             intro_reduced_motion: self.auto_state.intro_reduced_motion,
         });

@@ -2,8 +2,9 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::{AutoDriveStyle, AutoDriveVariant, FrameStyle};
-use crate::glitch_animation::{gradient_multi, mix_rgb};
 use crate::colors;
+use crate::glitch_animation::{gradient_multi, mix_rgb};
+use crate::spinner;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -12,8 +13,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, WidgetRef, Wrap};
 use std::borrow::Cow;
-use unicode_width::UnicodeWidthStr;
-use std::time::{Duration, Instant};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
     bottom_pane_view::{BottomPaneView, ConditionalUpdate},
@@ -40,8 +41,10 @@ pub(crate) struct AutoActiveViewModel {
     pub cli_prompt: Option<String>,
     pub cli_context: Option<String>,
     pub show_composer: bool,
+    pub editing_prompt: bool,
     pub awaiting_submission: bool,
     pub waiting_for_response: bool,
+    pub coordinator_waiting: bool,
     pub waiting_for_review: bool,
     pub countdown: Option<CountdownState>,
     pub button: Option<AutoCoordinatorButton>,
@@ -336,10 +339,14 @@ impl AutoCoordinatorView {
     fn status_label(model: &AutoActiveViewModel) -> &'static str {
         if model.waiting_for_review {
             "Awaiting review"
-        } else if model.waiting_for_response || model.cli_running {
-            "Running"
         } else if model.awaiting_submission {
-            "Awaiting input"
+            "Waiting"
+        } else if model.coordinator_waiting {
+            "Creating prompt"
+        } else if model.cli_running {
+            "Running"
+        } else if model.waiting_for_response {
+            "Thinking"
         } else if model.started_at.is_some() {
             "Running"
         } else if model.elapsed.is_some() && model.started_at.is_none() {
@@ -401,8 +408,14 @@ impl AutoCoordinatorView {
                 details.push(Self::format_elapsed(duration));
             }
         }
-        details.push(Self::format_turns(model.turns_completed));
-        format!("{} ({})", label, details.join(", "))
+        if model.turns_completed > 0 {
+            details.push(Self::format_turns(model.turns_completed));
+        }
+        if details.is_empty() {
+            label.to_string()
+        } else {
+            format!("{} ({})", label, details.join(", "))
+        }
     }
 
     fn render_header(
@@ -421,8 +434,8 @@ impl AutoCoordinatorView {
         }
 
         let animating = intro.schedule_next_in.is_some() && !model.intro_reduced_motion;
-        let mut left_spans: Vec<Span<'static>> = Vec::new();
-        left_spans.push(Span::raw(" "));
+        let mut base_spans: Vec<Span<'static>> = Vec::new();
+        base_spans.push(Span::raw(" "));
 
         let fallback_color = frame_style
             .border_style
@@ -446,7 +459,7 @@ impl AutoCoordinatorView {
                     } else if idx == visible_chars.len().saturating_sub(1) {
                         color = mix_rgb(color, Color::Rgb(255, 255, 255), 0.35);
                     }
-                    left_spans.push(Span::styled(
+                    base_spans.push(Span::styled(
                         ch.to_string(),
                         Style::default()
                             .fg(color)
@@ -458,26 +471,40 @@ impl AutoCoordinatorView {
             let mut title_style = frame_style.title_style.clone();
             title_style.fg = Some(fallback_color);
             title_style = title_style.add_modifier(Modifier::BOLD);
-            left_spans.push(Span::styled(header_label.to_string(), title_style));
+            base_spans.push(Span::styled(header_label.to_string(), title_style));
         }
 
-        left_spans.push(Span::styled(
+        base_spans.push(Span::styled(
             " > ",
             Style::default().fg(colors::text_dim()),
         ));
-        left_spans.push(Span::styled(
+        base_spans.push(Span::styled(
             display_message.to_string(),
             Style::default().fg(colors::text()),
         ));
-        let left_line = Line::from(left_spans);
+        let base_line = Line::from(base_spans.clone());
 
-        let runtime = self.runtime_text(model);
-        let runtime_display = if runtime.is_empty() {
-            String::new()
-        } else {
-            format!(" {} ", runtime)
-        };
-        let right_width = UnicodeWidthStr::width(runtime_display.as_str()).min(area.width as usize) as u16;
+        let runtime_text = self.runtime_text(model);
+        let mut right_spans: Vec<Span<'static>> = Vec::new();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let spinner_frame = spinner::frame_at_time(spinner::current_spinner(), now_ms);
+        right_spans.push(Span::raw(" "));
+        right_spans.push(Span::styled(
+            spinner_frame,
+            Style::default().fg(colors::text_dim()),
+        ));
+        if !runtime_text.is_empty() {
+            right_spans.push(Span::raw(" "));
+            right_spans.push(Span::styled(
+                runtime_text,
+                Style::default().fg(colors::text_dim()),
+            ));
+        }
+        let right_line = Line::from(right_spans.clone());
+        let right_width = right_line.width().min(area.width as usize) as u16;
         let constraints = if right_width == 0 {
             vec![Constraint::Fill(1)]
         } else {
@@ -488,16 +515,307 @@ impl AutoCoordinatorView {
             .constraints(constraints)
             .split(area);
 
+        let left_available = chunks[0].width;
+        let mut left_line = base_line.clone();
+        if model.cli_running && left_available > 0 {
+            let (progress_past, progress_current) = Self::progress_labels(model);
+            let progress_style = Style::default().fg(colors::text_dim());
+            let mut applied = false;
+            if let (Some(past), Some(current)) = (progress_past.as_ref(), progress_current.as_ref()) {
+                let mut candidate_spans = base_spans.clone();
+                candidate_spans.push(Span::styled(
+                    format!(" > {} > {}", past, current),
+                    progress_style,
+                ));
+                let candidate_line = Line::from(candidate_spans.clone());
+                if candidate_line.width() <= left_available as usize {
+                    left_line = candidate_line;
+                    applied = true;
+                }
+            }
+            if !applied {
+                if let Some(current) = progress_current.as_ref() {
+                    let mut candidate_spans = base_spans.clone();
+                    candidate_spans.push(Span::styled(
+                        format!(" > {}", current),
+                        progress_style,
+                    ));
+                    let candidate_line = Line::from(candidate_spans.clone());
+                    if candidate_line.width() <= left_available as usize {
+                        left_line = candidate_line;
+                        applied = true;
+                    }
+                }
+                if !applied {
+                    if let Some(past) = progress_past.as_ref() {
+                        let mut candidate_spans = base_spans.clone();
+                        candidate_spans.push(Span::styled(
+                            format!(" > {}", past),
+                            progress_style,
+                        ));
+                        let candidate_line = Line::from(candidate_spans.clone());
+                        if candidate_line.width() <= left_available as usize {
+                            left_line = candidate_line;
+                        }
+                    }
+                }
+            }
+        }
+
         Paragraph::new(left_line).render(chunks[0], buf);
 
         if right_width > 0 {
-            Paragraph::new(Line::from(Span::styled(
-                runtime_display,
-                self.style.summary_style.clone(),
-            )))
-            .alignment(Alignment::Right)
-            .render(chunks[chunks.len() - 1], buf);
+            Paragraph::new(right_line)
+                .alignment(Alignment::Right)
+                .render(chunks[chunks.len() - 1], buf);
         }
+    }
+
+    fn pending_prompt_content_lines(
+        &self,
+        model: &AutoActiveViewModel,
+        inner_width: usize,
+    ) -> Vec<(String, Style)> {
+        if inner_width == 0 {
+            return Vec::new();
+        }
+
+        let indent = "  ";
+        let indent_width = UnicodeWidthStr::width(indent);
+        let text_width = inner_width.saturating_sub(indent_width);
+
+        let context_style = Style::default()
+            .fg(colors::text_dim())
+            .add_modifier(Modifier::ITALIC);
+        let prompt_style = Style::default().fg(colors::text());
+        let placeholder_style = Style::default()
+            .fg(colors::text_dim())
+            .add_modifier(Modifier::ITALIC);
+
+        let context = model
+            .cli_context
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let prompt = model
+            .cli_prompt
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+
+        let mut rows: Vec<(String, Style)> = Vec::new();
+
+        let add_segments = |text: &str, style: Style, rows: &mut Vec<(String, Style)>| {
+            if text_width == 0 {
+                let padded = Self::pad_to_width(indent, inner_width);
+                rows.push((padded, style));
+                return;
+            }
+
+            if text.trim().is_empty() {
+                let padded = Self::pad_to_width("", inner_width);
+                rows.push((padded, style));
+                return;
+            }
+
+            for segment in Self::wrap_text_segments(text, text_width) {
+                let body = format!("{indent}{segment}");
+                let padded = Self::pad_to_width(&body, inner_width);
+                rows.push((padded, style));
+            }
+        };
+
+        let mut inserted_context = false;
+        if let Some(value) = context {
+            for line in value.lines() {
+                add_segments(line.trim_end(), context_style, &mut rows);
+            }
+            inserted_context = true;
+        }
+
+        let mut inserted_prompt = false;
+        if let Some(value) = prompt {
+            if inserted_context {
+                add_segments("", prompt_style, &mut rows);
+            }
+            for line in value.lines() {
+                add_segments(line.trim_end(), prompt_style, &mut rows);
+            }
+            inserted_prompt = true;
+        }
+
+        if !inserted_prompt {
+            if inserted_context {
+                add_segments("", prompt_style, &mut rows);
+            }
+            add_segments(
+                "(Coordinator did not supply a prompt)",
+                placeholder_style,
+                &mut rows,
+            );
+        }
+
+        rows
+    }
+
+    fn render_pending_prompt_block(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        model: &AutoActiveViewModel,
+    ) -> u16 {
+        if area.width < 4 || area.height < 3 {
+            Self::clear_rect(area, buf);
+            return 0;
+        }
+
+        let inner_width = area.width.saturating_sub(2) as usize;
+        let content_rows = self.pending_prompt_content_lines(model, inner_width);
+        if content_rows.is_empty() {
+            Self::clear_rect(area, buf);
+            return 0;
+        }
+
+        let max_content_rows = area.height.saturating_sub(2) as usize;
+        let visible_rows: Vec<_> = content_rows.into_iter().take(max_content_rows).collect();
+
+        Self::clear_rect(area, buf);
+
+        let border_style = Style::default().fg(colors::text_dim());
+        let title = " Next Prompt ";
+        let mut top_line = String::from("+");
+        if title.len() + 2 <= inner_width {
+            top_line.push_str(title);
+            top_line.push_str(&"-".repeat(inner_width - title.len()));
+        } else {
+            top_line.push_str(&"-".repeat(inner_width));
+        }
+        top_line.push('+');
+        Self::write_text_line(buf, area.x, area.y, &top_line, border_style);
+
+        let mut used = 1u16;
+        let mut current_y = area.y + 1;
+        for (text, style) in visible_rows {
+            if current_y >= area.y + area.height - 1 {
+                break;
+            }
+
+            let left_cell = &mut buf[(area.x, current_y)];
+            left_cell.set_symbol("|");
+            left_cell.set_style(border_style);
+
+            for (idx, ch) in text.chars().enumerate() {
+                let cell = &mut buf[(area.x + 1 + idx as u16, current_y)];
+                let mut utf8 = [0u8; 4];
+                let sym = ch.encode_utf8(&mut utf8);
+                cell.set_symbol(sym);
+                cell.set_style(style);
+            }
+
+            let right_cell = &mut buf[(area.x + area.width - 1, current_y)];
+            right_cell.set_symbol("|");
+            right_cell.set_style(border_style);
+
+            current_y += 1;
+            used = used.saturating_add(1);
+        }
+
+        if current_y >= area.y + area.height {
+            current_y = area.y + area.height - 1;
+        }
+
+        let bottom_line = format!("+{}+", "-".repeat(inner_width));
+        Self::write_text_line(buf, area.x, current_y, &bottom_line, border_style);
+        used = used.saturating_add(1);
+
+        used
+    }
+
+    fn write_text_line(buf: &mut Buffer, x: u16, y: u16, text: &str, style: Style) {
+        for (idx, ch) in text.chars().enumerate() {
+            let cell = &mut buf[(x + idx as u16, y)];
+            let mut utf8 = [0u8; 4];
+            let sym = ch.encode_utf8(&mut utf8);
+            cell.set_symbol(sym);
+            cell.set_style(style);
+        }
+    }
+
+    fn wrap_text_segments(text: &str, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![String::new()];
+        }
+
+        let mut lines: Vec<String> = Vec::new();
+        let mut current = String::new();
+        let mut current_width = 0usize;
+
+        for word in text.split_whitespace() {
+            let word_width = UnicodeWidthStr::width(word);
+            if word_width >= width {
+                if !current.is_empty() {
+                    lines.push(current);
+                    current = String::new();
+                    current_width = 0;
+                }
+                lines.push(Self::truncate_to_width(word, width));
+                continue;
+            }
+
+            let separator_width = if current.is_empty() { 0 } else { 1 };
+            if current_width + separator_width + word_width <= width {
+                if !current.is_empty() {
+                    current.push(' ');
+                    current_width += 1;
+                }
+                current.push_str(word);
+                current_width += word_width;
+            } else {
+                if !current.is_empty() {
+                    lines.push(current);
+                }
+                current = word.to_string();
+                current_width = word_width;
+            }
+        }
+
+        if current.is_empty() {
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+        } else {
+            lines.push(current);
+        }
+
+        lines
+    }
+
+    fn truncate_to_width(text: &str, width: usize) -> String {
+        if UnicodeWidthStr::width(text) <= width {
+            return text.to_string();
+        }
+
+        let mut result = String::new();
+        let mut current_width = 0usize;
+        for ch in text.chars() {
+            let char_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+            if current_width + char_width > width {
+                break;
+            }
+            result.push(ch);
+            current_width += char_width;
+        }
+
+        result
+    }
+
+    fn pad_to_width(text: &str, width: usize) -> String {
+        let mut truncated = Self::truncate_to_width(text, width);
+        let current_width = UnicodeWidthStr::width(truncated.as_str());
+        if current_width < width {
+            truncated.push_str(&" ".repeat(width - current_width));
+        }
+        truncated
     }
 
     fn status_message_line(&self, display_message: &str) -> Option<Line<'static>> {
@@ -548,7 +866,7 @@ impl AutoCoordinatorView {
         let prompt = model
             .cli_prompt
             .as_ref()
-            .map(|value| value.trim_end())
+            .map(|value| value.trim())
             .filter(|value| !value.is_empty());
         let context = model
             .cli_context
@@ -560,74 +878,52 @@ impl AutoCoordinatorView {
             return None;
         }
 
-        let header_style = Style::default()
-            .fg(colors::text())
-            .add_modifier(Modifier::BOLD);
-        let context_label_style = Style::default()
-            .fg(colors::text_dim())
-            .add_modifier(Modifier::BOLD);
-        let context_body_style = Style::default()
+        let context_style = Style::default()
             .fg(colors::text_dim())
             .add_modifier(Modifier::ITALIC);
-        let prompt_label_style = Style::default()
-            .fg(colors::info())
-            .add_modifier(Modifier::BOLD);
-        let prompt_body_style = Style::default().fg(colors::text());
+        let prompt_style = Style::default().fg(colors::text());
+        let placeholder_style = Style::default()
+            .fg(colors::text_dim())
+            .add_modifier(Modifier::ITALIC);
+        let indent = "  ";
 
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(Line::from(vec![
-            Span::raw("   "),
-            Span::styled("Auto Drive will send:", header_style),
-        ]));
 
         if let Some(value) = context {
-            lines.push(Line::from(vec![
-                Span::raw("     "),
-                Span::styled("Preface:", context_label_style),
-            ]));
             for line in value.lines() {
                 let trimmed = line.trim_end();
                 if trimmed.is_empty() {
                     lines.push(Line::default());
                 } else {
                     lines.push(Line::from(vec![
-                        Span::raw("       "),
-                        Span::styled(trimmed.to_string(), context_body_style),
+                        Span::raw(indent),
+                        Span::styled(trimmed.to_string(), context_style),
                     ]));
                 }
             }
-        }
-
-        if context.is_some() && prompt.is_some() {
-            lines.push(Line::default());
+            if prompt.is_some() {
+                lines.push(Line::default());
+            }
         }
 
         if let Some(value) = prompt {
-            lines.push(Line::from(vec![
-                Span::raw("     "),
-                Span::styled("Prompt:", prompt_label_style),
-            ]));
             for line in value.lines() {
                 let trimmed = line.trim_end();
                 if trimmed.is_empty() {
                     lines.push(Line::default());
                 } else {
                     lines.push(Line::from(vec![
-                        Span::raw("       "),
-                        Span::styled(trimmed.to_string(), prompt_body_style),
+                        Span::raw(indent),
+                        Span::styled(trimmed.to_string(), prompt_style),
                     ]));
                 }
             }
         } else {
             lines.push(Line::from(vec![
-                Span::raw("     "),
-                Span::styled("Prompt:", prompt_label_style),
-            ]));
-            lines.push(Line::from(vec![
-                Span::raw("       "),
+                Span::raw(indent),
                 Span::styled(
                     "(Coordinator did not supply a prompt)".to_string(),
-                    prompt_body_style.add_modifier(Modifier::ITALIC),
+                    placeholder_style,
                 ),
             ]));
         }
@@ -772,40 +1068,56 @@ impl AutoCoordinatorView {
         }
 
         let inner_width = self.inner_width(width);
-        let button_height = if ctx.button.is_some() { 3 } else { 0 };
-        let hint_height = ctx
-            .manual_hint
-            .as_ref()
-            .map(|text| Self::wrap_count(text, inner_width))
-            .unwrap_or(0);
-        let ctrl_hint = ctx.ctrl_hint.trim();
-        let ctrl_height = if ctx.button.is_some() {
-            0
-        } else if ctrl_hint.is_empty() {
-            0
-        } else {
-            Self::wrap_count(ctrl_hint, inner_width)
-        };
+        let prompt_lines = self.cli_prompt_lines(model);
 
-        let display_message = self.resolve_display_message(model);
-        total = total.saturating_add(self.status_message_wrap_count(inner_width, &display_message));
-
-        if let Some(prompt_lines) = self.cli_prompt_lines(model) {
-            let prompt_height = Self::lines_height(&prompt_lines, inner_width) as usize;
-            total += prompt_height;
-            if prompt_height > 0 && ctx.button.is_some() {
-                total += 1; // spacer before button
+        if !model.editing_prompt {
+            let block_lines = self
+                .pending_prompt_content_lines(model, inner_width as usize)
+                .len();
+            if block_lines > 0 {
+                total = total.saturating_add(block_lines.saturating_add(2));
             }
         }
+
+        let mut button_height = 0usize;
         if ctx.button.is_some() {
-            total += button_height;
+            button_height = 3;
         }
-        if ctx.manual_hint.is_some() {
-            total += hint_height.max(1);
+
+        if model.editing_prompt {
+            let display_message = self.resolve_display_message(model);
+            total = total.saturating_add(
+                self.status_message_wrap_count(inner_width, &display_message),
+            );
+
+            if let Some(ref lines) = prompt_lines {
+                let prompt_height = Self::lines_height(lines, inner_width) as usize;
+                total = total.saturating_add(prompt_height);
+                if prompt_height > 0 && ctx.button.is_some() {
+                    total = total.saturating_add(1); // spacer before button
+                }
+            }
+
+            if ctx.manual_hint.is_some() {
+                let hint_height = ctx
+                    .manual_hint
+                    .as_ref()
+                    .map(|text| Self::wrap_count(text, inner_width))
+                    .unwrap_or(0)
+                    .max(1);
+                total = total.saturating_add(hint_height);
+            }
+
+            let ctrl_hint = ctx.ctrl_hint.trim();
+            if !ctx.button.is_some() && !ctrl_hint.is_empty() {
+                let ctrl_height = Self::wrap_count(ctrl_hint, inner_width).max(1);
+                total = total.saturating_add(1); // spacer before ctrl hint
+                total = total.saturating_add(ctrl_height);
+            }
         }
-        if ctrl_height > 0 {
-            total += 1; // spacer before ctrl hint
-            total += ctrl_height.max(1);
+
+        if button_height > 0 {
+            total = total.saturating_add(button_height);
         }
 
         let composer_block = usize::from(composer_height);
@@ -828,29 +1140,57 @@ impl AutoCoordinatorView {
         }
 
         let frame_style = self.frame_style_for_model(model);
+        if model.started_at.is_some()
+            && (model.waiting_for_response
+                || model.awaiting_submission
+                || model.waiting_for_review
+                || model.cli_running)
+        {
+            self.app_event_tx
+                .send(AppEvent::ScheduleFrameIn(Duration::from_secs(1)));
+        }
         let display_message = self.resolve_display_message(model);
         let intro = Self::intro_state(frame_style.title_text, model);
         if let Some(delay) = intro.schedule_next_in {
             self.app_event_tx.send(AppEvent::ScheduleFrameIn(delay));
         }
 
+        let ctx = Self::build_context(model);
+
+        let composer_visible = model.show_composer && composer.is_some();
+        let mut view_origin = area.y;
+        let mut view_height = area.height;
+
+        if !composer_visible {
+            let expected = self
+                .estimated_height_active(area.width, &ctx, model, 0)
+                .min(view_height);
+            let offset = view_height.saturating_sub(expected.max(1));
+            view_origin = view_origin.saturating_add(offset);
+            view_height = view_height.saturating_sub(offset);
+        }
+
+        if view_height == 0 {
+            return;
+        }
+
         // Draw spacer row to match composer spacing.
         let spacer_row = Rect {
             x: area.x,
-            y: area.y,
+            y: view_origin,
             width: area.width,
             height: 1,
         };
         Self::clear_row(spacer_row, buf);
 
-        if area.height <= 1 {
+        if view_height <= 1 {
             return;
         }
 
-        let header_height = Self::HEADER_HEIGHT.min(area.height.saturating_sub(1));
+        let header_height = Self::HEADER_HEIGHT.min(view_height.saturating_sub(1));
         let header_area = Rect {
             x: area.x,
-            y: area.y + 1,
+            y: view_origin + 1,
             width: area.width,
             height: header_height,
         };
@@ -866,16 +1206,15 @@ impl AutoCoordinatorView {
             &intro,
         );
 
-        if area.height <= 1 + Self::HEADER_HEIGHT {
+        if view_height <= 1 + Self::HEADER_HEIGHT {
             return;
         }
 
-        let inner = Rect {
+        let mut inner = Rect {
             x: area.x,
-            y: area.y + 1 + Self::HEADER_HEIGHT,
+            y: view_origin + 1 + Self::HEADER_HEIGHT,
             width: area.width,
-            height: area
-                .height
+            height: view_height
                 .saturating_sub(1)
                 .saturating_sub(Self::HEADER_HEIGHT),
         };
@@ -892,53 +1231,78 @@ impl AutoCoordinatorView {
             return;
         }
 
-        let ctx = Self::build_context(model);
+        let mut prompt_lines = self.cli_prompt_lines(model);
         let mut top_lines: Vec<Line<'static>> = Vec::new();
         let mut after_lines: Vec<Line<'static>> = Vec::new();
+        let mut button_block = self.button_block_lines(&ctx);
 
-        if let Some(mut prompt_lines) = self.cli_prompt_lines(model) {
-            top_lines.append(&mut prompt_lines);
+        if !model.editing_prompt {
+            let base_y = inner.y;
+            let base_height = inner.height;
+            let used = self.render_pending_prompt_block(inner, buf, model);
+            if used == 0 {
+                Self::clear_rect(inner, buf);
+                return;
+            }
+            if used >= base_height {
+                return;
+            }
+            let new_y = base_y + used;
+            let remaining_height = base_height.saturating_sub(new_y.saturating_sub(base_y));
+            inner = Rect {
+                x: inner.x,
+                y: new_y,
+                width: inner.width,
+                height: remaining_height,
+            };
+        } else if let Some(mut lines) = prompt_lines.take() {
+            top_lines.append(&mut lines);
         }
 
-        if let Some(button_block) = self.button_block_lines(&ctx) {
-            if !top_lines.is_empty() {
+        if model.editing_prompt {
+            if let Some(hint_line) = self.manual_hint_line(&ctx) {
+                if !after_lines.is_empty() {
+                    after_lines.push(Line::default());
+                }
+                after_lines.push(hint_line);
+            }
+
+            if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
+                if !after_lines.is_empty() {
+                    after_lines.push(Line::default());
+                }
+                after_lines.push(ctrl_hint_line);
+            }
+
+            if let Some(progress_text) = Self::compose_progress_line(model) {
+                let line = Line::from(Span::styled(
+                    progress_text,
+                    Style::default().fg(colors::text()),
+                ));
+                if top_lines.is_empty() {
+                    top_lines.push(line);
+                } else {
+                    top_lines.insert(0, line);
+                }
+            }
+
+            if let Some(line) = self.status_message_line(&display_message) {
+                if top_lines.is_empty() {
+                    top_lines.push(line);
+                } else {
+                    top_lines.insert(0, line);
+                }
+            }
+        }
+
+        if let Some(mut block_lines) = button_block.take() {
+            if top_lines
+                .last()
+                .is_some_and(|line| line.width() > 0)
+            {
                 top_lines.push(Line::default());
             }
-            top_lines.extend(button_block);
-        }
-
-        if let Some(hint_line) = self.manual_hint_line(&ctx) {
-            if !after_lines.is_empty() {
-                after_lines.push(Line::default());
-            }
-            after_lines.push(hint_line);
-        }
-
-        if let Some(ctrl_hint_line) = self.ctrl_hint_line(&ctx) {
-            if !after_lines.is_empty() {
-                after_lines.push(Line::default());
-            }
-            after_lines.push(ctrl_hint_line);
-        }
-
-        if let Some(progress_text) = Self::compose_progress_line(model) {
-            let line = Line::from(Span::styled(
-                progress_text,
-                Style::default().fg(colors::text()),
-            ));
-            if top_lines.is_empty() {
-                top_lines.push(line);
-            } else {
-                top_lines.insert(0, line);
-            }
-        }
-
-        if let Some(line) = self.status_message_line(&display_message) {
-            if top_lines.is_empty() {
-                top_lines.push(line);
-            } else {
-                top_lines.insert(0, line);
-            }
+            top_lines.append(&mut block_lines);
         }
 
         let mut top_height = Self::lines_height(&top_lines, inner.width);
@@ -996,6 +1360,15 @@ impl AutoCoordinatorView {
         } else {
             0
         };
+
+        if composer_height == 0 {
+            let used_height = top_height.saturating_add(after_height);
+            if used_height > 0 && used_height < inner.height {
+                let offset = inner.height - used_height;
+                inner.y = inner.y.saturating_add(offset);
+                inner.height = used_height;
+            }
+        }
 
         let mut cursor_y = inner.y;
         if top_height > 0 {
@@ -1125,24 +1498,39 @@ impl AutoCoordinatorView {
         format!("{} {}", turns, label)
     }
 
+    fn progress_labels(model: &AutoActiveViewModel) -> (Option<String>, Option<String>) {
+        let past = model
+            .progress_past
+            .as_ref()
+            .and_then(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+        let current = model
+            .progress_current
+            .as_ref()
+            .and_then(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+        (past, current)
+    }
+
     fn compose_progress_line(model: &AutoActiveViewModel) -> Option<String> {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(past) = model.progress_past.as_ref() {
-            let trimmed = past.trim();
-            if !trimmed.is_empty() {
-                parts.push(trimmed.to_string());
-            }
-        }
-        if let Some(current) = model.progress_current.as_ref() {
-            let trimmed = current.trim();
-            if !trimmed.is_empty() {
-                parts.push(trimmed.to_string());
-            }
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(" "))
+        let (past, current) = Self::progress_labels(model);
+        match (past, current) {
+            (Some(past), Some(current)) => Some(format!("{} > {}", past, current)),
+            (None, Some(current)) => Some(current),
+            (Some(past), None) => Some(past),
+            (None, None) => None,
         }
     }
 
