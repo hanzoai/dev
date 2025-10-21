@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use super::ChatWidget;
+use super::{ChatWidget, ExecCallId, RunningCommand};
 use crate::app_event::{AppEvent, AutoContinueMode};
 use crate::app_event_sender::AppEventSender;
 use crate::auto_drive_strings;
@@ -365,6 +365,45 @@ impl ChatWidgetHarness {
         self.flush_into_widget();
     }
 
+    pub fn auto_drive_mark_cli_running(&mut self) {
+        let call_id = ExecCallId(format!("helper-cli-{}", self.helper_seq));
+        self.helper_seq = self.helper_seq.wrapping_add(1);
+        {
+            let chat = self.chat();
+            chat.exec.running_commands.insert(
+                call_id,
+                RunningCommand {
+                    command: Vec::new(),
+                    parsed: Vec::new(),
+                    history_index: None,
+                    history_id: None,
+                    explore_entry: None,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    wait_total: None,
+                    wait_active: false,
+                    wait_notes: Vec::new(),
+                },
+            );
+            chat.refresh_auto_drive_visuals();
+        }
+        self.flush_into_widget();
+    }
+
+    pub fn auto_drive_simulate_cli_submission(&mut self) {
+        {
+            let chat = self.chat();
+            chat.auto_state.awaiting_submission = false;
+            chat.auto_state.current_progress_current = None;
+            chat.auto_state.current_progress_past = None;
+            chat.auto_state.waiting_for_response = true;
+            chat.auto_state.coordinator_waiting = false;
+            chat.refresh_auto_drive_visuals();
+            chat.request_redraw();
+        }
+        self.flush_into_widget();
+    }
+
     pub fn auto_drive_set_awaiting_submission(
         &mut self,
         cli_prompt: impl Into<String>,
@@ -388,8 +427,6 @@ impl ChatWidgetHarness {
                 chat.auto_state.current_summary = None;
                 chat.auto_state.last_decision_summary = None;
             }
-            chat.auto_state.last_decision_progress_past = None;
-            chat.auto_state.last_decision_progress_current = None;
             chat.auto_state.reset_countdown();
             chat.auto_state.countdown_id = chat.auto_state.countdown_id.wrapping_add(1);
             chat.auto_state.seconds_remaining =

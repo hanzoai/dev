@@ -14688,6 +14688,30 @@ fi\n\
             status_lines.push(telemetry_line);
         }
         let cli_running = self.is_cli_running();
+        let progress_hint_active = self.auto_state.awaiting_submission
+            || (self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting)
+            || cli_running;
+
+        // Keep the most recent coordinator progress visible across approval and
+        // CLI execution. The coordinator clears `current_progress_*` once it
+        // starts streaming the next turn, so fall back to the last decision while
+        // we are still acting on it.
+        let progress_current_for_view = if progress_hint_active {
+            self.auto_state
+                .current_progress_current
+                .clone()
+                .or_else(|| self.auto_state.last_decision_progress_current.clone())
+        } else {
+            None
+        };
+        let progress_past_for_view = if progress_hint_active {
+            self.auto_state
+                .current_progress_past
+                .clone()
+                .or_else(|| self.auto_state.last_decision_progress_past.clone())
+        } else {
+            None
+        };
 
         let cli_prompt = self
             .auto_state
@@ -14769,8 +14793,8 @@ fi\n\
             turns_completed: self.auto_state.turns_completed,
             started_at: self.auto_state.started_at,
             elapsed: self.auto_state.elapsed_override,
-            progress_past: self.auto_state.current_progress_past.clone(),
-            progress_current: self.auto_state.current_progress_current.clone(),
+            progress_past: progress_past_for_view,
+            progress_current: progress_current_for_view,
             cli_context,
             show_composer,
             editing_prompt: self.auto_state.paused_for_manual_edit,
