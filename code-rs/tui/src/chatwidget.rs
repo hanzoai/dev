@@ -12271,7 +12271,17 @@ impl ChatWidget<'_> {
         let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
 
-        if ctrl && matches!(key_event.code, KeyCode::Char('o') | KeyCode::Char('O')) {
+        if ctrl
+            && matches!(
+                key_event.code,
+                KeyCode::Char('o') | KeyCode::Char('O') | KeyCode::Char('\u{f}')
+            )
+        {
+            self.close_auto_threads_overlay();
+            return true;
+        }
+
+        if matches!(key_event.code, KeyCode::Char('\u{f}')) {
             self.close_auto_threads_overlay();
             return true;
         }
@@ -17992,7 +18002,7 @@ fi\n\
 
     pub(crate) fn has_active_modal_view(&self) -> bool {
         // Treat bottom‑pane views (approval, selection popups) and top‑level overlays
-        // (diff viewer, help overlay) as "modals" for Esc routing. This ensures that
+        // (diff viewer, help overlay, Auto Threads overlay) as "modals" for Esc routing. This ensures that
         // a single Esc keypress closes the visible overlay instead of engaging the
         // global Esc policy (clear input / backtrack).
         self.bottom_pane.has_active_modal_view()
@@ -18000,6 +18010,7 @@ fi\n\
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
             || self.terminal.overlay.is_some()
+            || self.auto_threads_overlay.is_active()
     }
 
     /// Forward an `Op` directly to codex.
@@ -22093,6 +22104,62 @@ mod tests {
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AgentsTerminal);
+    }
+
+    #[test]
+    fn esc_router_prioritizes_auto_threads_overlay_before_auto_stop() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.auto_state.active = true;
+        chat.auto_threads_overlay.activate();
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::DismissModal);
+        assert!(!route.allows_double_esc);
+
+        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let performed = chat.execute_esc_intent(route.intent, esc_event);
+        assert!(performed, "Esc intent should close the overlay");
+        assert!(chat.auto_state.active, "Auto Drive should remain active after closing overlay");
+        assert!(
+            !chat.auto_threads_overlay.is_active(),
+            "Overlay should deactivate after Esc is routed"
+        );
+    }
+
+    #[test]
+    fn ctrl_o_closes_auto_threads_overlay_when_active() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.toggle_auto_threads_overlay();
+        assert!(chat.auto_threads_overlay.is_active());
+
+        let ctrl_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        chat.handle_key_event(ctrl_o);
+
+        assert!(
+            !chat.auto_threads_overlay.is_active(),
+            "Ctrl+O should deactivate the overlay"
+        );
+    }
+
+    #[test]
+    fn control_character_closes_auto_threads_overlay() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.toggle_auto_threads_overlay();
+        assert!(chat.auto_threads_overlay.is_active());
+
+        let control_char = KeyEvent::new(KeyCode::Char('\u{f}'), KeyModifiers::NONE);
+        chat.handle_key_event(control_char);
+
+        assert!(
+            !chat.auto_threads_overlay.is_active(),
+            "Control character produced by Ctrl+O should close the overlay"
+        );
     }
 
     #[test]
