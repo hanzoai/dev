@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use code_core::protocol::{
     AgentReasoningDeltaEvent, AgentReasoningEvent, Event, EventMsg, OrderMeta,
 };
-use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
+use code_tui::test_helpers::{layout_metrics, render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
 fn bottom_spacer_short_wrapped_content_80x24() {
@@ -53,6 +53,22 @@ fn bottom_spacer_collapsed_vs_expanded_reasoning_120x40() {
     insta::assert_snapshot!(
         "bottom_spacer_expanded_reasoning_120x40",
         expanded
+    );
+}
+
+#[test]
+fn bottom_spacer_skips_when_history_fits() {
+    let mut harness = ChatWidgetHarness::new();
+    harness.push_user_prompt("Keep it brief.");
+    harness.push_assistant_markdown("The transcript stays short so it fits without scrolling.");
+
+    let _ = render_chat_widget_to_vt100(&mut harness, 120, 40);
+    let metrics = layout_metrics(&harness);
+
+    assert_eq!(
+        metrics.last_max_scroll,
+        0,
+        "history that fits in the viewport should not reserve overscan rows"
     );
 }
 
