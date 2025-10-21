@@ -74,6 +74,8 @@ pub struct Prompt {
     pub model_family_override: Option<ModelFamily>,
     /// Optional the output schema for the model's response.
     pub output_schema: Option<Value>,
+    /// Optional tag used to route debug logs into helper-specific directories.
+    pub log_tag: Option<String>,
 }
 
 impl Default for Prompt {
@@ -91,6 +93,7 @@ impl Default for Prompt {
             model_override: None,
             model_family_override: None,
             output_schema: None,
+            log_tag: None,
         }
     }
 }
@@ -120,6 +123,10 @@ impl Prompt {
         } else {
             Cow::Borrowed(base)
         }
+    }
+
+    pub fn set_log_tag<S: Into<String>>(&mut self, tag: S) {
+        self.log_tag = Some(tag.into());
     }
 
     fn get_formatted_user_instructions(&self) -> Option<String> {

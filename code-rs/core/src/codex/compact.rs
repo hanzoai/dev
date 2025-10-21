@@ -134,6 +134,7 @@ pub(super) async fn perform_compaction(
         model_override: None,
         model_family_override: None,
         output_schema: None,
+        log_tag: Some("codex/compact".to_string()),
     };
 
     let max_retries = turn_context.client.get_provider().stream_max_retries();
@@ -248,6 +249,7 @@ async fn run_compact_task_inner_inline(
         model_override: None,
         model_family_override: None,
         output_schema: None,
+        log_tag: Some("codex/compact".to_string()),
     };
 
     let max_retries = turn_context.client.get_provider().stream_max_retries();
