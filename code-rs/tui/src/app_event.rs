@@ -78,19 +78,6 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoReviewCommitSource {
-    Staged,
-    Commit,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AutoReviewCommit {
-    pub source: AutoReviewCommitSource,
-    pub sha: Option<String>,
-    pub summary: Option<String>,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct AutoTurnCliAction {
     pub prompt: String,
@@ -112,18 +99,6 @@ pub(crate) struct AutoTurnAgentsAction {
     pub write: bool,
     pub write_requested: Option<bool>,
     pub models: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnCodeReviewAction {
-    pub commit: AutoReviewCommit,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnCrossCheckAction {
-    pub summary: Option<String>,
-    pub focus: Option<String>,
-    pub forced: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,6 +281,15 @@ pub(crate) enum AppEvent {
         conversation: Vec<ResponseItem>,
         raw_output: Option<String>,
         parsed_response: Option<JsonValue>,
+    },
+    AutoObserverThinking {
+        mode: ObserverMode,
+        delta: String,
+        summary_index: Option<u32>,
+    },
+    AutoObserverReady {
+        baseline_summary: Option<String>,
+        bootstrap_len: usize,
     },
     ShowAutoDriveSettings,
     CloseAutoDriveSettings,

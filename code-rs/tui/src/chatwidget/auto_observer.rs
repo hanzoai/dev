@@ -2,7 +2,14 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use code_core::{error::CodexErr, ModelClient, OpenAiTool, Prompt, ResponseEvent, TextFormat};
+use code_core::{
+    error::CodexErr,
+    ModelClient,
+    OpenAiTool,
+    Prompt,
+    ResponseEvent,
+    TextFormat,
+};
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
 use code_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
@@ -11,6 +18,9 @@ use serde_json::{self, json, Value};
 use tracing::{debug, error, warn};
 
 use crate::app_event::AutoObserverTelemetry;
+use crate::app_event;
+
+type ObserverMode = app_event::ObserverMode;
 use crate::chatwidget::AutoObserverStatus;
 use crate::thread_spawner;
 
@@ -18,10 +28,10 @@ use super::auto_coordinator::{
     extract_first_json_object,
     make_message,
     AutoCoordinatorCommand,
-    ObserverMode,
     MODEL_SLUG,
 };
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(super) struct CrossCheckTurnSnapshot {
     pub cli_prompt: Option<String>,
@@ -43,13 +53,51 @@ impl AutoObserverHandle {
 
 #[derive(Debug)]
 pub(super) enum AutoObserverCommand {
+    Bootstrap {
+        goal_text: String,
+        environment_details: String,
+    },
     Trigger(ObserverTrigger),
     BeginCrossCheck {
         conversation: Vec<ResponseItem>,
-        from_index: usize,
+        _from_index: usize,
         forced: bool,
+        summary: Option<String>,
+        focus: Option<String>,
     },
     Stop,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ObserverToolPolicy {
+    ReadOnly,
+    Limited,
+    FullAudit,
+}
+
+impl ObserverToolPolicy {
+    fn for_mode(mode: ObserverMode) -> Self {
+        match mode {
+            ObserverMode::Bootstrap => ObserverToolPolicy::ReadOnly,
+            ObserverMode::Cadence => ObserverToolPolicy::Limited,
+            ObserverMode::CrossCheck => ObserverToolPolicy::FullAudit,
+        }
+    }
+
+    fn tools(self) -> Vec<OpenAiTool> {
+        match self {
+            ObserverToolPolicy::ReadOnly => vec![OpenAiTool::WebSearch(Default::default())],
+            ObserverToolPolicy::Limited => vec![OpenAiTool::WebSearch(Default::default())],
+            ObserverToolPolicy::FullAudit => vec![
+                OpenAiTool::LocalShell {},
+                OpenAiTool::WebSearch(Default::default()),
+            ],
+        }
+    }
+}
+
+pub(super) fn observer_tools_for_mode(mode: ObserverMode) -> Vec<OpenAiTool> {
+    ObserverToolPolicy::for_mode(mode).tools()
 }
 
 #[derive(Debug, Clone)]
@@ -122,12 +170,34 @@ pub(super) fn start_auto_observer(
     })
 }
 
+#[allow(dead_code)]
 pub(super) fn run_observer_once(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     trigger: ObserverTrigger,
 ) -> Result<ObserverEvaluation> {
-    evaluate_observer(runtime, client, trigger)
+    let (tx, _rx) = mpsc::channel();
+    evaluate_observer(runtime, client, trigger, tx, ObserverMode::Cadence)
+}
+
+fn build_bootstrap_trigger(goal_text: &str, environment_details: &str) -> ObserverTrigger {
+    let prompt = format!(
+        "You are the QA observer. Before automation begins, inspect the repository and outline how to validate completion of the primary goal.\n\nPrimary goal:\n{goal}\n\nEnvironment:\n{environment}\n\nReturn a concise readiness summary and any immediate risks to monitor.",
+        goal = goal_text.trim(),
+        environment = environment_details.trim()
+    );
+
+    let mut conversation = Vec::new();
+    conversation.push(make_message("developer", prompt));
+
+    ObserverTrigger {
+        conversation,
+        goal_text: goal_text.to_string(),
+        environment_details: environment_details.to_string(),
+        reason: ObserverReason::Cadence,
+        turn_snapshot: None,
+        tools: observer_tools_for_mode(ObserverMode::Bootstrap),
+    }
 }
 
 fn run_observer_loop(
@@ -148,9 +218,19 @@ fn run_observer_loop(
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
-            AutoObserverCommand::Trigger(trigger) => {
+            AutoObserverCommand::Bootstrap {
+                goal_text,
+                environment_details,
+            } => {
+                let trigger = build_bootstrap_trigger(&goal_text, &environment_details);
                 telemetry.trigger_count += 1;
-                match evaluate_observer(&runtime, client.clone(), trigger.clone()) {
+                match evaluate_observer(
+                    &runtime,
+                    client.clone(),
+                    trigger.clone(),
+                    coordinator_tx.clone(),
+                    ObserverMode::Bootstrap,
+                ) {
                     Ok(eval) => {
                         let ObserverEvaluation {
                             status,
@@ -167,7 +247,80 @@ fn run_observer_loop(
                         );
 
                         let outcome = ObserverOutcome {
-                            mode: ObserverMode::Cadence,
+                            mode: ObserverMode::Bootstrap,
+                            status,
+                            replace_message,
+                            additional_instructions,
+                            telemetry: telemetry.clone(),
+                            reason: ObserverReason::Cadence,
+                            conversation: trigger.conversation.clone(),
+                            turn_snapshot: None,
+                            raw_output: Some(raw_output),
+                            parsed_response: Some(parsed_response),
+                        };
+
+                        if coordinator_tx
+                            .send(AutoCoordinatorCommand::ObserverResult(outcome))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        warn!("auto observer bootstrap error: {err:#}");
+                        telemetry.last_status = AutoObserverStatus::Ok;
+                        telemetry.last_intervention = Some(format!("error: {err}"));
+                        let outcome = ObserverOutcome {
+                            mode: ObserverMode::Bootstrap,
+                            status: AutoObserverStatus::Ok,
+                            replace_message: None,
+                            additional_instructions: None,
+                            telemetry: telemetry.clone(),
+                            reason: ObserverReason::Cadence,
+                            conversation: Vec::new(),
+                            turn_snapshot: None,
+                            raw_output: None,
+                            parsed_response: None,
+                        };
+                        if coordinator_tx
+                            .send(AutoCoordinatorCommand::ObserverResult(outcome))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            AutoObserverCommand::Trigger(trigger) => {
+                telemetry.trigger_count += 1;
+                let mode = match trigger.reason {
+                    ObserverReason::CrossCheck { .. } => ObserverMode::CrossCheck,
+                    _ => ObserverMode::Cadence,
+                };
+                match evaluate_observer(
+                    &runtime,
+                    client.clone(),
+                    trigger.clone(),
+                    coordinator_tx.clone(),
+                    mode,
+                ) {
+                    Ok(eval) => {
+                        let ObserverEvaluation {
+                            status,
+                            replace_message,
+                            additional_instructions,
+                            raw_output,
+                            parsed_response,
+                        } = eval;
+
+                        telemetry.last_status = status;
+                        telemetry.last_intervention = summarize_intervention(
+                            replace_message.as_deref(),
+                            additional_instructions.as_deref(),
+                        );
+
+                        let outcome = ObserverOutcome {
+                            mode,
                             status,
                             replace_message,
                             additional_instructions,
@@ -191,12 +344,107 @@ fn run_observer_loop(
                         telemetry.last_status = AutoObserverStatus::Ok;
                         telemetry.last_intervention = Some(format!("error: {err}"));
                         let outcome = ObserverOutcome {
-                            mode: ObserverMode::Cadence,
+                            mode,
                             status: AutoObserverStatus::Ok,
                             replace_message: None,
                             additional_instructions: None,
                             telemetry: telemetry.clone(),
                             reason: trigger.reason,
+                            conversation: Vec::new(),
+                            turn_snapshot: None,
+                            raw_output: None,
+                            parsed_response: None,
+                        };
+                        if coordinator_tx
+                            .send(AutoCoordinatorCommand::ObserverResult(outcome))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            AutoObserverCommand::BeginCrossCheck {
+                conversation,
+                _from_index: _,
+                forced,
+                summary,
+                focus,
+            } => {
+                let summary_clone = summary.clone();
+                let focus_clone = focus.clone();
+                let trigger = ObserverTrigger {
+                    conversation,
+                    goal_text: String::new(),
+                    environment_details: String::new(),
+                    reason: ObserverReason::CrossCheck {
+                        forced,
+                        summary,
+                        focus,
+                    },
+                    turn_snapshot: None,
+                    tools: observer_tools_for_mode(ObserverMode::CrossCheck),
+                };
+                telemetry.trigger_count += 1;
+                match evaluate_observer(
+                    &runtime,
+                    client.clone(),
+                    trigger.clone(),
+                    coordinator_tx.clone(),
+                    ObserverMode::CrossCheck,
+                ) {
+                    Ok(eval) => {
+                        let ObserverEvaluation {
+                            status,
+                            replace_message,
+                            additional_instructions,
+                            raw_output,
+                            parsed_response,
+                        } = eval;
+
+                        telemetry.last_status = status;
+                        telemetry.last_intervention = summarize_intervention(
+                            replace_message.as_deref(),
+                            additional_instructions.as_deref(),
+                        );
+
+                        let outcome = ObserverOutcome {
+                            mode: ObserverMode::CrossCheck,
+                            status,
+                            replace_message,
+                            additional_instructions,
+                            telemetry: telemetry.clone(),
+                            reason: trigger.reason,
+                            conversation: trigger.conversation,
+                            turn_snapshot: None,
+                            raw_output: Some(raw_output),
+                            parsed_response: Some(parsed_response),
+                        };
+
+                        if coordinator_tx
+                            .send(AutoCoordinatorCommand::ObserverResult(outcome))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        warn!("auto observer cross-check error: {err:#}");
+                        telemetry.last_status = AutoObserverStatus::Failing;
+                        telemetry.last_intervention = Some(format!("error: {err}"));
+                        let outcome = ObserverOutcome {
+                            mode: ObserverMode::CrossCheck,
+                            status: AutoObserverStatus::Failing,
+                            replace_message: None,
+                            additional_instructions: Some(format!(
+                                "Cross-check failed due to observer error: {err}"
+                            )),
+                            telemetry: telemetry.clone(),
+                            reason: ObserverReason::CrossCheck {
+                                forced,
+                                summary: summary_clone,
+                                focus: focus_clone,
+                            },
                             conversation: Vec::new(),
                             turn_snapshot: None,
                             raw_output: None,
@@ -222,13 +470,22 @@ fn evaluate_observer(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     trigger: ObserverTrigger,
+    coordinator_tx: Sender<AutoCoordinatorCommand>,
+    mode: ObserverMode,
 ) -> Result<ObserverEvaluation> {
     let preferred_slug = match trigger.reason {
         ObserverReason::CrossCheck { .. } => "gpt-5",
         _ => MODEL_SLUG,
     };
-    let prompt = build_observer_prompt(&trigger, preferred_slug);
-    match run_observer_prompt(runtime, client.clone(), prompt) {
+    let mut prompt = build_observer_prompt(&trigger, preferred_slug);
+    let log_tag = match mode {
+        ObserverMode::Bootstrap => "auto/observer/bootstrap",
+        ObserverMode::Cadence => "auto/observer/cadence",
+        ObserverMode::CrossCheck => "auto/observer/cross_check",
+    };
+    prompt.set_log_tag(log_tag);
+    match run_observer_prompt(runtime, client.clone(), prompt.clone(), coordinator_tx.clone(), mode)
+    {
         Ok(result) => Ok(result),
         Err(err) => {
             let fallback_slug = client.default_model_slug().to_string();
@@ -238,9 +495,17 @@ fn evaluate_observer(
                     fallback = %fallback_slug,
                     "auto observer falling back to configured model after invalid model error"
                 );
-                let fallback_prompt = build_observer_prompt(&trigger, &fallback_slug);
+                let mut fallback_prompt = build_observer_prompt(&trigger, &fallback_slug);
+                fallback_prompt.set_log_tag(log_tag);
                 let original_error = err.to_string();
-                return run_observer_prompt(runtime, client, fallback_prompt).map_err(|fallback_err| {
+                return run_observer_prompt(
+                    runtime,
+                    client,
+                    fallback_prompt,
+                    coordinator_tx,
+                    mode,
+                )
+                .map_err(|fallback_err| {
                     fallback_err.context(format!(
                         "observer fallback with model '{}' failed after original error: {}",
                         fallback_slug, original_error
@@ -256,9 +521,11 @@ fn run_observer_prompt(
     runtime: &tokio::runtime::Runtime,
     client: Arc<ModelClient>,
     prompt: Prompt,
+    coordinator_tx: Sender<AutoCoordinatorCommand>,
+    mode: ObserverMode,
 ) -> Result<ObserverEvaluation> {
     let raw = runtime.block_on(async {
-        request_observer_response(client.clone(), &prompt).await
+        request_observer_response(client.clone(), &prompt, mode, coordinator_tx).await
     })?;
 
     let (response, value) = parse_observer_response(&raw)?;
@@ -364,9 +631,12 @@ fn should_retry_with_default_model(err: &anyhow::Error) -> bool {
 async fn request_observer_response(
     client: Arc<ModelClient>,
     prompt: &Prompt,
+    mode: ObserverMode,
+    coordinator_tx: Sender<AutoCoordinatorCommand>,
 ) -> Result<String> {
     let mut stream = client.stream(prompt).await?;
     let mut out = String::new();
+    let mut last_summary_index: Option<u32> = None;
     while let Some(ev) = stream.next().await {
         match ev {
             Ok(ResponseEvent::OutputTextDelta { delta, .. }) => out.push_str(&delta),
@@ -379,12 +649,50 @@ async fn request_observer_response(
                     }
                 }
             }
+            Ok(ResponseEvent::ReasoningSummaryDelta {
+                delta,
+                summary_index,
+                ..
+            }) => {
+                last_summary_index = summary_index;
+                let cleaned = strip_reasoning_prefix(&delta);
+                if !cleaned.trim().is_empty() {
+                    let _ = coordinator_tx.send(AutoCoordinatorCommand::ObserverThinking {
+                        mode,
+                        delta: cleaned.to_string(),
+                        summary_index,
+                    });
+                }
+            }
+            Ok(ResponseEvent::ReasoningContentDelta { delta, .. }) => {
+                let cleaned = strip_reasoning_prefix(&delta);
+                if !cleaned.trim().is_empty() {
+                    let _ = coordinator_tx.send(AutoCoordinatorCommand::ObserverThinking {
+                        mode,
+                        delta: cleaned.to_string(),
+                        summary_index: last_summary_index,
+                    });
+                }
+            }
             Ok(ResponseEvent::Completed { .. }) => break,
             Err(err) => return Err(anyhow!("observer stream error: {err}")),
             _ => {}
         }
     }
     Ok(out)
+}
+
+fn strip_reasoning_prefix(input: &str) -> &str {
+    const PREFIXES: [&str; 2] = ["Observer:", "Coordinator:"];
+    for prefix in PREFIXES {
+        if let Some(head) = input.get(..prefix.len()) {
+            if head.eq_ignore_ascii_case(prefix) {
+                let rest = input.get(prefix.len()..).unwrap_or_default();
+                return rest.strip_prefix(' ').unwrap_or(rest);
+            }
+        }
+    }
+    input
 }
 
 #[derive(Debug, Deserialize)]

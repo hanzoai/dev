@@ -1851,6 +1851,7 @@ impl App<'_> {
                     }
                 }
                 AppEvent::AutoObserverReport {
+                    mode,
                     status,
                     telemetry,
                     replace_message,
@@ -1862,6 +1863,7 @@ impl App<'_> {
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_observer_report(
+                            mode,
                             status,
                             telemetry,
                             replace_message,
@@ -1871,6 +1873,23 @@ impl App<'_> {
                             raw_output,
                             parsed_response,
                         );
+                    }
+                }
+                AppEvent::AutoObserverThinking {
+                    mode,
+                    delta,
+                    summary_index,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_observer_thinking(mode, delta, summary_index);
+                    }
+                }
+                AppEvent::AutoObserverReady {
+                    baseline_summary,
+                    bootstrap_len,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_observer_ready(baseline_summary, bootstrap_len);
                     }
                 }
                 AppEvent::PerformUndoRestore {

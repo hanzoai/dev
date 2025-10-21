@@ -313,14 +313,11 @@ use crate::app_event::{
     AutoObserverStatus,
     AutoObserverTelemetry,
     AutoContinueMode,
-    AutoReviewCommit,
-    AutoReviewCommitSource,
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
     AutoTurnCliAction,
-    AutoTurnCodeReviewAction,
-    AutoTurnCrossCheckAction,
     BackgroundPlacement,
+    ObserverMode,
     TerminalAfter,
     TerminalCommandGate,
     TerminalLaunch,
@@ -632,6 +629,7 @@ struct AutoCoordinatorUiState {
     cross_check_enabled: bool,
     qa_automation_enabled: bool,
     observer_enabled: bool,
+    observer_ready: bool,
     pending_agent_actions: Vec<AutoTurnAgentsAction>,
     pending_agent_timing: Option<AutoTurnAgentsTiming>,
     continue_mode: AutoContinueMode,
@@ -736,6 +734,7 @@ impl Default for AutoCoordinatorUiState {
             cross_check_enabled: true,
             qa_automation_enabled: true,
             observer_enabled: true,
+            observer_ready: false,
             pending_agent_actions: Vec::new(),
             pending_agent_timing: None,
             continue_mode,
@@ -750,6 +749,86 @@ impl Default for AutoCoordinatorUiState {
             intro_reduced_motion: false,
             intro_pending: false,
         }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct ObserverExchange {
+    mode: ObserverMode,
+    status: AutoObserverStatus,
+    request: Vec<ResponseItem>,
+    raw_output: Option<String>,
+    replace_message: Option<String>,
+    additional_instructions: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+struct ObserverThinkingFrame {
+    mode: ObserverMode,
+    summary_index: Option<u32>,
+    text: String,
+}
+
+#[derive(Clone, Debug)]
+struct ObserverHistory {
+    exchanges: Vec<ObserverExchange>,
+    thinking: Vec<ObserverThinkingFrame>,
+    bootstrap_len: usize,
+    last_sent_index: usize,
+}
+
+impl ObserverHistory {
+    fn new() -> Self {
+        Self {
+            exchanges: Vec::new(),
+            thinking: Vec::new(),
+            bootstrap_len: 0,
+            last_sent_index: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.exchanges.clear();
+        self.thinking.clear();
+        self.bootstrap_len = 0;
+        self.last_sent_index = 0;
+    }
+
+    fn record_exchange(
+        &mut self,
+        mode: ObserverMode,
+        status: AutoObserverStatus,
+        request: Vec<ResponseItem>,
+        raw_output: Option<String>,
+        replace_message: Option<String>,
+        additional_instructions: Option<String>,
+    ) -> usize {
+        let exchange = ObserverExchange {
+            mode,
+            status,
+            request,
+            raw_output,
+            replace_message,
+            additional_instructions,
+        };
+        let index = self.exchanges.len();
+        self.exchanges.push(exchange);
+        index
+    }
+
+    fn record_thinking(
+        &mut self,
+        mode: ObserverMode,
+        summary_index: Option<u32>,
+        text: String,
+    ) {
+        self.thinking.push(ObserverThinkingFrame {
+            mode,
+            summary_index,
+            text,
+        });
     }
 }
 
@@ -1020,6 +1099,7 @@ pub(crate) struct ChatWidget<'a> {
     auto_handle: Option<AutoCoordinatorHandle>,
     qa_handle: Option<qa_orchestrator::QaOrchestratorHandle>,
     auto_history: AutoDriveHistory,
+    observer_history: ObserverHistory,
     auto_turn_review_state: Option<AutoTurnReviewState>,
     cloud_tasks_selected_env: Option<CloudEnvironment>,
     cloud_tasks_environments: Vec<CloudEnvironment>,
@@ -4013,6 +4093,7 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            observer_history: ObserverHistory::new(),
             qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
@@ -4325,6 +4406,7 @@ impl ChatWidget<'_> {
             auto_state: AutoCoordinatorUiState::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
+            observer_history: ObserverHistory::new(),
             qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
@@ -12963,6 +13045,7 @@ fi\n\
         }
         self.auto_state.waiting_for_review = false;
         let conversation = self.current_auto_history();
+        self.observer_send_delta(&conversation);
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
@@ -12991,6 +13074,28 @@ fi\n\
             self.auto_rebuild_live_ring();
             self.request_redraw();
         }
+    }
+
+    fn observer_send_delta(&mut self, conversation: &[ResponseItem]) -> usize {
+        let current_len = conversation.len();
+        let last = self.observer_history.last_sent_index.min(current_len);
+        let delta = current_len.saturating_sub(last);
+        self.observer_history.last_sent_index = current_len;
+        delta
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn observer_history_kind_allowed(kind: HistoryCellType) -> bool {
+        matches!(
+            kind,
+            HistoryCellType::User
+                | HistoryCellType::Assistant
+                | HistoryCellType::Error
+                | HistoryCellType::Diff
+                | HistoryCellType::Exec { .. }
+                | HistoryCellType::Tool { .. }
+                | HistoryCellType::Patch { .. }
+        )
     }
 
     fn auto_failure_is_transient(message: &str) -> bool {
@@ -13256,185 +13361,6 @@ fi\n\
         }
     }
 
-    fn dispatch_review_turn(
-        &mut self,
-        descriptor: Option<&TurnDescriptor>,
-        review_commit: Option<&AutoReviewCommit>,
-    ) {
-        let strategy = descriptor.and_then(|d| d.review_strategy.as_ref());
-
-        let mut prompt;
-        let mut hint;
-        let mut auto_metadata: Option<ReviewContextMetadata>;
-        let mut review_metadata: Option<ReviewContextMetadata>;
-
-        match review_commit {
-            Some(commit) if matches!(commit.source, AutoReviewCommitSource::Commit) => {
-                let sha = commit
-                    .sha
-                    .as_ref()
-                    .map(|value| value.trim())
-                    .filter(|value| !value.is_empty())
-                    .expect("commit source should have been validated");
-                let short_sha: String = sha.chars().take(8).collect();
-                prompt = format!(
-                    "Review commit {sha} generated during the latest Auto Drive turn. Highlight bugs, regressions, risky patterns, and missing tests before merge."
-                );
-                hint = format!("Auto Drive commit {short_sha}");
-                review_metadata = Some(ReviewContextMetadata {
-                    scope: Some("commit".to_string()),
-                    commit: Some(sha.to_string()),
-                    ..Default::default()
-                });
-                auto_metadata = Some(ReviewContextMetadata {
-                    scope: Some("workspace".to_string()),
-                    ..Default::default()
-                });
-            }
-            _ => {
-                prompt = "Review the current workspace changes and highlight bugs, regressions, risky patterns, and missing tests before merge.".to_string();
-                hint = "current workspace changes".to_string();
-                review_metadata = Some(ReviewContextMetadata {
-                    scope: Some("workspace".to_string()),
-                    ..Default::default()
-                });
-                auto_metadata = review_metadata.clone();
-            }
-        }
-
-        if let Some(strategy) = strategy {
-            if let Some(custom_prompt) = strategy
-                .custom_prompt
-                .as_ref()
-                .and_then(|text| {
-                    let trimmed = text.trim();
-                    (!trimmed.is_empty()).then_some(trimmed)
-                })
-            {
-                prompt = custom_prompt.to_string();
-            }
-
-            if let Some(scope_hint) = strategy
-                .scope_hint
-                .as_ref()
-                .and_then(|text| {
-                    let trimmed = text.trim();
-                    (!trimmed.is_empty()).then_some(trimmed)
-                })
-            {
-                hint = scope_hint.to_string();
-
-                let apply_scope = |meta: &mut ReviewContextMetadata| {
-                    meta.scope = Some(scope_hint.to_string());
-                };
-
-                if let Some(meta) = review_metadata.as_mut() {
-                    apply_scope(meta);
-                } else {
-                    review_metadata = Some(ReviewContextMetadata {
-                        scope: Some(scope_hint.to_string()),
-                        ..Default::default()
-                    });
-                }
-
-                if let Some(meta) = auto_metadata.as_mut() {
-                    apply_scope(meta);
-                } else {
-                    auto_metadata = Some(ReviewContextMetadata {
-                        scope: Some(scope_hint.to_string()),
-                        ..Default::default()
-                    });
-                }
-            }
-        }
-
-        if self.config.tui.review_auto_resolve {
-            self.auto_resolve_state = Some(AutoResolveState::new(
-                prompt.clone(),
-                hint.clone(),
-                auto_metadata.clone(),
-            ));
-        } else {
-            self.auto_resolve_state = None;
-        }
-
-        if let Some(commit) = review_commit {
-            if let Some(summary) = commit.summary.as_ref() {
-                self.push_background_tail(format!("Review target: {summary}"));
-            } else if matches!(commit.source, AutoReviewCommitSource::Commit) {
-                if let Some(sha) = commit.sha.as_ref() {
-                    let short_sha: String = sha.trim().chars().take(8).collect();
-                    self.push_background_tail(format!("Review target: commit {short_sha}"));
-                }
-            }
-        }
-
-        self.begin_review(prompt, hint, None, review_metadata);
-        self.auto_state.waiting_for_review = true;
-        self.auto_state.waiting_for_response = false;
-        self.auto_state.awaiting_submission = false;
-        self.auto_state.coordinator_waiting = false;
-        self.bottom_pane.update_status_text(String::new());
-        self.bottom_pane.set_task_running(false);
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
-    fn ensure_review_commit_available(
-        &self,
-        review_commit: Option<&AutoReviewCommit>,
-    ) -> Result<(), String> {
-        let Some(commit) = review_commit else {
-            return Err(
-                "Coordinator requested a review but omitted `review_commit` metadata.".to_string(),
-            );
-        };
-
-        match commit.source {
-            AutoReviewCommitSource::Commit => {
-                let Some(sha) = commit
-                    .sha
-                    .as_ref()
-                    .map(|value| value.trim())
-                    .filter(|s| !s.is_empty())
-                else {
-                    return Err("Review target set to `commit` but `sha` was missing.".to_string());
-                };
-                let tree_ref = format!("{sha}^{{tree}}");
-                self.run_git_command(["cat-file", "-e", tree_ref.as_str()], |_: String| Ok(()))
-                    .map_err(|err| format!("Commit {sha} is not accessible for review: {err}"))?;
-                Ok(())
-            }
-            AutoReviewCommitSource::Staged => self.run_git_command(
-                ["diff", "--staged", "--name-only"],
-                |stdout| {
-                    let has_entries = stdout.lines().any(|line| !line.trim().is_empty());
-                    if has_entries {
-                        Ok(())
-                    } else {
-                        Err("No staged changes found for review.".to_string())
-                    }
-                },
-            ),
-        }
-    }
-
-    fn reject_review_without_commit(&mut self, reason: String) {
-        let summary = format!(
-            "Skipping coordinator review request: {reason} Prepare a staged diff or commit before retrying."
-        );
-        self.push_background_tail(summary);
-
-        let prompt = format!(
-            "Stage the latest changes and create a commit (or keep them staged) so a review can run. Reply with the commit SHA or confirm the staged diff is ready. ({reason})"
-        );
-        self.schedule_auto_cli_prompt(prompt);
-        self.auto_state.waiting_for_review = false;
-        self.auto_state.waiting_for_response = false;
-        self.auto_state.coordinator_waiting = false;
-        self.update_header_border_activation();
-    }
-
     fn schedule_auto_cli_prompt(&mut self, prompt_text: String) {
         self.auto_state.current_cli_prompt = Some(prompt_text);
         self.auto_state.awaiting_submission = true;
@@ -13564,6 +13490,7 @@ fi\n\
         self.auto_state.pending_restart = None;
         self.auto_state.waiting_for_transient_recovery = false;
         self.auto_state.restart_token = token;
+        self.observer_reset_state();
 
         if restart.reason.is_empty() {
             self.push_background_tail(format!(
@@ -13603,6 +13530,7 @@ fi\n\
 
     fn record_auto_observer_thread(
         &mut self,
+        mode: ObserverMode,
         reason: AutoObserverReason,
         status: AutoObserverStatus,
         telemetry: AutoObserverTelemetry,
@@ -13612,9 +13540,10 @@ fi\n\
         raw_output: Option<String>,
         parsed_response: Option<JsonValue>,
     ) {
-        let kind_label = match reason {
-            AutoObserverReason::Cadence => "Observer",
-            AutoObserverReason::CrossCheck { .. } => "Cross-check",
+        let kind_label = match mode {
+            ObserverMode::Bootstrap => "Bootstrap",
+            ObserverMode::Cadence => "Observer",
+            ObserverMode::CrossCheck => "Cross-check",
         };
 
         let heading = match reason {
@@ -13703,8 +13632,14 @@ fi\n\
             .collect::<Vec<_>>()
             .join("\n\n");
 
+        let mode_label = match mode {
+            ObserverMode::Bootstrap => "Bootstrap",
+            ObserverMode::Cadence => "Observer",
+            ObserverMode::CrossCheck => "Cross-check",
+        };
+
         let entry = AutoThreadEntry {
-            list_label: format!("{heading} · {status_label}"),
+            list_label: format!("{mode_label} · {heading} · {status_label}"),
             detail_text,
             detail_scroll: 0,
         };
@@ -13778,6 +13713,7 @@ fi\n\
 
     pub(crate) fn auto_handle_observer_report(
         &mut self,
+        mode: ObserverMode,
         status: AutoObserverStatus,
         telemetry: AutoObserverTelemetry,
         replace_message: Option<String>,
@@ -13787,6 +13723,28 @@ fi\n\
         raw_output: Option<String>,
         parsed_response: Option<JsonValue>,
     ) {
+        self.observer_history.record_exchange(
+            mode,
+            status,
+            conversation.clone(),
+            raw_output.clone(),
+            replace_message.clone(),
+            additional_instructions.clone(),
+        );
+        if matches!(mode, ObserverMode::Bootstrap) {
+            self.observer_history.bootstrap_len = conversation.len();
+        }
+
+        match mode {
+            ObserverMode::Bootstrap => {
+                self.auto_queue_observer_banner("Observer baseline recorded.".to_string());
+            }
+            ObserverMode::CrossCheck => {
+                self.auto_queue_observer_banner("Cross-check in progress.".to_string());
+            }
+            ObserverMode::Cadence => {}
+        }
+
         let reason_for_check = reason.clone();
         if matches!(reason_for_check, AutoObserverReason::Cadence)
             && !self.auto_state.observer_enabled
@@ -13795,6 +13753,7 @@ fi\n\
         }
 
         self.record_auto_observer_thread(
+            mode,
             reason,
             status,
             telemetry.clone(),
@@ -13813,6 +13772,10 @@ fi\n\
         self.auto_state.observer_telemetry = Some(telemetry);
 
         let flush_on_failing = self.auto_state.awaiting_submission;
+
+        if matches!(mode, ObserverMode::CrossCheck) && matches!(status, AutoObserverStatus::Ok) {
+            self.auto_queue_observer_banner("Cross-check successful.".to_string());
+        }
 
         if matches!(status, AutoObserverStatus::Failing) {
             let guidance = additional_instructions
@@ -13848,10 +13811,82 @@ fi\n\
             .filter(|s| !s.is_empty())
         {
             self.auto_queue_observer_banner(format!("Observer note: {note}"));
+        } else if matches!(mode, ObserverMode::CrossCheck) {
+            self.auto_queue_observer_banner("Cross-check completed with no findings.".to_string());
         }
 
         self.auto_rebuild_live_ring();
         self.request_redraw();
+    }
+
+    pub(crate) fn auto_handle_observer_ready(
+        &mut self,
+        baseline_summary: Option<String>,
+        bootstrap_len: usize,
+    ) {
+        self.auto_state.observer_ready = true;
+        let len = self.observer_history.exchanges.len();
+        self.observer_history.bootstrap_len = if bootstrap_len == 0 {
+            len
+        } else {
+            bootstrap_len.min(len)
+        };
+        self.observer_history.last_sent_index = self.observer_history.bootstrap_len;
+
+        if let Some(summary) = baseline_summary
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            self.push_background_tail(format!("Observer ready: {summary}"));
+        } else {
+            self.push_background_tail("Observer ready.".to_string());
+        }
+
+        self.auto_queue_observer_banner("Observer bootstrap completed.".to_string());
+        self.auto_flush_observer_banners();
+
+        if let Some(handle) = self.auto_handle.as_ref() {
+            let len = self.observer_history.bootstrap_len;
+            let _ = handle.send(AutoCoordinatorCommand::ObserverBootstrapLen(len));
+        }
+
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
+    }
+
+    fn observer_reset_state(&mut self) {
+        self.observer_history.clear();
+        self.auto_state.observer_ready = false;
+        if let Some(handle) = self.auto_handle.as_ref() {
+            let _ = handle.send(AutoCoordinatorCommand::ResetObserver);
+        }
+    }
+
+    pub(crate) fn auto_handle_observer_thinking(
+        &mut self,
+        mode: ObserverMode,
+        delta: String,
+        summary_index: Option<u32>,
+    ) {
+        let trimmed = delta.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        self.observer_history
+            .record_thinking(mode, summary_index, trimmed.to_string());
+
+        let mode_label = match mode {
+            ObserverMode::Bootstrap => "Bootstrap",
+            ObserverMode::Cadence => "Observer",
+            ObserverMode::CrossCheck => "Cross-check",
+        };
+
+        self.auto_threads_overlay.push_entry(AutoThreadEntry {
+            list_label: format!("{mode_label} thinking"),
+            detail_text: trimmed.to_string(),
+            detail_scroll: 0,
+        });
     }
 
     pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
@@ -14311,6 +14346,7 @@ fi\n\
         self.bottom_pane.set_standard_terminal_hint(None);
         self.auto_history.clear();
         self.auto_turn_review_state = None;
+        self.observer_reset_state();
         let any_exec_running = !self.exec.running_commands.is_empty();
         let any_tools_running = !self.tools_state.running_custom_tools.is_empty()
             || !self.tools_state.running_web_search.is_empty()
@@ -14493,52 +14529,6 @@ fi\n\
             self.auto_resolve_state = None;
         }
         self.begin_review(prompt, hint, Some(preparation), review_metadata);
-    }
-
-    fn auto_trigger_review_action(&mut self, action: AutoTurnCodeReviewAction) {
-        if !self.auto_state.review_enabled {
-            return;
-        }
-
-        let commit = action.commit;
-        if let Err(err) = self.ensure_review_commit_available(Some(&commit)) {
-            self.reject_review_without_commit(err);
-            return;
-        }
-
-        self.auto_state.current_cli_prompt = None;
-        self.dispatch_review_turn(None, Some(&commit));
-        self.auto_state.waiting_for_review = true;
-        self.update_header_border_activation();
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
-    fn auto_handle_cross_check_request(&mut self, action: AutoTurnCrossCheckAction) {
-        if !self.auto_state.cross_check_enabled {
-            return;
-        }
-        let mut banner = if action.forced {
-            "Cross-check (required) in progress".to_string()
-        } else {
-            "Cross-check launched".to_string()
-        };
-
-        if let Some(summary) = action.summary.as_ref() {
-            if !summary.trim().is_empty() {
-                banner.push_str(": ");
-                banner.push_str(summary.trim());
-            }
-        }
-
-        if let Some(focus) = action.focus.as_ref() {
-            if !focus.trim().is_empty() {
-                banner.push_str(" — focus: ");
-                banner.push_str(focus.trim());
-            }
-        }
-
-        self.auto_queue_observer_banner(banner);
     }
 
     fn auto_rebuild_live_ring(&mut self) {
@@ -21912,14 +21902,6 @@ mod tests {
     use std::time::SystemTime;
     use std::path::PathBuf;
 
-    #[allow(dead_code)]
-    fn test_review_commit() -> Option<AutoReviewCommit> {
-        Some(AutoReviewCommit {
-            source: AutoReviewCommitSource::Commit,
-            sha: Some("HEAD".to_string()),
-            summary: None,
-        })
-    }
     use code_core::protocol::{ReviewFinding, ReviewCodeLocation, ReviewLineRange};
 
     struct CaptureCommitStubGuard;
@@ -22459,10 +22441,15 @@ mod tests {
 
         for _ in 0..3 {
             chat.auto_handle_observer_report(
+                ObserverMode::Cadence,
                 AutoObserverStatus::Failing,
                 telemetry.clone(),
                 None,
                 Some(instruction.to_string()),
+                AutoObserverReason::Cadence,
+                Vec::new(),
+                None,
+                None,
             );
         }
 

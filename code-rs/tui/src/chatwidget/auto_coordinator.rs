@@ -46,12 +46,14 @@ use rand::Rng;
 use super::auto_observer::{
     build_observer_conversation,
     start_auto_observer,
+    observer_tools_for_mode,
     AutoObserverCommand,
     AutoObserverHandle,
     ObserverOutcome,
     ObserverReason,
     ObserverTrigger,
 };
+use crate::app_event::{ObserverMode, AutoObserverStatus};
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
@@ -91,6 +93,13 @@ impl AutoCoordinatorHandle {
 pub(super) enum AutoCoordinatorCommand {
     UpdateConversation(Vec<ResponseItem>),
     ObserverResult(ObserverOutcome),
+    ObserverThinking {
+        mode: ObserverMode,
+        delta: String,
+        summary_index: Option<u32>,
+    },
+    ObserverBootstrapLen(usize),
+    ResetObserver,
     Stop,
 }
 
@@ -768,9 +777,13 @@ fn run_auto_loop(
     let mut _last_progress_summary: Option<String> = None;
     let mut awaiting_cross_check = false;
     let mut pending_success: Option<PendingDecision> = None;
+    let mut observer_last_sent = 0usize;
+    let mut observer_current_len = 0usize;
+    let mut observer_bootstrap_len = 0usize;
     let cross_check_enabled = config.tui.auto_drive.cross_check_enabled;
     let observer_cadence_enabled = config.tui.auto_drive.observer_enabled;
     let observer_thread_enabled = observer_cadence_enabled || cross_check_enabled;
+    let mut observer_bootstrapped = !observer_thread_enabled;
     let mut observer_handle = if observer_thread_enabled {
         match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
             Ok(handle) => Some(handle),
@@ -782,6 +795,20 @@ fn run_auto_loop(
     } else {
         None
     };
+    if let Some(handle) = observer_handle.as_ref() {
+        if handle
+            .tx
+            .send(AutoObserverCommand::Bootstrap {
+                goal_text: goal_text.clone(),
+                environment_details: environment_details.clone(),
+            })
+            .is_err()
+        {
+            warn!("failed to trigger observer bootstrap");
+        } else {
+            observer_bootstrapped = false;
+        }
+    }
     let observer_cadence_interval = if observer_cadence_enabled && observer_cadence != 0 {
         observer_handle
             .as_ref()
@@ -802,6 +829,7 @@ fn run_auto_loop(
             }
 
             let conv_for_observer = conv.clone();
+            observer_current_len = conv_for_observer.len();
             let developer_intro =
                 compose_developer_intro(&base_developer_intro, &observer_guidance);
             match request_coordinator_decision(
@@ -856,28 +884,34 @@ fn run_auto_loop(
                     let cli_prompt_for_observer = turn_cli_prompt.as_deref();
 
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        if let (Some(handle), Some(cadence)) =
-                            (observer_handle.as_ref(), observer_cadence_interval)
-                        {
-                            if should_trigger_observer(requests_completed, cadence) {
-                                let conversation = build_observer_conversation(
-                                    conv_for_observer,
-                                    cli_prompt_for_observer,
-                                );
-                                let trigger = ObserverTrigger {
-                                    conversation,
-                                    goal_text: goal_text.clone(),
-                                    environment_details: environment_details.clone(),
-                                    reason: ObserverReason::Cadence,
-                                    turn_snapshot: None,
-                                    tools: Vec::new(),
-                                };
-                                if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
-                                    warn!("failed to trigger auto observer");
+                        if observer_bootstrapped {
+                            let slice_start = observer_last_sent.min(observer_current_len);
+                            let delta_slice = conv_for_observer[slice_start..].to_vec();
+                            let conversation = build_observer_conversation(
+                                delta_slice,
+                                cli_prompt_for_observer,
+                            );
+                            if !conversation.is_empty() {
+                                if let (Some(handle), Some(cadence)) =
+                                    (observer_handle.as_ref(), observer_cadence_interval)
+                                {
+                                    if should_trigger_observer(requests_completed, cadence) {
+                                        observer_last_sent = observer_current_len;
+                                        let trigger = ObserverTrigger {
+                                            conversation,
+                                            goal_text: goal_text.clone(),
+                                            environment_details: environment_details.clone(),
+                                            reason: ObserverReason::Cadence,
+                                            turn_snapshot: None,
+                                            tools: observer_tools_for_mode(ObserverMode::Cadence),
+                                        };
+                                        if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
+                                            warn!("failed to trigger auto observer");
+                                        }
+                                    }
                                 }
                             }
                         }
-
                         let event = AppEvent::AutoCoordinatorDecision {
                             status,
                             progress_past,
@@ -891,7 +925,7 @@ fn run_auto_loop(
                         continue;
                     }
 
-                    let mut decision_event = PendingDecision {
+                    let decision_event = PendingDecision {
                         status,
                         progress_past,
                         progress_current,
@@ -901,34 +935,28 @@ fn run_auto_loop(
                         transcript: response_items,
                     };
 
-                    if matches!(decision_event.status, AutoCoordinatorStatus::Success)
+                    if observer_bootstrapped
+                        && matches!(decision_event.status, AutoCoordinatorStatus::Success)
                         && cross_check_enabled
                         && !awaiting_cross_check
                     {
                         if let Some(handle) = observer_handle.as_ref() {
+                            let start = observer_bootstrap_len.min(observer_current_len);
+                            let delta_slice = conv_for_observer[start..].to_vec();
                             let conversation = build_observer_conversation(
-                                conv_for_observer,
+                                delta_slice,
                                 cli_prompt_for_observer,
                             );
-                            let trigger = ObserverTrigger {
+                            match handle.tx.send(AutoObserverCommand::BeginCrossCheck {
                                 conversation,
-                                goal_text: goal_text.clone(),
-                                environment_details: environment_details.clone(),
-                                reason: ObserverReason::CrossCheck {
-                                    forced: true,
-                                    summary: latest_summary.clone(),
-                                    focus: None,
-                                },
-                                turn_snapshot: Some(CrossCheckTurnSnapshot {
-                                    cli_prompt: turn_cli_prompt.clone(),
-                                    cli_context: turn_cli_context.clone(),
-                                    progress_summary: latest_summary.clone(),
-                                }),
-                                tools: Vec::new(),
-                            };
-                            match handle.tx.send(AutoObserverCommand::Trigger(trigger)) {
+                                _from_index: start,
+                                forced: true,
+                                summary: latest_summary.clone(),
+                                focus: None,
+                            }) {
                                 Ok(()) => {
                                     awaiting_cross_check = true;
+                                    observer_last_sent = observer_current_len;
                                     pending_success = Some(decision_event);
                                     continue;
                                 }
@@ -937,7 +965,9 @@ fn run_auto_loop(
                                 }
                             }
                         } else {
-                            warn!("cross-check enabled but observer thread unavailable; finishing without cross-check");
+                            warn!(
+                                "cross-check enabled but observer thread unavailable; finishing without cross-check"
+                            );
                         }
                     }
 
@@ -1006,6 +1036,7 @@ fn run_auto_loop(
             }
             Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
                 let ObserverOutcome {
+                    mode,
                     status,
                     replace_message,
                     additional_instructions,
@@ -1022,19 +1053,38 @@ fn run_auto_loop(
                 }
 
                 _observer_telemetry = telemetry.clone();
+                let report_raw = raw_output.clone();
+                let report_parsed = parsed_response.clone();
+
                 let event = AppEvent::AutoObserverReport {
+                    mode,
                     status,
                     telemetry,
                     replace_message: replace_message.clone(),
                     additional_instructions: additional_instructions.clone(),
                     reason: AutoObserverReason::from(reason.clone()),
                     conversation: conversation.clone(),
-                    raw_output,
-                    parsed_response,
+                    raw_output: report_raw.clone(),
+                    parsed_response: report_parsed.clone(),
                 };
                 app_event_tx.send(event);
 
-                if awaiting_cross_check {
+                if matches!(mode, ObserverMode::Bootstrap) {
+                    observer_bootstrapped = true;
+                    observer_current_len = conversation.len();
+                    observer_bootstrap_len = observer_current_len;
+                    observer_last_sent = observer_current_len;
+                    let baseline = report_raw
+                        .or_else(|| replace_message.clone())
+                        .or_else(|| additional_instructions.clone());
+                    let ready_event = AppEvent::AutoObserverReady {
+                        baseline_summary: baseline,
+                        bootstrap_len: conversation.len(),
+                    };
+                    app_event_tx.send(ready_event);
+                }
+
+                if awaiting_cross_check && matches!(mode, ObserverMode::CrossCheck) {
                     if let ObserverReason::CrossCheck { summary, .. } = reason {
                         awaiting_cross_check = false;
                         if matches!(status, AutoObserverStatus::Ok) {
@@ -1084,6 +1134,29 @@ fn run_auto_loop(
                     }
                 }
 
+            }
+            Ok(AutoCoordinatorCommand::ObserverThinking {
+                mode,
+                delta,
+                summary_index,
+            }) => {
+                let _ = app_event_tx.send(AppEvent::AutoObserverThinking {
+                    mode,
+                    delta,
+                    summary_index,
+                });
+            }
+            Ok(AutoCoordinatorCommand::ObserverBootstrapLen(len)) => {
+                observer_bootstrap_len = len;
+                observer_last_sent = observer_bootstrap_len.min(observer_current_len);
+            }
+            Ok(AutoCoordinatorCommand::ResetObserver) => {
+                observer_bootstrapped = false;
+                observer_last_sent = 0;
+                observer_current_len = 0;
+                observer_bootstrap_len = 0;
+                awaiting_cross_check = false;
+                pending_success = None;
             }
             Ok(AutoCoordinatorCommand::Stop) | Err(_) => {
                 stopped = true;
@@ -1719,6 +1792,7 @@ fn build_prompt_for_model(
     let family = find_family_for_model(model_slug)
         .unwrap_or_else(|| derive_default_model_family(model_slug));
     prompt.model_family_override = Some(family);
+    prompt.set_log_tag("auto/coordinator");
     prompt
 }
 
