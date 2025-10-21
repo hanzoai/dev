@@ -1,6 +1,12 @@
 use super::{ChatWidget, OrderKey};
 use crate::history::state::HistoryId;
-use crate::history_cell::HistoryCell;
+use crate::history_cell::{
+    AgentRunCell,
+    CollapsibleReasoningCell,
+    HistoryCell,
+    HistoryCellType,
+};
+use std::any::TypeId;
 
 pub(super) struct ToolCardSlot {
     pub order_key: OrderKey,
@@ -125,7 +131,18 @@ pub(super) fn replace_tool_card<C: ToolCardCell>(
     slot: &mut ToolCardSlot,
     cell: &C,
 ) -> usize {
-    if slot.has_order_change() {
+    let mut order_changed = slot.has_order_change();
+
+    if order_changed && TypeId::of::<C>() == TypeId::of::<AgentRunCell>() {
+        if should_anchor_agent_slot(chat, slot) {
+            if let Some(previous) = slot.last_inserted_order() {
+                slot.set_order_key(previous);
+                order_changed = false;
+            }
+        }
+    }
+
+    if order_changed {
         remove_existing_card::<C>(chat, slot);
     }
 
@@ -137,6 +154,31 @@ pub(super) fn replace_tool_card<C: ToolCardCell>(
     let signature = slot.signature().map(|s| s.to_string());
     prune_tool_card_duplicates::<C>(chat, slot, idx, signature.as_deref());
     idx
+}
+
+fn should_anchor_agent_slot(chat: &ChatWidget<'_>, slot: &ToolCardSlot) -> bool {
+    let Some(idx) = slot.cell_index else {
+        return false;
+    };
+
+    for cell in chat.history_cells.iter().skip(idx + 1) {
+        if cell.as_any().downcast_ref::<AgentRunCell>().is_some() {
+            continue;
+        }
+        if cell
+            .as_any()
+            .downcast_ref::<CollapsibleReasoningCell>()
+            .is_some()
+        {
+            continue;
+        }
+        if matches!(cell.kind(), HistoryCellType::BackgroundEvent) {
+            continue;
+        }
+        return false;
+    }
+
+    true
 }
 
 fn remove_existing_card<C: ToolCardCell>(chat: &mut ChatWidget<'_>, slot: &mut ToolCardSlot) {
