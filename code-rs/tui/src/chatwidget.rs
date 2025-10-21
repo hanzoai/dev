@@ -18,7 +18,7 @@ use std::process::Command;
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;
-use crate::header_wave::{HeaderBorderWeaveEffect, HeaderWaveEffect};
+use crate::header_wave::HeaderWaveEffect;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::AutoDriveVariant;
 use crate::spinner;
@@ -972,7 +972,7 @@ pub(crate) struct ChatWidget<'a> {
     tools_state: ToolState,
     live_builder: RowBuilder,
     header_wave: HeaderWaveEffect,
-    header_border: HeaderBorderWeaveEffect,
+    browser_overlay_visible: bool,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
@@ -3991,11 +3991,7 @@ impl ChatWidget<'_> {
                 }
                 effect
             },
-            header_border: {
-                let effect = HeaderBorderWeaveEffect::new();
-                effect.set_enabled(false, Instant::now());
-                effect
-            },
+            browser_overlay_visible: false,
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -4067,9 +4063,6 @@ impl ChatWidget<'_> {
                 vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
                 scrollbar_visible_until: std::cell::Cell::new(None),
                 last_bottom_reserved_rows: std::cell::Cell::new(0),
-                last_hud_present: std::cell::Cell::new(false),
-                browser_hud_expanded: false,
-                agents_hud_expanded: false,
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
@@ -4304,11 +4297,7 @@ impl ChatWidget<'_> {
                 }
                 effect
             },
-            header_border: {
-                let effect = HeaderBorderWeaveEffect::new();
-                effect.set_enabled(false, Instant::now());
-                effect
-            },
+            browser_overlay_visible: false,
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -4380,9 +4369,6 @@ impl ChatWidget<'_> {
                 vertical_scrollbar_state: std::cell::RefCell::new(ScrollbarState::default()),
                 scrollbar_visible_until: std::cell::Cell::new(None),
                 last_bottom_reserved_rows: std::cell::Cell::new(0),
-                last_hud_present: std::cell::Cell::new(false),
-                browser_hud_expanded: false,
-                agents_hud_expanded: false,
                 last_frame_height: std::cell::Cell::new(0),
                 last_frame_width: std::cell::Cell::new(0),
             },
@@ -4899,6 +4885,26 @@ impl ChatWidget<'_> {
                 return;
             }
         }
+        if self.browser_overlay_visible {
+            let is_ctrl_b = matches!(
+                key_event,
+                KeyEvent {
+                    code: crossterm::event::KeyCode::Char('b'),
+                    modifiers: crossterm::event::KeyModifiers::CONTROL,
+                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
+                    ..
+                }
+            );
+            if !is_ctrl_b {
+                if matches!(key_event.code, crossterm::event::KeyCode::Esc)
+                    && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                {
+                    self.browser_overlay_visible = false;
+                    self.request_redraw();
+                }
+                return;
+            }
+        }
         if key_event.kind == KeyEventKind::Press {
             self.bottom_pane.clear_ctrl_c_quit_hint();
         }
@@ -4923,8 +4929,8 @@ impl ChatWidget<'_> {
             }
         }
 
-        // Global HUD toggles (avoid conflicting with common editor keys):
-        // - Ctrl+B: toggle Browser panel (expand/collapse)
+        // Global overlays (avoid conflicting with common editor keys):
+        // - Ctrl+B: toggle Browser overlay
         // - Ctrl+A: toggle Agents terminal mode
         if let KeyEvent {
             code: crossterm::event::KeyCode::Char('b'),
@@ -4933,7 +4939,7 @@ impl ChatWidget<'_> {
             ..
         } = key_event
         {
-            self.toggle_browser_hud();
+            self.toggle_browser_overlay();
             return;
         }
         if let KeyEvent {
@@ -5199,8 +5205,13 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn toggle_browser_hud(&mut self) {
-        layout_scroll::toggle_browser_hud(self);
+    fn toggle_browser_overlay(&mut self) {
+        let new_state = !self.browser_overlay_visible;
+        self.browser_overlay_visible = new_state;
+        if new_state && self.agents_terminal.active {
+            self.exit_agents_terminal_mode();
+        }
+        self.request_redraw();
     }
 
     fn toggle_agents_hud(&mut self) {
@@ -12129,11 +12140,11 @@ impl ChatWidget<'_> {
         if self.agents_terminal.active {
             return;
         }
+        self.browser_overlay_visible = false;
         self.agents_terminal.active = true;
         self.agents_terminal.focus_sidebar();
         self.bottom_pane.set_input_focus(false);
         self.agents_terminal.saved_scroll_offset = self.layout.scroll_offset;
-        self.layout.agents_hud_expanded = false;
         if self.agents_terminal.order.is_empty() {
             for agent in &self.active_agents {
                 if !self
@@ -12696,23 +12707,7 @@ fi\n\
         false
     }
 
-    fn update_header_border_activation(&self) {
-        let now = Instant::now();
-        let auto_waiting = self.auto_state.waiting_for_response
-            || self.auto_state.coordinator_waiting
-            || self.auto_state.awaiting_submission;
-        let should_enable_header = self.auto_state.active
-            && (self.is_cli_running() || auto_waiting);
-        let currently_enabled = self.header_border.is_enabled();
-        if should_enable_header && !currently_enabled {
-            self.header_border.set_enabled(true, now);
-        } else if !should_enable_header && currently_enabled {
-            self.header_border.set_enabled(false, now);
-        }
-    }
-
     fn refresh_auto_drive_visuals(&mut self) {
-        self.update_header_border_activation();
         if self.auto_state.active
             || self.auto_state.awaiting_goal_input
             || self.auto_state.last_run_summary.is_some()
@@ -12779,7 +12774,6 @@ fi\n\
         self.bottom_pane.update_status_text("Auto Drive".to_string());
         self.auto_update_terminal_hint();
         self.bottom_pane.ensure_input_focus();
-        self.update_header_border_activation();
         self.request_redraw();
     }
 
@@ -12853,7 +12847,6 @@ fi\n\
                 self.auto_state.last_decision_progress_current = None;
                 self.auto_state.waiting_for_response = true;
                 self.auto_state.coordinator_waiting = true;
-                self.update_header_border_activation();
                 self.auto_rebuild_live_ring();
                 self.auto_update_terminal_hint();
                 self.push_background_tail(format!("Auto Drive started: {goal}"));
@@ -12923,7 +12916,6 @@ fi\n\
             self.auto_state.reset_countdown();
             self.auto_state.mark_intro_pending();
             self.auto_show_goal_entry_panel();
-            self.update_header_border_activation();
             self.request_redraw();
             return;
         }
@@ -13093,7 +13085,6 @@ fi\n\
             self.auto_state.placeholder_phrase =
                 Some(auto_drive_strings::next_auto_drive_phrase().to_string());
             self.auto_state.thinking_prefix_stripped = false;
-            self.update_header_border_activation();
             self.auto_rebuild_live_ring();
             self.request_redraw();
         }
@@ -13279,7 +13270,6 @@ fi\n\
         self.auto_state.resume_after_manual_submit = false;
         self.auto_state.awaiting_submission = false;
         self.auto_state.waiting_for_response = false;
-        self.update_header_border_activation();
 
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
@@ -14249,7 +14239,6 @@ fi\n\
         self.bottom_pane.set_task_running(true);
         self.bottom_pane
             .update_status_text("Auto Drive".to_string());
-        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -14396,7 +14385,6 @@ fi\n\
         };
         self.auto_state.reset();
         self.auto_state.last_run_summary = Some(summary);
-        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
     }
@@ -14427,8 +14415,6 @@ fi\n\
                     .is_some_and(|cfg| !cfg.read_only));
 
         self.auto_state.waiting_for_review = review_pending || auto_resolve_blocking;
-
-        self.update_header_border_activation();
         self.auto_rebuild_live_ring();
         self.request_redraw();
         self.rebuild_auto_history();
@@ -16336,7 +16322,7 @@ fi\n\
             "Panels",
             t_fg.add_modifier(Modifier::BOLD),
         )]));
-        lines.push(kv("Ctrl+B", "Toggle Browser panel"));
+        lines.push(kv("Ctrl+B", "Toggle Browser overlay"));
         lines.push(kv("Ctrl+A", "Open Agents terminal"));
 
         // Slash command reference
@@ -21666,32 +21652,24 @@ fi\n\
         let status_line = Line::from(status_spans);
 
         let now = Instant::now();
-        self.update_header_border_activation();
         let mut frame_needed = false;
         if ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now) {
             frame_needed = true;
         }
-        if self.header_border.schedule_if_needed(now) {
-            frame_needed = true;
-        }
         if frame_needed {
             self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(HeaderBorderWeaveEffect::FRAME_INTERVAL));
+                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
         }
 
         // Render the block first
         status_block.render(padded_area, buf);
         let wave_enabled = self.header_wave.is_enabled();
-        let border_enabled = self.header_border.is_enabled();
         if wave_enabled {
             self.header_wave.render(padded_area, buf, now);
         }
-        if border_enabled {
-            self.header_border.render(padded_area, buf, now);
-        }
 
         // Then render the text inside with padding, centered
-        let effect_enabled = wave_enabled || border_enabled;
+        let effect_enabled = wave_enabled;
         let status_style = if effect_enabled {
             Style::default().fg(crate::colors::text())
         } else {
@@ -26212,338 +26190,159 @@ impl ChatWidget<'_> {
 }
 
 impl ChatWidget<'_> {
-    /// Render the combined HUD with browser and/or agent panels (stacked full-width)
-    fn render_hud(&self, area: Rect, buf: &mut Buffer) {
-        // Check what's active
-        let has_browser_screenshot = self
-            .latest_browser_screenshot
-            .lock()
-            .map(|lock| lock.is_some())
-            .unwrap_or(false);
-        let has_active_agents = !self.active_agents.is_empty() || self.agents_ready_to_start;
-        if !has_browser_screenshot && !has_active_agents {
-            return;
-        }
+    fn render_browser_overlay(
+        &self,
+        frame_area: Rect,
+        history_area: Rect,
+        bottom_pane_area: Rect,
+        buf: &mut Buffer,
+    ) {
+        use ratatui::layout::{Alignment, Margin, Rect as RtRect};
+        use ratatui::style::Style;
+        use ratatui::text::{Line as RLine, Span};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-        // Add same horizontal padding as the Message input (2 chars on each side)
-        let horizontal_padding = 1u16;
-        let padded_area = Rect {
-            x: area.x + horizontal_padding,
-            y: area.y,
-            width: area.width.saturating_sub(horizontal_padding * 2),
-            height: area.height,
+        let scrim_style = Style::default()
+            .bg(crate::colors::overlay_scrim())
+            .fg(crate::colors::text_dim());
+        fill_rect(buf, frame_area, None, scrim_style);
+
+        let padding = 1u16;
+        let footer_reserved = bottom_pane_area.height.min(1);
+        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
+        let overlay_height = overlay_bottom
+            .saturating_sub(history_area.y)
+            .max(1)
+            .min(frame_area.height);
+
+        let window_area = Rect {
+            x: history_area.x + padding,
+            y: history_area.y,
+            width: history_area.width.saturating_sub(padding * 2),
+            height: overlay_height,
         };
-        if padded_area.height == 0 {
-            return;
-        }
+        Clear.render(window_area, buf);
 
-        let header_h: u16 = 3;
-        let term_h = self.layout.last_frame_height.get().max(1);
-        let thirty = ((term_h as u32) * 30 / 100) as u16;
-        let sixty = ((term_h as u32) * 60 / 100) as u16;
-        let mut expanded_target = if thirty < 25 { 25.min(sixty) } else { thirty };
-        let min_expanded = header_h.saturating_add(2);
-        if expanded_target < min_expanded {
-            expanded_target = min_expanded;
-        }
-
-        #[derive(Copy, Clone)]
-        enum HudKind {
-            Browser,
-            Agents,
-        }
-
-        let mut panels: Vec<(HudKind, bool)> = Vec::new();
-        if has_browser_screenshot {
-            panels.push((HudKind::Browser, self.layout.browser_hud_expanded));
-        }
-        if has_active_agents {
-            panels.push((HudKind::Agents, self.layout.agents_hud_expanded));
-        }
-        if panels.is_empty() {
-            return;
-        }
-
-        let mut constraints: Vec<Constraint> = Vec::with_capacity(panels.len());
-        let mut remaining = padded_area.height;
-        for (idx, (_, expanded)) in panels.iter().enumerate() {
-            if remaining == 0 {
-                constraints.push(Constraint::Length(0));
-                continue;
-            }
-            let desired = if *expanded {
-                expanded_target.min(remaining)
-            } else {
-                header_h.min(remaining)
-            };
-            let length = if idx == panels.len() - 1 {
-                desired.max(remaining)
-            } else {
-                desired
-            };
-            let length = length.min(remaining);
-            constraints.push(Constraint::Length(length));
-            remaining = remaining.saturating_sub(length);
-        }
-
-        let chunks = Layout::vertical(constraints).split(padded_area);
-        let count = panels.len().min(chunks.len());
-        for idx in 0..count {
-            let rect = chunks[idx];
-            let (kind, expanded) = panels[idx];
-            match (kind, expanded) {
-                (HudKind::Browser, true) => self.render_browser_panel(rect, buf),
-                (HudKind::Browser, false) => self.render_browser_header(rect, buf),
-                (HudKind::Agents, true) => self.render_agent_panel(rect, buf),
-                (HudKind::Agents, false) => self.render_agents_header(rect, buf),
-            }
-        }
-    }
-
-    /// Render the browser panel (left side when both panels are shown)
-    fn render_browser_panel(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Widget;
-
-        if let Ok(screenshot_lock) = self.latest_browser_screenshot.lock() {
-            if let Some((screenshot_path, url)) = &*screenshot_lock {
-                use ratatui::layout::Margin;
-                use ratatui::text::Line as RLine;
-                use ratatui::text::Span;
-                // Use the full area for the browser preview
-                let screenshot_block = Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" {} ", self.browser_title()))
-                    .border_style(Style::default().fg(crate::colors::border()));
-
-                let inner = screenshot_block.inner(area);
-                screenshot_block.render(area, buf);
-
-                // Render a one-line collapsed header inside (with padding), right hint = Collapse
-                let line_area = inner.inner(Margin::new(1, 0));
-                let header_line = Rect {
-                    x: line_area.x,
-                    y: line_area.y,
-                    width: line_area.width,
-                    height: 1,
-                };
-                let key_hint_style = Style::default().fg(crate::colors::function());
-                let label_style = Style::default().dim();
-                let is_active = true;
-                let dot_style = if is_active {
-                    Style::default().fg(crate::colors::success_green())
-                } else {
-                    Style::default().fg(crate::colors::text_dim())
-                };
-                let mut left_spans: Vec<Span> = Vec::new();
-                left_spans.push(Span::styled("•", dot_style));
-                // no status text; dot conveys status
-                // Spaces between status and URL; no label
-                left_spans.push(Span::raw(" "));
-                left_spans.push(Span::raw(url.clone()));
-                let right_spans: Vec<Span> = vec![
-                    Span::from("Ctrl+B").style(key_hint_style),
-                    Span::styled(" collapse", label_style),
-                ];
-                let measure = |spans: &Vec<Span>| -> usize {
-                    spans.iter().map(|s| s.content.chars().count()).sum()
-                };
-                let left_len = measure(&left_spans);
-                let right_len = measure(&right_spans);
-                let total_width = line_area.width as usize;
-                if total_width > left_len + right_len {
-                    let spacer = " ".repeat(total_width - left_len - right_len);
-                    left_spans.push(Span::from(spacer));
-                }
-                let mut spans = left_spans;
-                spans.extend(right_spans);
-                Paragraph::new(RLine::from(spans)).render(header_line, buf);
-
-                // Leave one blank spacer line, then render the screenshot
-                let body = Rect {
-                    x: inner.x,
-                    y: inner.y + 2,
-                    width: inner.width,
-                    height: inner.height.saturating_sub(2),
-                };
-                self.render_screenshot_highlevel(screenshot_path, body, buf);
-            }
-        }
-    }
-
-    /// Render a collapsed header for the browser HUD with status (1 line + border)
-    fn render_browser_header(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::layout::Margin;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Paragraph;
-
-        let (url_opt, status_str) = {
-            let url = self
-                .latest_browser_screenshot
-                .lock()
-                .ok()
-                .and_then(|g| g.as_ref().map(|(_, u)| u.clone()));
-            let status = self.get_browser_status_string();
-            (url, status)
-        };
-        let title = format!(" {} ", self.browser_title());
-        let is_active = url_opt.is_some();
-        let summary = match url_opt {
-            Some(u) if !u.is_empty() => format!("{}", u),
-            _ => status_str,
-        };
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .title(title);
-        let inner = block.inner(area);
-        block.render(area, buf);
-        let content = inner.inner(Margin::new(1, 0)); // 1 space padding inside border
-
-        let key_hint_style = Style::default().fg(crate::colors::function());
-        let label_style = Style::default().dim(); // match top status bar label
-
-        // Left side: status dot + text (no label) and URL
-        let mut left_spans: Vec<Span> = Vec::new();
-        let dot_style = if is_active {
-            Style::default().fg(crate::colors::success_green())
-        } else {
-            Style::default().fg(crate::colors::text_dim())
-        };
-        left_spans.push(Span::styled("•", dot_style));
-        // Choose status text: Active if we have a URL/screenshot, else Idle
-        // no status text; dot conveys status
-        // Spaces between status and URL; no label
-        left_spans.push(Span::raw(" "));
-        left_spans.push(Span::raw(summary));
-
-        // Right side: toggle hint based on state
-        let action = if self.layout.browser_hud_expanded {
-            " collapse"
-        } else {
-            " expand"
-        };
-        let right_spans: Vec<Span> = vec![
-            Span::from("Ctrl+B").style(key_hint_style),
-            Span::styled(action, label_style),
+        let title_spans = vec![
+            Span::styled(
+                format!(" {} ", self.browser_title()),
+                Style::default().fg(crate::colors::text()),
+            ),
+            Span::styled(
+                "— Ctrl+B to close",
+                Style::default().fg(crate::colors::text_dim()),
+            ),
         ];
 
-        let measure =
-            |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
-        let left_len = measure(&left_spans);
-        let right_len = measure(&right_spans);
-        let total_width = content.width as usize;
-        let trailing_pad = 0usize; // Paragraph will draw to edge; we already padded left/right
-        if total_width > left_len + right_len + trailing_pad {
-            let spacer = " ".repeat(total_width - left_len - right_len - trailing_pad);
-            left_spans.push(Span::from(spacer));
-        }
-        let mut spans = left_spans;
-        spans.extend(right_spans);
-        Paragraph::new(RLine::from(spans)).render(content, buf);
-    }
-
-    /// Render a collapsed header for the agents HUD with counts/list (1 line + border)
-    fn render_agents_header(&self, area: Rect, buf: &mut Buffer) {
-        use ratatui::layout::Margin;
-        use ratatui::text::Line as RLine;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Paragraph;
-
-        let count = self.active_agents.len();
-        let summary = if count == 0 && self.agents_ready_to_start {
-            "Starting...".to_string()
-        } else if count == 0 {
-            "no active agents".to_string()
-        } else {
-            let mut parts: Vec<String> = Vec::new();
-            for a in self.active_agents.iter().take(3) {
-                let state = match a.status {
-                    AgentStatus::Pending => "pending".to_string(),
-                    AgentStatus::Running => {
-                        if let Some(rt) = self.agent_runtime.get(&a.id) {
-                            if let Some(start) = rt.started_at {
-                                let elapsed = Instant::now().saturating_duration_since(start);
-                                format!("running {}", self.fmt_short_duration(elapsed))
-                            } else {
-                                "running".to_string()
-                            }
-                        } else {
-                            "running".to_string()
-                        }
-                    }
-                    AgentStatus::Completed => "done".to_string(),
-                    AgentStatus::Failed => "failed".to_string(),
-                    AgentStatus::Cancelled => "cancelled".to_string(),
-                };
-                let mut label = format!("{} ({})", a.name, state);
-                if matches!(a.status, AgentStatus::Running) {
-                    if let Some(lp) = &a.last_progress {
-                        let mut lp_trim = lp.trim().to_string();
-                        if lp_trim.len() > 60 {
-                            lp_trim.truncate(60);
-                            lp_trim.push('…');
-                        }
-                        label.push_str(&format!(" — {}", lp_trim));
-                    }
-                }
-                parts.push(label);
-            }
-            let extra = if count > 3 {
-                format!(" +{}", count - 3)
-            } else {
-                String::new()
-            };
-            format!("{}{}", parts.join(", "), extra)
-        };
-
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .title(" Agents ");
-        let inner = block.inner(area);
-        block.render(area, buf);
-        let content = inner.inner(Margin::new(1, 0));
+            .title(RLine::from(title_spans))
+            .style(Style::default().bg(crate::colors::background()))
+            .border_style(
+                Style::default()
+                    .fg(crate::colors::border())
+                    .bg(crate::colors::background()),
+            );
+        let inner = block.inner(window_area);
+        block.render(window_area, buf);
+
+        let inner_bg = Style::default().bg(crate::colors::background());
+        for y in inner.y..inner.y + inner.height {
+            for x in inner.x..inner.x + inner.width {
+                buf[(x, y)].set_style(inner_bg);
+            }
+        }
+
+        let content = inner.inner(Margin::new(1, 1));
+        if content.width == 0 || content.height == 0 {
+            return;
+        }
+
+        let (screenshot_path, url_opt) = match self.latest_browser_screenshot.lock() {
+            Ok(guard) => guard.as_ref().cloned().map(|(p, u)| (Some(p), Some(u))),
+            Err(_) => None,
+        }
+        .unwrap_or((None, None));
+
+        let status = self.get_browser_status_string();
+        let summary = url_opt
+            .clone()
+            .filter(|value| !value.is_empty())
+            .unwrap_or(status);
+        let is_active = screenshot_path.is_some();
 
         let key_hint_style = Style::default().fg(crate::colors::function());
         let label_style = Style::default().dim();
-
-        let mut left_spans: Vec<Span> = Vec::new();
-        let is_active = !self.active_agents.is_empty() || self.agents_ready_to_start;
         let dot_style = if is_active {
             Style::default().fg(crate::colors::success_green())
         } else {
             Style::default().fg(crate::colors::text_dim())
         };
-        left_spans.push(Span::styled("•", dot_style));
-        left_spans.push(Span::raw(" "));
-        left_spans.push(Span::raw(summary));
 
-        let right_spans: Vec<Span> = vec![
-            Span::from("Ctrl+A").style(key_hint_style),
-            Span::styled(" open terminal", label_style),
-        ];
+        let header_height = if content.height >= 3 { 1 } else { 0 };
+        if header_height > 0 {
+            let header_area = Rect {
+                x: content.x,
+                y: content.y,
+                width: content.width,
+                height: 1,
+            };
 
-        let measure =
-            |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
-        let left_len = measure(&left_spans);
-        let right_len = measure(&right_spans);
-        let total_width = content.width as usize;
-        let trailing_pad = 0usize;
-        if total_width > left_len + right_len + trailing_pad {
-            let spacer = " ".repeat(total_width - left_len - right_len - trailing_pad);
-            left_spans.push(Span::from(spacer));
+            let mut left_spans: Vec<Span> = Vec::new();
+            left_spans.push(Span::styled("•", dot_style));
+            left_spans.push(Span::raw(" "));
+            left_spans.push(Span::raw(summary.clone()));
+
+            let right_spans: Vec<Span> = vec![
+                Span::from("Ctrl+B").style(key_hint_style),
+                Span::styled(" close", label_style),
+            ];
+
+            let measure = |spans: &Vec<Span>| -> usize {
+                spans.iter().map(|s| s.content.chars().count()).sum()
+            };
+            let left_len = measure(&left_spans);
+            let right_len = measure(&right_spans);
+            let total_width = header_area.width as usize;
+            if total_width > left_len + right_len {
+                let spacer = " ".repeat(total_width - left_len - right_len);
+                left_spans.push(Span::from(spacer));
+            }
+            let mut spans = left_spans;
+            spans.extend(right_spans);
+            Paragraph::new(RLine::from(spans))
+                .alignment(Alignment::Left)
+                .render(header_area, buf);
         }
-        let mut spans = left_spans;
-        spans.extend(right_spans);
-        Paragraph::new(RLine::from(spans)).render(content, buf);
+
+        let mut body_y = content.y + header_height;
+        let mut body_height = content.height.saturating_sub(header_height);
+        if header_height > 0 && body_height > 0 {
+            body_y = body_y.saturating_add(1);
+            body_height = body_height.saturating_sub(1);
+        }
+
+        if body_height == 0 {
+            return;
+        }
+
+        let body_area = RtRect {
+            x: content.x,
+            y: body_y,
+            width: content.width,
+            height: body_height,
+        };
+
+        if let Some(path) = screenshot_path.as_ref() {
+            self.render_screenshot_highlevel(path, body_area, buf);
+        } else {
+            let message = Paragraph::new(RLine::from(vec![Span::raw(
+                "No browser session captured yet.",
+            )]))
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(crate::colors::text_dim()));
+            ratatui::widgets::Widget::render(message, body_area, buf);
+        }
     }
 
     fn render_settings_overlay(
@@ -27174,6 +26973,7 @@ impl ChatWidget<'_> {
         }
     }
 
+    #[allow(dead_code)]
     /// Render the agent status panel in the HUD
     fn render_agent_panel(&self, area: Rect, buf: &mut Buffer) {
         use ratatui::text::Line as RLine;
@@ -27695,19 +27495,9 @@ impl WidgetRef for &ChatWidget<'_> {
         self.layout.last_frame_width.set(area.width);
 
         let layout_areas = self.layout_areas(area);
-        let (status_bar_area, hud_area, history_area, bottom_pane_area) = if layout_areas.len() == 4
-        {
-            // Browser HUD is present
-            (
-                layout_areas[0],
-                Some(layout_areas[1]),
-                layout_areas[2],
-                layout_areas[3],
-            )
-        } else {
-            // No browser HUD
-            (layout_areas[0], None, layout_areas[1], layout_areas[2])
-        };
+        let status_bar_area = layout_areas.get(0).copied().unwrap_or(area);
+        let history_area = layout_areas.get(1).copied().unwrap_or(area);
+        let bottom_pane_area = layout_areas.get(2).copied().unwrap_or(area);
 
         // Record the effective bottom pane height for buffer-mode scrollback inserts.
         self.layout
@@ -27717,9 +27507,6 @@ impl WidgetRef for &ChatWidget<'_> {
         // Render status bar and HUD only in full TUI mode
         if !self.standard_terminal_mode {
             self.render_status_bar(status_bar_area, buf);
-            if let Some(hud_area) = hud_area {
-                self.render_hud(hud_area, buf);
-            }
         }
 
         // In standard-terminal mode, do not paint the history region: committed
@@ -29008,6 +28795,11 @@ impl WidgetRef for &ChatWidget<'_> {
             return;
         }
 
+        if self.terminal.overlay().is_none() && self.browser_overlay_visible {
+            self.render_browser_overlay(area, history_area, bottom_pane_area, buf);
+            return;
+        }
+
         if self.terminal.overlay().is_none() && self.agents_terminal.active {
             self.render_agents_terminal_overlay(area, history_area, bottom_pane_area, buf);
         }
@@ -29636,10 +29428,6 @@ struct LayoutState {
     scrollbar_visible_until: std::cell::Cell<Option<std::time::Instant>>,
     // Last effective bottom pane height used by layout (rows)
     last_bottom_reserved_rows: std::cell::Cell<u16>,
-    // HUD visibility and sizing
-    last_hud_present: std::cell::Cell<bool>,
-    browser_hud_expanded: bool,
-    agents_hud_expanded: bool,
     last_frame_height: std::cell::Cell<u16>,
     last_frame_width: std::cell::Cell<u16>,
 }
