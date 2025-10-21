@@ -11,13 +11,13 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive prompt
- Prompt
- cargo nextest run --no-fail-fast
-
-
-
+  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo nextest run --no-fail-fast                                          |
+ +----------------------------------------------------------------------------+
+ +------------------+
+ | Send prompt (9s) |   Esc to edit
+ +------------------+
    Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
 
 ---FRAME---
@@ -30,13 +30,13 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive prompt
- Prompt
- cargo nextest run --no-fail-fast
-
-
-
+  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo nextest run --no-fail-fast                                          |
+ +----------------------------------------------------------------------------+
+ +-------------+
+ | Send prompt |   Esc to edit
+ +-------------+
    Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
 
 ---FRAME---
@@ -52,7 +52,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                       Running (0 turns)
+  Auto Drive > Working                                   Running (1s, 0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+

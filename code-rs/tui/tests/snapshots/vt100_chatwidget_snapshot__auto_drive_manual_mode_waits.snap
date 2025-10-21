@@ -11,11 +11,11 @@ expression: frame
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive prompt
- Prompt
- justfile run manual
-
-
-
+  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+ + Next Prompt ---------------------------------------------------------------+
+ |  justfile run manual                                                       |
+ +----------------------------------------------------------------------------+
+ +-------------+
+ | Send prompt |   Esc to edit
+ +-------------+
    Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel

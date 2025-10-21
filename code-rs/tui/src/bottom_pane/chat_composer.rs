@@ -1993,7 +1993,7 @@ impl ChatComposer {
         matches!(normalized, "Esc" | "Enter" | "Tab" | "Space" | "Backspace")
     }
 
-    fn footer_height(&self) -> u16 {
+    pub(crate) fn footer_height(&self) -> u16 {
         if self.render_mode == ComposerRenderMode::FooterOnly {
             return if self.standard_terminal_hint.is_some() { 1 } else { 0 };
         }

@@ -1,5 +1,6 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
+assertion_line: 1200
 expression: output
 ---
  +----------------------------------------------------------------------------+

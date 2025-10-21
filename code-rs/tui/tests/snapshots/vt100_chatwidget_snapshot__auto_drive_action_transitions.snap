@@ -14,7 +14,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                       Running (0 turns)
+  Auto Drive > Working                                   Running (1s, 0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -30,13 +30,13 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Completed git status check. Comparing diffs against last run.
- Auto Drive prompt
- Prompt
-
-
-
+  Auto Drive > Working                            Awaiting input (1s, 0 turns)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo test --workspace                                                    |
+ +----------------------------------------------------------------------------+
+ +------------------+
+ | Send prompt (6s) |   Esc to edit
+ +------------------+
    Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
 
 ---FRAME---
@@ -52,7 +52,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                               Awaiting review (0 turns)
+  Auto Drive > Working                           Awaiting review (1s, 0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
@@ -71,7 +71,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                       Running (0 turns)
+  Auto Drive > Working                                   Running (1s, 0 turns)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
