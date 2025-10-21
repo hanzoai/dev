@@ -996,6 +996,8 @@ pub fn set_tui_auto_drive_settings(
 
     doc["tui"]["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
     doc["tui"]["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
+    doc["tui"]["auto_drive"]["qa_automation_enabled"] =
+        toml_edit::value(settings.qa_automation_enabled);
     doc["tui"]["auto_drive"]["cross_check_enabled"] =
         toml_edit::value(settings.cross_check_enabled);
     doc["tui"]["auto_drive"]["observer_enabled"] =

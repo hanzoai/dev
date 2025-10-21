@@ -1772,6 +1772,7 @@ impl App<'_> {
                     review_enabled,
                     agents_enabled,
                     cross_check_enabled,
+                    qa_automation_enabled,
                     observer_enabled,
                     continue_mode,
                 } => {
@@ -1780,6 +1781,7 @@ impl App<'_> {
                             review_enabled,
                             agents_enabled,
                             cross_check_enabled,
+                            qa_automation_enabled,
                             observer_enabled,
                             continue_mode,
                         );
@@ -1802,6 +1804,16 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
+                AppEvent::AutoQaUpdate { note } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_auto_qa_update(note);
+                    }
+                }
+                AppEvent::AutoReviewRequest { summary } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.handle_auto_review_request(summary);
+                    }
+                }
                 AppEvent::AutoCoordinatorDecision {
                     status,
                     progress_past,
@@ -1809,8 +1821,6 @@ impl App<'_> {
                     cli,
                     agents_timing,
                     agents,
-                    code_review,
-                    cross_check,
                     transcript,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1821,8 +1831,6 @@ impl App<'_> {
                             cli,
                             agents_timing,
                             agents,
-                            code_review,
-                            cross_check,
                             transcript,
                         );
                     }

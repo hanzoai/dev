@@ -10,16 +10,24 @@ use serde::Deserialize;
 use serde_json::{self, json, Value};
 use tracing::{debug, error, warn};
 
-use crate::app_event::{AutoObserverStatus, AutoObserverTelemetry};
+use crate::app_event::AutoObserverTelemetry;
+use crate::chatwidget::AutoObserverStatus;
 use crate::thread_spawner;
 
 use super::auto_coordinator::{
     extract_first_json_object,
     make_message,
     AutoCoordinatorCommand,
-    CrossCheckTurnSnapshot,
+    ObserverMode,
     MODEL_SLUG,
 };
+
+#[derive(Debug, Clone)]
+pub(super) struct CrossCheckTurnSnapshot {
+    pub cli_prompt: Option<String>,
+    pub cli_context: Option<String>,
+    pub progress_summary: Option<String>,
+}
 
 #[derive(Debug)]
 pub(super) struct AutoObserverHandle {
@@ -36,6 +44,11 @@ impl AutoObserverHandle {
 #[derive(Debug)]
 pub(super) enum AutoObserverCommand {
     Trigger(ObserverTrigger),
+    BeginCrossCheck {
+        conversation: Vec<ResponseItem>,
+        from_index: usize,
+        forced: bool,
+    },
     Stop,
 }
 
@@ -70,6 +83,7 @@ pub(super) struct ObserverEvaluation {
 
 #[derive(Debug, Clone)]
 pub(super) struct ObserverOutcome {
+    pub mode: ObserverMode,
     pub status: AutoObserverStatus,
     pub replace_message: Option<String>,
     pub additional_instructions: Option<String>,
@@ -153,6 +167,7 @@ fn run_observer_loop(
                         );
 
                         let outcome = ObserverOutcome {
+                            mode: ObserverMode::Cadence,
                             status,
                             replace_message,
                             additional_instructions,
@@ -176,6 +191,7 @@ fn run_observer_loop(
                         telemetry.last_status = AutoObserverStatus::Ok;
                         telemetry.last_intervention = Some(format!("error: {err}"));
                         let outcome = ObserverOutcome {
+                            mode: ObserverMode::Cadence,
                             status: AutoObserverStatus::Ok,
                             replace_message: None,
                             additional_instructions: None,
