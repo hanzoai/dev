@@ -1,59 +1,59 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 371
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive will send:
- Prompt:
- cargo fmt --check
-
-
-
+  Auto Drive > Working                                           ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo fmt --check                                                         |
+ +----------------------------------------------------------------------------+
+ +------------------+
+ | Send prompt (3s) |   Esc to edit
+ +------------------+
    Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
 
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                Awaiting input (0 turns)
- Auto Drive will send:
- Prompt:
- cargo fmt --check
-
-
-
+  Auto Drive > Working                                           ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo fmt --check                                                         |
+ +----------------------------------------------------------------------------+
+ +------------------+
+ | Send prompt (1s) |   Esc to edit
+ +------------------+
    Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
 
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- /settings - manage all settings in one place NEW
- /auto - work autonomously on long tasks with Auto Drive UPDATED
-  /chrome - connect to your Chrome browser
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
+   /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
  › cargo fmt --check
 
-  Auto Drive > Running cargo fmt --check.                    Running (0 turns)
+  Auto Drive > Running cargo fmt --check.                       ✶ Thinking (1s)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-  Agents Disabled  •  Review Enabled  •  Cross-check Enabled  •  Observer Enabled  •  Ctrl+S Settings  •  Ctrl+O Threads  Esc stop Auto Drive
+   Agents Disabled  •  Review Enabled  •  Cross-check Enab… Esc stop Auto Drive

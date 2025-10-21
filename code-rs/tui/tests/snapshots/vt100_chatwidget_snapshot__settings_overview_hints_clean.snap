@@ -3,7 +3,7 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
  +------------------------------------------------------------------------------------------------+
- |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251017-050546/code-rs/tui   |
+ |    Code  •  Directory: ~/.code/working/code/branches/code-branch-20251020-094810/code-rs/tui   |
  +------------------------------------------------------------------------------------------------+
  +Settings ▸ Overview-----------------------------------------------------------------------------+
  |                                                                                                |
