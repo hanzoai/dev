@@ -348,6 +348,42 @@ fn auto_drive_action_transitions() {
 }
 
 #[test]
+fn auto_drive_cli_progress_header() {
+    let mut harness = ChatWidgetHarness::new();
+
+    harness.auto_drive_activate(
+        "Highlight CLI progress",
+        true,
+        true,
+        AutoContinueModeFixture::TenSeconds,
+    );
+    harness.auto_drive_set_waiting_for_response(
+        "Preparing workspace",
+        Some("Running cargo check...".to_string()),
+        Some("Installed dependencies".to_string()),
+    );
+    harness.auto_drive_set_awaiting_submission(
+        "cargo check",
+        "Ready: run cargo check",
+        Some("Running cargo check...".to_string()),
+    );
+
+    let mut frames = Vec::new();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 12)));
+
+    harness.auto_drive_simulate_cli_submission();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 12)));
+
+    harness.auto_drive_mark_cli_running();
+    frames.push(normalize_output(render_chat_widget_to_vt100(&mut harness, 80, 12)));
+
+    insta::assert_snapshot!(
+        "auto_drive_cli_progress_header",
+        frames.join("\n---FRAME---\n"),
+    );
+}
+
+#[test]
 fn auto_drive_countdown_auto_submit() {
     let mut harness = ChatWidgetHarness::new();
 
