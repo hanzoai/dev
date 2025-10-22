@@ -605,10 +605,6 @@ impl AgentRunCell {
             lines.push(task.to_string());
         }
 
-        if let Some(context) = self.context.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
-            lines.push(format!("Context: {}", context));
-        }
-
         if !self.plan.is_empty() {
             for (index, step) in self.plan.iter().take(MAX_PLAN_LINES).enumerate() {
                 lines.push(format!("{}. {}", index + 1, step));
@@ -622,9 +618,9 @@ impl AgentRunCell {
             return rows;
         }
 
-        rows.push(self.section_heading_row("Prompt", body_width, style));
+        let mut body = Vec::new();
         for line in lines {
-            rows.extend(self.multiline_body_rows_with_indent(
+            body.extend(self.multiline_body_rows_with_indent(
                 line,
                 body_width,
                 style,
@@ -633,7 +629,7 @@ impl AgentRunCell {
             ));
         }
 
-        rows
+        body
     }
 
     fn agent_section_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
@@ -641,7 +637,7 @@ impl AgentRunCell {
             return Vec::new();
         }
 
-        let mut rows = Vec::new();
+        let mut rows = self.prompt_rows(body_width, style);
         rows.push(self.section_heading_row("Agents", body_width, style));
 
         if self.agents.is_empty() {
