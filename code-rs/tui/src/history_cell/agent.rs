@@ -1001,9 +1001,11 @@ impl AgentRunCell {
             segments.push(CardSegment::new(indent_str, indent_style));
 
             let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
-            let time_display = truncate_with_ellipsis(elapsed.as_str(), remaining);
-            let time_width = string_width(time_display.as_str());
-            segments.push(CardSegment::new(time_display, time_style));
+            let time_width = string_width(elapsed.as_str());
+            if time_width > remaining {
+                continue;
+            }
+            segments.push(CardSegment::new(elapsed.clone(), time_style));
             remaining = remaining.saturating_sub(time_width);
 
             if remaining > 0 {
@@ -1012,8 +1014,15 @@ impl AgentRunCell {
             }
 
             if remaining > 0 {
-                let desc_display = truncate_with_ellipsis(entry.label.as_str(), remaining);
-                segments.push(CardSegment::new(desc_display, label_style));
+                let mut desc_display = entry.label.clone();
+                if string_width(desc_display.as_str()) > remaining {
+                    desc_display = truncate_with_ellipsis(entry.label.as_str(), remaining)
+                        .trim_end()
+                        .to_string();
+                }
+                if !desc_display.is_empty() {
+                    segments.push(CardSegment::new(desc_display, label_style));
+                }
             }
 
             rows.push(CardRow::new(
