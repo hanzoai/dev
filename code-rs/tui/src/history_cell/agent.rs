@@ -432,7 +432,14 @@ impl AgentRunCell {
 
             if let Some(label) = write_label {
                 if available >= string_width(label.as_str()) {
-                    segments.push(CardSegment::new(label, secondary_text_style(style)));
+                    let label_style = if label.contains("read only") {
+                        Style::default().fg(colors::success())
+                    } else if label.contains("write") {
+                        Style::default().fg(colors::warning())
+                    } else {
+                        secondary_text_style(style)
+                    };
+                    segments.push(CardSegment::new(label, label_style));
                 }
             }
         }
