@@ -27,6 +27,8 @@ use unicode_width::UnicodeWidthChar;
 const MAX_PLAN_LINES: usize = 4;
 const MAX_SUMMARY_LINES: usize = 4;
 const MAX_AGENT_DISPLAY: usize = 8;
+const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
+const ACTION_TIME_SEPARATOR_WIDTH: usize = 2;
 
 #[derive(Clone, Default)]
 pub(crate) struct AgentRunCell {
@@ -56,6 +58,7 @@ pub(crate) struct AgentStatusPreview {
     pub status_kind: AgentStatusKind,
     pub step_progress: Option<StepProgress>,
     pub elapsed: Option<Duration>,
+    #[allow(dead_code)]
     pub token_count: Option<u64>,
     pub last_update: Option<String>,
     pub elapsed_updated_at: Option<Instant>,
@@ -67,7 +70,7 @@ pub(crate) struct StepProgress {
     pub total: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum AgentStatusKind {
     #[default]
     Running,
@@ -158,6 +161,34 @@ pub(crate) enum AgentDetail {
     Result(String),
     Error(String),
     Info(String),
+}
+
+#[derive(Clone)]
+struct AgentRowData {
+    name: String,
+    status: String,
+    meta: String,
+    color: Color,
+    name_width: usize,
+    status_width: usize,
+    meta_width: usize,
+}
+
+impl AgentRowData {
+    fn new(name: String, status: String, meta: String, color: Color) -> Self {
+        let name_width = string_width(name.as_str());
+        let status_width = string_width(status.as_str());
+        let meta_width = string_width(meta.as_str());
+        Self {
+            name,
+            status,
+            meta,
+            color,
+            name_width,
+            status_width,
+            meta_width,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -401,7 +432,14 @@ impl AgentRunCell {
 
             if let Some(label) = write_label {
                 if available >= string_width(label.as_str()) {
-                    segments.push(CardSegment::new(label, secondary_text_style(style)));
+                    let label_style = if label.contains("read only") {
+                        Style::default().fg(colors::success())
+                    } else if label.contains("write") {
+                        Style::default().fg(colors::warning())
+                    } else {
+                        secondary_text_style(style)
+                    };
+                    segments.push(CardSegment::new(label, label_style));
                 }
             }
         }
@@ -527,7 +565,12 @@ impl AgentRunCell {
         rows.push(self.top_border_row(body_width, style));
         rows.push(self.blank_border_row(body_width, style));
 
-        let mut inserted_section = false;
+        let prompt_rows = self.prompt_rows(body_width, style);
+        if !prompt_rows.is_empty() {
+            rows.extend(prompt_rows);
+        }
+
+        let mut inserted_section = !rows.is_empty();
 
         let agent_rows = self.agent_section_rows(body_width, style);
         if !agent_rows.is_empty() {
@@ -535,15 +578,6 @@ impl AgentRunCell {
                 rows.push(self.blank_border_row(body_width, style));
             }
             rows.extend(agent_rows);
-            inserted_section = true;
-        }
-
-        let prompt_rows = self.prompt_rows(body_width, style);
-        if !prompt_rows.is_empty() {
-            if inserted_section {
-                rows.push(self.blank_border_row(body_width, style));
-            }
-            rows.extend(prompt_rows);
             inserted_section = true;
         }
 
@@ -576,15 +610,16 @@ impl AgentRunCell {
             return Vec::new();
         }
 
-        let mut rows = Vec::new();
         let mut lines: Vec<String> = Vec::new();
 
         if let Some(task) = self.task.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
-            lines.push(task.to_string());
-        }
-
-        if let Some(context) = self.context.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
-            lines.push(format!("Context: {}", context));
+            let cleaned = task
+                .split_once("Context:")
+                .map(|(before, _)| before.trim_end())
+                .unwrap_or(task);
+            if !cleaned.is_empty() {
+                lines.push(cleaned.to_string());
+            }
         }
 
         if !self.plan.is_empty() {
@@ -596,22 +631,18 @@ impl AgentRunCell {
             }
         }
 
-        if lines.is_empty() {
-            return rows;
-        }
-
-        rows.push(self.section_heading_row("Prompt", body_width, style));
-        for line in lines {
-            rows.extend(self.multiline_body_rows_with_indent(
-                line,
-                body_width,
-                style,
-                secondary_text_style(style),
-                CONTENT_INDENT,
-            ));
-        }
-
-        rows
+        lines
+            .into_iter()
+            .flat_map(|line| {
+                self.multiline_body_rows_with_indent(
+                    line,
+                    body_width,
+                    style,
+                    secondary_text_style(style),
+                    HEADING_INDENT,
+                )
+            })
+            .collect()
     }
 
     fn agent_section_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
@@ -633,49 +664,33 @@ impl AgentRunCell {
             return rows;
         }
 
-        let now = Instant::now();
-        for preview in self.agents.iter().take(MAX_AGENT_DISPLAY) {
-            let indent = " ".repeat(CONTENT_INDENT);
+        let displayed: Vec<&AgentStatusPreview> = self.agents.iter().take(MAX_AGENT_DISPLAY).collect();
+        let indent = " ".repeat(CONTENT_INDENT);
+        let bullet = "• ";
+        let indent_width = string_width(indent.as_str());
+        let bullet_width = string_width(bullet);
+        let available_rest = body_width
+            .saturating_sub(indent_width)
+            .saturating_sub(bullet_width);
 
-            let mut meta_parts: Vec<String> = Vec::new();
-            if let Some(duration_label) = Self::agent_duration_label(preview, now) {
-                meta_parts.push(duration_label);
-            }
-            if let Some(progress) = preview.step_progress.as_ref() {
-                meta_parts.push(format!("{}/{}", progress.completed, progress.total));
-            }
-            if let Some(tokens) = preview.token_count {
-                meta_parts.push(format!("{} tok", tokens));
-            }
+        let entries = self.build_agent_display_entries(&displayed);
 
-            let meta_text = if meta_parts.is_empty() {
-                String::new()
-            } else {
-                format!("  ({})", meta_parts.join(" · "))
-            };
-
-            let status_text = format!(" {}", Self::agent_status_text(preview));
-            let name_text = Self::agent_display_name(preview);
-
-            let rest_source = format!("{}{}{}", name_text, status_text, meta_text);
-
-            let available = body_width.saturating_sub(string_width(indent.as_str()));
-            let available_rest = available.saturating_sub(string_width("• "));
-            let rest_display = truncate_with_ellipsis(rest_source.as_str(), available_rest);
-
-            let mut segments = Vec::new();
-            segments.push(CardSegment::new(indent.clone(), primary_text_style(style)));
-            segments.push(CardSegment::new(
-                "• ".to_string(),
-                Style::default().fg(preview.status_kind.color()),
-            ));
-            segments.push(CardSegment::new(rest_display, primary_text_style(style)));
-
-            rows.push(CardRow::new(
-                BORDER_BODY.to_string(),
-                Self::accent_style(style),
-                segments,
-                None,
+        if let Some(mut aligned) = self.build_aligned_agent_rows(
+            &entries,
+            body_width,
+            style,
+            indent.as_str(),
+            bullet,
+            available_rest,
+        ) {
+            rows.append(&mut aligned);
+        } else {
+            rows.extend(self.build_agent_rows_fallback(
+                &entries,
+                body_width,
+                style,
+                indent.as_str(),
+                bullet,
             ));
         }
 
@@ -693,6 +708,277 @@ impl AgentRunCell {
         rows
     }
 
+    fn build_agent_display_entries(
+        &self,
+        previews: &[&AgentStatusPreview],
+    ) -> Vec<AgentRowData> {
+        let now = Instant::now();
+        previews
+            .iter()
+            .map(|preview| {
+                let mut meta_parts: Vec<String> = Vec::new();
+                if let Some(duration_label) = Self::agent_duration_label(preview, now) {
+                    meta_parts.push(duration_label);
+                }
+                if let Some(progress) = preview.step_progress.as_ref() {
+                    meta_parts.push(format!("{}/{}", progress.completed, progress.total));
+                }
+                // Token counts add noise in the compact card view; leave them out here.
+
+                let meta = if meta_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!("({})", meta_parts.join(" · "))
+                };
+
+                let name = Self::agent_display_name(preview);
+                let status = Self::agent_status_text(preview);
+                let color = preview.status_kind.color();
+
+                AgentRowData::new(name, status, meta, color)
+            })
+            .collect()
+    }
+
+    fn build_aligned_agent_rows(
+        &self,
+        entries: &[AgentRowData],
+        _body_width: usize,
+        style: &CardStyle,
+        indent: &str,
+        bullet: &str,
+        available_rest: usize,
+    ) -> Option<Vec<CardRow>> {
+        if entries.is_empty() {
+            return Some(Vec::new());
+        }
+        if available_rest == 0 {
+            return None;
+        }
+
+        const COLUMN_GAP: usize = 2;
+
+        let has_status = entries.iter().any(|entry| !entry.status.is_empty());
+        let mut include_meta = entries.iter().any(|entry| !entry.meta.is_empty());
+
+        let mut max_status_width = if has_status {
+            entries
+                .iter()
+                .map(|entry| entry.status_width)
+                .max()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut max_meta_width = if include_meta {
+            entries
+                .iter()
+                .map(|entry| entry.meta_width)
+                .max()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        let mut remaining = available_rest;
+
+        if has_status {
+            if remaining <= COLUMN_GAP {
+                return None;
+            }
+            remaining -= COLUMN_GAP;
+            max_status_width = max_status_width.min(remaining);
+            remaining = remaining.saturating_sub(max_status_width);
+        }
+
+        if include_meta {
+            if remaining <= COLUMN_GAP {
+                include_meta = false;
+                max_meta_width = 0;
+            } else {
+                remaining -= COLUMN_GAP;
+                max_meta_width = max_meta_width.min(remaining);
+                remaining = remaining.saturating_sub(max_meta_width);
+            }
+        }
+
+        if include_meta && max_meta_width == 0 {
+            include_meta = false;
+        }
+
+        if has_status && max_status_width == 0 {
+            return None;
+        }
+
+        let max_name_width_raw = entries
+            .iter()
+            .map(|entry| entry.name_width)
+            .max()
+            .unwrap_or(0);
+
+        let mut name_space = remaining;
+        if name_space == 0 {
+            if has_status && max_status_width > 1 {
+                max_status_width -= 1;
+                name_space = 1;
+            } else {
+                return None;
+            }
+        }
+
+        let max_name_width = max_name_width_raw.min(name_space).max(1);
+
+        let mut rows = Vec::new();
+        let indent_style = primary_text_style(style);
+        for entry in entries {
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent.to_string(), indent_style));
+            segments.push(CardSegment::new(
+                bullet.to_string(),
+                Style::default().fg(entry.color),
+            ));
+
+            let mut name_display = truncate_with_ellipsis(entry.name.as_str(), max_name_width);
+            let name_width = string_width(name_display.as_str());
+            if name_width < max_name_width {
+                let padding = " ".repeat(max_name_width - name_width);
+                name_display.push_str(&padding);
+            }
+            segments.push(CardSegment::new(name_display, primary_text_style(style)));
+
+            if has_status {
+                segments.push(CardSegment::new(" ".repeat(COLUMN_GAP), Style::default()));
+                let status_display = truncate_with_ellipsis(entry.status.as_str(), max_status_width);
+                let status_width = string_width(status_display.as_str());
+                if status_width > 0 {
+                    segments.push(CardSegment::new(
+                        status_display,
+                        Style::default().fg(entry.color),
+                    ));
+                }
+                if max_status_width > status_width {
+                    segments.push(CardSegment::new(
+                        " ".repeat(max_status_width - status_width),
+                        Style::default(),
+                    ));
+                }
+            }
+
+            if include_meta {
+                segments.push(CardSegment::new(" ".repeat(COLUMN_GAP), Style::default()));
+                let meta_display = truncate_with_ellipsis(entry.meta.as_str(), max_meta_width);
+                let meta_width = string_width(meta_display.as_str());
+                if meta_width > 0 {
+                    segments.push(CardSegment::new(
+                        meta_display,
+                        Style::default().fg(entry.color),
+                    ));
+                }
+                if max_meta_width > meta_width {
+                    segments.push(CardSegment::new(
+                        " ".repeat(max_meta_width - meta_width),
+                        Style::default(),
+                    ));
+                }
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            ));
+        }
+
+        Some(rows)
+    }
+
+    fn build_agent_rows_fallback(
+        &self,
+        entries: &[AgentRowData],
+        body_width: usize,
+        style: &CardStyle,
+        indent: &str,
+        bullet: &str,
+    ) -> Vec<CardRow> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        let indent_width = string_width(indent);
+        let bullet_width = string_width(bullet);
+        let available_rest = body_width
+            .saturating_sub(indent_width)
+            .saturating_sub(bullet_width);
+
+        let mut rows = Vec::new();
+        let indent_style = primary_text_style(style);
+
+        for entry in entries {
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent.to_string(), indent_style));
+            segments.push(CardSegment::new(
+                bullet.to_string(),
+                Style::default().fg(entry.color),
+            ));
+
+            let mut remaining = available_rest;
+            if remaining == 0 {
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    segments,
+                    None,
+                ));
+                continue;
+            }
+
+            let name_display = truncate_with_ellipsis(entry.name.as_str(), remaining);
+            let name_width = string_width(name_display.as_str());
+            remaining = remaining.saturating_sub(name_width);
+            segments.push(CardSegment::new(name_display, primary_text_style(style)));
+
+            if remaining > 0 && !entry.status.is_empty() {
+                segments.push(CardSegment::new(" ".to_string(), Style::default()));
+                remaining = remaining.saturating_sub(1);
+                if remaining > 0 {
+                    let status_display = truncate_with_ellipsis(entry.status.as_str(), remaining);
+                    let status_width = string_width(status_display.as_str());
+                    segments.push(CardSegment::new(
+                        status_display,
+                        Style::default().fg(entry.color),
+                    ));
+                    remaining = remaining.saturating_sub(status_width);
+                }
+            }
+
+            if remaining > 0 && !entry.meta.is_empty() {
+                let gap = 2.min(remaining);
+                if gap > 0 {
+                    segments.push(CardSegment::new(" ".repeat(gap), Style::default()));
+                    remaining = remaining.saturating_sub(gap);
+                }
+                if remaining > 0 {
+                    let meta_display = truncate_with_ellipsis(entry.meta.as_str(), remaining);
+                    segments.push(CardSegment::new(
+                        meta_display,
+                        Style::default().fg(entry.color),
+                    ));
+                }
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
+            ));
+        }
+
+        rows
+    }
+
     fn actions_section_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
         if body_width == 0 || self.actions.is_empty() {
             return Vec::new();
@@ -701,24 +987,117 @@ impl AgentRunCell {
         let mut rows = Vec::new();
         rows.push(self.section_heading_row("Actions", body_width, style));
 
-        let show_minutes = self
+        let rendered_times: Vec<(String, usize)> = self
             .actions
             .iter()
-            .any(|entry| entry.elapsed.as_secs() >= 60);
+            .map(|entry| {
+                let formatted = Self::format_elapsed_label(entry.elapsed);
+                let width = string_width(formatted.as_str());
+                (formatted, width)
+            })
+            .collect();
 
-        for entry in &self.actions {
-            let elapsed = if show_minutes {
-                Self::format_elapsed(entry.elapsed)
+        const ACTIONS_HEAD_COUNT: usize = 2;
+        const ACTIONS_TAIL_COUNT: usize = 4;
+        let total_actions = self.actions.len();
+        let truncated = total_actions > 7;
+
+        let head_count = ACTIONS_HEAD_COUNT.min(total_actions);
+        let tail_count = if truncated {
+            ACTIONS_TAIL_COUNT.min(total_actions.saturating_sub(head_count))
+        } else {
+            total_actions.saturating_sub(head_count)
+        };
+        let tail_start = total_actions.saturating_sub(tail_count);
+
+        let mut display_indices: Vec<usize> = Vec::new();
+        display_indices.extend(0..head_count);
+        if truncated {
+            display_indices.extend(tail_start..total_actions);
+        } else {
+            display_indices.extend(head_count..total_actions);
+        }
+
+        let time_width = display_indices
+            .iter()
+            .map(|idx| rendered_times[*idx].1)
+            .max()
+            .unwrap_or(0)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH);
+
+        let indent_text = " ".repeat(CONTENT_INDENT);
+        let indent_style = secondary_text_style(style);
+        let time_style = Style::default().fg(colors::text());
+        let label_style = secondary_text_style(style);
+
+        for (position, idx) in display_indices.iter().enumerate() {
+            if truncated && position == head_count {
+                let mut ellipsis_segments = Vec::new();
+                ellipsis_segments.push(CardSegment::new(indent_text.clone(), indent_style));
+                let ellipsis_time = format!("{:<width$}", "⋮", width = time_width);
+                ellipsis_segments.push(CardSegment::new(
+                    ellipsis_time,
+                    secondary_text_style(style),
+                ));
+                if ACTION_TIME_SEPARATOR_WIDTH > 0 {
+                    ellipsis_segments.push(CardSegment::new(
+                        " ".repeat(ACTION_TIME_SEPARATOR_WIDTH),
+                        Style::default(),
+                    ));
+                }
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    ellipsis_segments,
+                    None,
+                ));
+            }
+
+            let entry = &self.actions[*idx];
+            let (elapsed, _) = &rendered_times[*idx];
+
+            if body_width <= CONTENT_INDENT {
+                continue;
+            }
+
+            let mut segments = Vec::new();
+            segments.push(CardSegment::new(indent_text.clone(), indent_style));
+
+            let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
+            if remaining <= time_width {
+                continue;
+            }
+            let padded_time = format!("{:<width$}", elapsed, width = time_width);
+            segments.push(CardSegment::new(padded_time, time_style));
+            remaining = remaining.saturating_sub(time_width);
+
+            if remaining >= ACTION_TIME_SEPARATOR_WIDTH {
+                segments.push(CardSegment::new(
+                    " ".repeat(ACTION_TIME_SEPARATOR_WIDTH),
+                    Style::default(),
+                ));
+                remaining = remaining.saturating_sub(ACTION_TIME_SEPARATOR_WIDTH);
             } else {
-                Self::format_elapsed_seconds(entry.elapsed)
-            };
-            let text = format!("{} {}", elapsed, entry.label);
-            rows.push(self.body_text_row_with_indent(
-                text,
-                body_width,
-                style,
-                secondary_text_style(style),
-                CONTENT_INDENT,
+                continue;
+            }
+
+            if remaining > 0 {
+                let mut desc_display = entry.label.clone();
+                if string_width(desc_display.as_str()) > remaining {
+                    desc_display = truncate_with_ellipsis(entry.label.as_str(), remaining)
+                        .trim_end()
+                        .to_string();
+                }
+                if !desc_display.is_empty() {
+                    segments.push(CardSegment::new(desc_display, label_style));
+                }
+            }
+
+            rows.push(CardRow::new(
+                BORDER_BODY.to_string(),
+                Self::accent_style(style),
+                segments,
+                None,
             ));
         }
 
@@ -783,22 +1162,21 @@ impl AgentRunCell {
             } else {
                 let minutes = duration.as_secs() / 60;
                 let seconds = duration.as_secs() % 60;
-                format!("{}m{:02}s", minutes, seconds)
+                format!("{}m {:02}s", minutes, seconds)
             }
         })
     }
 
-    fn format_elapsed(duration: Duration) -> String {
+    fn format_elapsed_label(duration: Duration) -> String {
         let total_secs = duration.as_secs();
-        let minutes = total_secs / 60;
-        let seconds = total_secs % 60;
-        format!("{:02}m {:02}s", minutes, seconds)
+        if total_secs < 60 {
+            format!("{}s", total_secs)
+        } else {
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            format!("{}m {}s", minutes, seconds)
+        }
     }
-
-    fn format_elapsed_seconds(duration: Duration) -> String {
-        format!("{:02}s", duration.as_secs())
-    }
-
     fn agent_counts(&self) -> AgentCountSummary {
         let mut summary = AgentCountSummary::default();
         for agent in &self.agents {
@@ -1033,5 +1411,5 @@ impl crate::chatwidget::tool_cards::ToolCardCell for AgentRunCell {
         self.set_cell_key(key);
     }
 }
-const HEADING_INDENT: usize = 2;
-const CONTENT_INDENT: usize = 4;
+const HEADING_INDENT: usize = 1;
+const CONTENT_INDENT: usize = 3;
