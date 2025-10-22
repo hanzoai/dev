@@ -150,6 +150,9 @@ pub(crate) fn truncate_with_ellipsis(text: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
+    if UnicodeWidthStr::width(text) <= width {
+        return truncate_to_width(text, width);
+    }
     let ellipsis = "...";
     let ellipsis_width = UnicodeWidthStr::width(ellipsis);
     if width <= ellipsis_width {
@@ -157,21 +160,19 @@ pub(crate) fn truncate_with_ellipsis(text: &str, width: usize) -> String {
     }
     let mut result = String::new();
     let mut used = 0;
+    let limit = width - ellipsis_width;
     for ch in text.chars() {
         let w = UnicodeWidthChar::width(ch).unwrap_or(1);
-        if used + w > width - ellipsis_width {
-            result.push_str(ellipsis);
-            let current = UnicodeWidthStr::width(result.as_str());
-            if current < width {
-                result.push_str(&" ".repeat(width - current));
-            }
-            return result;
+        if used + w > limit {
+            break;
         }
         result.push(ch);
         used += w;
     }
-    if used < width {
-        result.push_str(&" ".repeat(width - used));
+    result.push_str(ellipsis);
+    let current = UnicodeWidthStr::width(result.as_str());
+    if current < width {
+        result.push_str(&" ".repeat(width - current));
     }
     result
 }
