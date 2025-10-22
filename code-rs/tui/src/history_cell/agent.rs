@@ -524,7 +524,16 @@ impl AgentRunCell {
     }
 
     fn bottom_border_row(&self, body_width: usize, style: &CardStyle) -> CardRow {
-        let text_value = format!(" [Ctrl+A] Expand · [Esc] Stop");
+        let has_running_agents = self
+            .agents
+            .iter()
+            .any(|agent| matches!(agent.status_kind, AgentStatusKind::Running | AgentStatusKind::Pending));
+
+        let text_value = if has_running_agents {
+            " [Ctrl+A] Expand · [Esc] Stop".to_string()
+        } else {
+            " [Ctrl+A] Expand".to_string()
+        };
         let text = truncate_with_ellipsis(text_value.as_str(), body_width);
         let segment = CardSegment::new(text, secondary_text_style(style));
         CardRow::new(BORDER_BOTTOM.to_string(), Self::accent_style(style), vec![segment], None)

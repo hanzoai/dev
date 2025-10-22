@@ -771,6 +771,7 @@ fn run_auto_loop(
     let observer_cadence_enabled = config.tui.auto_drive.observer_enabled;
     let observer_thread_enabled = observer_cadence_enabled || cross_check_enabled;
     let mut observer_bootstrapped = !observer_thread_enabled;
+    let mut cross_check_restart_conversation: Option<Vec<ResponseItem>> = None;
     let mut observer_handle = if observer_thread_enabled {
         match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
             Ok(handle) => Some(handle),
@@ -946,6 +947,7 @@ fn run_auto_loop(
                                 Ok(()) => {
                                     awaiting_cross_check = true;
                                     observer_last_sent = observer_current_len;
+                                    cross_check_restart_conversation = Some(conv_for_observer.clone());
                                     pending_success = Some(decision_event);
                                     continue;
                                 }
@@ -1077,6 +1079,7 @@ fn run_auto_loop(
                     if let ObserverReason::CrossCheck { summary, .. } = reason {
                         awaiting_cross_check = false;
                         if matches!(status, AutoObserverStatus::Ok) {
+                            cross_check_restart_conversation = None;
                             if let Some(decision) = pending_success.take() {
                                 app_event_tx.send(decision.into_event());
                                 stopped = true;
@@ -1101,23 +1104,38 @@ fn run_auto_loop(
                                     });
                             }
                             let failure_message = detail
+                                .clone()
                                 .map(|text| format!("Cross-check failed: {text}"))
                                 .unwrap_or_else(|| "Cross-check failed".to_string());
                             let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
                                 delta: CROSS_CHECK_RESTART_BANNER.to_string(),
                                 summary_index: None,
                             });
-                            let fail_event = AppEvent::AutoCoordinatorDecision {
-                                status: AutoCoordinatorStatus::Failed,
-                                progress_past: None,
-                                progress_current: Some(failure_message),
-                                cli: None,
-                                agents_timing: None,
-                                agents: Vec::new(),
-                                transcript: Vec::new(),
-                            };
-                            app_event_tx.send(fail_event);
-                            stopped = true;
+                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
+                                delta: failure_message.clone(),
+                                summary_index: None,
+                            });
+
+                            let mut restart_conversation = cross_check_restart_conversation
+                                .take()
+                                .unwrap_or_else(|| conversation.clone());
+
+                            if let Some(text) = detail {
+                                let prompt = format!(
+                                    "Observer cross-check flagged unresolved issues:\n{text}\nPlease address these items before retrying completion."
+                                );
+                                restart_conversation.push(ResponseItem::Message {
+                                    id: None,
+                                    role: "user".to_string(),
+                                    content: vec![ContentItem::InputText { text: prompt }],
+                                });
+                            }
+
+                            if restart_conversation.is_empty() {
+                                restart_conversation = conversation;
+                            }
+
+                            pending_conversation = Some(restart_conversation);
                             continue;
                         }
                     }
@@ -1409,13 +1427,13 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                 "context": {
                     "type": ["string", "null"],
                     "maxLength": 1500,
-                    "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
+                    "description": "Only use if there is information the CLI does not have in its history. Specifically; messages sent to you by the user or context gathered before a compaction."
                 },
                 "prompt": {
                     "type": "string",
                     "minLength": 4,
-                    "maxLength": 240,
-                    "description": "Exactly one objective in 1–2 sentences. No step lists."
+                    "maxLength": 600,
+                    "description": "1–2 sentences. No step lists. Work WITH the CLI like a peer and give the CLI autonomy while working. Simple prompts like \"Continue the next task you identified\", \"Work on feature A now\", or \"What are the next steps?\" keep guidance high level. The CLI has much more context and tools than you do."
                 }
             },
             "required": ["prompt", "context"]
@@ -1434,7 +1452,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                     "timing": {
                         "type": "string",
                         "enum": ["parallel", "blocking"],
-                        "description": "Parallel: run while the CLI works. Blocking: wait for results before the CLI proceeds."
+                        "description": "Parallel: run while the CLI works. Blocking: wait for results before the CLI executes the prompt you provided."
                     },
                     "list": {
                         "type": "array",
@@ -1450,7 +1468,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                                 "context": {
                                     "type": ["string", "null"],
                                     "maxLength": 1500,
-                                    "description": "Background details (agents can not see the conversation - you must provide any neccessary information here)."
+                                    "description": "Background details (agents can not see the conversation - you must provide ALL neccessary information here)."
                                 },
                                 "prompt": {
                                     "type": "string",
