@@ -46,7 +46,7 @@ const SCREENSHOT_MAX_WIDTH: usize = 64;
 const SCREENSHOT_LEFT_PAD: usize = 1;
 const MIN_TEXT_WIDTH: usize = 28;
 const ACTION_LABEL_GAP: usize = 2;
-const ACTION_TIME_GAP: usize = 1;
+const ACTION_TIME_GAP: usize = 2;
 const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 pub(crate) struct BrowserSessionCell {
     url: Option<String>,
@@ -440,6 +440,12 @@ impl BrowserSessionCell {
                             ellipsis_time,
                             secondary_text_style(style),
                         ));
+                        if ACTION_TIME_GAP > 0 {
+                            segments.push(CardSegment::new(
+                                " ".repeat(ACTION_TIME_GAP),
+                                Style::default(),
+                            ));
+                        }
                         rows.push(CardRow::new(
                             BORDER_BODY.to_string(),
                             Self::accent_style(style),
@@ -729,9 +735,9 @@ impl BrowserSessionCell {
         segments.push(CardSegment::new(time_display, time_style));
 
         let mut remaining = available.saturating_sub(effective_time_width);
-        if remaining > 0 {
-            segments.push(CardSegment::new(" ".to_string(), Style::default()));
-            remaining = remaining.saturating_sub(1);
+        if remaining >= ACTION_TIME_GAP {
+            segments.push(CardSegment::new(" ".repeat(ACTION_TIME_GAP), Style::default()));
+            remaining = remaining.saturating_sub(ACTION_TIME_GAP);
         }
 
         if remaining > 0 {

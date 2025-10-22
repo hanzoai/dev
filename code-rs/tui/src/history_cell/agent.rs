@@ -28,6 +28,7 @@ const MAX_PLAN_LINES: usize = 4;
 const MAX_SUMMARY_LINES: usize = 4;
 const MAX_AGENT_DISPLAY: usize = 8;
 const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
+const ACTION_TIME_SEPARATOR_WIDTH: usize = 2;
 
 #[derive(Clone, Default)]
 pub(crate) struct AgentRunCell {
@@ -1025,7 +1026,16 @@ impl AgentRunCell {
                 let mut ellipsis_segments = Vec::new();
                 ellipsis_segments.push(CardSegment::new(indent_text.clone(), indent_style));
                 let ellipsis_time = format!("{:>width$}", "⋮", width = time_width);
-                ellipsis_segments.push(CardSegment::new(ellipsis_time, secondary_text_style(style)));
+                ellipsis_segments.push(CardSegment::new(
+                    ellipsis_time,
+                    secondary_text_style(style),
+                ));
+                if ACTION_TIME_SEPARATOR_WIDTH > 0 {
+                    ellipsis_segments.push(CardSegment::new(
+                        " ".repeat(ACTION_TIME_SEPARATOR_WIDTH),
+                        Style::default(),
+                    ));
+                }
                 rows.push(CardRow::new(
                     BORDER_BODY.to_string(),
                     Self::accent_style(style),
@@ -1052,9 +1062,14 @@ impl AgentRunCell {
             segments.push(CardSegment::new(padded_time, time_style));
             remaining = remaining.saturating_sub(time_width);
 
-            if remaining > 0 {
-                segments.push(CardSegment::new(" ".to_string(), Style::default()));
-                remaining = remaining.saturating_sub(1);
+            if remaining >= ACTION_TIME_SEPARATOR_WIDTH {
+                segments.push(CardSegment::new(
+                    " ".repeat(ACTION_TIME_SEPARATOR_WIDTH),
+                    Style::default(),
+                ));
+                remaining = remaining.saturating_sub(ACTION_TIME_SEPARATOR_WIDTH);
+            } else {
+                continue;
             }
 
             if remaining > 0 {
