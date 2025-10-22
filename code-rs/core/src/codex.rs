@@ -2898,6 +2898,61 @@ async fn submission_loop(
                 };
                 tokio::spawn(async move { sess.abort() });
             }
+            Op::CancelAgents { batch_ids, agent_ids } => {
+                let sess_arc = match sess.as_ref() {
+                    Some(sess) => Arc::clone(sess),
+                    None => {
+                        send_no_session_event(sub.id).await;
+                        continue;
+                    }
+                };
+
+                let mut manager = AGENT_MANAGER.write().await;
+                let mut seen_batches: HashSet<String> = HashSet::new();
+                let mut seen_agents: HashSet<String> = HashSet::new();
+                let mut cancelled = 0usize;
+
+                for batch in batch_ids {
+                    let trimmed = batch.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if !seen_batches.insert(trimmed.to_string()) {
+                        continue;
+                    }
+                    cancelled += manager.cancel_batch(trimmed).await;
+                }
+
+                for agent_id in agent_ids {
+                    let trimmed = agent_id.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if !seen_agents.insert(trimmed.to_string()) {
+                        continue;
+                    }
+                    if manager.cancel_agent(trimmed).await {
+                        cancelled += 1;
+                    }
+                }
+
+                drop(manager);
+
+                send_agent_status_update(&sess_arc).await;
+
+                let message = if cancelled == 0 {
+                    "No running agents to cancel.".to_string()
+                } else {
+                    let suffix = if cancelled == 1 { "" } else { "s" };
+                    format!("Cancelled {cancelled} running agent{suffix}.")
+                };
+
+                let event = sess_arc.make_event(
+                    &sub.id,
+                    EventMsg::AgentMessage(AgentMessageEvent { message }),
+                );
+                sess_arc.send_event(event).await;
+            }
             Op::AddPendingInputDeveloper { text } => {
                 let sess = match sess.as_ref() { Some(s) => s.clone(), None => { send_no_session_event(sub.id).await; continue; } };
                 let dev_msg = ResponseInputItem::Message { role: "developer".to_string(), content: vec![ContentItem::InputText { text }] };
