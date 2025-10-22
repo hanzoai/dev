@@ -114,6 +114,16 @@ pub enum Op {
     /// This server sends no corresponding Event
     Interrupt,
 
+    /// Cancel running agents immediately without waiting for the model to issue a tool call.
+    CancelAgents {
+        /// Agent batch identifiers to cancel.
+        #[serde(default)]
+        batch_ids: Vec<String>,
+        /// Specific agent identifiers to cancel when no batch is available.
+        #[serde(default)]
+        agent_ids: Vec<String>,
+    },
+
     /// Input from the user
     UserInput {
         /// User input items, see `InputItem`

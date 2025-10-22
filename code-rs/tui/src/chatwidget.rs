@@ -1,4 +1,5 @@
 use once_cell::sync::Lazy;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
@@ -180,6 +181,7 @@ pub(crate) enum EscIntent {
     AutoDismissSummary,
     DiffConfirm,
     AgentsTerminal,
+    CancelAgents,
     CancelTask,
     ClearComposer,
     ShowUndoHint,
@@ -2588,6 +2590,78 @@ impl ChatWidget<'_> {
             .any(|a| matches!(a.status, AgentStatus::Pending | AgentStatus::Running))
     }
 
+    fn has_cancelable_agents(&self) -> bool {
+        self
+            .active_agents
+            .iter()
+            .any(|agent| matches!(agent.status, AgentStatus::Pending | AgentStatus::Running))
+    }
+
+    fn collect_cancelable_agents(&self) -> (Vec<String>, Vec<String>) {
+        let mut batch_ids: BTreeSet<String> = BTreeSet::new();
+        let mut agent_ids: BTreeSet<String> = BTreeSet::new();
+
+        for agent in &self.active_agents {
+            if !matches!(agent.status, AgentStatus::Pending | AgentStatus::Running) {
+                continue;
+            }
+
+            if let Some(batch) = agent.batch_id.as_ref() {
+                let trimmed = batch.trim();
+                if !trimmed.is_empty() {
+                    batch_ids.insert(trimmed.to_string());
+                    continue;
+                }
+            }
+
+            let trimmed_id = agent.id.trim();
+            if !trimmed_id.is_empty() {
+                agent_ids.insert(trimmed_id.to_string());
+            }
+        }
+
+        (
+            batch_ids.into_iter().collect(),
+            agent_ids.into_iter().collect(),
+        )
+    }
+
+    fn cancel_active_agents(&mut self) -> bool {
+        let (batch_ids, agent_ids) = self.collect_cancelable_agents();
+        if batch_ids.is_empty() && agent_ids.is_empty() {
+            return false;
+        }
+
+        let mut status_parts = Vec::new();
+        if !batch_ids.is_empty() {
+            let count = batch_ids.len();
+            status_parts.push(if count == 1 {
+                "1 batch".to_string()
+            } else {
+                format!("{count} batches")
+            });
+        }
+        if !agent_ids.is_empty() {
+            let count = agent_ids.len();
+            status_parts.push(if count == 1 {
+                "1 agent".to_string()
+            } else {
+                format!("{count} agents")
+            });
+        }
+
+        let descriptor = if status_parts.is_empty() {
+            "agents".to_string()
+        } else {
+            status_parts.join(", ")
+        };
+        self.push_background_tail(format!("Cancelling {descriptor}…"));
+        self.bottom_pane.update_status_text("cancelling agents".to_string());
+        self.bottom_pane.set_task_running(true);
+        self.submit_op(Op::CancelAgents { batch_ids, agent_ids });
+        true
+    }
+
     /// Hide the bottom spinner/status if the UI is idle (no streams, tools, agents, or tasks).
     fn maybe_hide_spinner(&mut self) {
         let any_tools_running = !self.exec.running_commands.is_empty()
@@ -3757,6 +3831,7 @@ impl ChatWidget<'_> {
         UserMessage {
             display_text,
             ordered_items,
+            suppress_persistence: false,
         }
     }
 
@@ -9048,6 +9123,7 @@ impl ChatWidget<'_> {
         let UserMessage {
             display_text,
             ordered_items,
+            suppress_persistence,
         } = message;
 
         let combined_message_text = {
@@ -9082,7 +9158,9 @@ impl ChatWidget<'_> {
             self.pending_dispatched_user_messages.push_back(model_echo);
         }
 
-        if !display_text.is_empty() {
+        let suppress_history = suppress_persistence;
+
+        if !display_text.is_empty() && !suppress_history {
             if let Err(e) = self
                 .code_op_tx
                 .send(Op::AddToHistory { text: display_text })
@@ -14231,7 +14309,10 @@ fi\n\
         }
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
-        self.submit_text_message(full_prompt);
+        use crate::chatwidget::message::UserMessage;
+        let mut message: UserMessage = full_prompt.into();
+        message.suppress_persistence = true;
+        self.submit_user_message(message);
         self.auto_state.pending_agent_actions.clear();
         self.auto_state.pending_agent_timing = None;
         self.auto_rebuild_live_ring();
@@ -17925,6 +18006,10 @@ fi\n\
             return EscRoute::new(EscIntent::AutoDismissSummary, true, false);
         }
 
+        if self.has_cancelable_agents() {
+            return EscRoute::new(EscIntent::CancelAgents, true, false);
+        }
+
         if self.auto_manual_entry_active() && !self.composer_is_empty() {
             return EscRoute::new(EscIntent::ClearComposer, true, false);
         }
@@ -17981,6 +18066,7 @@ fi\n\
                 self.handle_key_event(key_event);
                 true
             }
+            EscIntent::CancelAgents => self.cancel_active_agents(),
             EscIntent::CancelTask => {
                 let _ = self.on_ctrl_c();
                 true
@@ -21179,6 +21265,7 @@ fi\n\
         let msg = UserMessage {
             display_text: display,
             ordered_items: ordered,
+            suppress_persistence: false,
         };
         self.submit_user_message(msg);
     }
@@ -21202,6 +21289,7 @@ fi\n\
         let msg = UserMessage {
             display_text: visible,
             ordered_items: ordered,
+            suppress_persistence: false,
         };
         self.submit_user_message(msg);
     }
@@ -21228,6 +21316,7 @@ fi\n\
         let msg = UserMessage {
             display_text: String::new(),
             ordered_items: ordered,
+            suppress_persistence: false,
         };
         self.submit_user_message(msg);
     }
@@ -22089,6 +22178,27 @@ mod tests {
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AutoStopActive);
         assert!(!route.allows_double_esc);
+    }
+
+    #[test]
+    fn esc_router_prioritizes_agent_cancel_before_cli_interrupt() {
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
+
+        chat.active_agents.push(AgentInfo {
+            id: "agent-1".to_string(),
+            name: "Agent 1".to_string(),
+            status: AgentStatus::Running,
+            batch_id: Some("batch-1".to_string()),
+            model: None,
+            result: None,
+            error: None,
+            last_progress: None,
+        });
+        chat.bottom_pane.set_task_running(true);
+
+        let route = chat.describe_esc_context();
+        assert_eq!(route.intent, EscIntent::CancelAgents);
     }
 
     #[test]
