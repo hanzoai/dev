@@ -47,6 +47,7 @@ const SCREENSHOT_LEFT_PAD: usize = 1;
 const MIN_TEXT_WIDTH: usize = 28;
 const ACTION_LABEL_GAP: usize = 2;
 const ACTION_TIME_GAP: usize = 1;
+const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 pub(crate) struct BrowserSessionCell {
     url: Option<String>,
     title: Option<String>,
@@ -395,7 +396,8 @@ impl BrowserSessionCell {
                 ActionDisplayLine::Ellipsis => None,
             })
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
         if action_display.is_empty() {
             for wrapped in wrap_card_lines(
@@ -429,13 +431,20 @@ impl BrowserSessionCell {
                         rows.extend(entry_rows);
                     }
                     ActionDisplayLine::Ellipsis => {
-                        rows.push(self.body_text_row(
-                            "⋮",
-                            body_width,
-                            style,
-                            primary_text_style(style),
-                            indent_cols,
-                            right_padding,
+                        let mut segments = Vec::new();
+                        if indent_cols > 0 {
+                            segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
+                        }
+                        let ellipsis_time = format!("{:>width$}", "⋮", width = time_width);
+                        segments.push(CardSegment::new(
+                            ellipsis_time,
+                            secondary_text_style(style),
+                        ));
+                        rows.push(CardRow::new(
+                            BORDER_BODY.to_string(),
+                            Self::accent_style(style),
+                            segments,
+                            None,
                         ));
                     }
                 }
@@ -711,14 +720,15 @@ impl BrowserSessionCell {
             segments.push(CardSegment::new(" ".repeat(indent), Style::default()));
         }
 
-        let time_display = truncate_with_ellipsis(entry.time_label.as_str(), available.min(time_width));
-        let time_width_actual = string_display_width(time_display.as_str());
-        segments.push(CardSegment::new(
-            time_display,
-            Style::default().fg(colors::text()),
-        ));
+        let time_style = Style::default().fg(colors::text());
+        let effective_time_width = available.min(time_width).max(ACTION_TIME_COLUMN_MIN_WIDTH.min(available));
+        if effective_time_width == 0 {
+            return Vec::new();
+        }
+        let time_display = format!("{:>width$}", entry.time_label.as_str(), width = effective_time_width);
+        segments.push(CardSegment::new(time_display, time_style));
 
-        let mut remaining = available.saturating_sub(time_width_actual);
+        let mut remaining = available.saturating_sub(effective_time_width);
         if remaining > 0 {
             segments.push(CardSegment::new(" ".to_string(), Style::default()));
             remaining = remaining.saturating_sub(1);
@@ -788,13 +798,14 @@ impl BrowserSessionCell {
         }
     }
 
-    fn format_elapsed_label(duration: Duration, show_minutes: bool) -> String {
-        if show_minutes {
-            let minutes = duration.as_secs() / 60;
-            let seconds = duration.as_secs() % 60;
-            format!("{:02}m {:02}s", minutes, seconds)
+    fn format_elapsed_label(duration: Duration, _show_minutes: bool) -> String {
+        let total_secs = duration.as_secs();
+        if total_secs < 60 {
+            format!("{}s", total_secs)
         } else {
-            format!("{:02}s", duration.as_secs())
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            format!("{}m {:>2}s", minutes, seconds)
         }
     }
 
