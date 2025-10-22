@@ -11,6 +11,8 @@ pub struct UserMessage {
     /// Items to send to the core/model in the correct order, with inline
     /// markers preceding images so the LLM knows placement.
     pub ordered_items: Vec<InputItem>,
+    /// Skip adding this message to the persisted history when true.
+    pub suppress_persistence: bool,
 }
 
 impl From<String> for UserMessage {
@@ -19,7 +21,11 @@ impl From<String> for UserMessage {
         if !text.trim().is_empty() {
             ordered.push(InputItem::Text { text: text.clone() });
         }
-        Self { display_text: text, ordered_items: ordered }
+        Self {
+            display_text: text,
+            ordered_items: ordered,
+            suppress_persistence: false,
+        }
     }
 }
 
@@ -36,6 +42,10 @@ pub fn create_initial_user_message(text: String, image_paths: Vec<PathBuf>) -> O
             ordered.push(InputItem::Text { text: format!("[image: {}]", filename) });
             ordered.push(InputItem::LocalImage { path });
         }
-        Some(UserMessage { display_text: text, ordered_items: ordered })
+        Some(UserMessage {
+            display_text: text,
+            ordered_items: ordered,
+            suppress_persistence: false,
+        })
     }
 }
