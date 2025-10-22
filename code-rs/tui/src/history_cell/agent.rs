@@ -549,7 +549,12 @@ impl AgentRunCell {
         rows.push(self.top_border_row(body_width, style));
         rows.push(self.blank_border_row(body_width, style));
 
-        let mut inserted_section = false;
+        let prompt_rows = self.prompt_rows(body_width, style);
+        if !prompt_rows.is_empty() {
+            rows.extend(prompt_rows);
+        }
+
+        let mut inserted_section = !rows.is_empty();
 
         let agent_rows = self.agent_section_rows(body_width, style);
         if !agent_rows.is_empty() {
@@ -557,15 +562,6 @@ impl AgentRunCell {
                 rows.push(self.blank_border_row(body_width, style));
             }
             rows.extend(agent_rows);
-            inserted_section = true;
-        }
-
-        let prompt_rows = self.prompt_rows(body_width, style);
-        if !prompt_rows.is_empty() {
-            if inserted_section {
-                rows.push(self.blank_border_row(body_width, style));
-            }
-            rows.extend(prompt_rows);
             inserted_section = true;
         }
 
@@ -598,7 +594,6 @@ impl AgentRunCell {
             return Vec::new();
         }
 
-        let mut rows = Vec::new();
         let mut lines: Vec<String> = Vec::new();
 
         if let Some(task) = self.task.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
@@ -614,22 +609,18 @@ impl AgentRunCell {
             }
         }
 
-        if lines.is_empty() {
-            return rows;
-        }
-
-        let mut body = Vec::new();
-        for line in lines {
-            body.extend(self.multiline_body_rows_with_indent(
-                line,
-                body_width,
-                style,
-                secondary_text_style(style),
-                CONTENT_INDENT,
-            ));
-        }
-
-        body
+        lines
+            .into_iter()
+            .flat_map(|line| {
+                self.multiline_body_rows_with_indent(
+                    line,
+                    body_width,
+                    style,
+                    secondary_text_style(style),
+                    HEADING_INDENT,
+                )
+            })
+            .collect()
     }
 
     fn agent_section_rows(&self, body_width: usize, style: &CardStyle) -> Vec<CardRow> {
@@ -1398,5 +1389,5 @@ impl crate::chatwidget::tool_cards::ToolCardCell for AgentRunCell {
         self.set_cell_key(key);
     }
 }
-const HEADING_INDENT: usize = 2;
-const CONTENT_INDENT: usize = 4;
+const HEADING_INDENT: usize = 1;
+const CONTENT_INDENT: usize = 3;
