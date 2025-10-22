@@ -1427,13 +1427,13 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                 "context": {
                     "type": ["string", "null"],
                     "maxLength": 1500,
-                    "description": "Only info the CLI wouldn’t infer (paths, constraints). Keep it tight."
+                    "description": "Only use if there is information the CLI does not have in its history. Specifically; messages sent to you by the user or context gathered before a compaction."
                 },
                 "prompt": {
                     "type": "string",
                     "minLength": 4,
                     "maxLength": 600,
-                    "description": "1–2 sentences. No step lists. Give the CLI autonomy while working; simple prompts like \"Please continue\", \"Work on feature A now\", or \"What do you think is the best approach?\" keep guidance high level."
+                    "description": "1–2 sentences. No step lists. Work WITH the CLI like a peer and give the CLI autonomy while working. Simple prompts like \"Continue the next task you identified\", \"Work on feature A now\", or \"What are the next steps?\" keep guidance high level. The CLI has much more context and tools than you do."
                 }
             },
             "required": ["prompt", "context"]
@@ -1452,7 +1452,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                     "timing": {
                         "type": "string",
                         "enum": ["parallel", "blocking"],
-                        "description": "Parallel: run while the CLI works. Blocking: wait for results before the CLI proceeds."
+                        "description": "Parallel: run while the CLI works. Blocking: wait for results before the CLI executes the prompt you provided."
                     },
                     "list": {
                         "type": "array",
@@ -1468,7 +1468,7 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                                 "context": {
                                     "type": ["string", "null"],
                                     "maxLength": 1500,
-                                    "description": "Background details (agents can not see the conversation - you must provide any neccessary information here)."
+                                    "description": "Background details (agents can not see the conversation - you must provide ALL neccessary information here)."
                                 },
                                 "prompt": {
                                     "type": "string",
