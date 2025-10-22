@@ -435,7 +435,7 @@ impl BrowserSessionCell {
                         if indent_cols > 0 {
                             segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
                         }
-                        let ellipsis_time = format!("{:>width$}", "⋮", width = time_width);
+                        let ellipsis_time = format!("{:<width$}", "⋮", width = time_width);
                         segments.push(CardSegment::new(
                             ellipsis_time,
                             secondary_text_style(style),
@@ -580,10 +580,7 @@ impl BrowserSessionCell {
             lines.push(String::new());
         }
 
-        let time_display = truncate_with_ellipsis(entry.time_label.as_str(), time_width);
-        let time_display_width = string_display_width(time_display.as_str());
-        let time_padding = time_width.saturating_sub(time_display_width);
-        let time_column = format!("{}{}", time_display, " ".repeat(time_padding));
+        let time_column = format!("{:<width$}", entry.time_label.as_str(), width = time_width);
         let continuation_time = " ".repeat(time_width);
 
         let label_column = format!("{}{}", label_display, " ".repeat(label_padding));
@@ -731,7 +728,7 @@ impl BrowserSessionCell {
         if effective_time_width == 0 {
             return Vec::new();
         }
-        let time_display = format!("{:>width$}", entry.time_label.as_str(), width = effective_time_width);
+        let time_display = format!("{:<width$}", entry.time_label.as_str(), width = effective_time_width);
         segments.push(CardSegment::new(time_display, time_style));
 
         let mut remaining = available.saturating_sub(effective_time_width);
@@ -811,7 +808,7 @@ impl BrowserSessionCell {
         } else {
             let minutes = total_secs / 60;
             let seconds = total_secs % 60;
-            format!("{}m {:>2}s", minutes, seconds)
+            format!("{}m {}s", minutes, seconds)
         }
     }
 
