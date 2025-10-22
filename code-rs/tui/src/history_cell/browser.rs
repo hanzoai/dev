@@ -46,6 +46,8 @@ const SCREENSHOT_MAX_WIDTH: usize = 64;
 const SCREENSHOT_LEFT_PAD: usize = 1;
 const MIN_TEXT_WIDTH: usize = 28;
 const ACTION_LABEL_GAP: usize = 2;
+const ACTION_TIME_GAP: usize = 2;
+const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 pub(crate) struct BrowserSessionCell {
     url: Option<String>,
     title: Option<String>,
@@ -110,6 +112,7 @@ struct ScreenshotLayout {
 struct ActionEntry {
     label: String,
     detail: String,
+    time_label: String,
 }
 
 enum ActionDisplayLine {
@@ -123,6 +126,7 @@ struct BrowserAction {
     target: Option<String>,
     value: Option<String>,
     outcome: Option<String>,
+    timestamp: Duration,
 }
 
 impl BrowserSessionCell {
@@ -180,6 +184,7 @@ impl BrowserSessionCell {
             target,
             value,
             outcome: outcome.clone(),
+            timestamp,
         };
         self.actions.push(action_entry);
         if self.actions.len() > MAX_ACTIONS {
@@ -372,7 +377,8 @@ impl BrowserSessionCell {
 
         let content_start = rows.len();
 
-        let action_display = self.formatted_action_display();
+        let show_minutes = self.total_duration.as_secs() >= 60;
+        let action_display = self.formatted_action_display(show_minutes);
         let label_width = action_display
             .iter()
             .filter_map(|line| match line {
@@ -381,6 +387,17 @@ impl BrowserSessionCell {
             })
             .max()
             .unwrap_or(0);
+        let time_width = action_display
+            .iter()
+            .filter_map(|line| match line {
+                ActionDisplayLine::Entry(entry) => {
+                    Some(string_display_width(entry.time_label.as_str()))
+                }
+                ActionDisplayLine::Ellipsis => None,
+            })
+            .max()
+            .unwrap_or(0)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
         if action_display.is_empty() {
             for wrapped in wrap_card_lines(
@@ -409,17 +426,31 @@ impl BrowserSessionCell {
                             indent_cols,
                             right_padding,
                             label_width,
+                            time_width,
                         );
                         rows.extend(entry_rows);
                     }
                     ActionDisplayLine::Ellipsis => {
-                        rows.push(self.body_text_row(
-                            "⋮",
-                            body_width,
-                            style,
-                            primary_text_style(style),
-                            indent_cols,
-                            right_padding,
+                        let mut segments = Vec::new();
+                        if indent_cols > 0 {
+                            segments.push(CardSegment::new(" ".repeat(indent_cols), Style::default()));
+                        }
+                        let ellipsis_time = format!("{:<width$}", "⋮", width = time_width);
+                        segments.push(CardSegment::new(
+                            ellipsis_time,
+                            secondary_text_style(style),
+                        ));
+                        if ACTION_TIME_GAP > 0 {
+                            segments.push(CardSegment::new(
+                                " ".repeat(ACTION_TIME_GAP),
+                                Style::default(),
+                            ));
+                        }
+                        rows.push(CardRow::new(
+                            BORDER_BODY.to_string(),
+                            Self::accent_style(style),
+                            segments,
+                            None,
                         ));
                     }
                 }
@@ -496,36 +527,48 @@ impl BrowserSessionCell {
         indent_cols: usize,
         right_padding: usize,
         label_width: usize,
+        time_width: usize,
     ) -> Vec<CardRow> {
-        if body_width == 0 {
-            return Vec::new();
-        }
-        let indent = indent_cols.min(body_width.saturating_sub(1));
-        let available = body_width.saturating_sub(indent);
-        if available == 0 {
+        if body_width == 0 || time_width == 0 {
             return Vec::new();
         }
 
-        let base_available = available.saturating_sub(right_padding);
+        let indent = indent_cols.min(body_width.saturating_sub(1));
+        let available = body_width.saturating_sub(indent);
+        if available <= time_width {
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+        }
+
+        const TIME_GAP: usize = ACTION_TIME_GAP;
+        let after_time = available.saturating_sub(time_width);
+        if after_time <= TIME_GAP {
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+        }
+        let after_time_gap = after_time.saturating_sub(TIME_GAP);
+        if after_time_gap == 0 {
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
+        }
+
+        let base_available = after_time_gap.saturating_sub(right_padding);
         if base_available == 0 {
-            return Vec::new();
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
         }
 
         let max_label_width = base_available.saturating_sub(ACTION_LABEL_GAP + 1);
         if max_label_width == 0 {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding);
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
         }
 
         let effective_label_width = label_width.min(max_label_width);
         let detail_width = base_available
             .saturating_sub(effective_label_width + ACTION_LABEL_GAP);
         if detail_width == 0 {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding);
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
         }
 
         let label_full_width = string_display_width(entry.label.as_str());
         if effective_label_width < label_full_width {
-            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding);
+            return self.render_fallback_entry(entry, body_width, style, indent_cols, right_padding, time_width);
         }
 
         let label_display = entry.label.clone();
@@ -537,10 +580,16 @@ impl BrowserSessionCell {
             lines.push(String::new());
         }
 
+        let time_column = format!("{:<width$}", entry.time_label.as_str(), width = time_width);
+        let continuation_time = " ".repeat(time_width);
+
         let label_column = format!("{}{}", label_display, " ".repeat(label_padding));
+        let continuation_label = " ".repeat(effective_label_width);
+
         let mut rows = Vec::new();
         let label_style = secondary_text_style(style);
         let detail_style = primary_text_style(style);
+        let time_style = Style::default().fg(colors::text());
 
         let indent_string = if indent > 0 {
             Some(" ".repeat(indent))
@@ -553,29 +602,36 @@ impl BrowserSessionCell {
                 body_width,
                 style,
                 indent_string.as_deref().unwrap_or(""),
-                &label_column,
+                time_column.as_str(),
+                time_width,
+                TIME_GAP,
+                label_column.as_str(),
+                effective_label_width,
                 &gap,
                 first,
                 indent,
-                effective_label_width,
                 right_padding,
+                time_style,
                 label_style,
                 detail_style,
             ));
         }
 
-        let continuation_label = " ".repeat(effective_label_width);
         for detail_line in lines.iter().skip(1) {
             rows.push(self.build_action_row(
                 body_width,
                 style,
                 indent_string.as_deref().unwrap_or(""),
-                &continuation_label,
+                continuation_time.as_str(),
+                time_width,
+                TIME_GAP,
+                continuation_label.as_str(),
+                effective_label_width,
                 &gap,
                 detail_line,
                 indent,
-                effective_label_width,
                 right_padding,
+                time_style,
                 label_style,
                 detail_style,
             ));
@@ -589,12 +645,16 @@ impl BrowserSessionCell {
         body_width: usize,
         style: &CardStyle,
         indent: &str,
+        time: &str,
+        time_width: usize,
+        time_gap: usize,
         label: &str,
+        label_width: usize,
         gap: &str,
         detail: &str,
         indent_cols: usize,
-        label_width: usize,
         right_padding: usize,
+        time_style: Style,
         label_style: Style,
         detail_style: Style,
     ) -> CardRow {
@@ -603,6 +663,16 @@ impl BrowserSessionCell {
         if !indent.is_empty() {
             segments.push(CardSegment::new(indent.to_string(), Style::default()));
             consumed += indent_cols;
+        }
+
+        if !time.is_empty() {
+            segments.push(CardSegment::new(time.to_string(), time_style));
+            consumed += time_width;
+        }
+
+        if time_gap > 0 {
+            segments.push(CardSegment::new(" ".repeat(time_gap), Style::default()));
+            consumed += time_gap;
         }
 
         if !label.is_empty() {
@@ -635,29 +705,57 @@ impl BrowserSessionCell {
         body_width: usize,
         style: &CardStyle,
         indent_cols: usize,
-        right_padding: usize,
+        _right_padding: usize,
+        time_width: usize,
     ) -> Vec<CardRow> {
-        let combined = if entry.detail.is_empty() {
-            entry.label.clone()
-        } else {
-            format!("{} {}", entry.label.trim(), entry.detail.trim())
-        };
-        wrap_card_lines(combined.trim(), body_width, indent_cols, right_padding)
-            .into_iter()
-            .map(|wrapped| {
-                self.body_text_row(
-                    wrapped,
-                    body_width,
-                    style,
-                    primary_text_style(style),
-                    indent_cols,
-                    right_padding,
-                )
-            })
-            .collect()
+        if body_width == 0 {
+            return Vec::new();
+        }
+
+        let indent = indent_cols.min(body_width.saturating_sub(1));
+        let available = body_width.saturating_sub(indent);
+        if available == 0 {
+            return Vec::new();
+        }
+
+        let mut segments = Vec::new();
+        if indent > 0 {
+            segments.push(CardSegment::new(" ".repeat(indent), Style::default()));
+        }
+
+        let time_style = Style::default().fg(colors::text());
+        let effective_time_width = available.min(time_width).max(ACTION_TIME_COLUMN_MIN_WIDTH.min(available));
+        if effective_time_width == 0 {
+            return Vec::new();
+        }
+        let time_display = format!("{:<width$}", entry.time_label.as_str(), width = effective_time_width);
+        segments.push(CardSegment::new(time_display, time_style));
+
+        let mut remaining = available.saturating_sub(effective_time_width);
+        if remaining >= ACTION_TIME_GAP {
+            segments.push(CardSegment::new(" ".repeat(ACTION_TIME_GAP), Style::default()));
+            remaining = remaining.saturating_sub(ACTION_TIME_GAP);
+        }
+
+        if remaining > 0 {
+            let combined = if entry.detail.is_empty() {
+                entry.label.clone()
+            } else {
+                format!("{} {}", entry.label.trim(), entry.detail.trim())
+            };
+            let rest_display = truncate_with_ellipsis(combined.trim(), remaining);
+            segments.push(CardSegment::new(rest_display, primary_text_style(style)));
+        }
+
+        vec![CardRow::new(
+            BORDER_BODY.to_string(),
+            Self::accent_style(style),
+            segments,
+            None,
+        )]
     }
 
-    fn formatted_action_display(&self) -> Vec<ActionDisplayLine> {
+    fn formatted_action_display(&self, show_minutes: bool) -> Vec<ActionDisplayLine> {
         let mut entries: Vec<ActionEntry> = Vec::new();
         let has_actions = !self.actions.is_empty();
         if !has_actions {
@@ -665,11 +763,15 @@ impl BrowserSessionCell {
                 entries.push(ActionEntry {
                     label: "Opened".to_string(),
                     detail: url.clone(),
+                    time_label: Self::format_elapsed_label(Duration::ZERO, show_minutes),
                 });
             }
         }
 
-        entries.extend(self.actions.iter().map(format_action_entry));
+        entries.extend(self.actions.iter().map(|action| {
+            let time_label = Self::format_elapsed_label(action.timestamp, show_minutes);
+            format_action_entry(action, time_label)
+        }));
 
         if entries.is_empty() {
             return Vec::new();
@@ -696,6 +798,17 @@ impl BrowserSessionCell {
                 .into_iter()
                 .map(ActionDisplayLine::Entry)
                 .collect()
+        }
+    }
+
+    fn format_elapsed_label(duration: Duration, _show_minutes: bool) -> String {
+        let total_secs = duration.as_secs();
+        if total_secs < 60 {
+            format!("{}s", total_secs)
+        } else {
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            format!("{}m {}s", minutes, seconds)
         }
     }
 
@@ -1151,7 +1264,7 @@ fn format_action_summary(action: &BrowserAction) -> String {
     }
 }
 
-fn format_action_entry(action: &BrowserAction) -> ActionEntry {
+fn format_action_entry(action: &BrowserAction, time_label: String) -> ActionEntry {
     let action_lower = action.action.to_ascii_lowercase();
     match action_lower.as_str() {
         "click" | "mouse_click" => {
@@ -1170,6 +1283,7 @@ fn format_action_entry(action: &BrowserAction) -> ActionEntry {
             ActionEntry {
                 label: "Clicked".to_string(),
                 detail,
+                time_label,
             }
         }
         "press_key" | "key" | "press" => {
@@ -1184,6 +1298,7 @@ fn format_action_entry(action: &BrowserAction) -> ActionEntry {
             ActionEntry {
                 label: "Pressed".to_string(),
                 detail: key,
+                time_label,
             }
         }
         "type" | "input" | "enter_text" | "fill" | "insert_text" => {
@@ -1197,6 +1312,7 @@ fn format_action_entry(action: &BrowserAction) -> ActionEntry {
             ActionEntry {
                 label: "Typed".to_string(),
                 detail: typed,
+                time_label,
             }
         }
         "navigate" | "open" | "nav" => {
@@ -1223,6 +1339,7 @@ fn format_action_entry(action: &BrowserAction) -> ActionEntry {
             ActionEntry {
                 label: "Opened".to_string(),
                 detail: dest,
+                time_label,
             }
         }
         other if other.starts_with("scroll") => {
@@ -1256,6 +1373,7 @@ fn format_action_entry(action: &BrowserAction) -> ActionEntry {
             ActionEntry {
                 label: "Scrolled".to_string(),
                 detail,
+                time_label,
             }
         }
         _ => {
@@ -1270,6 +1388,7 @@ fn format_action_entry(action: &BrowserAction) -> ActionEntry {
             ActionEntry {
                 label,
                 detail: trimmed,
+                time_label,
             }
         }
     }
