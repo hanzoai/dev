@@ -711,9 +711,7 @@ impl AgentRunCell {
                 if let Some(progress) = preview.step_progress.as_ref() {
                     meta_parts.push(format!("{}/{}", progress.completed, progress.total));
                 }
-                if let Some(tokens) = preview.token_count {
-                    meta_parts.push(format!("{} tok", tokens));
-                }
+                // Token counts add noise in the compact card view; leave them out here.
 
                 let meta = if meta_parts.is_empty() {
                     String::new()
