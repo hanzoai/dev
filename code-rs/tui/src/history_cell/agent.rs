@@ -27,6 +27,7 @@ use unicode_width::UnicodeWidthChar;
 const MAX_PLAN_LINES: usize = 4;
 const MAX_SUMMARY_LINES: usize = 4;
 const MAX_AGENT_DISPLAY: usize = 8;
+const ACTION_TIME_COLUMN_WIDTH: usize = 11;
 
 #[derive(Clone, Default)]
 pub(crate) struct AgentRunCell {
@@ -56,6 +57,7 @@ pub(crate) struct AgentStatusPreview {
     pub status_kind: AgentStatusKind,
     pub step_progress: Option<StepProgress>,
     pub elapsed: Option<Duration>,
+    #[allow(dead_code)]
     pub token_count: Option<u64>,
     pub last_update: Option<String>,
     pub elapsed_updated_at: Option<Instant>,
@@ -975,17 +977,8 @@ impl AgentRunCell {
         let mut rows = Vec::new();
         rows.push(self.section_heading_row("Actions", body_width, style));
 
-        let show_minutes = self
-            .actions
-            .iter()
-            .any(|entry| entry.elapsed.as_secs() >= 60);
-
         for entry in &self.actions {
-            let elapsed = if show_minutes {
-                Self::format_elapsed(entry.elapsed)
-            } else {
-                Self::format_elapsed_seconds(entry.elapsed)
-            };
+            let elapsed = Self::format_elapsed_label(entry.elapsed);
             let indent_str = " ".repeat(CONTENT_INDENT);
             let indent_style = secondary_text_style(style);
             let time_style = Style::default().fg(colors::text());
@@ -999,11 +992,12 @@ impl AgentRunCell {
             segments.push(CardSegment::new(indent_str, indent_style));
 
             let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
-            let time_width = string_width(elapsed.as_str());
-            if time_width > remaining {
+            if remaining <= ACTION_TIME_COLUMN_WIDTH {
                 continue;
             }
-            segments.push(CardSegment::new(elapsed.clone(), time_style));
+            let padded_time = format!("{:>width$}", elapsed, width = ACTION_TIME_COLUMN_WIDTH);
+            let time_width = string_width(padded_time.as_str());
+            segments.push(CardSegment::new(padded_time, time_style));
             remaining = remaining.saturating_sub(time_width);
 
             if remaining > 0 {
@@ -1097,17 +1091,16 @@ impl AgentRunCell {
         })
     }
 
-    fn format_elapsed(duration: Duration) -> String {
+    fn format_elapsed_label(duration: Duration) -> String {
         let total_secs = duration.as_secs();
-        let minutes = total_secs / 60;
-        let seconds = total_secs % 60;
-        format!("{:02}m {:02}s", minutes, seconds)
+        if total_secs < 60 {
+            format!("{}s", total_secs)
+        } else {
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            format!("{}m {:>2}s", minutes, seconds)
+        }
     }
-
-    fn format_elapsed_seconds(duration: Duration) -> String {
-        format!("{:02}s", duration.as_secs())
-    }
-
     fn agent_counts(&self) -> AgentCountSummary {
         let mut summary = AgentCountSummary::default();
         for agent in &self.agents {
