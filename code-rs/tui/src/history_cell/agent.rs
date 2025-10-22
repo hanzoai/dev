@@ -69,7 +69,7 @@ pub(crate) struct StepProgress {
     pub total: u32,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum AgentStatusKind {
     #[default]
     Running,

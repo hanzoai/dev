@@ -256,6 +256,7 @@ pub(super) struct AgentRunTracker {
     agent_started_at: HashMap<String, Instant>,
     agent_elapsed: HashMap<String, Duration>,
     agent_token_counts: HashMap<String, u64>,
+    agent_announced_status: HashMap<String, AgentStatusKind>,
     anchor_inserted: bool,
     write_enabled: Option<bool>,
 }
@@ -276,6 +277,7 @@ impl AgentRunTracker {
             agent_started_at: HashMap::new(),
             agent_elapsed: HashMap::new(),
             agent_token_counts: HashMap::new(),
+            agent_announced_status: HashMap::new(),
             anchor_inserted: false,
             write_enabled: None,
         }
@@ -1126,6 +1128,24 @@ fn process_status_update_for_batch(
 
     let mut status_updates: Vec<String> = Vec::new();
     for preview in &previews {
+        let current_kind = preview.status_kind;
+        let previous_kind = tracker
+            .agent_announced_status
+            .get(preview.id.as_str())
+            .copied();
+        tracker
+            .agent_announced_status
+            .insert(preview.id.clone(), current_kind);
+
+        let should_emit = matches!(
+            current_kind,
+            AgentStatusKind::Completed | AgentStatusKind::Failed | AgentStatusKind::Cancelled
+        ) && previous_kind != Some(current_kind);
+
+        if !should_emit {
+            continue;
+        }
+
         let label = tracker
             .cell
             .agent_name_for_id(preview.id.as_str())
@@ -1141,7 +1161,7 @@ fn process_status_update_for_batch(
                 }
             });
 
-        match preview.status_kind {
+        match current_kind {
             AgentStatusKind::Completed => status_updates.push(format!("{} completed", label)),
             AgentStatusKind::Failed => status_updates.push(format!("{} failed", label)),
             AgentStatusKind::Cancelled => status_updates.push(format!("{} cancelled", label)),
