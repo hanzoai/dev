@@ -1025,7 +1025,7 @@ impl AgentRunCell {
             if truncated && position == head_count {
                 let mut ellipsis_segments = Vec::new();
                 ellipsis_segments.push(CardSegment::new(indent_text.clone(), indent_style));
-                let ellipsis_time = format!("{:>width$}", "⋮", width = time_width);
+                let ellipsis_time = format!("{:<width$}", "⋮", width = time_width);
                 ellipsis_segments.push(CardSegment::new(
                     ellipsis_time,
                     secondary_text_style(style),
@@ -1058,7 +1058,7 @@ impl AgentRunCell {
             if remaining <= time_width {
                 continue;
             }
-            let padded_time = format!("{:>width$}", elapsed, width = time_width);
+            let padded_time = format!("{:<width$}", elapsed, width = time_width);
             segments.push(CardSegment::new(padded_time, time_style));
             remaining = remaining.saturating_sub(time_width);
 
@@ -1165,7 +1165,7 @@ impl AgentRunCell {
         } else {
             let minutes = total_secs / 60;
             let seconds = total_secs % 60;
-            format!("{}m {:>2}s", minutes, seconds)
+            format!("{}m {}s", minutes, seconds)
         }
     }
     fn agent_counts(&self) -> AgentCountSummary {
