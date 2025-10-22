@@ -122,3 +122,61 @@ fn exec_spinner_clears_after_final_answer() {
         output
     );
 }
+
+#[test]
+fn synthetic_end_clears_cancelled_exec_spinner() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut seq = 0_u64;
+    let call_id = "call_cancel".to_string();
+    let cwd = PathBuf::from("/tmp");
+    let sub_id = "exec-cancel".to_string();
+
+    harness.handle_event(Event {
+        id: sub_id.clone(),
+        event_seq: 0,
+        msg: EventMsg::ExecCommandBegin(ExecCommandBeginEvent {
+            call_id: call_id.clone(),
+            command: vec!["bash".into(), "-lc".into(), "sleep 5".into()],
+            cwd: cwd.clone(),
+            parsed_cmd: Vec::new(),
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    let before = render_chat_widget_to_vt100(&mut harness, 80, 12);
+    assert!(
+        before.contains("sleep 5"),
+        "exec cell should include command before synthetic end, output:\n{}",
+        before
+    );
+    assert!(
+        !before.contains("Command cancelled by user."),
+        "cancellation details should not appear before synthetic end, output:\n{}",
+        before
+    );
+
+    harness.handle_event(Event {
+        id: sub_id.clone(),
+        event_seq: 1,
+        msg: EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: call_id,
+            stdout: String::new(),
+            stderr: "Command cancelled by user.".to_string(),
+            exit_code: 130,
+            duration: Duration::ZERO,
+        }),
+        order: Some(next_order_meta(1, &mut seq)),
+    });
+
+    let after = render_chat_widget_to_vt100(&mut harness, 80, 12);
+    assert!(
+        after.contains("✖") || after.contains("exit code"),
+        "synthetic end should mark the exec as finished:\n{}",
+        after
+    );
+    assert!(
+        after.contains("Command cancelled by user."),
+        "expected cancellation context in output, got:\n{}",
+        after
+    );
+}
