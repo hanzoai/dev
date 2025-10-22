@@ -986,25 +986,63 @@ impl AgentRunCell {
                 (formatted, width)
             })
             .collect();
-        let time_width = rendered_times
+
+        const ACTIONS_HEAD_COUNT: usize = 2;
+        const ACTIONS_TAIL_COUNT: usize = 4;
+        let total_actions = self.actions.len();
+        let truncated = total_actions > 7;
+
+        let head_count = ACTIONS_HEAD_COUNT.min(total_actions);
+        let tail_count = if truncated {
+            ACTIONS_TAIL_COUNT.min(total_actions.saturating_sub(head_count))
+        } else {
+            total_actions.saturating_sub(head_count)
+        };
+        let tail_start = total_actions.saturating_sub(tail_count);
+
+        let mut display_indices: Vec<usize> = Vec::new();
+        display_indices.extend(0..head_count);
+        if truncated {
+            display_indices.extend(tail_start..total_actions);
+        } else {
+            display_indices.extend(head_count..total_actions);
+        }
+
+        let time_width = display_indices
             .iter()
-            .map(|(_, width)| *width)
+            .map(|idx| rendered_times[*idx].1)
             .max()
             .unwrap_or(0)
             .max(ACTION_TIME_COLUMN_MIN_WIDTH);
 
-        for (entry, (elapsed, _elapsed_width)) in self.actions.iter().zip(rendered_times.iter()) {
-            let indent_str = " ".repeat(CONTENT_INDENT);
-            let indent_style = secondary_text_style(style);
-            let time_style = Style::default().fg(colors::text());
-            let label_style = secondary_text_style(style);
+        let indent_text = " ".repeat(CONTENT_INDENT);
+        let indent_style = secondary_text_style(style);
+        let time_style = Style::default().fg(colors::text());
+        let label_style = secondary_text_style(style);
+
+        for (position, idx) in display_indices.iter().enumerate() {
+            if truncated && position == head_count {
+                let mut ellipsis_segments = Vec::new();
+                ellipsis_segments.push(CardSegment::new(indent_text.clone(), indent_style));
+                let ellipsis_time = format!("{:>width$}", "⋮", width = time_width);
+                ellipsis_segments.push(CardSegment::new(ellipsis_time, secondary_text_style(style)));
+                rows.push(CardRow::new(
+                    BORDER_BODY.to_string(),
+                    Self::accent_style(style),
+                    ellipsis_segments,
+                    None,
+                ));
+            }
+
+            let entry = &self.actions[*idx];
+            let (elapsed, _) = &rendered_times[*idx];
 
             if body_width <= CONTENT_INDENT {
                 continue;
             }
 
             let mut segments = Vec::new();
-            segments.push(CardSegment::new(indent_str, indent_style));
+            segments.push(CardSegment::new(indent_text.clone(), indent_style));
 
             let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
             if remaining <= time_width {
