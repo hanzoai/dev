@@ -1432,8 +1432,8 @@ fn build_schema(active_agents: &[String], features: SchemaFeatures) -> Value {
                 "prompt": {
                     "type": "string",
                     "minLength": 4,
-                    "maxLength": 240,
-                    "description": "Exactly one objective in 1–2 sentences. No step lists."
+                    "maxLength": 600,
+                    "description": "1–2 sentences. No step lists. Give the CLI autonomy while working; simple prompts like \"Please continue\", \"Work on feature A now\", or \"What do you think is the best approach?\" keep guidance high level."
                 }
             },
             "required": ["prompt", "context"]
