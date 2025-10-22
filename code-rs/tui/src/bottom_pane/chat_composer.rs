@@ -2200,6 +2200,20 @@ impl ChatComposer {
 
                 if self.auto_drive_active {
                     hint_spans.clear();
+
+                    let mut auto_drive_hint_spans: Vec<Span<'static>> = Vec::new();
+                    auto_drive_hint_spans.push(Span::from("Ctrl+S").style(key_hint_style));
+                    auto_drive_hint_spans.push(Span::from(" settings").style(label_style));
+                    auto_drive_hint_spans.push(Span::from(" • ").style(label_style));
+                    auto_drive_hint_spans.push(Span::from("Esc").style(key_hint_style));
+                    auto_drive_hint_spans.push(Span::from(" stop Auto Drive").style(label_style));
+
+                    if !auto_drive_hint_spans.is_empty() {
+                        if !right_spans.is_empty() {
+                            right_spans.push(Span::from("  •  ").style(label_style));
+                        }
+                        right_spans.extend(auto_drive_hint_spans);
+                    }
                 }
 
                 let measure = |spans: &[Span<'static>]| -> usize {
