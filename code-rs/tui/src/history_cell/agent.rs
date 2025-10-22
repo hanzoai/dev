@@ -977,8 +977,23 @@ impl AgentRunCell {
         let mut rows = Vec::new();
         rows.push(self.section_heading_row("Actions", body_width, style));
 
-        for entry in &self.actions {
-            let elapsed = Self::format_elapsed_label(entry.elapsed);
+        let rendered_times: Vec<(String, usize)> = self
+            .actions
+            .iter()
+            .map(|entry| {
+                let formatted = Self::format_elapsed_label(entry.elapsed);
+                let width = string_width(formatted.as_str());
+                (formatted, width)
+            })
+            .collect();
+        let time_width = rendered_times
+            .iter()
+            .map(|(_, width)| *width)
+            .max()
+            .unwrap_or(0)
+            .max(ACTION_TIME_COLUMN_MIN_WIDTH);
+
+        for (entry, (elapsed, _elapsed_width)) in self.actions.iter().zip(rendered_times.iter()) {
             let indent_str = " ".repeat(CONTENT_INDENT);
             let indent_style = secondary_text_style(style);
             let time_style = Style::default().fg(colors::text());
@@ -992,11 +1007,7 @@ impl AgentRunCell {
             segments.push(CardSegment::new(indent_str, indent_style));
 
             let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
-            if remaining <= ACTION_TIME_COLUMN_MIN_WIDTH {
-                continue;
-            }
-            let time_width = string_width(elapsed.as_str()).max(ACTION_TIME_COLUMN_MIN_WIDTH);
-            if time_width > remaining {
+            if remaining <= time_width {
                 continue;
             }
             let padded_time = format!("{:>width$}", elapsed, width = time_width);
