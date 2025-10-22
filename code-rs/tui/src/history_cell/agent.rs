@@ -27,7 +27,7 @@ use unicode_width::UnicodeWidthChar;
 const MAX_PLAN_LINES: usize = 4;
 const MAX_SUMMARY_LINES: usize = 4;
 const MAX_AGENT_DISPLAY: usize = 8;
-const ACTION_TIME_COLUMN_WIDTH: usize = 11;
+const ACTION_TIME_COLUMN_MIN_WIDTH: usize = 2;
 
 #[derive(Clone, Default)]
 pub(crate) struct AgentRunCell {
@@ -992,11 +992,14 @@ impl AgentRunCell {
             segments.push(CardSegment::new(indent_str, indent_style));
 
             let mut remaining = body_width.saturating_sub(CONTENT_INDENT);
-            if remaining <= ACTION_TIME_COLUMN_WIDTH {
+            if remaining <= ACTION_TIME_COLUMN_MIN_WIDTH {
                 continue;
             }
-            let padded_time = format!("{:>width$}", elapsed, width = ACTION_TIME_COLUMN_WIDTH);
-            let time_width = string_width(padded_time.as_str());
+            let time_width = string_width(elapsed.as_str()).max(ACTION_TIME_COLUMN_MIN_WIDTH);
+            if time_width > remaining {
+                continue;
+            }
+            let padded_time = format!("{:>width$}", elapsed, width = time_width);
             segments.push(CardSegment::new(padded_time, time_style));
             remaining = remaining.saturating_sub(time_width);
 
