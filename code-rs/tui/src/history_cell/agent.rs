@@ -597,7 +597,13 @@ impl AgentRunCell {
         let mut lines: Vec<String> = Vec::new();
 
         if let Some(task) = self.task.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty()) {
-            lines.push(task.to_string());
+            let cleaned = task
+                .split_once("Context:")
+                .map(|(before, _)| before.trim_end())
+                .unwrap_or(task);
+            if !cleaned.is_empty() {
+                lines.push(cleaned.to_string());
+            }
         }
 
         if !self.plan.is_empty() {
@@ -628,7 +634,7 @@ impl AgentRunCell {
             return Vec::new();
         }
 
-        let mut rows = self.prompt_rows(body_width, style);
+        let mut rows = Vec::new();
         rows.push(self.section_heading_row("Agents", body_width, style));
 
         if self.agents.is_empty() {
