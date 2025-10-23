@@ -22,7 +22,6 @@ use crate::app::ChatWidgetArgs;
 use crate::chrome_launch::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 use code_protocol::models::ResponseItem;
-use serde_json::Value as JsonValue;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
@@ -78,123 +77,13 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnCliAction {
-    pub prompt: String,
-    pub context: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoTurnAgentsTiming {
-    /// Launch agents and continue executing the CLI prompt while they run.
-    Parallel,
-    /// Launch agents and wait for their results before progressing.
-    Blocking,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnAgentsAction {
-    pub prompt: String,
-    pub context: Option<String>,
-    pub write: bool,
-    pub write_requested: Option<bool>,
-    pub models: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ObserverMode {
-    Bootstrap,
-    Cadence,
-    CrossCheck,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoCoordinatorStatus {
-    Continue,
-    Success,
-    Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoObserverStatus {
-    Ok,
-    Failing,
-}
-
-impl Default for AutoObserverStatus {
-    fn default() -> Self {
-        Self::Ok
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct AutoObserverTelemetry {
-    pub trigger_count: u64,
-    pub last_status: AutoObserverStatus,
-    pub last_intervention: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AutoObserverReason {
-    Cadence,
-    CrossCheck {
-        forced: bool,
-        summary: Option<String>,
-        focus: Option<String>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AutoContinueMode {
-    Immediate,
-    TenSeconds,
-    SixtySeconds,
-    Manual,
-}
-
-impl Default for AutoContinueMode {
-    fn default() -> Self {
-        Self::TenSeconds
-    }
-}
-
-impl AutoContinueMode {
-    pub fn seconds(self) -> Option<u8> {
-        match self {
-            Self::Immediate => Some(0),
-            Self::TenSeconds => Some(10),
-            Self::SixtySeconds => Some(60),
-            Self::Manual => None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Immediate => "Immediate",
-            Self::TenSeconds => "10 seconds",
-            Self::SixtySeconds => "60 seconds",
-            Self::Manual => "Manual approval",
-        }
-    }
-
-    pub fn cycle_forward(self) -> Self {
-        match self {
-            Self::Immediate => Self::TenSeconds,
-            Self::TenSeconds => Self::SixtySeconds,
-            Self::SixtySeconds => Self::Manual,
-            Self::Manual => Self::Immediate,
-        }
-    }
-
-    pub fn cycle_backward(self) -> Self {
-        match self {
-            Self::Immediate => Self::Manual,
-            Self::TenSeconds => Self::Immediate,
-            Self::SixtySeconds => Self::TenSeconds,
-            Self::Manual => Self::SixtySeconds,
-        }
-    }
-}
+pub(crate) use code_auto_drive_core::{
+    AutoContinueMode,
+    AutoCoordinatorStatus,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+};
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -223,12 +112,6 @@ pub(crate) enum AppEvent {
         result: Result<GhostCommit, GitToolingError>,
         elapsed: Duration,
     },
-
-    /// Placeholder QA automation updates (no-op for now).
-    AutoQaUpdate { note: String },
-
-    /// Placeholder review requests routed from the QA orchestrator.
-    AutoReviewRequest { summary: Option<String> },
 
     /// Internal: flush any pending out-of-order ExecEnd events that did not
     /// receive a matching ExecBegin within a short pairing window. This lets
@@ -275,26 +158,6 @@ pub(crate) enum AppEvent {
         token: u64,
         attempt: u32,
     },
-    AutoObserverReport {
-        mode: ObserverMode,
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
-        reason: AutoObserverReason,
-        conversation: Vec<ResponseItem>,
-        raw_output: Option<String>,
-        parsed_response: Option<JsonValue>,
-    },
-    AutoObserverThinking {
-        mode: ObserverMode,
-        delta: String,
-        summary_index: Option<u32>,
-    },
-    AutoObserverReady {
-        baseline_summary: Option<String>,
-        bootstrap_len: usize,
-    },
     ShowAutoDriveSettings,
     CloseAutoDriveSettings,
     AutoDriveSettingsChanged {
@@ -302,7 +165,6 @@ pub(crate) enum AppEvent {
         agents_enabled: bool,
         cross_check_enabled: bool,
         qa_automation_enabled: bool,
-        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     },
 

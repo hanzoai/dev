@@ -3,7 +3,7 @@
 use anyhow::Context;
 use serde_json::Value;
 
-pub(crate) fn user_turn_schema() -> Value {
+pub fn user_turn_schema() -> Value {
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
@@ -23,7 +23,7 @@ pub(crate) fn user_turn_schema() -> Value {
     })
 }
 
-pub(crate) fn parse_user_turn_reply(raw: &str) -> anyhow::Result<(Option<String>, Option<String>)> {
+pub fn parse_user_turn_reply(raw: &str) -> anyhow::Result<(Option<String>, Option<String>)> {
     let value: Value = serde_json::from_str(raw)
         .context("parsing coordinator user turn JSON")?;
     let obj = value
