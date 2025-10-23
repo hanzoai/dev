@@ -57,9 +57,11 @@ use code_protocol::num_format::format_with_separators;
 
 pub(crate) mod auto_coordinator;
 mod auto_drive_history;
+#[cfg(FALSE)]
 mod auto_observer;
 mod coordinator_router;
 mod coordinator_user_schema;
+#[cfg(FALSE)]
 mod qa_orchestrator;
 #[cfg(feature = "dev-faults")]
 mod faults;
@@ -106,6 +108,7 @@ use self::auto_coordinator::{
     TurnDescriptor,
     CROSS_CHECK_RESTART_BANNER,
 };
+#[cfg(FALSE)]
 use self::qa_orchestrator::start_qa_orchestrator;
 use self::limits_overlay::{LimitsOverlayContent, LimitsTab};
 use crate::chrome_launch::ChromeLaunchOption;
@@ -1188,6 +1191,7 @@ pub(crate) struct ChatWidget<'a> {
     auto_drive_variant: AutoDriveVariant,
     auto_state: AutoCoordinatorUiState,
     auto_handle: Option<AutoCoordinatorHandle>,
+    #[cfg(FALSE)]
     qa_handle: Option<qa_orchestrator::QaOrchestratorHandle>,
     auto_history: AutoDriveHistory,
     observer_history: ObserverHistory,
@@ -4380,6 +4384,7 @@ impl ChatWidget<'_> {
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
             observer_history: ObserverHistory::new(),
+            #[cfg(FALSE)]
             qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
@@ -4687,6 +4692,7 @@ impl ChatWidget<'_> {
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
             observer_history: ObserverHistory::new(),
+            #[cfg(FALSE)]
             qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
@@ -13606,13 +13612,17 @@ fi\n\
             self.config.auto_drive_observer_cadence,
         ) {
             Ok(handle) => {
+                #[cfg(FALSE)]
                 if let Some(handle) = self.qa_handle.take() {
                     handle.stop();
                 }
-                let should_spawn_qa =
-                    qa_automation_enabled && (review_enabled || cross_check_enabled || observer_enabled);
-                if should_spawn_qa {
-                    self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
+                #[cfg(FALSE)]
+                {
+                    let should_spawn_qa =
+                        qa_automation_enabled && (review_enabled || cross_check_enabled || observer_enabled);
+                    if should_spawn_qa {
+                        self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
+                    }
                 }
                 self.auto_handle = Some(handle);
                 self.auto_state.review_enabled = review_enabled;
@@ -13832,21 +13842,26 @@ fi\n\
         }
 
         let should_run_qa = self.auto_should_run_qa_orchestrator();
-        if self.auto_state.active {
-            match (self.qa_handle.is_some(), should_run_qa) {
-                (false, true) => {
-                    self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
-                }
-                (true, false) => {
-                    if let Some(handle) = self.qa_handle.take() {
-                        handle.stop();
+        #[cfg(not(FALSE))]
+        let _ = &should_run_qa;
+        #[cfg(FALSE)]
+        {
+            if self.auto_state.active {
+                match (self.qa_handle.is_some(), should_run_qa) {
+                    (false, true) => {
+                        self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
                     }
+                    (true, false) => {
+                        if let Some(handle) = self.qa_handle.take() {
+                            handle.stop();
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-        } else if !should_run_qa {
-            if let Some(handle) = self.qa_handle.take() {
-                handle.stop();
+            } else if !should_run_qa {
+                if let Some(handle) = self.qa_handle.take() {
+                    handle.stop();
+                }
             }
         }
 
@@ -14165,9 +14180,12 @@ fi\n\
             self.auto_state.pending_agent_actions.clear();
             self.auto_state.pending_agent_timing = None;
 
-            let has_diff = self.auto_turn_has_diff();
-            if let Some(handle) = self.qa_handle.as_ref() {
-                handle.notify_turn_finished(has_diff);
+            #[cfg(FALSE)]
+            {
+                let has_diff = self.auto_turn_has_diff();
+                if let Some(handle) = self.qa_handle.as_ref() {
+                    handle.notify_turn_finished(has_diff);
+                }
             }
         }
 
@@ -14625,182 +14643,9 @@ fi\n\
         self.auto_threads_overlay.push_entry(entry);
     }
 
-    pub(crate) fn auto_handle_observer_report(
-        &mut self,
-        mode: ObserverMode,
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
-        reason: AutoObserverReason,
-        conversation: Vec<ResponseItem>,
-        raw_output: Option<String>,
-        parsed_response: Option<JsonValue>,
-    ) {
-        self.observer_history.record_exchange(
-            mode,
-            status,
-            conversation.clone(),
-            raw_output.clone(),
-            replace_message.clone(),
-            additional_instructions.clone(),
-        );
-        if matches!(mode, ObserverMode::Bootstrap) {
-            self.observer_history.bootstrap_len = conversation.len();
-        }
-
-        match mode {
-            ObserverMode::Bootstrap => {
-                self.auto_queue_observer_banner("Observer baseline recorded.".to_string());
-            }
-            ObserverMode::CrossCheck => {
-                self.auto_queue_observer_banner("Cross-check in progress.".to_string());
-            }
-            ObserverMode::Cadence => {}
-        }
-
-        let reason_for_check = reason.clone();
-        if matches!(reason_for_check, AutoObserverReason::Cadence)
-            && !self.auto_state.observer_enabled
-        {
-            return;
-        }
-
-        self.record_auto_observer_thread(
-            mode,
-            reason,
-            status,
-            telemetry.clone(),
-            replace_message.clone(),
-            additional_instructions.clone(),
-            conversation,
-            raw_output,
-            parsed_response,
-        );
-
-        if !self.auto_state.active {
-            return;
-        }
-
-        self.auto_state.observer_status = status;
-        self.auto_state.observer_telemetry = Some(telemetry);
-
-        let flush_on_failing = self.auto_state.awaiting_submission;
-
-        if matches!(mode, ObserverMode::CrossCheck) && matches!(status, AutoObserverStatus::Ok) {
-            self.auto_queue_observer_banner("Cross-check successful.".to_string());
-        }
-
-        if matches!(status, AutoObserverStatus::Failing) {
-            let guidance = additional_instructions
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty());
-            let banner = guidance
-                .map(|text| format!("Observer guidance: {text}"))
-                .unwrap_or_else(|| "Observer flagged the last Auto Drive step.".to_string());
-            self.auto_queue_observer_banner(banner);
-
-            if let Some(message) = replace_message
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                self.auto_state.current_cli_prompt = Some(message.to_string());
-                let summary = Self::truncate_with_ellipsis(message, 160);
-                self.auto_queue_observer_banner(format!("Observer replaced prompt with: {summary}"));
-                if self.auto_state.awaiting_submission {
-                    self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-                    self.auto_state.reset_countdown();
-                    let countdown_seconds = self.auto_state.countdown_seconds();
-                    self.auto_flush_observer_banners();
-                    self.auto_start_countdown(self.auto_state.countdown_id, countdown_seconds);
-                }
-            } else if flush_on_failing {
-                self.auto_flush_observer_banners();
-            }
-        } else if let Some(note) = additional_instructions
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            self.auto_queue_observer_banner(format!("Observer note: {note}"));
-        } else if matches!(mode, ObserverMode::CrossCheck) {
-            self.auto_queue_observer_banner("Cross-check completed with no findings.".to_string());
-        }
-
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
-    pub(crate) fn auto_handle_observer_ready(
-        &mut self,
-        baseline_summary: Option<String>,
-        bootstrap_len: usize,
-    ) {
-        self.auto_state.observer_ready = true;
-        let len = self.observer_history.exchanges.len();
-        self.observer_history.bootstrap_len = if bootstrap_len == 0 {
-            len
-        } else {
-            bootstrap_len.min(len)
-        };
-        self.observer_history.last_sent_index = self.observer_history.bootstrap_len;
-
-        if let Some(summary) = baseline_summary
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            self.push_background_tail(format!("Observer ready: {summary}"));
-        } else {
-            self.push_background_tail("Observer ready.".to_string());
-        }
-
-        self.auto_queue_observer_banner("Observer bootstrap completed.".to_string());
-        self.auto_flush_observer_banners();
-
-        if let Some(handle) = self.auto_handle.as_ref() {
-            let len = self.observer_history.bootstrap_len;
-            let _ = handle.send(AutoCoordinatorCommand::ObserverBootstrapLen(len));
-        }
-
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
     fn observer_reset_state(&mut self) {
         self.observer_history.clear();
         self.auto_state.observer_ready = false;
-        if let Some(handle) = self.auto_handle.as_ref() {
-            let _ = handle.send(AutoCoordinatorCommand::ResetObserver);
-        }
-    }
-
-    pub(crate) fn auto_handle_observer_thinking(
-        &mut self,
-        mode: ObserverMode,
-        delta: String,
-        summary_index: Option<u32>,
-    ) {
-        let trimmed = delta.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        self.observer_history
-            .record_thinking(mode, summary_index, trimmed.to_string());
-
-        let mode_label = match mode {
-            ObserverMode::Bootstrap => "Bootstrap",
-            ObserverMode::Cadence => "Observer",
-            ObserverMode::CrossCheck => "Cross-check",
-        };
-
-        self.auto_threads_overlay.push_entry(AutoThreadEntry {
-            list_label: format!("{mode_label} thinking"),
-            detail_text: trimmed.to_string(),
-            detail_scroll: 0,
-        });
     }
 
     pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
@@ -14937,52 +14782,6 @@ fi\n\
         }
 
         false
-    }
-
-    pub(crate) fn handle_auto_qa_update(&mut self, note: String) {
-        let trimmed = note.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-
-        let banner = format!("Auto QA update: {trimmed}");
-        self.auto_queue_observer_banner(banner);
-        self.auto_flush_observer_banners();
-        self.bottom_pane.update_status_text(trimmed.to_string());
-        self.request_redraw();
-    }
-
-    pub(crate) fn handle_auto_review_request(&mut self, summary: Option<String>) {
-        let summary_text = summary
-            .as_ref()
-            .map(|text| text.trim())
-            .filter(|text| !text.is_empty())
-            .map(|text| text.to_string());
-
-        match summary_text.as_ref() {
-            Some(text) => self.push_background_tail(format!("QA review requested: {text}")),
-            None => self.push_background_tail("QA review requested.".to_string()),
-        }
-
-        if !self.auto_state.review_enabled {
-            self.push_background_tail(
-                "QA review skipped: Auto Drive reviews are disabled in settings.".to_string(),
-            );
-            self.request_redraw();
-            return;
-        }
-
-        self.prepare_auto_turn_review_state();
-        let cfg = self
-            .pending_auto_turn_config
-            .clone()
-            .unwrap_or_else(|| TurnConfig {
-                read_only: false,
-                complexity: None,
-            });
-
-        let descriptor = self.pending_turn_descriptor.clone();
-        self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
     }
 
     fn prepare_auto_turn_review_state(&mut self) {
@@ -15247,6 +15046,7 @@ use crate::chatwidget::message::UserMessage;
             handle.cancel();
             let _ = handle.send(AutoCoordinatorCommand::Stop);
         }
+        #[cfg(FALSE)]
         if let Some(handle) = self.qa_handle.take() {
             handle.notify_finalize(has_diff);
             handle.stop();
@@ -23518,63 +23318,6 @@ mod tests {
         assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::PlanUpdate));
         assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::BackgroundEvent));
         assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::Plain));
-    }
-
-    #[test]
-    fn auto_observer_failing_reports_flush_duplicate_banners_on_success() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_state.awaiting_submission = false;
-        chat.auto_state.waiting_for_response = false;
-
-        let telemetry = AutoObserverTelemetry {
-            last_status: AutoObserverStatus::Failing,
-            ..AutoObserverTelemetry::default()
-        };
-        let instruction = "Tighten up the summary";
-
-        for _ in 0..3 {
-            chat.auto_handle_observer_report(
-                ObserverMode::Cadence,
-                AutoObserverStatus::Failing,
-                telemetry.clone(),
-                None,
-                Some(instruction.to_string()),
-                AutoObserverReason::Cadence,
-                Vec::new(),
-                None,
-                None,
-            );
-        }
-
-        assert_eq!(chat.auto_state.pending_observer_banners.len(), 1);
-
-        let baseline_cells = chat.history_cells.len();
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Success,
-            Some("Resolved outstanding actions".to_string()),
-            Some("Ready to wrap up".to_string()),
-            None,
-            None,
-            Vec::new(),
-            Vec::new(),
-        );
-
-        let new_cells = chat.history_cells.len() - baseline_cells;
-        assert!(new_cells >= 2);
-
-        let guidance_hits = chat
-            .history_cells
-            .iter()
-            .flat_map(|cell| cell.display_lines_trimmed())
-            .flat_map(|line| line.spans.clone())
-            .filter(|span| span.content.contains("Observer guidance: Tighten up the summary"))
-            .count();
-        assert_eq!(guidance_hits, 1);
-        assert!(chat.auto_state.pending_observer_banners.is_empty());
     }
 
     #[test]
