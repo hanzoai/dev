@@ -1237,6 +1237,116 @@ fn agent_run_grouped_plain_tool_name() {
 }
 
 #[test]
+fn agents_terminal_overlay_full_details() {
+    let mut harness = ChatWidgetHarness::new();
+    let mut event_seq = 1;
+    let mut order_seq = 1;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::CustomToolCallBegin(CustomToolCallBeginEvent {
+            call_id: "agent-run".into(),
+            tool_name: "agent".into(),
+            parameters: Some(json!({
+                "action": "create",
+                "batch_id": "batch-docs",
+                "create": {
+                    "name": "Docs Sweep",
+                    "task": "Compile the release highlights",
+                    "context": "Focus on October 2025 product changes"
+                }
+            })),
+        }),
+    );
+
+    harness.handle_event(Event {
+        id: "agent-status-0".into(),
+        event_seq,
+        msg: EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "docs-sweep-claude".into(),
+                    name: "Docs Sweep (Claude)".into(),
+                    status: "running".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("claude-3-opus".into()),
+                    last_progress: Some("Collecting release notes\nReviewing eng updates".into()),
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(4_200),
+                    token_count: Some(3_500),
+                },
+                AgentInfo {
+                    id: "docs-sweep-gpt".into(),
+                    name: "Docs Sweep (GPT)".into(),
+                    status: "pending".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("gpt-4o".into()),
+                    last_progress: None,
+                    result: None,
+                    error: None,
+                    elapsed_ms: Some(1_100),
+                    token_count: None,
+                },
+            ],
+            context: Some("Focus on October 2025 product changes".into()),
+            task: Some("Compile the release highlights".into()),
+        }),
+        order: Some(OrderMeta {
+            request_ordinal: 1,
+            output_index: Some(0),
+            sequence_number: Some(order_seq),
+        }),
+    });
+    event_seq += 1;
+    order_seq += 1;
+
+    push_ordered_event(
+        &mut harness,
+        &mut event_seq,
+        &mut order_seq,
+        EventMsg::AgentStatusUpdate(AgentStatusUpdateEvent {
+            agents: vec![
+                AgentInfo {
+                    id: "docs-sweep-claude".into(),
+                    name: "Docs Sweep (Claude)".into(),
+                    status: "completed".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("claude-3-opus".into()),
+                    last_progress: Some("Synthesizing highlights".into()),
+                    result: Some("### Highlights\n- New Auto Drive controls\n- Faster release approvals".into()),
+                    error: None,
+                    elapsed_ms: Some(12_700),
+                    token_count: Some(7_200),
+                },
+                AgentInfo {
+                    id: "docs-sweep-gpt".into(),
+                    name: "Docs Sweep (GPT)".into(),
+                    status: "failed".into(),
+                    batch_id: Some("batch-docs".into()),
+                    model: Some("gpt-4o".into()),
+                    last_progress: Some("Drafting rollout summary".into()),
+                    result: None,
+                    error: Some("Timed out waiting for GitHub diff".into()),
+                    elapsed_ms: Some(9_300),
+                    token_count: Some(4_900),
+                },
+            ],
+            context: Some("Focus on October 2025 product changes".into()),
+            task: Some("Compile the release highlights".into()),
+        }),
+    );
+
+    harness.send_key(make_key(KeyCode::Char('a'), KeyModifiers::CONTROL));
+
+    let output = render_chat_widget_to_vt100(&mut harness, 96, 30);
+    let output = normalize_output(output);
+    insta::assert_snapshot!("agents_terminal_overlay_full_details", &output);
+}
+
+#[test]
 fn plan_agent_keeps_single_aggregate_block() {
     let mut harness = ChatWidgetHarness::new();
     harness.push_user_prompt("/plan deduplicate agent aggregates");
