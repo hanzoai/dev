@@ -4,12 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
-use code_browser::global as browser_global;
 use code_core::config::Config;
 use code_core::config_types::{AutoDriveSettings, ReasoningEffort};
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::get_openai_tools;
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
@@ -53,7 +51,6 @@ struct AutoCoordinatorCancelled;
 
 pub(super) const MODEL_SLUG: &str = "gpt-5";
 const USER_TURN_SCHEMA_NAME: &str = "auto_coordinator_user_turn";
-pub(super) const CROSS_CHECK_RESTART_BANNER: &str = "Cross-check restart with minimal context";
 const COORDINATOR_PROMPT_PATH: &str = "code-rs/core/prompt_coordinator.md";
 
 #[derive(Debug, Clone)]
@@ -600,11 +597,9 @@ pub(super) fn start_auto_coordinator(
     conversation: Vec<ResponseItem>,
     config: Config,
     debug_enabled: bool,
-    observer_cadence: u32,
 ) -> Result<AutoCoordinatorHandle> {
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let thread_tx = cmd_tx.clone();
-    let loop_tx = cmd_tx.clone();
     let cancel_token = CancellationToken::new();
     let thread_cancel = cancel_token.clone();
 
@@ -615,9 +610,7 @@ pub(super) fn start_auto_coordinator(
             conversation,
             config,
             cmd_rx,
-            loop_tx,
             debug_enabled,
-            observer_cadence,
             thread_cancel,
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
@@ -641,9 +634,7 @@ fn run_auto_loop(
     initial_conversation: Vec<ResponseItem>,
     config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
-    cmd_tx: Sender<AutoCoordinatorCommand>,
     debug_enabled: bool,
-    observer_cadence: u32,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let preferred_auth = if config.using_chatgpt_auth {
@@ -683,30 +674,6 @@ fn run_auto_loop(
         .enable_all()
         .build()
         .context("creating runtime for auto coordinator")?;
-
-    let browser_enabled = runtime.block_on(async {
-        browser_global::get_browser_manager().await.is_some()
-    });
-
-    let read_only_tools_config = client
-        .as_ref()
-        .build_tools_config_with_sandbox(SandboxPolicy::ReadOnly);
-    let read_only_tools = get_openai_tools(
-        &read_only_tools_config,
-        None,
-        browser_enabled,
-        false,
-    );
-
-    let full_access_tools_config = client
-        .as_ref()
-        .build_tools_config_with_sandbox(SandboxPolicy::DangerFullAccess);
-    let full_access_tools = get_openai_tools(
-        &full_access_tools_config,
-        None,
-        browser_enabled,
-        false,
-    );
 
     let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
         Ok(Some(text)) => {
@@ -776,23 +743,12 @@ fn run_auto_loop(
                     mut agents,
                     mut response_items,
                 }) => {
-                    retry_conversation = None;
+                    retry_conversation.take();
                     if !include_agents {
                         agents_timing = None;
                         agents.clear();
                     }
                     consecutive_decision_failures = 0;
-                    let (turn_cli_prompt, turn_cli_context) = if let Some(cli_action) = &cli {
-                        let prompt = Some(cli_action.prompt.clone());
-                        let context = cli_action
-                            .context
-                            .as_ref()
-                            .map(|ctx| ctx.trim().to_string())
-                            .filter(|ctx| !ctx.is_empty());
-                        (prompt, context)
-                    } else {
-                        (None, None)
-                    };
                     if matches!(status, AutoCoordinatorStatus::Continue) {
                         let event = AppEvent::AutoCoordinatorDecision {
                             status,
@@ -1776,6 +1732,7 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
 
 struct RecoverableDecisionError {
     summary: String,
+    #[cfg_attr(not(any(test, feature = "test-helpers")), allow(dead_code))]
     guidance: Option<String>,
 }
 
@@ -1858,6 +1815,7 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
     None
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
 fn push_unique_guidance(guidance: &mut Vec<String>, message: &str) {
     let trimmed = message.trim();
     if trimmed.is_empty() {

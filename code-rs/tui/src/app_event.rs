@@ -101,46 +101,10 @@ pub(crate) struct AutoTurnAgentsAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ObserverMode {
-    Bootstrap,
-    Cadence,
-    CrossCheck,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AutoCoordinatorStatus {
     Continue,
     Success,
     Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoObserverStatus {
-    Ok,
-    Failing,
-}
-
-impl Default for AutoObserverStatus {
-    fn default() -> Self {
-        Self::Ok
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct AutoObserverTelemetry {
-    pub trigger_count: u64,
-    pub last_status: AutoObserverStatus,
-    pub last_intervention: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AutoObserverReason {
-    Cadence,
-    CrossCheck {
-        forced: bool,
-        summary: Option<String>,
-        focus: Option<String>,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -275,7 +239,6 @@ pub(crate) enum AppEvent {
         agents_enabled: bool,
         cross_check_enabled: bool,
         qa_automation_enabled: bool,
-        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     },
 

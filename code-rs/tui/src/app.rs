@@ -1773,7 +1773,6 @@ impl App<'_> {
                     agents_enabled,
                     cross_check_enabled,
                     qa_automation_enabled,
-                    observer_enabled,
                     continue_mode,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1782,7 +1781,6 @@ impl App<'_> {
                             agents_enabled,
                             cross_check_enabled,
                             qa_automation_enabled,
-                            observer_enabled,
                             continue_mode,
                         );
                     }

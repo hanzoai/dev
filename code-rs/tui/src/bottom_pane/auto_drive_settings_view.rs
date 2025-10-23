@@ -20,7 +20,6 @@ pub(crate) struct AutoDriveSettingsView {
     agents_enabled: bool,
     cross_check_enabled: bool,
     qa_automation_enabled: bool,
-    observer_enabled: bool,
     diagnostics_enabled: bool,
     continue_mode: AutoContinueMode,
     closing: bool,
@@ -35,11 +34,10 @@ impl AutoDriveSettingsView {
         agents_enabled: bool,
         cross_check_enabled: bool,
         qa_automation_enabled: bool,
-        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) -> Self {
         let diagnostics_enabled = qa_automation_enabled
-            && (review_enabled || cross_check_enabled || observer_enabled);
+            && (review_enabled || cross_check_enabled);
         Self {
             app_event_tx,
             selected_index: 0,
@@ -47,7 +45,6 @@ impl AutoDriveSettingsView {
             agents_enabled,
             cross_check_enabled,
             qa_automation_enabled,
-            observer_enabled,
             diagnostics_enabled,
             continue_mode,
             closing: false,
@@ -64,7 +61,6 @@ impl AutoDriveSettingsView {
             agents_enabled: self.agents_enabled,
             cross_check_enabled: self.cross_check_enabled,
             qa_automation_enabled: self.qa_automation_enabled,
-            observer_enabled: self.observer_enabled,
             continue_mode: self.continue_mode,
         });
     }
@@ -73,9 +69,8 @@ impl AutoDriveSettingsView {
         self.review_enabled = enabled;
         self.cross_check_enabled = enabled;
         self.qa_automation_enabled = enabled;
-        self.observer_enabled = enabled;
-        self.diagnostics_enabled = self.qa_automation_enabled
-            && (self.review_enabled || self.cross_check_enabled || self.observer_enabled);
+        self.diagnostics_enabled =
+            self.qa_automation_enabled && (self.review_enabled || self.cross_check_enabled);
     }
 
     fn cycle_continue_mode(&mut self, forward: bool) {
