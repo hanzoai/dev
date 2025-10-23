@@ -1835,6 +1835,14 @@ impl App<'_> {
                         );
                     }
                 }
+                AppEvent::AutoCoordinatorUserReply {
+                    user_response,
+                    cli_command,
+                } => {
+                    if let AppState::Chat { widget } = &mut self.app_state {
+                        widget.auto_handle_user_reply(user_response, cli_command);
+                    }
+                }
                 AppEvent::AutoCoordinatorThinking { delta, summary_index } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_thinking(delta, summary_index);
