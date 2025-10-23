@@ -258,6 +258,10 @@ pub(crate) enum AppEvent {
         agents: Vec<AutoTurnAgentsAction>,
         transcript: Vec<ResponseItem>,
     },
+    AutoCoordinatorUserReply {
+        user_response: Option<String>,
+        cli_command: Option<String>,
+    },
     AutoCoordinatorThinking {
         delta: String,
         summary_index: Option<u32>,
