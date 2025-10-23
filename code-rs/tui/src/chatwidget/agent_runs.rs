@@ -344,6 +344,36 @@ impl AgentRunTracker {
             self.cell.set_write_mode(Some(flag));
         }
     }
+
+    pub(crate) fn overlay_display_label(&self) -> Option<String> {
+        self
+            .effective_label()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| self.batch_id.as_ref().map(|value| value.to_string()))
+    }
+
+    pub(crate) fn overlay_task(&self) -> Option<String> {
+        self.task.as_ref().and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
+    pub(crate) fn overlay_context(&self) -> Option<String> {
+        self.context.as_ref().and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
 }
 
 fn agent_batch_key(batch_id: &str) -> String {
