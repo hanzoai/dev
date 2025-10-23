@@ -22,7 +22,6 @@ use crate::app::ChatWidgetArgs;
 use crate::chrome_launch::ChromeLaunchOption;
 use crate::slash_command::SlashCommand;
 use code_protocol::models::ResponseItem;
-use serde_json::Value as JsonValue;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender as StdSender;
@@ -224,12 +223,6 @@ pub(crate) enum AppEvent {
         elapsed: Duration,
     },
 
-    /// Placeholder QA automation updates (no-op for now).
-    AutoQaUpdate { note: String },
-
-    /// Placeholder review requests routed from the QA orchestrator.
-    AutoReviewRequest { summary: Option<String> },
-
     /// Internal: flush any pending out-of-order ExecEnd events that did not
     /// receive a matching ExecBegin within a short pairing window. This lets
     /// the TUI render a fallback "Ran call_<id>" cell so output is not lost.
@@ -274,26 +267,6 @@ pub(crate) enum AppEvent {
     AutoCoordinatorRestart {
         token: u64,
         attempt: u32,
-    },
-    AutoObserverReport {
-        mode: ObserverMode,
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
-        reason: AutoObserverReason,
-        conversation: Vec<ResponseItem>,
-        raw_output: Option<String>,
-        parsed_response: Option<JsonValue>,
-    },
-    AutoObserverThinking {
-        mode: ObserverMode,
-        delta: String,
-        summary_index: Option<u32>,
-    },
-    AutoObserverReady {
-        baseline_summary: Option<String>,
-        bootstrap_len: usize,
     },
     ShowAutoDriveSettings,
     CloseAutoDriveSettings,

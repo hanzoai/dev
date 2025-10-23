@@ -28,8 +28,6 @@ use uuid::Uuid;
 use crate::app_event::{
     AppEvent,
     AutoCoordinatorStatus,
-    AutoObserverReason,
-    AutoObserverTelemetry,
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
     AutoTurnCliAction,
@@ -43,16 +41,6 @@ use code_common::elapsed::format_duration;
 use std::fs;
 use chrono::{DateTime, Local, Utc};
 use rand::Rng;
-use super::auto_observer::{
-    build_observer_conversation,
-    start_auto_observer,
-    AutoObserverCommand,
-    AutoObserverHandle,
-    ObserverOutcome,
-    ObserverReason,
-    ObserverTrigger,
-};
-use crate::app_event::{ObserverMode, AutoObserverStatus};
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
@@ -95,14 +83,6 @@ pub(super) enum AutoCoordinatorCommand {
         _prompt: String,
         conversation: Vec<ResponseItem>,
     },
-    ObserverResult(ObserverOutcome),
-    ObserverThinking {
-        mode: ObserverMode,
-        delta: String,
-        summary_index: Option<u32>,
-    },
-    ObserverBootstrapLen(usize),
-    ResetObserver,
     Stop,
 }
 
@@ -762,54 +742,6 @@ fn run_auto_loop(
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
-    let mut observer_guidance: Vec<String> = Vec::new();
-    let mut _observer_telemetry = AutoObserverTelemetry::default();
-    let mut _last_cli_context: Option<String> = None;
-    let mut _last_cli_prompt: Option<String> = None;
-    let mut _last_progress_summary: Option<String> = None;
-    let mut awaiting_cross_check = false;
-    let mut pending_success: Option<PendingDecision> = None;
-    let mut observer_last_sent = 0usize;
-    let mut observer_current_len = 0usize;
-    let mut observer_bootstrap_len = 0usize;
-    let cross_check_enabled = config.tui.auto_drive.cross_check_enabled;
-    let observer_cadence_enabled = config.tui.auto_drive.observer_enabled;
-    let observer_thread_enabled = observer_cadence_enabled || cross_check_enabled;
-    let mut observer_bootstrapped = !observer_thread_enabled;
-    let mut cross_check_restart_conversation: Option<Vec<ResponseItem>> = None;
-    let mut observer_handle = if observer_thread_enabled {
-        match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
-            Ok(handle) => Some(handle),
-            Err(err) => {
-                tracing::error!("failed to start auto observer: {err:#}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    if let Some(handle) = observer_handle.as_ref() {
-        if handle
-            .tx
-            .send(AutoObserverCommand::Bootstrap {
-                goal_text: goal_text.clone(),
-                environment_details: environment_details.clone(),
-                tools: read_only_tools.clone(),
-            })
-            .is_err()
-        {
-            warn!("failed to trigger observer bootstrap");
-        } else {
-            observer_bootstrapped = false;
-        }
-    }
-    let observer_cadence_interval = if observer_cadence_enabled && observer_cadence != 0 {
-        observer_handle
-            .as_ref()
-            .map(|handle: &AutoObserverHandle| handle.cadence() as u64)
-    } else {
-        None
-    };
 
     loop {
         if stopped {
@@ -822,14 +754,12 @@ fn run_auto_loop(
                 continue;
             }
 
-            let conv_for_observer = conv.clone();
-            observer_current_len = conv_for_observer.len();
-            let developer_intro =
-                compose_developer_intro(&base_developer_intro, &observer_guidance);
+            let developer_intro = base_developer_intro.as_str();
+            let mut retry_conversation = Some(conv.clone());
             match request_coordinator_decision(
                 &runtime,
                 client.as_ref(),
-                developer_intro.as_str(),
+                developer_intro,
                 &primary_goal_message,
                 &schema,
                 conv,
@@ -846,6 +776,7 @@ fn run_auto_loop(
                     mut agents,
                     mut response_items,
                 }) => {
+                    retry_conversation = None;
                     if !include_agents {
                         agents_timing = None;
                         agents.clear();
@@ -862,50 +793,7 @@ fn run_auto_loop(
                     } else {
                         (None, None)
                     };
-                    _last_cli_prompt = turn_cli_prompt.clone();
-                    _last_cli_context = turn_cli_context.clone();
-
-                    let mut latest_summary = progress_current.clone();
-                    if latest_summary.is_none() {
-                        latest_summary = progress_past.clone();
-                    }
-                    if let Some(summary_text) = latest_summary.clone() {
-                        _last_progress_summary = Some(summary_text);
-                    } else {
-                        _last_progress_summary = None;
-                    }
-
-                    let cli_prompt_for_observer = turn_cli_prompt.as_deref();
-
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        if observer_bootstrapped {
-                            let slice_start = observer_last_sent.min(observer_current_len);
-                            let delta_slice = conv_for_observer[slice_start..].to_vec();
-                            let conversation = build_observer_conversation(
-                                delta_slice,
-                                cli_prompt_for_observer,
-                            );
-                            if !conversation.is_empty() {
-                                if let (Some(handle), Some(cadence)) =
-                                    (observer_handle.as_ref(), observer_cadence_interval)
-                                {
-                                    if should_trigger_observer(requests_completed, cadence) {
-                                        observer_last_sent = observer_current_len;
-                                        let trigger = ObserverTrigger {
-                                            conversation,
-                                            goal_text: goal_text.clone(),
-                                            environment_details: environment_details.clone(),
-                                            reason: ObserverReason::Cadence,
-                                            turn_snapshot: None,
-                                            tools: read_only_tools.clone(),
-                                        };
-                                        if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
-                                            warn!("failed to trigger auto observer");
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         let event = AppEvent::AutoCoordinatorDecision {
                             status,
                             progress_past,
@@ -929,44 +817,6 @@ fn run_auto_loop(
                         transcript: response_items,
                     };
 
-                    if observer_bootstrapped
-                        && matches!(decision_event.status, AutoCoordinatorStatus::Success)
-                        && cross_check_enabled
-                        && !awaiting_cross_check
-                    {
-                        if let Some(handle) = observer_handle.as_ref() {
-                            let start = observer_bootstrap_len.min(observer_current_len);
-                            let delta_slice = conv_for_observer[start..].to_vec();
-                            let conversation = build_observer_conversation(
-                                delta_slice,
-                                cli_prompt_for_observer,
-                            );
-                            match handle.tx.send(AutoObserverCommand::BeginCrossCheck {
-                                conversation,
-                                _from_index: start,
-                                forced: true,
-                                summary: latest_summary.clone(),
-                                focus: None,
-                                tools: full_access_tools.clone(),
-                            }) {
-                                Ok(()) => {
-                                    awaiting_cross_check = true;
-                                    observer_last_sent = observer_current_len;
-                                    cross_check_restart_conversation = Some(conv_for_observer.clone());
-                                    pending_success = Some(decision_event);
-                                    continue;
-                                }
-                                Err(err) => {
-                                    warn!("failed to trigger cross-check observer: {err:#}");
-                                }
-                            }
-                        } else {
-                            warn!(
-                                "cross-check enabled but observer thread unavailable; finishing without cross-check"
-                            );
-                        }
-                    }
-
                     app_event_tx.send(decision_event.into_event());
                     stopped = true;
                     continue;
@@ -987,9 +837,6 @@ fn run_auto_loop(
                                 MAX_DECISION_RECOVERY_ATTEMPTS,
                                 err
                             );
-                            if let Some(hint) = recoverable.guidance.as_deref() {
-                                push_unique_guidance(&mut observer_guidance, hint);
-                            }
                             let message = format!(
                                 "Coordinator response invalid (attempt {attempt}/{MAX_DECISION_RECOVERY_ATTEMPTS}): {}. Retrying…",
                                 recoverable.summary
@@ -998,7 +845,7 @@ fn run_auto_loop(
                                 delta: message,
                                 summary_index: None,
                             });
-                            pending_conversation = Some(conv_for_observer);
+                            pending_conversation = retry_conversation.take();
                             continue;
                         }
                         warn!(
@@ -1026,13 +873,13 @@ fn run_auto_loop(
 
         match cmd_rx.recv() {
             Ok(AutoCoordinatorCommand::HandleUserPrompt { _prompt, conversation }) => {
-                let developer_intro = compose_developer_intro(&base_developer_intro, &observer_guidance);
+                let developer_intro = base_developer_intro.as_str();
                 let mut updated_conversation = conversation.clone();
                 let schema = user_turn_schema();
                 match request_user_turn_decision(
                     &runtime,
                     client.as_ref(),
-                    developer_intro.as_str(),
+                    developer_intro,
                     &primary_goal_message,
                     &schema,
                     updated_conversation.clone(),
@@ -1064,181 +911,13 @@ fn run_auto_loop(
                 consecutive_decision_failures = 0;
                 pending_conversation = Some(conv);
             }
-            Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
-                let ObserverOutcome {
-                    mode,
-                    status,
-                    replace_message,
-                    additional_instructions,
-                    telemetry,
-                    reason,
-                    conversation,
-                    turn_snapshot: _turn_snapshot,
-                    raw_output,
-                    parsed_response,
-                } = outcome;
-
-                if let Some(instr) = additional_instructions.as_deref() {
-                    push_unique_guidance(&mut observer_guidance, instr);
-                }
-
-                _observer_telemetry = telemetry.clone();
-                let report_raw = raw_output.clone();
-                let report_parsed = parsed_response.clone();
-
-                let event = AppEvent::AutoObserverReport {
-                    mode,
-                    status,
-                    telemetry,
-                    replace_message: replace_message.clone(),
-                    additional_instructions: additional_instructions.clone(),
-                    reason: AutoObserverReason::from(reason.clone()),
-                    conversation: conversation.clone(),
-                    raw_output: report_raw.clone(),
-                    parsed_response: report_parsed.clone(),
-                };
-                app_event_tx.send(event);
-
-                if matches!(mode, ObserverMode::Bootstrap) {
-                    observer_bootstrapped = true;
-                    observer_current_len = conversation.len();
-                    observer_bootstrap_len = observer_current_len;
-                    observer_last_sent = observer_current_len;
-                    let baseline = report_raw
-                        .or_else(|| replace_message.clone())
-                        .or_else(|| additional_instructions.clone());
-                    let ready_event = AppEvent::AutoObserverReady {
-                        baseline_summary: baseline,
-                        bootstrap_len: conversation.len(),
-                    };
-                    app_event_tx.send(ready_event);
-                }
-
-                if awaiting_cross_check && matches!(mode, ObserverMode::CrossCheck) {
-                    if let ObserverReason::CrossCheck { summary, .. } = reason {
-                        awaiting_cross_check = false;
-                        if matches!(status, AutoObserverStatus::Ok) {
-                            cross_check_restart_conversation = None;
-                            if let Some(decision) = pending_success.take() {
-                                app_event_tx.send(decision.into_event());
-                                stopped = true;
-                                continue;
-                            } else {
-                                warn!("cross-check completed but no pending success decision to finalize");
-                            }
-                        } else {
-                            pending_success = None;
-                            let mut detail = additional_instructions
-                                .as_ref()
-                                .and_then(|text| {
-                                    let trimmed = text.trim();
-                                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                                });
-                            if detail.is_none() {
-                                detail = summary
-                                    .as_ref()
-                                    .and_then(|text| {
-                                        let trimmed = text.trim();
-                                        (!trimmed.is_empty()).then(|| trimmed.to_string())
-                                    });
-                            }
-                            let failure_message = detail
-                                .clone()
-                                .map(|text| format!("Cross-check failed: {text}"))
-                                .unwrap_or_else(|| "Cross-check failed".to_string());
-                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
-                                delta: CROSS_CHECK_RESTART_BANNER.to_string(),
-                                summary_index: None,
-                            });
-                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
-                                delta: failure_message.clone(),
-                                summary_index: None,
-                            });
-
-                            let mut restart_conversation = cross_check_restart_conversation
-                                .take()
-                                .unwrap_or_else(|| conversation.clone());
-
-                            if let Some(text) = detail {
-                                let prompt = format!(
-                                    "Observer cross-check flagged unresolved issues:\n{text}\nPlease address these items before retrying completion."
-                                );
-                                restart_conversation.push(ResponseItem::Message {
-                                    id: None,
-                                    role: "user".to_string(),
-                                    content: vec![ContentItem::InputText { text: prompt }],
-                                });
-                            }
-
-                            if restart_conversation.is_empty() {
-                                restart_conversation = conversation;
-                            }
-
-                            pending_conversation = Some(restart_conversation);
-                            continue;
-                        }
-                    }
-                }
-
-            }
-            Ok(AutoCoordinatorCommand::ObserverThinking {
-                mode,
-                delta,
-                summary_index,
-            }) => {
-                let _ = app_event_tx.send(AppEvent::AutoObserverThinking {
-                    mode,
-                    delta,
-                    summary_index,
-                });
-            }
-            Ok(AutoCoordinatorCommand::ObserverBootstrapLen(len)) => {
-                observer_bootstrap_len = len;
-                observer_last_sent = observer_bootstrap_len.min(observer_current_len);
-            }
-            Ok(AutoCoordinatorCommand::ResetObserver) => {
-                observer_bootstrapped = false;
-                observer_last_sent = 0;
-                observer_current_len = 0;
-                observer_bootstrap_len = 0;
-                awaiting_cross_check = false;
-                pending_success = None;
-            }
             Ok(AutoCoordinatorCommand::Stop) | Err(_) => {
                 stopped = true;
             }
         }
     }
 
-    if let Some(handle) = observer_handle.take() {
-        let _ = handle.tx.send(AutoObserverCommand::Stop);
-    }
-
     Ok(())
-}
-
-fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
-    if guidance.is_empty() {
-        return base.to_string();
-    }
-
-    let mut intro = String::with_capacity(base.len() + guidance.len() * 64);
-    intro.push_str(base);
-    intro.push_str("\n\n**Observer Guidance**\n");
-    for hint in guidance {
-        let trimmed = hint.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        intro.push_str("- ");
-        intro.push_str(trimmed);
-        intro.push('\n');
-    }
-    intro
-}
-
-fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
-    cadence != 0 && requests_completed > 0 && requests_completed % cadence == 0
 }
 fn read_coordinator_prompt(_config: &Config) -> Option<String> {
     match fs::read_to_string(COORDINATOR_PROMPT_PATH) {
@@ -1256,17 +935,6 @@ fn read_coordinator_prompt(_config: &Config) -> Option<String> {
                 COORDINATOR_PROMPT_PATH
             );
             None
-        }
-    }
-}
-
-impl From<ObserverReason> for AutoObserverReason {
-    fn from(reason: ObserverReason) -> Self {
-        match reason {
-            ObserverReason::Cadence => AutoObserverReason::Cadence,
-            ObserverReason::CrossCheck { forced, summary, focus } => {
-                AutoObserverReason::CrossCheck { forced, summary, focus }
-            }
         }
     }
 }
