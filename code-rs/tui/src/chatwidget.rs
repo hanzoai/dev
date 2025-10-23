@@ -2404,6 +2404,16 @@ impl ChatWidget<'_> {
         self.bottom_pane.update_status_text("cancelling agents".to_string());
         self.bottom_pane.set_task_running(true);
         self.submit_op(Op::CancelAgents { batch_ids, agent_ids });
+
+        // Mark agents locally so Esc can progress to stopping Auto Drive even if
+        // backend acknowledgements arrive later.
+        self.agents_ready_to_start = false;
+        for agent in &mut self.active_agents {
+            if matches!(agent.status, AgentStatus::Pending | AgentStatus::Running) {
+                agent.status = AgentStatus::Cancelled;
+            }
+        }
+        self.request_redraw();
         true
     }
 
