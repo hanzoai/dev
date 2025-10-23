@@ -11,13 +11,20 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(super) struct BrowserSessionTracker {
     pub slot: ToolCardSlot,
     pub cell: BrowserSessionCell,
     pub elapsed: Duration,
     pub anchor_inserted: bool,
+    pub first_screenshot_instant: Option<Instant>,
+    pub last_screenshot_timestamp: Duration,
+}
+
+pub(super) struct BrowserScreenshotUpdateResult {
+    pub grouped: bool,
+    pub session_key: Option<String>,
 }
 
 struct BrowserActionSummary {
@@ -36,6 +43,8 @@ impl BrowserSessionTracker {
             cell: BrowserSessionCell::new(),
             elapsed: Duration::default(),
             anchor_inserted: false,
+            first_screenshot_instant: None,
+            last_screenshot_timestamp: Duration::ZERO,
         }
     }
 }
@@ -279,17 +288,22 @@ pub(super) fn handle_screenshot_update(
     order: Option<&OrderMeta>,
     screenshot_path: &PathBuf,
     url: &str,
-) -> bool {
+) -> BrowserScreenshotUpdateResult {
+    let mut result = BrowserScreenshotUpdateResult {
+        grouped: false,
+        session_key: None,
+    };
+
     if chat.tools_state.browser_sessions.is_empty() {
-        return false;
+        return result;
     }
 
     let key = key_from_order_or_last(chat, order);
-    let Some(key) = key else { return false; };
+    let Some(key) = key else { return result; };
 
     let mut tracker = match chat.tools_state.browser_sessions.remove(&key) {
         Some(tracker) => tracker,
-        None => return false,
+        None => return result,
     };
 
     let order_key = order
@@ -298,7 +312,21 @@ pub(super) fn handle_screenshot_update(
     tracker.slot.set_order_key(order_key);
 
     tracker.cell.set_url(url.to_string());
-    tracker.cell.set_screenshot(screenshot_path.clone());
+
+    let now = Instant::now();
+    let base = tracker
+        .first_screenshot_instant
+        .get_or_insert(now);
+    let mut relative = now.duration_since(*base);
+    if relative <= tracker.last_screenshot_timestamp {
+        let bump = tracker.last_screenshot_timestamp - relative + Duration::from_millis(1);
+        relative = relative.saturating_add(bump);
+    }
+    tracker.last_screenshot_timestamp = relative;
+
+    tracker
+        .cell
+        .record_screenshot(relative, screenshot_path.clone(), Some(url.to_string()));
 
     ensure_cell_picker(chat, &tracker.cell);
     if tracker.slot.has_order_change() && !tracker.anchor_inserted {
@@ -310,12 +338,15 @@ pub(super) fn handle_screenshot_update(
     tool_cards::assign_tool_card_key(&mut tracker.slot, &mut tracker.cell, Some(key.clone()));
     tool_cards::replace_tool_card::<BrowserSessionCell>(chat, &mut tracker.slot, &tracker.cell);
 
+    result.session_key = Some(key.clone());
+
     chat
         .tools_state
         .browser_sessions
         .insert(key, tracker);
 
-    true
+    result.grouped = true;
+    result
 }
 
 fn order_key_and_ordinal(chat: &mut ChatWidget<'_>, order: Option<&OrderMeta>) -> (OrderKey, Option<u64>) {
