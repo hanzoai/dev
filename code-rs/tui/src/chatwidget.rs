@@ -205,6 +205,89 @@ impl EscRoute {
         }
     }
 }
+
+impl ChatWidget<'_> {
+    fn browser_overlay_progress_line(
+        &self,
+        width: u16,
+        current: Duration,
+        total: Duration,
+    ) -> Line<'static> {
+        let width = width.max(20) as usize;
+        let prefix = "▶ ";
+        let suffix = format!(
+            " {} / {}",
+            self.format_overlay_mm_ss(current),
+            self.format_overlay_mm_ss(total)
+        );
+        let slider_width = width
+            .saturating_sub(prefix.len())
+            .saturating_sub(suffix.chars().count())
+            .max(5);
+
+        let progress_ratio = if total.as_millis() == 0 {
+            0.0
+        } else {
+            (current.as_secs_f64() / total.as_secs_f64()).clamp(0.0, 1.0)
+        };
+        let progress_cells = (progress_ratio * slider_width as f64).round() as usize;
+
+        let mut slider = String::with_capacity(slider_width);
+        let pointer_idx = if slider_width <= 1 {
+            0
+        } else {
+            progress_cells.clamp(0, slider_width.saturating_sub(1))
+        };
+        for i in 0..slider_width {
+            if i == pointer_idx {
+                slider.push('◉');
+            } else {
+                slider.push('─');
+            }
+        }
+
+        let mut spans: Vec<Span> = Vec::new();
+        spans.push(Span::styled(prefix.to_string(), Style::default().fg(crate::colors::text())));
+        spans.push(Span::styled(
+            slider,
+            Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            suffix,
+            Style::default().fg(crate::colors::text()),
+        ));
+
+        Line::from(spans)
+    }
+
+    fn format_overlay_mm_ss(&self, duration: Duration) -> String {
+        let total_secs = duration.as_secs();
+        let minutes = total_secs / 60;
+        let seconds = total_secs % 60;
+        format!("{:02}:{:02}", minutes, seconds)
+    }
+
+    fn normalize_action_time_label(&self, label: &str) -> String {
+        if let Some((minutes, seconds)) = label.split_once('m') {
+            let minutes = minutes.trim().parse::<u64>().unwrap_or(0);
+            let seconds = seconds
+                .trim()
+                .trim_start_matches(char::is_whitespace)
+                .trim_end_matches('s')
+                .parse::<u64>()
+                .unwrap_or(0);
+            return format!("{:02}:{:02}", minutes, seconds);
+        }
+        if let Some(stripped) = label.strip_suffix('s') {
+            if let Ok(seconds) = stripped.trim().parse::<u64>() {
+                return format!("00:{:02}", seconds.min(59));
+            }
+        }
+        label.to_string()
+    }
+}
 use code_git_tooling::{
     create_ghost_commit,
     restore_ghost_commit,
@@ -975,6 +1058,7 @@ pub(crate) struct ChatWidget<'a> {
     live_builder: RowBuilder,
     header_wave: HeaderWaveEffect,
     browser_overlay_visible: bool,
+    browser_overlay_state: BrowserOverlayState,
     // Store pending image paths keyed by their placeholder text
     pending_images: HashMap<String, PathBuf>,
     // (removed) pending non-image files are no longer tracked; non-image paths remain as plain text
@@ -4195,6 +4279,7 @@ impl ChatWidget<'_> {
                 effect
             },
             browser_overlay_visible: false,
+            browser_overlay_state: BrowserOverlayState::default(),
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -4501,6 +4586,7 @@ impl ChatWidget<'_> {
                 effect
             },
             browser_overlay_visible: false,
+            browser_overlay_state: BrowserOverlayState::default(),
             pending_images: HashMap::new(),
             welcome_shown: false,
             latest_browser_screenshot: Arc::new(Mutex::new(None)),
@@ -5098,13 +5184,11 @@ impl ChatWidget<'_> {
                     ..
                 }
             );
-            if !is_ctrl_b {
-                if matches!(key_event.code, crossterm::event::KeyCode::Esc)
-                    && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                {
-                    self.browser_overlay_visible = false;
-                    self.request_redraw();
-                }
+            if is_ctrl_b {
+                self.toggle_browser_overlay();
+                return;
+            }
+            if self.handle_browser_overlay_key(key_event) {
                 return;
             }
         }
@@ -5409,10 +5493,215 @@ impl ChatWidget<'_> {
     fn toggle_browser_overlay(&mut self) {
         let new_state = !self.browser_overlay_visible;
         self.browser_overlay_visible = new_state;
-        if new_state && self.agents_terminal.active {
-            self.exit_agents_terminal_mode();
+        if new_state {
+            if self.agents_terminal.active {
+                self.exit_agents_terminal_mode();
+            }
+            self.browser_overlay_state.reset();
+            let session_key = self
+                .tools_state
+                .browser_last_key
+                .clone()
+                .or_else(|| self.tools_state.browser_sessions.keys().next().cloned());
+            self.browser_overlay_state.set_session_key(session_key.clone());
+            if let Some(key) = session_key {
+                if let Some(tracker) = self.tools_state.browser_sessions.get(&key) {
+                    let history_len = tracker.cell.screenshot_history().len();
+                    if history_len > 0 {
+                        self
+                            .browser_overlay_state
+                            .set_screenshot_index(history_len.saturating_sub(1));
+                    }
+                }
+            }
+        } else {
+            self.browser_overlay_state.reset();
         }
         self.request_redraw();
+    }
+
+    fn handle_browser_overlay_key(&mut self, key_event: KeyEvent) -> bool {
+        if !self.browser_overlay_visible {
+            return false;
+        }
+        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            return true;
+        }
+
+        let shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
+        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
+
+        match key_event.code {
+            KeyCode::Esc => {
+                self.browser_overlay_visible = false;
+                self.browser_overlay_state.reset();
+                self.request_redraw();
+            }
+            KeyCode::Up if shift => {
+                self.adjust_browser_overlay_action_scroll(-1);
+                self.request_redraw();
+            }
+            KeyCode::Down if shift => {
+                self.adjust_browser_overlay_action_scroll(1);
+                self.request_redraw();
+            }
+            KeyCode::Up => {
+                if self.move_browser_overlay_screenshot(-1) {
+                    self.request_redraw();
+                }
+            }
+            KeyCode::Down => {
+                if self.move_browser_overlay_screenshot(1) {
+                    self.request_redraw();
+                }
+            }
+            KeyCode::Left => {
+                if self.move_browser_overlay_screenshot(-1) {
+                    self.request_redraw();
+                }
+            }
+            KeyCode::Right => {
+                if self.move_browser_overlay_screenshot(1) {
+                    self.request_redraw();
+                }
+            }
+            KeyCode::PageUp => {
+                let step = self.browser_overlay_state.last_action_view_height().max(1) as i16;
+                self.adjust_browser_overlay_action_scroll(-step);
+                self.request_redraw();
+            }
+            KeyCode::PageDown => {
+                let step = self.browser_overlay_state.last_action_view_height().max(1) as i16;
+                self.adjust_browser_overlay_action_scroll(step);
+                self.request_redraw();
+            }
+            KeyCode::Home => {
+                if self.set_browser_overlay_screenshot_index(0) {
+                    self.request_redraw();
+                }
+            }
+            KeyCode::End => {
+                if let Some((_, tracker)) = self.browser_overlay_tracker() {
+                    let len = tracker.cell.screenshot_history().len();
+                    if len > 0 && self.set_browser_overlay_screenshot_index(len - 1) {
+                        self.request_redraw();
+                    }
+                }
+            }
+            KeyCode::Char('j') if key_event.modifiers.is_empty() => {
+                self.adjust_browser_overlay_action_scroll(1);
+                self.request_redraw();
+            }
+            KeyCode::Char('k') if key_event.modifiers.is_empty() => {
+                self.adjust_browser_overlay_action_scroll(-1);
+                self.request_redraw();
+            }
+            KeyCode::Char('g') if ctrl => {
+                if self.set_browser_overlay_screenshot_index(0) {
+                    self.request_redraw();
+                }
+            }
+            KeyCode::Char('G') if key_event.modifiers.is_empty() => {
+                if let Some((_, tracker)) = self.browser_overlay_tracker() {
+                    let len = tracker.cell.screenshot_history().len();
+                    if len > 0 && self.set_browser_overlay_screenshot_index(len - 1) {
+                        self.request_redraw();
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        true
+    }
+
+    fn browser_overlay_session_key(&self) -> Option<String> {
+        if let Some(key) = self.browser_overlay_state.session_key() {
+            if self.tools_state.browser_sessions.contains_key(&key) {
+                return Some(key);
+            }
+        }
+        if let Some(last) = self.tools_state.browser_last_key.clone() {
+            if self.tools_state.browser_sessions.contains_key(&last) {
+                self.browser_overlay_state
+                    .set_session_key(Some(last.clone()));
+                return Some(last);
+            }
+        }
+        if let Some((key, _)) = self.tools_state.browser_sessions.iter().next() {
+            let owned = key.clone();
+            self.browser_overlay_state
+                .set_session_key(Some(owned.clone()));
+            return Some(owned);
+        }
+        None
+    }
+
+    fn browser_overlay_tracker(
+        &self,
+    ) -> Option<(String, &browser_sessions::BrowserSessionTracker)> {
+        let key = self.browser_overlay_session_key()?;
+        self.tools_state
+            .browser_sessions
+            .get(&key)
+            .map(|tracker| (key, tracker))
+    }
+
+    fn set_browser_overlay_screenshot_index(&self, index: usize) -> bool {
+        let Some((_, tracker)) = self.browser_overlay_tracker() else {
+            return false;
+        };
+        let history = tracker.cell.screenshot_history();
+        if history.is_empty() {
+            return false;
+        }
+        let clamped = index.min(history.len().saturating_sub(1));
+        if self.browser_overlay_state.screenshot_index() != clamped {
+            self.browser_overlay_state.set_screenshot_index(clamped);
+            return true;
+        }
+        false
+    }
+
+    fn move_browser_overlay_screenshot(&self, delta: isize) -> bool {
+        let Some((_, tracker)) = self.browser_overlay_tracker() else {
+            return false;
+        };
+        let history = tracker.cell.screenshot_history();
+        if history.is_empty() {
+            return false;
+        }
+        let last_index = history.len() as isize - 1;
+        let mut current = self.browser_overlay_state.screenshot_index() as isize;
+        if current > last_index {
+            current = last_index;
+        }
+        let mut new_index = current + delta;
+        if new_index < 0 {
+            new_index = 0;
+        }
+        if new_index > last_index {
+            new_index = last_index;
+        }
+        if new_index != current {
+            self.browser_overlay_state
+                .set_screenshot_index(new_index as usize);
+            return true;
+        }
+        false
+    }
+
+    fn adjust_browser_overlay_action_scroll(&self, delta: i16) {
+        let current = self.browser_overlay_state.action_scroll() as i32;
+        let max = self.browser_overlay_state.max_action_scroll() as i32;
+        let mut updated = current + delta as i32;
+        if updated < 0 {
+            updated = 0;
+        } else if updated > max {
+            updated = max;
+        }
+        self.browser_overlay_state
+            .set_action_scroll(updated as u16);
     }
 
     fn toggle_agents_hud(&mut self) {
@@ -10912,7 +11201,7 @@ impl ChatWidget<'_> {
                 handle_browser_screenshot(&payload, &self.app_event_tx);
 
                 let BrowserScreenshotUpdateEvent { screenshot_path, url } = payload;
-                let grouped = browser_sessions::handle_screenshot_update(
+                let update = browser_sessions::handle_screenshot_update(
                     self,
                     event.order.as_ref(),
                     &screenshot_path,
@@ -10940,10 +11229,26 @@ impl ChatWidget<'_> {
                     tracing::warn!("Failed to acquire lock for browser screenshot update");
                 }
 
+                if let Some(key) = update.session_key.as_ref() {
+                    self.browser_overlay_state
+                        .set_session_key(Some(key.clone()));
+                    if let Some(tracker) = self.tools_state.browser_sessions.get(key) {
+                        let len = tracker.cell.screenshot_history().len();
+                        if len > 0 {
+                            let last_index = len.saturating_sub(1);
+                            let current_index = self.browser_overlay_state.screenshot_index();
+                            if !self.browser_overlay_visible || current_index >= last_index {
+                                self.browser_overlay_state
+                                    .set_screenshot_index(last_index);
+                            }
+                        }
+                    }
+                }
+
                 // Request a redraw to update the display immediately
                 self.app_event_tx.send(AppEvent::RequestRedraw);
 
-                if grouped {
+                if update.grouped {
                     self.bottom_pane
                         .update_status_text("using browser".to_string());
                 }
@@ -21807,7 +22112,10 @@ fi\n\
         // caret does not show inside the input while a modal (help/diff) is open.
         if self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
+            || self.settings.overlay.is_some()
             || self.terminal.overlay().is_some()
+            || self.auto_threads_overlay.is_active()
+            || self.browser_overlay_visible
             || self.agents_terminal.active
         {
             return None;
@@ -26636,10 +26944,11 @@ impl ChatWidget<'_> {
         bottom_pane_area: Rect,
         buf: &mut Buffer,
     ) {
-        use ratatui::layout::{Alignment, Margin, Rect as RtRect};
-        use ratatui::style::Style;
+        use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect as RtRect};
+        use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line as RLine, Span};
-        use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+        use ratatui::widgets::Widget;
 
         let scrim_style = Style::default()
             .bg(crate::colors::overlay_scrim())
@@ -26662,20 +26971,18 @@ impl ChatWidget<'_> {
         };
         Clear.render(window_area, buf);
 
-        let title_spans = vec![
-            Span::styled(
-                format!(" {} ", self.browser_title()),
-                Style::default().fg(crate::colors::text()),
-            ),
-            Span::styled(
-                "— Ctrl+B to close",
-                Style::default().fg(crate::colors::text_dim()),
-            ),
-        ];
-
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(RLine::from(title_spans))
+            .title(RLine::from(vec![
+                Span::styled(
+                    format!(" {} ", self.browser_title()),
+                    Style::default().fg(crate::colors::text()),
+                ),
+                Span::styled(
+                    "— Ctrl+B to close",
+                    Style::default().fg(crate::colors::text_dim()),
+                ),
+            ]))
             .style(Style::default().bg(crate::colors::background()))
             .border_style(
                 Style::default()
@@ -26697,21 +27004,65 @@ impl ChatWidget<'_> {
             return;
         }
 
-        let (screenshot_path, url_opt) = match self.latest_browser_screenshot.lock() {
-            Ok(guard) => guard.as_ref().cloned().map(|(p, u)| (Some(p), Some(u))),
-            Err(_) => None,
-        }
-        .unwrap_or((None, None));
+        let overlay_tracker = self.browser_overlay_tracker();
+        let cell_opt = overlay_tracker.as_ref().map(|(_, tracker)| &tracker.cell);
 
-        let status = self.get_browser_status_string();
-        let summary = url_opt
+        let (screenshot_history, mut selected_index) = if let Some(cell) = cell_opt {
+            let history = cell.screenshot_history();
+            if history.is_empty() {
+                (None, 0usize)
+            } else {
+                let mut index = self.browser_overlay_state.screenshot_index();
+                if index >= history.len() {
+                    index = history.len().saturating_sub(1);
+                    self.browser_overlay_state.set_screenshot_index(index);
+                }
+                (Some(history), index)
+            }
+        } else {
+            (None, 0usize)
+        };
+
+        let screenshot_count = screenshot_history.map(|items| items.len()).unwrap_or(0);
+        if screenshot_count == 0 {
+            selected_index = 0;
+        }
+
+        let mut screenshot_path = screenshot_history
+            .and_then(|history| history.get(selected_index))
+            .map(|record| record.path.clone());
+        let mut screenshot_url = screenshot_history
+            .and_then(|history| history.get(selected_index))
+            .and_then(|record| record.url.clone());
+
+        if screenshot_path.is_none() {
+            if let Ok(latest) = self.latest_browser_screenshot.lock() {
+                if let Some((path, url)) = latest.as_ref() {
+                    screenshot_path = Some(path.clone());
+                    if screenshot_url.is_none() {
+                        screenshot_url = Some(url.clone());
+                    }
+                }
+            }
+        }
+
+        let summary_label = cell_opt
+            .map(|cell| cell.summary_label())
+            .unwrap_or_else(|| self.browser_title().to_string());
+        let summary_value = screenshot_url
             .clone()
             .filter(|value| !value.is_empty())
-            .unwrap_or(status);
-        let is_active = screenshot_path.is_some();
+            .unwrap_or_else(|| summary_label.clone());
 
+        let screenshot_info = if screenshot_count > 0 {
+            format!("Shot {}/{}", selected_index + 1, screenshot_count)
+        } else {
+            "No screenshots yet".to_string()
+        };
+
+        let is_active = screenshot_path.is_some();
         let key_hint_style = Style::default().fg(crate::colors::function());
-        let label_style = Style::default().dim();
+        let label_style = Style::default().fg(crate::colors::text_dim());
         let dot_style = if is_active {
             Style::default().fg(crate::colors::success_green())
         } else {
@@ -26729,8 +27080,12 @@ impl ChatWidget<'_> {
 
             let mut left_spans: Vec<Span> = Vec::new();
             left_spans.push(Span::styled("•", dot_style));
-            left_spans.push(Span::raw(" "));
-            left_spans.push(Span::raw(summary.clone()));
+            if !summary_value.is_empty() {
+                left_spans.push(Span::raw(" "));
+                left_spans.push(Span::raw(summary_value.clone()));
+            }
+            left_spans.push(Span::raw("  "));
+            left_spans.push(Span::styled(screenshot_info.clone(), label_style));
 
             let right_spans: Vec<Span> = vec![
                 Span::from("Ctrl+B").style(key_hint_style),
@@ -26772,16 +27127,190 @@ impl ChatWidget<'_> {
             height: body_height,
         };
 
-        if let Some(path) = screenshot_path.as_ref() {
-            self.render_screenshot_highlevel(path, body_area, buf);
+        let column_constraints = if body_area.width <= 50 {
+            [
+                Constraint::Length(body_area.width.saturating_sub(24).max(20)),
+                Constraint::Length(24),
+            ]
         } else {
-            let message = Paragraph::new(RLine::from(vec![Span::raw(
-                "No browser session captured yet.",
-            )]))
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(crate::colors::text_dim()));
-            ratatui::widgets::Widget::render(message, body_area, buf);
+            [Constraint::Percentage(62), Constraint::Percentage(38)]
+        };
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(column_constraints)
+            .split(body_area);
+
+        let screenshot_column = columns[0];
+        let info_column = if columns.len() > 1 { columns[1] } else { columns[0] };
+
+        let progress_height = if screenshot_column.height > 3 { 1 } else { 0 };
+        let screenshot_display_height = screenshot_column.height.saturating_sub(progress_height);
+        let screenshot_display_area = Rect {
+            x: screenshot_column.x,
+            y: screenshot_column.y,
+            width: screenshot_column.width,
+            height: screenshot_display_height,
+        };
+        let progress_area = if progress_height > 0 {
+            Some(Rect {
+                x: screenshot_column.x,
+                y: screenshot_column
+                    .y
+                    .saturating_add(screenshot_column.height.saturating_sub(progress_height)),
+                width: screenshot_column.width,
+                height: progress_height,
+            })
+        } else {
+            None
+        };
+
+        if screenshot_display_area.width > 0 && screenshot_display_area.height > 0 {
+            if let Some(path) = screenshot_path.as_ref() {
+                self.render_screenshot_highlevel(path, screenshot_display_area, buf);
+            } else {
+                let message = Paragraph::new(RLine::from(vec![Span::raw(
+                    "No browser session captured yet.",
+                )]))
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(crate::colors::text_dim()));
+                Widget::render(message, screenshot_display_area, buf);
+            }
         }
+
+        let current_time = screenshot_history
+            .and_then(|history| history.get(selected_index))
+            .map(|record| record.timestamp)
+            .unwrap_or_else(|| Duration::ZERO);
+        let mut total_time = overlay_tracker
+            .as_ref()
+            .map(|(_, tracker)| tracker.elapsed)
+            .unwrap_or_else(|| Duration::ZERO);
+        if let Some(history) = screenshot_history {
+            if let Some(last) = history.last() {
+                total_time = total_time.max(last.timestamp);
+            }
+        }
+        if let Some(cell) = cell_opt {
+            total_time = total_time.max(cell.total_duration());
+        }
+
+        if let Some(area) = progress_area {
+            if area.height > 0 && area.width > 0 {
+                let progress_line = self.browser_overlay_progress_line(area.width, current_time, total_time);
+                Paragraph::new(progress_line)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(crate::colors::text()))
+                    .render(area, buf);
+            }
+        }
+
+        if info_column.width == 0 || info_column.height == 0 {
+            return;
+        }
+
+        let header_style = Style::default()
+            .fg(crate::colors::text())
+            .add_modifier(Modifier::BOLD);
+        let secondary_style = Style::default().fg(crate::colors::text_dim());
+        let primary_style = Style::default().fg(crate::colors::text());
+
+        let mut info_lines: Vec<RLine<'static>> = Vec::new();
+
+        info_lines.push(RLine::from(vec![Span::styled("Screenshots", header_style)]));
+
+        if let Some(history) = screenshot_history {
+            if history.is_empty() {
+                info_lines.push(RLine::from(vec![Span::styled(
+                    "No screenshots yet",
+                    secondary_style,
+                )]));
+            } else {
+                for (idx, entry) in history.iter().enumerate() {
+                    let mut spans: Vec<Span> = Vec::new();
+                    let marker = if idx == selected_index { "◉" } else { "•" };
+                    let marker_style = if idx == selected_index {
+                        Style::default().fg(crate::colors::primary())
+                    } else {
+                        secondary_style
+                    };
+                    spans.push(Span::styled(marker.to_string(), marker_style));
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        self.format_overlay_mm_ss(entry.timestamp),
+                        secondary_style,
+                    ));
+                    if let Some(url) = entry.url.as_ref() {
+                        if !url.trim().is_empty() {
+                            spans.push(Span::raw("  "));
+                            spans.push(Span::styled(url.clone(), primary_style));
+                        }
+                    }
+                    info_lines.push(RLine::from(spans));
+                }
+            }
+        } else {
+            info_lines.push(RLine::from(vec![Span::styled(
+                "No browser session yet",
+                secondary_style,
+            )]));
+        }
+
+        info_lines.push(RLine::from(vec![Span::raw(String::new())]));
+        info_lines.push(RLine::from(vec![Span::styled("Actions", header_style)]));
+
+        if let Some(cell) = cell_opt {
+            let entries = cell.full_action_entries();
+            if entries.is_empty() {
+                info_lines.push(RLine::from(vec![Span::styled(
+                    "No browser actions yet",
+                    secondary_style,
+                )]));
+            } else {
+                for (time, label, detail) in entries {
+                    let mut spans: Vec<Span> = Vec::new();
+                    spans.push(Span::styled("•", secondary_style));
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        self.normalize_action_time_label(time.as_str()),
+                        secondary_style,
+                    ));
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(label.clone(), primary_style));
+                    let detail_trimmed = detail.trim();
+                    if !detail_trimmed.is_empty() {
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(detail_trimmed.to_string(), secondary_style));
+                    }
+                    info_lines.push(RLine::from(spans));
+                }
+            }
+        } else {
+            info_lines.push(RLine::from(vec![Span::styled(
+                "No browser session yet",
+                secondary_style,
+            )]));
+        }
+
+        info_lines.push(RLine::from(vec![Span::raw(String::new())]));
+        info_lines.push(RLine::from(vec![Span::styled(
+            "Controls: ←/→ or ↑/↓ select screenshot • Shift+↑/↓ or j/k scroll actions",
+            secondary_style,
+        )]));
+
+        let max_scroll = info_lines.len().saturating_sub(info_column.height as usize);
+        let max_scroll_u16 = max_scroll.min(u16::MAX as usize) as u16;
+        self.browser_overlay_state
+            .update_action_metrics(info_column.height, max_scroll_u16);
+        let scroll = self
+            .browser_overlay_state
+            .action_scroll()
+            .min(max_scroll_u16);
+
+        let paragraph = Paragraph::new(info_lines)
+            .style(Style::default().fg(crate::colors::text()))
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0));
+        Widget::render(paragraph, info_column, buf);
     }
 
     fn render_settings_overlay(
@@ -26812,10 +27341,6 @@ impl ChatWidget<'_> {
         fill_rect(buf, overlay_area, None, bg_style);
 
         overlay.render(overlay_area, buf);
-    }
-
-    fn get_browser_status_string(&self) -> String {
-        "Browser".to_string()
     }
 
     fn browser_title(&self) -> &'static str {
@@ -30039,6 +30564,75 @@ struct HelpState {
 #[derive(Default)]
 struct SettingsState {
     overlay: Option<SettingsOverlayView>,
+}
+
+struct BrowserOverlayState {
+    session_key: RefCell<Option<String>>,
+    screenshot_index: Cell<usize>,
+    action_scroll: Cell<u16>,
+    last_action_view_height: Cell<u16>,
+    max_action_scroll: Cell<u16>,
+}
+
+impl Default for BrowserOverlayState {
+    fn default() -> Self {
+        Self {
+            session_key: RefCell::new(None),
+            screenshot_index: Cell::new(0),
+            action_scroll: Cell::new(0),
+            last_action_view_height: Cell::new(0),
+            max_action_scroll: Cell::new(0),
+        }
+    }
+}
+
+impl BrowserOverlayState {
+    fn reset(&self) {
+        self.screenshot_index.set(0);
+        self.action_scroll.set(0);
+        self.last_action_view_height.set(0);
+        self.max_action_scroll.set(0);
+    }
+
+    fn session_key(&self) -> Option<String> {
+        self.session_key.borrow().clone()
+    }
+
+    fn set_session_key(&self, key: Option<String>) {
+        *self.session_key.borrow_mut() = key;
+    }
+
+    fn screenshot_index(&self) -> usize {
+        self.screenshot_index.get()
+    }
+
+    fn set_screenshot_index(&self, index: usize) {
+        self.screenshot_index.set(index);
+    }
+
+    fn action_scroll(&self) -> u16 {
+        self.action_scroll.get()
+    }
+
+    fn set_action_scroll(&self, value: u16) {
+        self.action_scroll.set(value);
+    }
+
+    fn update_action_metrics(&self, height: u16, max_scroll: u16) {
+        self.last_action_view_height.set(height);
+        self.max_action_scroll.set(max_scroll);
+        if self.action_scroll.get() > max_scroll {
+            self.action_scroll.set(max_scroll);
+        }
+    }
+
+    fn last_action_view_height(&self) -> u16 {
+        self.last_action_view_height.get()
+    }
+
+    fn max_action_scroll(&self) -> u16 {
+        self.max_action_scroll.get()
+    }
 }
 
 #[derive(Default)]
