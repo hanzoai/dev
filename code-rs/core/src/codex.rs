@@ -826,6 +826,14 @@ fn is_shell_wrapper(shell: &str, flag: &str) -> bool {
     ) && matches!(flag, "-lc" | "-c")
 }
 
+#[derive(Clone)]
+struct RunningExecMeta {
+    sub_id: String,
+    order_meta: crate::protocol::OrderMeta,
+    cancel_flag: Arc<AtomicBool>,
+    end_emitted: Arc<AtomicBool>,
+}
+
 #[derive(Default)]
 struct State {
     approved_commands: HashSet<ApprovedCommandPattern>,
@@ -851,6 +859,8 @@ struct State {
     dry_run_guard: DryRunGuardState,
     /// Background execs by call_id
     background_execs: std::collections::HashMap<String, BackgroundExecState>,
+    /// Active foreground exec calls keyed by call_id (ExecCommandBegin/End lifecycle)
+    running_execs: HashMap<String, RunningExecMeta>,
     next_internal_sub_id: u64,
     token_usage_info: Option<TokenUsageInfo>,
     latest_rate_limits: Option<RateLimitSnapshotEvent>,
@@ -1871,6 +1881,92 @@ impl Session {
             .await
     }
 
+    fn track_running_exec(
+        &self,
+        call_id: &str,
+        sub_id: &str,
+        order_meta: crate::protocol::OrderMeta,
+        cancel_flag: Arc<AtomicBool>,
+        end_emitted: Arc<AtomicBool>,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        state.running_execs.insert(
+            call_id.to_string(),
+            RunningExecMeta {
+                sub_id: sub_id.to_string(),
+                order_meta,
+                cancel_flag,
+                end_emitted,
+            },
+        );
+    }
+
+    fn unregister_running_exec(&self, call_id: &str) {
+        let mut state = self.state.lock().unwrap();
+        state.running_execs.remove(call_id);
+    }
+
+    fn mark_running_exec_as_cancelled(&self, sub_id: &str) {
+        let state = self.state.lock().unwrap();
+        for meta in state.running_execs.values() {
+            if meta.sub_id == sub_id {
+                meta.cancel_flag.store(true, Ordering::Release);
+            }
+        }
+    }
+
+    fn mark_all_running_execs_as_cancelled(&self) {
+        let sub_ids: Vec<String> = {
+            let state = self.state.lock().unwrap();
+            state
+                .running_execs
+                .values()
+                .map(|meta| meta.sub_id.clone())
+                .collect()
+        };
+        for sub_id in sub_ids {
+            self.mark_running_exec_as_cancelled(&sub_id);
+        }
+    }
+
+    async fn finalize_cancelled_execs(&self, sub_id: &str) {
+        let mut to_emit = Vec::new();
+        {
+            let mut state = self.state.lock().unwrap();
+            let mut remove_keys = Vec::new();
+            for (call_id, meta) in state.running_execs.iter() {
+                if meta.sub_id == sub_id && !meta.end_emitted.load(Ordering::Acquire) {
+                    to_emit.push((
+                        call_id.clone(),
+                        meta.order_meta.clone(),
+                        meta.cancel_flag.clone(),
+                        meta.end_emitted.clone(),
+                    ));
+                    remove_keys.push(call_id.clone());
+                }
+            }
+            for key in remove_keys {
+                state.running_execs.remove(&key);
+            }
+        }
+
+        for (call_id, order_meta, cancel_flag, end_emitted) in to_emit {
+            cancel_flag.store(true, Ordering::Release);
+            if !end_emitted.swap(true, Ordering::AcqRel) {
+                let (exit_code, stderr) = synthetic_exec_end_payload(true);
+                let msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+                    call_id,
+                    stdout: String::new(),
+                    stderr,
+                    exit_code,
+                    duration: Duration::ZERO,
+                });
+                let event = self.make_event_with_order(sub_id, msg, order_meta.clone(), order_meta.sequence_number);
+                let _ = self.tx_event.send(event).await;
+            }
+        }
+    }
+
     async fn run_exec_with_events_inner<'a>(
         &self,
         turn_diff_tracker: &mut TurnDiffTracker,
@@ -1884,6 +1980,26 @@ impl Session {
         let is_apply_patch = begin_ctx.apply_patch.is_some();
         let sub_id = begin_ctx.sub_id.clone();
         let call_id = begin_ctx.call_id.clone();
+
+        let order_for_end = crate::protocol::OrderMeta {
+            request_ordinal: attempt_req,
+            output_index,
+            sequence_number: seq_hint.map(|h| h.saturating_add(1)),
+        };
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let end_emitted = Arc::new(AtomicBool::new(false));
+        self.track_running_exec(&call_id, &sub_id, order_for_end.clone(), cancel_flag.clone(), end_emitted.clone());
+
+        let mut exec_guard = ExecDropGuard::new(
+            self.self_handle.clone(),
+            self.tx_event.clone(),
+            sub_id.clone(),
+            call_id.clone(),
+            order_for_end.clone(),
+            cancel_flag,
+            end_emitted,
+        );
 
         let ExecInvokeArgs { params, sandbox_type, sandbox_policy, sandbox_cwd, code_linux_sandbox_exe, stdout_stream } = exec_args;
         let tracking_command = params.command.clone();
@@ -1948,6 +2064,9 @@ impl Session {
             attempt_req,
         )
         .await;
+
+        exec_guard.mark_completed();
+        self.finalize_cancelled_execs(&sub_id).await;
 
         if enable_hooks {
             if let Some(params_ref) = params_for_hooks.as_ref() {
@@ -2550,6 +2669,8 @@ impl Session {
     fn abort(&self) {
         info!("Aborting existing session");
 
+        self.mark_all_running_execs_as_cancelled();
+
         let mut state = self.state.lock().unwrap();
         state.pending_approvals.clear();
         // Do not clear `pending_input` here. When a user submits a new message
@@ -2619,6 +2740,104 @@ impl State {
             dry_run_guard: self.dry_run_guard.clone(),
             next_internal_sub_id: self.next_internal_sub_id,
             ..Default::default()
+        }
+    }
+}
+
+fn synthetic_exec_end_payload(cancelled: bool) -> (i32, String) {
+    if cancelled {
+        (130, "Command cancelled by user.".to_string())
+    } else {
+        (130, "Command interrupted before completion.".to_string())
+    }
+}
+
+struct ExecDropGuard {
+    sub_id: String,
+    call_id: String,
+    order_meta: crate::protocol::OrderMeta,
+    tx_event: Sender<Event>,
+    cancel_flag: Arc<AtomicBool>,
+    end_emitted: Arc<AtomicBool>,
+    session: Weak<Session>,
+    completed: bool,
+}
+
+impl ExecDropGuard {
+    fn new(
+        session: Weak<Session>,
+        tx_event: Sender<Event>,
+        sub_id: String,
+        call_id: String,
+        order_meta: crate::protocol::OrderMeta,
+        cancel_flag: Arc<AtomicBool>,
+        end_emitted: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            sub_id,
+            call_id,
+            order_meta,
+            tx_event,
+            cancel_flag,
+            end_emitted,
+            session,
+            completed: false,
+        }
+    }
+
+    fn mark_completed(&mut self) {
+        self.completed = true;
+        self.end_emitted.store(true, Ordering::Release);
+        self.remove_from_registry();
+    }
+
+    fn remove_from_registry(&self) {
+        if let Some(session) = self.session.upgrade() {
+            session.unregister_running_exec(&self.call_id);
+        }
+    }
+}
+
+impl Drop for ExecDropGuard {
+    fn drop(&mut self) {
+        self.remove_from_registry();
+
+        if self.completed {
+            return;
+        }
+
+        if self.end_emitted.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let (exit_code, stderr) = synthetic_exec_end_payload(
+            self.cancel_flag.load(Ordering::Acquire),
+        );
+        let msg = EventMsg::ExecCommandEnd(ExecCommandEndEvent {
+            call_id: self.call_id.clone(),
+            stdout: String::new(),
+            stderr,
+            exit_code,
+            duration: Duration::ZERO,
+        });
+
+        if let Some(session) = self.session.upgrade() {
+            let event = session.make_event_with_order(
+                &self.sub_id,
+                msg,
+                self.order_meta.clone(),
+                self.order_meta.sequence_number,
+            );
+            let _ = self.tx_event.try_send(event);
+        } else {
+            // Fallback: emit directly if session no longer exists.
+            let event = Event {
+                id: self.sub_id.clone(),
+                event_seq: 0,
+                msg,
+                order: Some(self.order_meta.clone()),
+            };
+            let _ = self.tx_event.try_send(event);
         }
     }
 }
