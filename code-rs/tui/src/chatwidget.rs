@@ -1325,6 +1325,9 @@ struct AgentRuntime {
 struct AgentTerminalEntry {
     name: String,
     batch_id: Option<String>,
+    batch_label: Option<String>,
+    batch_prompt: Option<String>,
+    batch_context: Option<String>,
     model: Option<String>,
     status: AgentStatus,
     last_progress: Option<String>,
@@ -1343,6 +1346,9 @@ impl AgentTerminalEntry {
         Self {
             name,
             batch_id,
+            batch_label: None,
+            batch_prompt: None,
+            batch_context: None,
             model,
             status,
             last_progress: None,
@@ -1402,6 +1408,47 @@ struct AgentsTerminalState {
     focus: AgentsTerminalFocus,
 }
 
+#[derive(Default, Clone)]
+struct AgentBatchMetadata {
+    label: Option<String>,
+    prompt: Option<String>,
+    context: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum AgentsSidebarEntry {
+    Overview(Option<String>),
+    Agent(String),
+}
+
+#[derive(Clone, Debug)]
+struct AgentsSidebarGroup {
+    batch_id: Option<String>,
+    label: String,
+    agent_ids: Vec<String>,
+}
+
+fn short_batch_label(batch_id: &str) -> String {
+    let compact: String = batch_id.chars().filter(|c| *c != '-').collect();
+    let source = if compact.is_empty() { batch_id } else { compact.as_str() };
+    let short: String = source.chars().take(8).collect();
+    if short.is_empty() {
+        "Batch".to_string()
+    } else {
+        format!("Batch {short}")
+    }
+}
+
+impl AgentsSidebarEntry {
+    fn scroll_key(&self) -> String {
+        match self {
+            AgentsSidebarEntry::Agent(id) => format!("agent:{id}"),
+            AgentsSidebarEntry::Overview(Some(batch)) => format!("batch:{batch}"),
+            AgentsSidebarEntry::Overview(None) => "batch:__adhoc__".to_string(),
+        }
+    }
+}
+
 impl AgentsTerminalState {
     fn new() -> Self {
         Self {
@@ -1427,10 +1474,9 @@ impl AgentsTerminalState {
         self.focus = AgentsTerminalFocus::Sidebar;
     }
 
-    fn current_agent_id(&self) -> Option<&str> {
-        self.order
-            .get(self.selected_index)
-            .map(String::as_str)
+    fn current_sidebar_entry(&self) -> Option<AgentsSidebarEntry> {
+        let entries = self.sidebar_entries();
+        entries.get(self.selected_index).cloned()
     }
 
     fn focus_sidebar(&mut self) {
@@ -1443,6 +1489,63 @@ impl AgentsTerminalState {
 
     fn focus(&self) -> AgentsTerminalFocus {
         self.focus
+    }
+
+    fn clamp_selected_index(&mut self) {
+        let entries = self.sidebar_entries();
+        if entries.is_empty() {
+            self.selected_index = 0;
+        } else if self.selected_index >= entries.len() {
+            self.selected_index = entries.len().saturating_sub(1);
+        }
+    }
+
+    fn sidebar_entries(&self) -> Vec<AgentsSidebarEntry> {
+        let mut out = Vec::new();
+        for group in self.sidebar_groups() {
+            out.push(AgentsSidebarEntry::Overview(group.batch_id.clone()));
+            for agent_id in group.agent_ids {
+                out.push(AgentsSidebarEntry::Agent(agent_id));
+            }
+        }
+        out
+    }
+
+    fn sidebar_groups(&self) -> Vec<AgentsSidebarGroup> {
+        let mut groups: Vec<AgentsSidebarGroup> = Vec::new();
+        let mut group_lookup: HashMap<Option<String>, usize> = HashMap::new();
+        for id in &self.order {
+            if let Some(entry) = self.entries.get(id) {
+                let key = entry.batch_id.clone();
+                let idx = if let Some(idx) = group_lookup.get(&key) {
+                    *idx
+                } else {
+                    let label = entry
+                        .batch_label
+                        .as_ref()
+                        .and_then(|value| {
+                            let trimmed = value.trim();
+                            (!trimmed.is_empty()).then(|| trimmed.to_string())
+                        })
+                        .or_else(|| {
+                            key.as_ref().map(|batch| short_batch_label(batch))
+                        })
+                        .unwrap_or_else(|| "Ad-hoc Agents".to_string());
+                    let idx = groups.len();
+                    group_lookup.insert(key.clone(), idx);
+                    groups.push(AgentsSidebarGroup {
+                        batch_id: key.clone(),
+                        label,
+                        agent_ids: Vec::new(),
+                    });
+                    idx
+                };
+                if let Some(group) = groups.get_mut(idx) {
+                    group.agent_ids.push(id.clone());
+                }
+            }
+        }
+        groups
     }
 }
 
@@ -5083,9 +5186,7 @@ impl ChatWidget<'_> {
                     return;
                 }
                 KeyCode::Right | KeyCode::Enter => {
-                    if self.agents_terminal.focus() == AgentsTerminalFocus::Sidebar
-                        && self.agents_terminal.current_agent_id().is_some()
-                    {
+                    if self.agents_terminal.focus() == AgentsTerminalFocus::Sidebar {
                         self.agents_terminal.focus_detail();
                         self.request_redraw();
                     }
@@ -12154,6 +12255,149 @@ impl ChatWidget<'_> {
         }
     }
 
+    fn agent_batch_metadata(&self, batch_id: &str) -> AgentBatchMetadata {
+        if let Some(key) = self.tools_state.agent_run_by_batch.get(batch_id) {
+            if let Some(tracker) = self.tools_state.agent_runs.get(key) {
+                return AgentBatchMetadata {
+                    label: tracker.overlay_display_label(),
+                    prompt: tracker.overlay_task(),
+                    context: tracker.overlay_context(),
+                };
+            }
+        }
+        AgentBatchMetadata::default()
+    }
+
+    fn append_agents_overlay_section(
+        &self,
+        lines: &mut Vec<ratatui::text::Line<'static>>,
+        title: &str,
+        text: &str,
+    ) {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let header_style = ratatui::style::Style::default()
+            .fg(crate::colors::text())
+            .add_modifier(ratatui::style::Modifier::BOLD);
+        lines.push(ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw(" "),
+            ratatui::text::Span::styled(title.to_string(), header_style),
+        ]));
+        for raw_line in trimmed.lines() {
+            let content = raw_line.trim_end();
+            lines.push(ratatui::text::Line::from(vec![
+                ratatui::text::Span::raw("   "),
+                ratatui::text::Span::styled(
+                    content.to_string(),
+                    ratatui::style::Style::default().fg(crate::colors::text()),
+                ),
+            ]));
+        }
+    }
+
+    fn append_agent_log_lines(
+        &self,
+        lines: &mut Vec<ratatui::text::Line<'static>>,
+        timestamp: DateTime<Local>,
+        kind: AgentLogKind,
+        message: &str,
+        agent_label: Option<&str>,
+    ) {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+
+        let timestamp_text = format!("[{timestamp}] ", timestamp = timestamp.format("%H:%M:%S"));
+        let label = agent_log_label(kind);
+        let label_prefix = format!("{label}: ");
+        let timestamp_style = Style::default().fg(crate::colors::text_dim());
+        let label_style = Style::default()
+            .fg(agent_log_color(kind))
+            .add_modifier(Modifier::BOLD);
+        let message_style = Style::default().fg(crate::colors::text());
+        let agent_label_string = agent_label.map(|label_text| format!("{label_text} "));
+        let agent_style = Style::default()
+            .fg(crate::colors::text_dim())
+            .add_modifier(Modifier::BOLD);
+
+        let indent_len = 1
+            + timestamp_text.chars().count()
+            + agent_label_string
+                .as_ref()
+                .map(|value| value.chars().count())
+                .unwrap_or(0)
+            + label_prefix.chars().count();
+        let indent_string = " ".repeat(indent_len);
+
+        let mut prefix_spans = vec![
+            Span::raw(" "),
+            Span::styled(timestamp_text.clone(), timestamp_style),
+        ];
+        if let Some(agent_text) = agent_label_string.as_ref() {
+            prefix_spans.push(Span::styled(agent_text.clone(), agent_style));
+        }
+        prefix_spans.push(Span::styled(label_prefix.clone(), label_style));
+
+        match kind {
+            AgentLogKind::Result => {
+                let mut markdown_lines: Vec<Line<'static>> = Vec::new();
+                crate::markdown::append_markdown(message, &mut markdown_lines, &self.config);
+                if markdown_lines.is_empty() {
+                    let mut spans = prefix_spans.clone();
+                    spans.push(Span::styled(
+                        "(no result)".to_string(),
+                        Style::default().fg(crate::colors::text_dim()),
+                    ));
+                    lines.push(Line::from(spans));
+                    return;
+                }
+
+                let mut markdown_iter = markdown_lines.into_iter();
+                if let Some(mut first) = markdown_iter.next() {
+                    let mut spans = prefix_spans.clone();
+                    spans.extend(first.spans.drain(..));
+                    lines.push(Line::from(spans));
+                }
+                for md_line in markdown_iter {
+                    let mut spans = vec![Span::raw(indent_string.clone())];
+                    spans.extend(md_line.spans);
+                    lines.push(Line::from(spans));
+                }
+            }
+            _ => {
+                let mut parts = message.split('\n');
+                let first = parts.next().unwrap_or("");
+                let mut spans = prefix_spans.clone();
+                spans.push(Span::styled(first.to_string(), message_style));
+                lines.push(Line::from(spans));
+                for part in parts {
+                    lines.push(Line::from(vec![
+                        Span::raw(indent_string.clone()),
+                        Span::styled(part.to_string(), message_style),
+                    ]));
+                }
+            }
+        }
+    }
+
+    fn ensure_trailing_blank_line(
+        &self,
+        lines: &mut Vec<ratatui::text::Line<'static>>,
+    ) {
+        if lines
+            .last()
+            .map(|line| {
+                line.spans.is_empty()
+                    || (line.spans.len() == 1 && line.spans[0].content.is_empty())
+            })
+            .unwrap_or(false)
+        {
+            return;
+        }
+        lines.push(ratatui::text::Line::from(""));
+    }
+
     fn update_agents_terminal_state(
         &mut self,
         agents: &[code_core::protocol::AgentInfo],
@@ -12166,6 +12410,11 @@ impl ChatWidget<'_> {
         let mut saw_new_agent = false;
         for info in agents {
             let status = agent_status_from_str(info.status.as_str());
+            let batch_metadata = info
+                .batch_id
+                .as_deref()
+                .map(|id| self.agent_batch_metadata(id))
+                .unwrap_or_default();
             let is_new = !self.agents_terminal.entries.contains_key(&info.id);
             if is_new
                 && !self
@@ -12198,6 +12447,32 @@ impl ChatWidget<'_> {
             entry.batch_id = info.batch_id.clone();
             entry.model = info.model.clone();
 
+            let AgentBatchMetadata { label, prompt: meta_prompt, context: meta_context } = batch_metadata;
+            let previous_label = entry.batch_label.clone();
+            entry.batch_label = label
+                .or_else(|| info.batch_id.clone())
+                .or(previous_label);
+
+            let fallback_prompt = self
+                .agents_terminal
+                .shared_task
+                .clone()
+                .or_else(|| self.agent_task.clone());
+            let previous_prompt = entry.batch_prompt.clone();
+            entry.batch_prompt = meta_prompt
+                .or(fallback_prompt)
+                .or(previous_prompt);
+
+            let fallback_context = self
+                .agents_terminal
+                .shared_context
+                .clone()
+                .or_else(|| self.agent_context.clone());
+            let previous_context = entry.batch_context.clone();
+            entry.batch_context = meta_context
+                .or(fallback_context)
+                .or(previous_context);
+
             if entry.status != status {
                 entry.status = status.clone();
                 entry.push_log(
@@ -12228,11 +12503,7 @@ impl ChatWidget<'_> {
             }
         }
 
-        if self.agents_terminal.selected_index >= self.agents_terminal.order.len()
-            && !self.agents_terminal.order.is_empty()
-        {
-            self.agents_terminal.selected_index = self.agents_terminal.order.len() - 1;
-        }
+        self.agents_terminal.clamp_selected_index();
 
         if saw_new_agent && self.agents_terminal.active {
             self.layout.scroll_offset = 0;
@@ -12262,6 +12533,31 @@ impl ChatWidget<'_> {
                         agent.status.clone(),
                         agent.batch_id.clone(),
                     );
+                    let batch_metadata = agent
+                        .batch_id
+                        .as_deref()
+                        .map(|id| self.agent_batch_metadata(id))
+                        .unwrap_or_default();
+                    let AgentBatchMetadata { label, prompt: meta_prompt, context: meta_context } = batch_metadata;
+                    entry.batch_label = label
+                        .or_else(|| agent.batch_id.clone())
+                        .or(entry.batch_label.clone());
+                    let fallback_prompt = self
+                        .agents_terminal
+                        .shared_task
+                        .clone()
+                        .or_else(|| self.agent_task.clone());
+                    entry.batch_prompt = meta_prompt
+                        .or(fallback_prompt)
+                        .or(entry.batch_prompt.clone());
+                    let fallback_context = self
+                        .agents_terminal
+                        .shared_context
+                        .clone()
+                        .or_else(|| self.agent_context.clone());
+                    entry.batch_context = meta_context
+                        .or(fallback_context)
+                        .or(entry.batch_context.clone());
                     if let Some(progress) = agent.last_progress.as_ref() {
                         entry.last_progress = Some(progress.clone());
                         entry.push_log(AgentLogKind::Progress, progress.clone());
@@ -12280,6 +12576,7 @@ impl ChatWidget<'_> {
                 }
             }
         }
+        self.agents_terminal.clamp_selected_index();
         self.restore_selected_agent_scroll();
         self.request_redraw();
     }
@@ -12297,32 +12594,38 @@ impl ChatWidget<'_> {
     }
 
     fn record_current_agent_scroll(&mut self) {
-        if let Some(id) = self.agents_terminal.current_agent_id() {
+        if let Some(entry) = self.agents_terminal.current_sidebar_entry() {
             let capped = self
                 .layout
                 .scroll_offset
                 .min(self.layout.last_max_scroll.get());
             self.agents_terminal
                 .scroll_offsets
-                .insert(id.to_string(), capped);
+                .insert(entry.scroll_key(), capped);
         }
     }
 
     fn restore_selected_agent_scroll(&mut self) {
         let offset = self
             .agents_terminal
-            .current_agent_id()
-            .and_then(|id| self.agents_terminal.scroll_offsets.get(id).copied())
+            .current_sidebar_entry()
+            .and_then(|entry| {
+                self.agents_terminal
+                    .scroll_offsets
+                    .get(&entry.scroll_key())
+                    .copied()
+            })
             .unwrap_or(0);
         self.layout.scroll_offset = offset;
     }
 
     fn navigate_agents_terminal_selection(&mut self, delta: isize) {
-        if self.agents_terminal.order.is_empty() {
+        let entries = self.agents_terminal.sidebar_entries();
+        if entries.is_empty() {
             return;
         }
         self.agents_terminal.focus_sidebar();
-        let len = self.agents_terminal.order.len() as isize;
+        let len = entries.len() as isize;
         self.record_current_agent_scroll();
         let mut new_index = self.agents_terminal.selected_index as isize + delta;
         if new_index >= len {
@@ -12332,6 +12635,7 @@ impl ChatWidget<'_> {
             new_index += len;
         }
         self.agents_terminal.selected_index = new_index as usize;
+        self.agents_terminal.clamp_selected_index();
         self.restore_selected_agent_scroll();
         self.request_redraw();
     }
@@ -26806,261 +27110,379 @@ impl ChatWidget<'_> {
 
         // Sidebar list of agents grouped by batch id
         let mut items: Vec<ListItem> = Vec::new();
-        let mut display_ids: Vec<Option<String>> = Vec::new();
-        if !self.agents_terminal.order.is_empty() {
-            let mut groups: Vec<(Option<String>, Vec<String>)> = Vec::new();
-            let mut group_lookup: HashMap<Option<String>, usize> = HashMap::new();
+        let mut row_entries: Vec<Option<AgentsSidebarEntry>> = Vec::new();
 
-            for id in &self.agents_terminal.order {
-                if let Some(entry) = self.agents_terminal.entries.get(id) {
-                    let key = entry.batch_id.clone();
-                    let idx = if let Some(idx) = group_lookup.get(&key) {
-                        *idx
-                    } else {
-                        let idx = groups.len();
-                        group_lookup.insert(key.clone(), idx);
-                        groups.push((key.clone(), Vec::new()));
-                        idx
-                    };
-                    groups[idx].1.push(id.clone());
-                }
-            }
+        let header_style = Style::default()
+            .fg(crate::colors::text())
+            .add_modifier(Modifier::BOLD);
+        let overview_style = Style::default().fg(crate::colors::text_dim());
 
-            for (batch_id, ids) in groups {
-                let count_label = if ids.len() == 1 {
-                    "1 agent".to_string()
-                } else {
-                    format!("{} agents", ids.len())
-                };
-                let header_label = match batch_id.as_ref() {
-                    Some(batch) => {
-                        let short: String = batch.chars().take(8).collect();
-                        if short.is_empty() {
-                            format!("Batch · {count_label}")
-                        } else {
-                            format!("Batch {short} · {count_label}")
-                        }
-                    }
-                    None => format!("Ad-hoc · {count_label}"),
-                };
-                items.push(ListItem::new(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(
-                        header_label,
-                        Style::default()
-                            .fg(crate::colors::text_dim())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ])));
-                display_ids.push(None);
+        for group in self.agents_terminal.sidebar_groups() {
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(group.label.clone(), header_style),
+            ])));
+            row_entries.push(None);
 
-                for id in ids {
-                    if let Some(entry) = self.agents_terminal.entries.get(&id) {
-                        let status_color = agent_status_color(entry.status.clone());
-                        let spans = vec![
-                            Span::raw(" "),
-                            Span::styled("• ", Style::default().fg(status_color)),
-                            Span::styled(entry.name.clone(), Style::default().fg(crate::colors::text())),
-                        ];
-                        items.push(ListItem::new(Line::from(spans)));
-                        display_ids.push(Some(id));
-                    }
+            let overview_entry = AgentsSidebarEntry::Overview(group.batch_id.clone());
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(" ★ Overview".to_string(), overview_style),
+            ])));
+            row_entries.push(Some(overview_entry));
+
+            for agent_id in group.agent_ids {
+                if let Some(entry) = self.agents_terminal.entries.get(&agent_id) {
+                    let model_label = entry
+                        .model
+                        .as_ref()
+                        .and_then(|value| {
+                            let trimmed = value.trim();
+                            (!trimmed.is_empty()).then(|| trimmed.to_string())
+                        })
+                        .unwrap_or_else(|| entry.name.clone());
+                    let text = format!(" • {model_label}");
+                    let color = agent_status_color(entry.status.clone());
+                    items.push(ListItem::new(Line::from(vec![Span::styled(
+                        text,
+                        Style::default().fg(color),
+                    )])));
+                    row_entries.push(Some(AgentsSidebarEntry::Agent(agent_id.clone())));
                 }
             }
         }
 
         if items.is_empty() {
-            items.push(ListItem::new(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    "No agents yet",
-                    Style::default().fg(crate::colors::text_dim()),
-                ),
-            ])));
+            items.push(ListItem::new(Line::from(vec![Span::styled(
+                "No agents yet",
+                Style::default().fg(crate::colors::text_dim()),
+            )])));
+            row_entries.push(None);
         }
 
         let mut list_state = ListState::default();
-        if !display_ids.is_empty() && !self.agents_terminal.order.is_empty() {
-            let idx = self
-                .agents_terminal
-                .selected_index
-                .min(self.agents_terminal.order.len().saturating_sub(1));
-            if let Some(selected_id) = self.agents_terminal.order.get(idx) {
-                if let Some(list_idx) = display_ids
-                    .iter()
-                    .position(|maybe_id| maybe_id.as_ref() == Some(selected_id))
-                {
-                    list_state.select(Some(list_idx));
-                }
+        if let Some(selected_entry) = self.agents_terminal.current_sidebar_entry() {
+            if let Some(row_idx) = row_entries
+                .iter()
+                .position(|entry| entry.as_ref() == Some(&selected_entry))
+            {
+                list_state.select(Some(row_idx));
             }
         }
 
         let sidebar_has_focus = self.agents_terminal.focus() == AgentsTerminalFocus::Sidebar;
-        let sidebar_border_color = if sidebar_has_focus {
-            crate::colors::border_focused()
+        let highlight_style = if sidebar_has_focus {
+            Style::default()
+                .fg(crate::colors::primary())
+                .add_modifier(Modifier::BOLD)
         } else {
-            crate::colors::border()
+            Style::default()
+                .fg(crate::colors::text_dim())
+                .add_modifier(Modifier::BOLD)
         };
-        let sidebar_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Agents ")
-            .border_style(Style::default().fg(sidebar_border_color));
         let sidebar = List::new(items)
-            .block(sidebar_block)
-            .highlight_style(
-                Style::default()
-                    .fg(crate::colors::primary())
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("➤ ");
+            .highlight_style(highlight_style)
+            .highlight_symbol("›");
+
+        fill_rect(
+            buf,
+            chunks[0],
+            None,
+            Style::default().bg(crate::colors::background()),
+        );
         ratatui::widgets::StatefulWidget::render(sidebar, chunks[0], buf, &mut list_state);
 
         let right_area = if chunks.len() > 1 { chunks[1] } else { chunks[0] };
         let mut lines: Vec<Line> = Vec::new();
 
-        if let Some(agent_id) = self.agents_terminal.current_agent_id() {
-            if let Some(entry) = self.agents_terminal.entries.get(agent_id) {
-                lines.push(Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled(
-                        entry.name.clone(),
-                        Style::default()
-                            .fg(crate::colors::text())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        agent_status_label(entry.status.clone()),
-                        Style::default().fg(agent_status_color(entry.status.clone())),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(
-                        format!("#{}", agent_id.chars().take(7).collect::<String>()),
-                        Style::default().fg(crate::colors::text_dim()),
-                    ),
-                ]));
-
-                if let Some(model) = entry.model.as_ref() {
+        match self.agents_terminal.current_sidebar_entry() {
+            Some(AgentsSidebarEntry::Agent(agent_id)) => {
+                if let Some(entry) = self.agents_terminal.entries.get(agent_id.as_str()) {
                     lines.push(Line::from(vec![
                         Span::raw(" "),
                         Span::styled(
-                            format!("Model: {model}"),
+                            entry.name.clone(),
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            agent_status_label(entry.status.clone()),
+                            Style::default().fg(agent_status_color(entry.status.clone())),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("#{}", agent_id.chars().take(7).collect::<String>()),
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
+
+                    if let Some(model) = entry.model.as_ref() {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(
+                                format!("Model: {model}"),
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    }
+
+                    if entry
+                        .batch_label
+                        .as_ref()
+                        .map(|value| !value.trim().is_empty())
+                        .unwrap_or(false)
+                        || entry.batch_id.is_some()
+                    {
+                        let mut parts: Vec<String> = Vec::new();
+                        if let Some(label) = entry
+                            .batch_label
+                            .as_ref()
+                            .and_then(|value| {
+                                let trimmed = value.trim();
+                                (!trimmed.is_empty()).then(|| trimmed.to_string())
+                            })
+                        {
+                            parts.push(label);
+                        }
+                        if let Some(batch_id) = entry.batch_id.as_ref() {
+                            let short = short_batch_label(batch_id);
+                            if short.is_empty() {
+                                parts.push(batch_id.clone());
+                            } else {
+                                parts.push(short);
+                            }
+                        }
+                        let batch_text = if parts.is_empty() {
+                            "Ad-hoc".to_string()
+                        } else {
+                            parts.join("  ")
+                        };
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(
+                                format!("Batch: {batch_text}"),
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    }
+
+                    if let Some(context_text) = entry
+                        .batch_context
+                        .as_ref()
+                        .filter(|value| !value.trim().is_empty())
+                    {
+                        self.ensure_trailing_blank_line(&mut lines);
+                        self.append_agents_overlay_section(&mut lines, "Context", context_text);
+                    }
+
+                    self.ensure_trailing_blank_line(&mut lines);
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "Action History",
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    self.ensure_trailing_blank_line(&mut lines);
+
+                    if entry.logs.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(
+                                "No updates yet",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    } else {
+                        for (idx, log) in entry.logs.iter().enumerate() {
+                            self.append_agent_log_lines(
+                                &mut lines,
+                                log.timestamp,
+                                log.kind,
+                                log.message.as_str(),
+                                None,
+                            );
+                            if idx + 1 < entry.logs.len() {
+                                lines.push(Line::from(""));
+                            }
+                        }
+                    }
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "No data for selected agent",
                             Style::default().fg(crate::colors::text_dim()),
                         ),
                     ]));
                 }
-                if let Some(context) = self.agents_terminal.shared_context.as_ref() {
-                    lines.push(Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(
-                            format!("Context: {context}"),
-                            Style::default().fg(crate::colors::text_dim()),
-                        ),
-                    ]));
-                }
-                if let Some(task) = self.agents_terminal.shared_task.as_ref() {
-                    lines.push(Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(
-                            format!("Task: {task}"),
-                            Style::default().fg(crate::colors::text_dim()),
-                        ),
-                    ]));
+            }
+            Some(AgentsSidebarEntry::Overview(batch_id)) => {
+                let mut batch_entries: Vec<&AgentTerminalEntry> = Vec::new();
+                for id in &self.agents_terminal.order {
+                    if let Some(entry) = self.agents_terminal.entries.get(id) {
+                        if entry.batch_id == batch_id {
+                            batch_entries.push(entry);
+                        }
+                    }
                 }
 
-                lines.push(Line::from(""));
-
-                if entry.logs.is_empty() {
+                if batch_entries.is_empty() {
                     lines.push(Line::from(vec![
                         Span::raw(" "),
                         Span::styled(
-                            "No updates yet",
+                            "No data for this batch",
                             Style::default().fg(crate::colors::text_dim()),
                         ),
                     ]));
                 } else {
-                    for (idx, log) in entry.logs.iter().enumerate() {
-                        let timestamp = log.timestamp.format("%H:%M:%S");
-                        let label = agent_log_label(log.kind);
-                        let color = agent_log_color(log.kind);
-                        let label_style = Style::default()
-                            .fg(color)
-                            .add_modifier(Modifier::BOLD);
+                    let count = batch_entries.len();
+                    let title = batch_entries
+                        .iter()
+                        .find_map(|entry| {
+                            entry.batch_label.as_ref().and_then(|value| {
+                                let trimmed = value.trim();
+                                (!trimmed.is_empty()).then(|| trimmed.to_string())
+                            })
+                        })
+                        .or_else(|| {
+                            batch_id
+                                .as_ref()
+                                .map(|id| short_batch_label(id))
+                        })
+                        .unwrap_or_else(|| "Ad-hoc Agents".to_string());
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            title,
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(
+                            if count == 1 {
+                                "1 agent".to_string()
+                            } else {
+                                format!("{count} agents")
+                            },
+                            Style::default().fg(crate::colors::text_dim()),
+                        ),
+                    ]));
 
-                        match log.kind {
-                            AgentLogKind::Result => {
-                                lines.push(Line::from(vec![
-                                    Span::raw(" "),
-                                    Span::styled(
-                                        format!("[{timestamp}] "),
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    ),
-                                    Span::styled(label, label_style),
-                                    Span::raw(": "),
-                                ]));
+                    let mut model_labels: Vec<String> = batch_entries
+                        .iter()
+                        .map(|entry| {
+                            entry
+                                .model
+                                .as_ref()
+                                .and_then(|value| {
+                                    let trimmed = value.trim();
+                                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                                })
+                                .unwrap_or_else(|| entry.name.clone())
+                        })
+                        .collect();
+                    model_labels.sort();
+                    model_labels.dedup();
+                    if !model_labels.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(
+                                format!("Models: {}", model_labels.join(", ")),
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    }
 
-                                let mut markdown_lines: Vec<Line<'static>> = Vec::new();
-                                crate::markdown::append_markdown(
-                                    log.message.as_str(),
-                                    &mut markdown_lines,
-                                    &self.config,
-                                );
+                    if let Some(context_text) = batch_entries
+                        .iter()
+                        .find_map(|entry| entry.batch_context.as_ref())
+                        .and_then(|value| {
+                            let trimmed = value.trim();
+                            (!trimmed.is_empty()).then(|| value.as_str())
+                        })
+                    {
+                        self.ensure_trailing_blank_line(&mut lines);
+                        self.append_agents_overlay_section(&mut lines, "Context", context_text);
+                    }
 
-                                if markdown_lines.is_empty() {
-                                    lines.push(Line::from(vec![
-                                        Span::raw(" "),
-                                        Span::styled(
-                                            "(no result)",
-                                            Style::default().fg(crate::colors::text_dim()),
-                                        ),
-                                    ]));
-                                } else {
-                                    for line in markdown_lines.into_iter() {
-                                        let mut spans = line.spans;
-                                        spans.insert(0, Span::raw(" "));
-                                        lines.push(Line::from(spans));
-                                    }
-                                }
+                    self.ensure_trailing_blank_line(&mut lines);
+                    lines.push(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "Action History",
+                            Style::default()
+                                .fg(crate::colors::text())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                    self.ensure_trailing_blank_line(&mut lines);
 
-                                if idx + 1 < entry.logs.len() {
-                                    lines.push(Line::from(""));
-                                }
-                            }
-                            _ => {
-                                lines.push(Line::from(vec![
-                                    Span::raw(" "),
-                                    Span::styled(
-                                        format!("[{timestamp}] "),
-                                        Style::default().fg(crate::colors::text_dim()),
-                                    ),
-                                    Span::styled(label, label_style),
-                                    Span::raw(": "),
-                                    Span::styled(
-                                        log.message.clone(),
-                                        Style::default().fg(crate::colors::text()),
-                                    ),
-                                ]));
+                    let mut aggregated: Vec<(DateTime<Local>, AgentLogKind, String, String)> = Vec::new();
+                    for entry in &batch_entries {
+                        let entry = *entry;
+                        let agent_label = entry
+                            .model
+                            .as_ref()
+                            .and_then(|value| {
+                                let trimmed = value.trim();
+                                (!trimmed.is_empty()).then(|| trimmed.to_string())
+                            })
+                            .unwrap_or_else(|| entry.name.clone());
+                        for log in &entry.logs {
+                            aggregated.push((
+                                log.timestamp,
+                                log.kind,
+                                log.message.clone(),
+                                agent_label.clone(),
+                            ));
+                        }
+                    }
+                    aggregated.sort_by(|a, b| {
+                        a.0
+                            .cmp(&b.0)
+                            .then_with(|| a.3.cmp(&b.3))
+                            .then_with(|| a.2.cmp(&b.2))
+                    });
+
+                    if aggregated.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::raw(" "),
+                            Span::styled(
+                                "No updates yet",
+                                Style::default().fg(crate::colors::text_dim()),
+                            ),
+                        ]));
+                    } else {
+                        for (idx, (timestamp, kind, message, agent_label_text)) in
+                            aggregated.iter().enumerate()
+                        {
+                            self.append_agent_log_lines(
+                                &mut lines,
+                                *timestamp,
+                                *kind,
+                                message.as_str(),
+                                Some(agent_label_text.as_str()),
+                            );
+                            if idx + 1 < aggregated.len() {
+                                lines.push(Line::from(""));
                             }
                         }
                     }
                 }
-            } else {
+            }
+            None => {
                 lines.push(Line::from(vec![
                     Span::raw(" "),
                     Span::styled(
-                        "No data for selected agent",
+                        "No agents available",
                         Style::default().fg(crate::colors::text_dim()),
                     ),
                 ]));
             }
-        } else {
-            lines.push(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    "No agents available",
-                    Style::default().fg(crate::colors::text_dim()),
-                ),
-            ]));
         }
 
         let viewport_height = right_area.height.max(1);
