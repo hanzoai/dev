@@ -18,23 +18,14 @@ use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
-use super::coordinator_user_schema::{user_turn_schema, parse_user_turn_reply};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::app_event::{
-    AppEvent,
-    AutoCoordinatorStatus,
-    AutoTurnAgentsAction,
-    AutoTurnAgentsTiming,
-    AutoTurnCliAction,
-};
-use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
-use crate::thread_spawner;
+use crate::coordinator_user_schema::{parse_user_turn_reply, user_turn_schema};
+use crate::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
-use crate::chatwidget::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
+use crate::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
 use code_common::elapsed::format_duration;
 use std::fs;
 use chrono::{DateTime, Local, Utc};
@@ -49,12 +40,79 @@ const MAX_DECISION_RECOVERY_ATTEMPTS: u32 = 3;
 #[error("auto coordinator cancelled")]
 struct AutoCoordinatorCancelled;
 
-pub(super) const MODEL_SLUG: &str = "gpt-5";
+pub const MODEL_SLUG: &str = "gpt-5";
 const USER_TURN_SCHEMA_NAME: &str = "auto_coordinator_user_turn";
 const COORDINATOR_PROMPT_PATH: &str = "code-rs/core/prompt_coordinator.md";
 
+#[derive(Clone)]
+pub struct AutoCoordinatorEventSender {
+    inner: Arc<dyn Fn(AutoCoordinatorEvent) + Send + Sync>,
+}
+
+impl AutoCoordinatorEventSender {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(AutoCoordinatorEvent) + Send + Sync + 'static,
+    {
+        Self { inner: Arc::new(f) }
+    }
+
+    pub fn send(&self, event: AutoCoordinatorEvent) {
+        (self.inner)(event);
+    }
+}
+
 #[derive(Debug, Clone)]
-pub(super) struct AutoCoordinatorHandle {
+pub struct AutoTurnCliAction {
+    pub prompt: String,
+    pub context: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoTurnAgentsTiming {
+    Parallel,
+    Blocking,
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoTurnAgentsAction {
+    pub prompt: String,
+    pub context: Option<String>,
+    pub write: bool,
+    pub write_requested: Option<bool>,
+    pub models: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCoordinatorStatus {
+    Continue,
+    Success,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub enum AutoCoordinatorEvent {
+    Decision {
+        status: AutoCoordinatorStatus,
+        progress_past: Option<String>,
+        progress_current: Option<String>,
+        cli: Option<AutoTurnCliAction>,
+        agents_timing: Option<AutoTurnAgentsTiming>,
+        agents: Vec<AutoTurnAgentsAction>,
+        transcript: Vec<ResponseItem>,
+    },
+    Thinking {
+        delta: String,
+        summary_index: Option<u32>,
+    },
+    UserReply {
+        user_response: Option<String>,
+        cli_command: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoCoordinatorHandle {
     pub tx: Sender<AutoCoordinatorCommand>,
     cancel_token: CancellationToken,
 }
@@ -70,11 +128,10 @@ impl AutoCoordinatorHandle {
     pub fn cancel(&self) {
         self.cancel_token.cancel();
     }
-
 }
 
 #[derive(Debug)]
-pub(super) enum AutoCoordinatorCommand {
+pub enum AutoCoordinatorCommand {
     UpdateConversation(Vec<ResponseItem>),
     HandleUserPrompt {
         _prompt: String,
@@ -95,8 +152,8 @@ struct PendingDecision {
 }
 
 impl PendingDecision {
-    fn into_event(self) -> AppEvent {
-        AppEvent::AutoCoordinatorDecision {
+    fn into_event(self) -> AutoCoordinatorEvent {
+        AutoCoordinatorEvent::Decision {
             status: self.status,
             progress_past: self.progress_past,
             progress_current: self.progress_current,
@@ -110,14 +167,14 @@ impl PendingDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum TurnComplexity {
+pub enum TurnComplexity {
     Low,
     Medium,
     High,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TurnConfig {
+pub struct TurnConfig {
     #[serde(default)]
     pub read_only: bool,
     #[serde(default)]
@@ -127,7 +184,7 @@ pub(crate) struct TurnConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum TurnMode {
+pub enum TurnMode {
     Normal,
     SubAgentWrite,
     SubAgentReadOnly,
@@ -142,7 +199,7 @@ impl Default for TurnMode {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
-pub(crate) struct AgentPreferences {
+pub struct AgentPreferences {
     #[serde(default)]
     pub prefer_research: bool,
     #[serde(default)]
@@ -153,7 +210,7 @@ pub(crate) struct AgentPreferences {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ReviewTiming {
+pub enum ReviewTiming {
     PostTurn,
     PreWrite,
     Immediate,
@@ -167,7 +224,7 @@ impl Default for ReviewTiming {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ReviewStrategy {
+pub struct ReviewStrategy {
     #[serde(default)]
     pub timing: ReviewTiming,
     #[serde(default)]
@@ -188,7 +245,7 @@ impl Default for ReviewStrategy {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TurnDescriptor {
+pub struct TurnDescriptor {
     #[serde(default)]
     pub mode: TurnMode,
     #[serde(default)]
@@ -591,8 +648,8 @@ struct AgentAction {
     models: Option<Vec<String>>,
 }
 
-pub(super) fn start_auto_coordinator(
-    app_event_tx: AppEventSender,
+pub fn start_auto_coordinator(
+    event_tx: AutoCoordinatorEventSender,
     goal_text: String,
     conversation: Vec<ResponseItem>,
     config: Config,
@@ -603,9 +660,12 @@ pub(super) fn start_auto_coordinator(
     let cancel_token = CancellationToken::new();
     let thread_cancel = cancel_token.clone();
 
-    if thread_spawner::spawn_lightweight("auto-coordinator", move || {
+    let builder = std::thread::Builder::new()
+        .name("code-auto-coordinator".to_string())
+        .stack_size(256 * 1024);
+    let handle = builder.spawn(move || {
         if let Err(err) = run_auto_loop(
-            app_event_tx,
+            event_tx,
             goal_text,
             conversation,
             config,
@@ -615,10 +675,10 @@ pub(super) fn start_auto_coordinator(
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
         }
-    })
-    .is_none()
-    {
-        tracing::error!("auto coordinator spawn rejected: background thread limit reached");
+    });
+
+    if handle.is_err() {
+        tracing::error!("auto coordinator spawn failed: {:#}", handle.unwrap_err());
         return Err(anyhow!("auto coordinator worker unavailable"));
     }
 
@@ -629,7 +689,7 @@ pub(super) fn start_auto_coordinator(
 }
 
 fn run_auto_loop(
-    app_event_tx: AppEventSender,
+    event_tx: AutoCoordinatorEventSender,
     goal_text: String,
     initial_conversation: Vec<ResponseItem>,
     config: Config,
@@ -731,7 +791,7 @@ fn run_auto_loop(
                 &schema,
                 conv,
                 auto_instructions.as_deref(),
-                &app_event_tx,
+                &event_tx,
                 &cancel_token,
             ) {
                 Ok(ParsedCoordinatorDecision {
@@ -750,7 +810,7 @@ fn run_auto_loop(
                     }
                     consecutive_decision_failures = 0;
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        let event = AppEvent::AutoCoordinatorDecision {
+                        let event = AutoCoordinatorEvent::Decision {
                             status,
                             progress_past,
                             progress_current,
@@ -759,7 +819,7 @@ fn run_auto_loop(
                             agents: agents.iter().map(agent_action_to_event).collect(),
                             transcript: std::mem::take(&mut response_items),
                         };
-                        app_event_tx.send(event);
+                        event_tx.send(event);
                         continue;
                     }
 
@@ -773,7 +833,7 @@ fn run_auto_loop(
                         transcript: response_items,
                     };
 
-                    app_event_tx.send(decision_event.into_event());
+                    event_tx.send(decision_event.into_event());
                     stopped = true;
                     continue;
                 }
@@ -797,7 +857,7 @@ fn run_auto_loop(
                                 "Coordinator response invalid (attempt {attempt}/{MAX_DECISION_RECOVERY_ATTEMPTS}): {}. Retrying…",
                                 recoverable.summary
                             );
-                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
+                            let _ = event_tx.send(AutoCoordinatorEvent::Thinking {
                                 delta: message,
                                 summary_index: None,
                             });
@@ -811,7 +871,7 @@ fn run_auto_loop(
                         );
                     }
                     consecutive_decision_failures = 0;
-                    let event = AppEvent::AutoCoordinatorDecision {
+                    let event = AutoCoordinatorEvent::Decision {
                         status: AutoCoordinatorStatus::Failed,
                         progress_past: None,
                         progress_current: Some(format!("Coordinator error: {err}")),
@@ -820,7 +880,7 @@ fn run_auto_loop(
                         agents: Vec::new(),
                         transcript: Vec::new(),
                     };
-                    app_event_tx.send(event);
+                    event_tx.send(event);
                     stopped = true;
                     continue;
                 }
@@ -840,7 +900,7 @@ fn run_auto_loop(
                     &schema,
                     updated_conversation.clone(),
                     auto_instructions.as_deref(),
-                    &app_event_tx,
+                    &event_tx,
                     &cancel_token,
                 ) {
                     Ok((user_response, cli_command)) => {
@@ -848,14 +908,14 @@ fn run_auto_loop(
                             updated_conversation.push(make_message("assistant", response_text.clone()));
                         }
                         pending_conversation = Some(updated_conversation);
-                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                        event_tx.send(AutoCoordinatorEvent::UserReply {
                             user_response,
                             cli_command,
                         });
                     }
                     Err(err) => {
                         tracing::warn!("failed to handle coordinator user prompt: {err:#}");
-                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                        event_tx.send(AutoCoordinatorEvent::UserReply {
                             user_response: Some(format!("Coordinator error: {err}")),
                             cli_command: None,
                         });
@@ -1183,7 +1243,7 @@ fn request_coordinator_decision(
     schema: &Value,
     conversation: Vec<ResponseItem>,
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<ParsedCoordinatorDecision> {
     let (raw, response_items) = request_decision(
@@ -1194,7 +1254,7 @@ fn request_coordinator_decision(
         schema,
         &conversation,
         auto_instructions,
-        app_event_tx,
+        event_tx,
         cancel_token,
     )?;
     let (mut decision, value) = parse_decision(&raw)?;
@@ -1211,7 +1271,7 @@ fn request_decision(
     schema: &Value,
     conversation: &[ResponseItem],
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<(String, Vec<ResponseItem>)> {
     match request_decision_with_model(
@@ -1222,7 +1282,7 @@ fn request_decision(
         schema,
         conversation,
         auto_instructions,
-        app_event_tx,
+        event_tx,
         cancel_token,
         MODEL_SLUG,
     ) {
@@ -1244,7 +1304,7 @@ fn request_decision(
                     schema,
                     conversation,
                     auto_instructions,
-                    app_event_tx,
+                    event_tx,
                     cancel_token,
                     &fallback_slug,
                 )
@@ -1269,7 +1329,7 @@ fn request_user_turn_decision(
     schema: &Value,
     conversation: Vec<ResponseItem>,
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<(Option<String>, Option<String>)> {
     let (raw, _response_items) = request_decision(
@@ -1280,7 +1340,7 @@ fn request_user_turn_decision(
         schema,
         &conversation,
         auto_instructions,
-        app_event_tx,
+        event_tx,
         cancel_token,
     )?;
     let (user_response, cli_command) = parse_user_turn_reply(&raw)?;
@@ -1295,7 +1355,7 @@ fn request_decision_with_model(
     schema: &Value,
     conversation: &[ResponseItem],
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
     model_slug: &str,
 ) -> Result<RequestStreamResult> {
@@ -1304,7 +1364,7 @@ fn request_decision_with_model(
     let schema = schema.clone();
     let conversation: Vec<ResponseItem> = conversation.to_vec();
     let auto_instructions = auto_instructions.map(|text| text.to_string());
-    let tx = app_event_tx.clone();
+    let tx = event_tx.clone();
     let cancel = cancel_token.clone();
     let classify = |error: &anyhow::Error| classify_model_error(error);
     let options = RetryOptions::with_defaults(MAX_RETRY_ELAPSED);
@@ -1363,7 +1423,7 @@ fn request_decision_with_model(
                                 let cleaned = strip_role_prefix(&delta);
                                 reasoning_delta_accumulator.push_str(cleaned);
                                 let message = cleaned.to_string();
-                                tx_inner.send(AppEvent::AutoCoordinatorThinking {
+                                tx_inner.send(AutoCoordinatorEvent::Thinking {
                                     delta: message,
                                     summary_index,
                                 });
@@ -1372,7 +1432,7 @@ fn request_decision_with_model(
                                 let cleaned = strip_role_prefix(&delta);
                                 reasoning_delta_accumulator.push_str(cleaned);
                                 let message = cleaned.to_string();
-                                tx_inner.send(AppEvent::AutoCoordinatorThinking {
+                                tx_inner.send(AutoCoordinatorEvent::Thinking {
                                     delta: message,
                                     summary_index: None,
                                 });
@@ -1438,7 +1498,7 @@ fn request_decision_with_model(
                         .map(|s| format!("; next attempt at {s}"))
                         .unwrap_or_default()
                 );
-                let _ = tx.send(AppEvent::AutoCoordinatorThinking {
+                let _ = tx.send(AutoCoordinatorEvent::Thinking {
                     delta: message,
                     summary_index: None,
                 });
@@ -1732,7 +1792,7 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
 
 struct RecoverableDecisionError {
     summary: String,
-    #[cfg_attr(not(any(test, feature = "test-helpers")), allow(dead_code))]
+    #[cfg_attr(not(test), allow(dead_code))]
     guidance: Option<String>,
 }
 
@@ -1815,7 +1875,7 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
     None
 }
 
-#[cfg(any(test, feature = "test-helpers"))]
+#[cfg(test)]
 fn push_unique_guidance(guidance: &mut Vec<String>, message: &str) {
     let trimmed = message.trim();
     if trimmed.is_empty() {

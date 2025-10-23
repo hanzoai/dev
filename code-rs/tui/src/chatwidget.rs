@@ -55,13 +55,6 @@ use code_protocol::protocol::SessionSource;
 use code_protocol::num_format::format_with_separators;
 
 
-pub(crate) mod auto_coordinator;
-mod auto_drive_history;
-mod coordinator_router;
-mod coordinator_user_schema;
-#[cfg(feature = "dev-faults")]
-mod faults;
-mod retry;
 mod diff_handlers;
 mod agent_install;
 mod diff_ui;
@@ -94,12 +87,20 @@ use self::agent_install::{
     start_upgrade_terminal_session,
     wrap_command,
 };
-use self::auto_drive_history::AutoDriveHistory;
-use self::coordinator_router::{CoordinatorContext, CoordinatorRouterResponse};
-use self::auto_coordinator::{
+use code_auto_drive_core::{
     start_auto_coordinator,
     AutoCoordinatorCommand,
+    AutoCoordinatorEvent,
+    AutoCoordinatorEventSender,
     AutoCoordinatorHandle,
+    AutoCoordinatorStatus,
+    AutoDriveHistory,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+    CoordinatorContext,
+    CoordinatorRouterResponse,
+    route_user_message,
     TurnConfig,
     TurnDescriptor,
 };
@@ -392,11 +393,7 @@ fn describe_cloud_error(err: &CloudTaskError) -> String {
 use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
-    AutoCoordinatorStatus,
     AutoContinueMode,
-    AutoTurnAgentsAction,
-    AutoTurnAgentsTiming,
-    AutoTurnCliAction,
     BackgroundPlacement,
     TerminalAfter,
     TerminalCommandGate,
@@ -1042,7 +1039,6 @@ pub(crate) struct ChatWidget<'a> {
 
     // State for the Agents Terminal view
     agents_terminal: AgentsTerminalState,
-    auto_threads_overlay: AutoThreadsOverlayState,
 
     pending_upgrade_notice: Option<(u64, String)>,
 
@@ -1543,125 +1539,6 @@ impl AgentsTerminalState {
 enum AgentsTerminalFocus {
     Sidebar,
     Detail,
-}
-
-const AUTO_THREADS_MAX_ENTRIES: usize = 50;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AutoThreadsOverlayFocus {
-    List,
-    Detail,
-}
-
-struct AutoThreadEntry {
-    list_label: String,
-    detail_text: String,
-    detail_scroll: u16,
-}
-
-impl AutoThreadEntry {
-    fn reset_scroll(&mut self) {
-        self.detail_scroll = 0;
-    }
-}
-
-struct AutoThreadsOverlayState {
-    active: bool,
-    entries: Vec<AutoThreadEntry>,
-    selected_index: usize,
-    focus: AutoThreadsOverlayFocus,
-}
-
-impl AutoThreadsOverlayState {
-    fn new() -> Self {
-        Self {
-            active: false,
-            entries: Vec::new(),
-            selected_index: 0,
-            focus: AutoThreadsOverlayFocus::List,
-        }
-    }
-
-    fn activate(&mut self) {
-        self.active = true;
-        if self.selected_index >= self.entries.len() {
-            self.selected_index = self.entries.len().saturating_sub(1);
-        }
-        if let Some(entry) = self.selected_entry_mut() {
-            entry.reset_scroll();
-        }
-    }
-
-    fn deactivate(&mut self) {
-        self.active = false;
-        self.focus = AutoThreadsOverlayFocus::List;
-    }
-
-    fn is_active(&self) -> bool {
-        self.active
-    }
-
-    fn focus(&self) -> AutoThreadsOverlayFocus {
-        self.focus
-    }
-
-    fn set_focus(&mut self, focus: AutoThreadsOverlayFocus) {
-        self.focus = focus;
-    }
-
-    fn push_entry(&mut self, entry: AutoThreadEntry) {
-        if self.entries.len() >= AUTO_THREADS_MAX_ENTRIES {
-            self.entries.remove(0);
-            if self.selected_index > 0 {
-                self.selected_index -= 1;
-            }
-        }
-
-        self.entries.push(entry);
-        self.selected_index = self.entries.len().saturating_sub(1);
-        if let Some(entry) = self.selected_entry_mut() {
-            entry.reset_scroll();
-        }
-    }
-
-    fn entries(&self) -> &Vec<AutoThreadEntry> {
-        &self.entries
-    }
-
-    fn selected_index(&self) -> usize {
-        self.selected_index
-    }
-
-    fn selected_entry_mut(&mut self) -> Option<&mut AutoThreadEntry> {
-        self.entries.get_mut(self.selected_index)
-    }
-
-    fn navigate(&mut self, delta: isize) {
-        if self.entries.is_empty() {
-            return;
-        }
-        let len = self.entries.len() as isize;
-        let mut idx = self.selected_index as isize + delta;
-        if idx < 0 {
-            idx = 0;
-        } else if idx >= len {
-            idx = len - 1;
-        }
-        if self.selected_index != idx as usize {
-            self.selected_index = idx as usize;
-            if let Some(entry) = self.selected_entry_mut() {
-                entry.reset_scroll();
-            }
-        }
-    }
-
-    fn scroll_detail(&mut self, delta: i16) {
-        if let Some(entry) = self.selected_entry_mut() {
-            let current = entry.detail_scroll as i32;
-            let new = (current + delta as i32).max(0);
-            entry.detail_scroll = new as u16;
-        }
-    }
 }
 
 // ---------- Stable ordering & routing helpers ----------
@@ -4221,7 +4098,6 @@ impl ChatWidget<'_> {
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             agents_terminal: AgentsTerminalState::new(),
-            auto_threads_overlay: AutoThreadsOverlayState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             render_theme_epoch: 0,
@@ -4525,7 +4401,6 @@ impl ChatWidget<'_> {
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             agents_terminal: AgentsTerminalState::new(),
-            auto_threads_overlay: AutoThreadsOverlayState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             render_theme_epoch: 0,
@@ -5052,11 +4927,6 @@ impl ChatWidget<'_> {
         if self.diffs.overlay.is_some() {
             return;
         }
-        if self.auto_threads_overlay.is_active() {
-            if self.handle_auto_threads_overlay_key(key_event) {
-                return;
-            }
-        }
         if self.browser_overlay_visible {
             let is_ctrl_b = matches!(
                 key_event,
@@ -5122,21 +4992,6 @@ impl ChatWidget<'_> {
             self.toggle_agents_hud();
             return;
         }
-        if let KeyEvent {
-            code: crossterm::event::KeyCode::Char(c),
-            modifiers,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        } = key_event
-        {
-            if (c == 'o' || c == 'O')
-                && modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-            {
-                self.toggle_auto_threads_overlay();
-                return;
-            }
-        }
-
         if self.agents_terminal.active {
             use crossterm::event::KeyCode;
             if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
@@ -7756,7 +7611,7 @@ impl ChatWidget<'_> {
         }
 
         let context = CoordinatorContext::new(self.auto_state.pending_agent_actions.len(), updates);
-        let response = coordinator_router::route_user_message(trimmed, &context);
+        let response = route_user_message(trimmed, &context);
         if response.user_response.is_some() || response.cli_command.is_some() {
             Some(response)
         } else {
@@ -11269,7 +11124,6 @@ impl ChatWidget<'_> {
                 }
                 let hint = self.active_review_hint.take();
                 let prompt = self.active_review_prompt.take();
-                self.record_auto_review_thread(hint.clone(), prompt.clone(), review_output.clone());
                 match review_output {
                     Some(output) => {
                         let summary_cell = self.build_review_summary_cell(
@@ -12911,157 +12765,6 @@ impl ChatWidget<'_> {
         self.restore_selected_agent_scroll();
         self.request_redraw();
     }
-
-
-    fn open_auto_threads_overlay(&mut self) {
-        if self.agents_terminal.active {
-            self.exit_agents_terminal_mode();
-        }
-        self.auto_threads_overlay.activate();
-        self.request_redraw();
-    }
-
-    fn close_auto_threads_overlay(&mut self) {
-        if !self.auto_threads_overlay.is_active() {
-            return;
-        }
-        self.auto_threads_overlay.deactivate();
-        self.request_redraw();
-        self.bottom_pane.ensure_input_focus();
-    }
-
-    fn toggle_auto_threads_overlay(&mut self) {
-        if self.auto_threads_overlay.is_active() {
-            self.close_auto_threads_overlay();
-        } else {
-            self.open_auto_threads_overlay();
-        }
-    }
-
-    fn handle_auto_threads_overlay_key(&mut self, key_event: KeyEvent) -> bool {
-        if !self.auto_threads_overlay.is_active() {
-            return false;
-        }
-
-        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-            return true;
-        }
-
-        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
-
-        if ctrl
-            && matches!(
-                key_event.code,
-                KeyCode::Char('o') | KeyCode::Char('O') | KeyCode::Char('\u{f}')
-            )
-        {
-            self.close_auto_threads_overlay();
-            return true;
-        }
-
-        if matches!(key_event.code, KeyCode::Char('\u{f}')) {
-            self.close_auto_threads_overlay();
-            return true;
-        }
-
-        if ctrl && shift && matches!(key_event.code, KeyCode::Char('c') | KeyCode::Char('C')) {
-            self.close_auto_threads_overlay();
-            return true;
-        }
-
-        match key_event.code {
-            KeyCode::Esc => {
-                self.close_auto_threads_overlay();
-            }
-            KeyCode::Tab => {
-                let new_focus = match self.auto_threads_overlay.focus() {
-                    AutoThreadsOverlayFocus::List => AutoThreadsOverlayFocus::Detail,
-                    AutoThreadsOverlayFocus::Detail => AutoThreadsOverlayFocus::List,
-                };
-                self.auto_threads_overlay.set_focus(new_focus);
-                if let Some(entry) = self.auto_threads_overlay.selected_entry_mut() {
-                    if matches!(new_focus, AutoThreadsOverlayFocus::Detail) {
-                        entry.reset_scroll();
-                    }
-                }
-                self.request_redraw();
-            }
-            KeyCode::Left => {
-                self.auto_threads_overlay.set_focus(AutoThreadsOverlayFocus::List);
-                self.request_redraw();
-            }
-            KeyCode::Right => {
-                self.auto_threads_overlay.set_focus(AutoThreadsOverlayFocus::Detail);
-                if let Some(entry) = self.auto_threads_overlay.selected_entry_mut() {
-                    entry.reset_scroll();
-                }
-                self.request_redraw();
-            }
-            KeyCode::Up => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    self.auto_threads_overlay.navigate(-1);
-                } else {
-                    self.auto_threads_overlay.scroll_detail(-1);
-                }
-                self.request_redraw();
-            }
-            KeyCode::Down => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    self.auto_threads_overlay.navigate(1);
-                } else {
-                    self.auto_threads_overlay.scroll_detail(1);
-                }
-                self.request_redraw();
-            }
-            KeyCode::PageUp => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::Detail) {
-                    self.auto_threads_overlay.scroll_detail(-8);
-                    self.request_redraw();
-                }
-            }
-            KeyCode::PageDown => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::Detail) {
-                    self.auto_threads_overlay.scroll_detail(8);
-                    self.request_redraw();
-                }
-            }
-            KeyCode::Home => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    let current = self.auto_threads_overlay.selected_index() as isize;
-                    if current > 0 {
-                        self.auto_threads_overlay.navigate(-current);
-                        self.request_redraw();
-                    }
-                } else {
-                    self.auto_threads_overlay.scroll_detail(-i16::MAX);
-                    self.request_redraw();
-                }
-            }
-            KeyCode::End => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    let remaining = self
-                        .auto_threads_overlay
-                        .entries()
-                        .len()
-                        .saturating_sub(self.auto_threads_overlay.selected_index())
-                        as isize
-                        - 1;
-                    if remaining > 0 {
-                        self.auto_threads_overlay.navigate(remaining);
-                        self.request_redraw();
-                    }
-                } else {
-                    self.auto_threads_overlay.scroll_detail(i16::MAX);
-                    self.request_redraw();
-                }
-            }
-            _ => {}
-        }
-
-        true
-    }
-
     fn resolve_agent_install_command(&self, agent_name: &str) -> Option<(Vec<String>, String)> {
         let cmd = self
             .config
@@ -13473,8 +13176,47 @@ fi\n\
         }
         self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
         self.config.tui.auto_drive.qa_automation_enabled = qa_automation_enabled;
+        let coordinator_events = {
+            let app_event_tx = self.app_event_tx.clone();
+            AutoCoordinatorEventSender::new(move |event| {
+                match event {
+                    AutoCoordinatorEvent::Decision {
+                        status,
+                        progress_past,
+                        progress_current,
+                        cli,
+                        agents_timing,
+                        agents,
+                        transcript,
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorDecision {
+                            status,
+                            progress_past,
+                            progress_current,
+                            cli,
+                            agents_timing,
+                            agents,
+                            transcript,
+                        });
+                    }
+                    AutoCoordinatorEvent::Thinking { delta, summary_index } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorThinking { delta, summary_index });
+                    }
+                    AutoCoordinatorEvent::UserReply {
+                        user_response,
+                        cli_command,
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                            user_response,
+                            cli_command,
+                        });
+                    }
+                }
+            })
+        };
+
         match start_auto_coordinator(
-            self.app_event_tx.clone(),
+            coordinator_events,
             goal.clone(),
             conversation,
             self.config.clone(),
@@ -14213,70 +13955,6 @@ fi\n\
         self.auto_update_terminal_hint();
         self.request_redraw();
         self.rebuild_auto_history();
-    }
-
-    fn record_auto_review_thread(
-        &mut self,
-        hint: Option<String>,
-        prompt: Option<String>,
-        output: Option<ReviewOutputEvent>,
-    ) {
-        let heading = hint
-            .as_ref()
-            .and_then(|h| {
-                let trimmed = h.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(format!("Review – {}", Self::truncate_with_ellipsis(trimmed, 48)))
-                }
-            })
-            .unwrap_or_else(|| "Review".to_string());
-
-        let status_label = match output {
-            Some(ref out) if out.findings.is_empty() => "No findings".to_string(),
-            Some(ref out) => format!("Findings {}", out.findings.len()),
-            None => "No response".to_string(),
-        };
-
-        let mut sections: Vec<String> = Vec::new();
-        if let Some(h) = hint
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            sections.push(format!("Hint:\n{}", h));
-        }
-        if let Some(p) = prompt
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            sections.push(format!("Prompt:\n{}", p));
-        }
-
-        match output {
-            Some(ref review) => {
-                let json = serde_json::to_string_pretty(review)
-                    .unwrap_or_else(|_| format!("{review:?}"));
-                sections.push(format!("Review output:\n{}", json));
-            }
-            None => sections.push("Review output: <none>".to_string()),
-        }
-
-        let detail_text = sections
-            .into_iter()
-            .filter(|section| !section.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        let entry = AutoThreadEntry {
-            list_label: format!("{heading} · {status_label}"),
-            detail_text,
-            detail_scroll: 0,
-        };
-
-        self.auto_threads_overlay.push_entry(entry);
     }
 
     pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
@@ -18278,7 +17956,7 @@ use crate::chatwidget::message::UserMessage;
 
     pub(crate) fn has_active_modal_view(&self) -> bool {
         // Treat bottom‑pane views (approval, selection popups) and top‑level overlays
-        // (diff viewer, help overlay, Auto Threads overlay) as "modals" for Esc routing. This ensures that
+        // (diff viewer, help overlay) as "modals" for Esc routing. This ensures that
         // a single Esc keypress closes the visible overlay instead of engaging the
         // global Esc policy (clear input / backtrack).
         self.bottom_pane.has_active_modal_view()
@@ -18286,7 +17964,6 @@ use crate::chatwidget::message::UserMessage;
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
             || self.terminal.overlay.is_some()
-            || self.auto_threads_overlay.is_active()
     }
 
     /// Forward an `Op` directly to codex.
@@ -21670,7 +21347,6 @@ use crate::chatwidget::message::UserMessage;
             || self.help.overlay.is_some()
             || self.settings.overlay.is_some()
             || self.terminal.overlay().is_some()
-            || self.auto_threads_overlay.is_active()
             || self.browser_overlay_visible
             || self.agents_terminal.active
         {
@@ -22144,10 +21820,7 @@ mod tests {
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
-    use crate::chatwidget::auto_coordinator::{
-        TurnComplexity,
-        TurnMode,
-    };
+    use code_auto_drive_core::{TurnComplexity, TurnMode};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use code_core::history::state::{
         AssistantStreamDelta,
@@ -22408,62 +22081,6 @@ mod tests {
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AgentsTerminal);
-    }
-
-    #[test]
-    fn esc_router_prioritizes_auto_threads_overlay_before_auto_stop() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_threads_overlay.activate();
-
-        let route = chat.describe_esc_context();
-        assert_eq!(route.intent, EscIntent::DismissModal);
-        assert!(!route.allows_double_esc);
-
-        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let performed = chat.execute_esc_intent(route.intent, esc_event);
-        assert!(performed, "Esc intent should close the overlay");
-        assert!(chat.auto_state.active, "Auto Drive should remain active after closing overlay");
-        assert!(
-            !chat.auto_threads_overlay.is_active(),
-            "Overlay should deactivate after Esc is routed"
-        );
-    }
-
-    #[test]
-    fn ctrl_o_closes_auto_threads_overlay_when_active() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.toggle_auto_threads_overlay();
-        assert!(chat.auto_threads_overlay.is_active());
-
-        let ctrl_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
-        chat.handle_key_event(ctrl_o);
-
-        assert!(
-            !chat.auto_threads_overlay.is_active(),
-            "Ctrl+O should deactivate the overlay"
-        );
-    }
-
-    #[test]
-    fn control_character_closes_auto_threads_overlay() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.toggle_auto_threads_overlay();
-        assert!(chat.auto_threads_overlay.is_active());
-
-        let control_char = KeyEvent::new(KeyCode::Char('\u{f}'), KeyModifiers::NONE);
-        chat.handle_key_event(control_char);
-
-        assert!(
-            !chat.auto_threads_overlay.is_active(),
-            "Control character produced by Ctrl+O should close the overlay"
-        );
     }
 
     #[test]
@@ -26936,193 +26553,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn render_auto_threads_overlay(
-        &self,
-        frame_area: Rect,
-        history_area: Rect,
-        bottom_pane_area: Rect,
-        buf: &mut Buffer,
-    ) {
-        use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect as RtRect};
-        use ratatui::style::{Modifier, Style};
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
-        use ratatui::widgets::StatefulWidget;
-
-        let scrim_style = Style::default()
-            .bg(crate::colors::overlay_scrim())
-            .fg(crate::colors::text_dim());
-        fill_rect(buf, frame_area, None, scrim_style);
-
-        let padding = 1u16;
-        let footer_reserved = bottom_pane_area.height.min(1);
-        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
-        let overlay_height = overlay_bottom
-            .saturating_sub(history_area.y)
-            .max(1)
-            .min(frame_area.height);
-
-        let window_area = Rect {
-            x: history_area.x + padding,
-            y: history_area.y,
-            width: history_area.width.saturating_sub(padding * 2),
-            height: overlay_height,
-        };
-        Clear.render(window_area, buf);
-
-        let title_spans = vec![
-            Span::styled(" Auto QA Threads ", Style::default().fg(crate::colors::text())),
-            Span::styled(
-                "— Ctrl+O to close",
-                Style::default().fg(crate::colors::text_dim()),
-            ),
-        ];
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(title_spans))
-            .style(Style::default().bg(crate::colors::background()))
-            .border_style(Style::default().fg(crate::colors::border()));
-        let inner = block.inner(window_area);
-        block.render(window_area, buf);
-
-        let inner_bg = Style::default().bg(crate::colors::background());
-        for y in inner.y..inner.y + inner.height {
-            for x in inner.x..inner.x + inner.width {
-                buf[(x, y)].set_style(inner_bg);
-            }
-        }
-
-        if inner.width == 0 || inner.height == 0 {
-            return;
-        }
-
-        let content = inner.inner(Margin::new(1, 1));
-        if content.width == 0 || content.height == 0 {
-            return;
-        }
-
-        let hint_height = if content.height >= 2 { 1 } else { 0 };
-        let body_height = content.height.saturating_sub(hint_height);
-        let body_area = RtRect {
-            x: content.x,
-            y: content.y,
-            width: content.width,
-            height: body_height,
-        };
-        let hint_area = RtRect {
-            x: content.x,
-            y: content.y.saturating_add(body_height),
-            width: content.width,
-            height: hint_height,
-        };
-
-        let entries = self.auto_threads_overlay.entries();
-        let sidebar_target = 28u16;
-        let sidebar_width = if body_area.width <= sidebar_target + 12 {
-            body_area.width.saturating_mul(35).saturating_div(100).clamp(16, body_area.width)
-        } else {
-            sidebar_target.min(body_area.width.saturating_sub(12)).max(16)
-        };
-
-        let constraints = if body_area.width <= sidebar_width {
-            [Constraint::Length(body_area.width), Constraint::Length(0)]
-        } else {
-            [Constraint::Length(sidebar_width), Constraint::Min(12)]
-        };
-
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(constraints)
-            .split(body_area);
-
-        let list_area = chunks[0];
-        let detail_area = if chunks.len() > 1 { chunks[1] } else { chunks[0] };
-
-        let mut list_items: Vec<ListItem> = Vec::new();
-        if entries.is_empty() {
-            list_items.push(ListItem::new(Line::from(vec![Span::styled(
-                "No QA threads yet",
-                Style::default().fg(crate::colors::text_dim()),
-            )])));
-        } else {
-            for entry in entries {
-                list_items.push(ListItem::new(Line::from(vec![Span::raw(entry.list_label.clone())])));
-            }
-        }
-
-        let mut list_state = ListState::default();
-        if !entries.is_empty() {
-            list_state.select(Some(self.auto_threads_overlay.selected_index()));
-        }
-
-        StatefulWidget::render(
-            List::new(list_items)
-                .highlight_style(
-                    Style::default()
-                        .fg(crate::colors::primary())
-                        .add_modifier(Modifier::BOLD),
-                )
-                .highlight_symbol("› "),
-            list_area,
-            buf,
-            &mut list_state,
-        );
-
-        let focus = self.auto_threads_overlay.focus();
-        let detail_border = if matches!(focus, AutoThreadsOverlayFocus::Detail) {
-            crate::colors::primary()
-        } else {
-            crate::colors::border()
-        };
-
-        let detail_block = Block::default()
-            .borders(if chunks.len() > 1 { Borders::LEFT } else { Borders::NONE })
-            .border_style(Style::default().fg(detail_border))
-            .style(Style::default().bg(crate::colors::background()));
-        let detail_inner = detail_block.inner(detail_area);
-        detail_block.render(detail_area, buf);
-
-        for y in detail_inner.y..detail_inner.y + detail_inner.height {
-            for x in detail_inner.x..detail_inner.x + detail_inner.width {
-                buf[(x, y)].set_style(inner_bg);
-            }
-        }
-
-        let detail_text = if let Some(entry) = entries
-            .get(self.auto_threads_overlay.selected_index())
-        {
-            entry.detail_text.clone()
-        } else {
-            "Run Auto Drive with cross-check or review enabled to capture QA threads.".to_string()
-        };
-
-        let scroll = entries
-            .get(self.auto_threads_overlay.selected_index())
-            .map(|entry| entry.detail_scroll)
-            .unwrap_or(0);
-
-        Paragraph::new(detail_text)
-            .wrap(Wrap { trim: false })
-            .style(Style::default().fg(crate::colors::text()))
-            .scroll((scroll, 0))
-            .render(detail_inner, buf);
-
-        if hint_area.height > 0 {
-            let list_focus = matches!(focus, AutoThreadsOverlayFocus::List);
-            let hint_text = if list_focus {
-                "Up/Down navigate · Tab detail · Esc close"
-            } else {
-                "Up/Down scroll · Tab list · Esc close"
-            };
-            Paragraph::new(Line::from(vec![Span::styled(
-                hint_text,
-                Style::default().fg(crate::colors::text_dim()),
-            )]))
-            .render(hint_area, buf);
-        }
-    }
-
     fn render_agents_terminal_overlay(
         &self,
         frame_area: Rect,
@@ -29487,11 +28917,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     .alignment(ratatui::layout::Alignment::Left)
                     .render(instructions_area, buf);
             }
-        }
-
-        if self.terminal.overlay().is_none() && self.auto_threads_overlay.is_active() {
-            self.render_auto_threads_overlay(area, history_area, bottom_pane_area, buf);
-            return;
         }
 
         if self.terminal.overlay().is_none() && self.browser_overlay_visible {
