@@ -77,35 +77,12 @@ pub(crate) enum BackgroundPlacement {
     BeforeNextOutput,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnCliAction {
-    pub prompt: String,
-    pub context: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoTurnAgentsTiming {
-    /// Launch agents and continue executing the CLI prompt while they run.
-    Parallel,
-    /// Launch agents and wait for their results before progressing.
-    Blocking,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AutoTurnAgentsAction {
-    pub prompt: String,
-    pub context: Option<String>,
-    pub write: bool,
-    pub write_requested: Option<bool>,
-    pub models: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AutoCoordinatorStatus {
-    Continue,
-    Success,
-    Failed,
-}
+pub(crate) use code_auto_drive_core::{
+    AutoCoordinatorStatus,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AutoContinueMode {
