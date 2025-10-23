@@ -18,7 +18,7 @@ debug-logs = []
 dev-faults = ["code-auto-drive-core/dev-faults"]
 # Fork-specific extensions layered on top of upstream history rendering.
 code-fork = []
-test-helpers = []
+test-helpers = ["code-auto-drive-core/test-helpers"]
 
 [lints]
 workspace = true

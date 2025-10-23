@@ -1084,6 +1084,7 @@ dependencies = [
  "chrono",
  "code-common",
  "code-core",
+ "code-git-tooling",
  "code-protocol",
  "futures",
  "once_cell",
