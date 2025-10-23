@@ -58,6 +58,8 @@ use code_protocol::num_format::format_with_separators;
 pub(crate) mod auto_coordinator;
 mod auto_drive_history;
 mod auto_observer;
+mod coordinator_router;
+mod coordinator_user_schema;
 mod qa_orchestrator;
 #[cfg(feature = "dev-faults")]
 mod faults;
@@ -95,6 +97,7 @@ use self::agent_install::{
     wrap_command,
 };
 use self::auto_drive_history::AutoDriveHistory;
+use self::coordinator_router::{CoordinatorContext, CoordinatorRouterResponse};
 use self::auto_coordinator::{
     start_auto_coordinator,
     AutoCoordinatorCommand,
@@ -7452,6 +7455,45 @@ impl ChatWidget<'_> {
         true
     }
 
+    fn try_coordinator_route(
+        &mut self,
+        original_text: &str,
+    ) -> Option<CoordinatorRouterResponse> {
+        let trimmed = original_text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if !self.auto_state.active {
+            return None;
+        }
+        if !self.config.tui.auto_drive.coordinator_routing {
+            return None;
+        }
+        if trimmed.starts_with('/') {
+            return None;
+        }
+
+        let mut updates = Vec::new();
+        if let Some(summary) = self.auto_state.last_decision_summary.clone() {
+            if !summary.trim().is_empty() {
+                updates.push(summary);
+            }
+        }
+        if let Some(current) = self.auto_state.current_summary.clone() {
+            if !current.trim().is_empty() && updates.iter().all(|existing| existing != &current) {
+                updates.push(current);
+            }
+        }
+
+        let context = CoordinatorContext::new(self.auto_state.pending_agent_actions.len(), updates);
+        let response = coordinator_router::route_user_message(trimmed, &context);
+        if response.user_response.is_some() || response.cli_command.is_some() {
+            Some(response)
+        } else {
+            None
+        }
+    }
+
     fn submit_user_message(&mut self, user_message: UserMessage) {
         if self.layout.scroll_offset > 0 {
             layout_scroll::to_bottom(self);
@@ -7503,6 +7545,53 @@ impl ChatWidget<'_> {
             return;
         }
         let original_text = message.display_text.clone();
+
+        let mut submitted_cli = false;
+        if !message.suppress_persistence
+            && !original_text.trim().starts_with('/')
+            && self.auto_state.active
+            && self.config.tui.auto_drive.coordinator_routing
+        {
+            let mut conversation = self.current_auto_history();
+            if let Some(user_item) = Self::auto_drive_make_user_message(original_text.clone()) {
+                conversation.push(user_item.clone());
+                if self.auto_send_user_prompt_to_coordinator(original_text.clone(), conversation) {
+                    self.finalize_sent_user_message(message);
+                    self.consume_pending_prompt_for_ui_only_turn();
+                    self.auto_history.append_raw(std::slice::from_ref(&user_item));
+                    return;
+                }
+            }
+        }
+
+        if !message.suppress_persistence {
+            if let Some(mut routed) = self.try_coordinator_route(&original_text) {
+                self.finalize_sent_user_message(message);
+                self.consume_pending_prompt_for_ui_only_turn();
+                let _ = self.rebuild_auto_history();
+
+                if let Some(notice_text) = routed.user_response.take() {
+                    let mut lines = Vec::with_capacity(2);
+                    lines.push("AUTO DRIVE RESPONSE".to_string());
+                    lines.push(notice_text);
+                    self.history_push_plain_paragraphs(PlainMessageKind::Notice, lines);
+                }
+
+                if let Some(cli_command) = routed.cli_command {
+                    let mut synthetic: UserMessage = cli_command.into();
+                    synthetic.suppress_persistence = true;
+                    self.submit_user_message(synthetic);
+                    submitted_cli = true;
+                }
+
+                if !submitted_cli {
+                    self.auto_send_conversation_force();
+                }
+
+                return;
+            }
+        }
+
         let only_text_items = message
             .ordered_items
             .iter()
@@ -13193,6 +13282,71 @@ fi\n\
         }
     }
 
+    fn auto_send_conversation_force(&mut self) {
+        if !self.auto_state.active {
+            return;
+        }
+        let conversation = self.current_auto_history();
+        self.observer_send_delta(&conversation);
+        let Some(handle) = self.auto_handle.as_ref() else {
+            return;
+        };
+        if handle
+            .send(AutoCoordinatorCommand::UpdateConversation(conversation))
+            .is_err()
+        {
+            self.auto_stop(Some("Coordinator stopped unexpectedly.".to_string()));
+        } else {
+            self.auto_state.waiting_for_response = true;
+            self.auto_state.coordinator_waiting = true;
+            self.auto_state.current_summary = None;
+            self.auto_state.current_progress_past = None;
+            self.auto_state.current_progress_current = None;
+            self.auto_state.current_cli_prompt = None;
+            self.auto_state.current_cli_context = None;
+            self.auto_state.last_broadcast_summary = None;
+            self.auto_state.current_summary_index = None;
+            self.auto_state.current_display_line = None;
+            self.auto_state.current_display_is_summary = false;
+            self.auto_state.current_reasoning_title = None;
+            self.auto_state.placeholder_phrase =
+                Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+            self.auto_state.thinking_prefix_stripped = false;
+            self.auto_rebuild_live_ring();
+            self.request_redraw();
+        }
+    }
+
+    fn auto_send_user_prompt_to_coordinator(
+        &mut self,
+        prompt: String,
+        conversation: Vec<ResponseItem>,
+    ) -> bool {
+        let Some(handle) = self.auto_handle.as_ref() else {
+            return false;
+        };
+        let command = AutoCoordinatorCommand::HandleUserPrompt {
+            _prompt: prompt,
+            conversation,
+        };
+        match handle.send(command) {
+            Ok(()) => {
+                self.auto_state.waiting_for_response = true;
+                self.auto_state.coordinator_waiting = true;
+                self.auto_state.awaiting_submission = false;
+                self.auto_state.placeholder_phrase =
+                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
+                self.auto_rebuild_live_ring();
+                self.request_redraw();
+                true
+            }
+            Err(err) => {
+                tracing::warn!("failed to dispatch user prompt to coordinator: {err}");
+                false
+            }
+        }
+    }
+
     fn observer_send_delta(&mut self, conversation: &[ResponseItem]) -> usize {
         let current_len = conversation.len();
         let last = self.observer_history.last_sent_index.min(current_len);
@@ -13475,6 +13629,41 @@ fi\n\
                 return;
             }
         }
+    }
+
+    pub(crate) fn auto_handle_user_reply(
+        &mut self,
+        user_response: Option<String>,
+        cli_command: Option<String>,
+    ) {
+        if let Some(text) = user_response.clone() {
+            if let Some(item) = Self::auto_drive_make_assistant_message(text.clone()) {
+                self.auto_history
+                    .append_raw(std::slice::from_ref(&item));
+            }
+            let mut lines = Vec::with_capacity(2);
+            lines.push("AUTO DRIVE RESPONSE".to_string());
+            lines.push(text);
+            self.history_push_plain_paragraphs(PlainMessageKind::Notice, lines);
+        }
+
+        if let Some(command) = cli_command {
+            if command.trim_start().starts_with('/') {
+                self.app_event_tx
+                    .send(AppEvent::DispatchCommand(SlashCommand::Auto, command));
+            } else {
+                let mut message: UserMessage = command.into();
+                message.suppress_persistence = true;
+                self.submit_user_message(message);
+            }
+        } else {
+            self.auto_state.waiting_for_response = false;
+            self.auto_state.coordinator_waiting = false;
+            self.auto_state.placeholder_phrase = None;
+        }
+
+        self.auto_rebuild_live_ring();
+        self.request_redraw();
     }
 
     fn schedule_auto_cli_prompt(&mut self, prompt_text: String) {
@@ -14309,7 +14498,7 @@ fi\n\
         }
         self.bottom_pane.update_status_text(String::new());
         self.bottom_pane.set_task_running(false);
-        use crate::chatwidget::message::UserMessage;
+use crate::chatwidget::message::UserMessage;
         let mut message: UserMessage = full_prompt.into();
         message.suppress_persistence = true;
         self.submit_user_message(message);
@@ -14432,10 +14621,7 @@ fi\n\
         if !self.auto_state.subagents_enabled {
             return requested_write.unwrap_or(false);
         }
-        match requested_write {
-            Some(flag) => flag,
-            None => true,
-        }
+        true
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
@@ -21973,6 +22159,7 @@ mod tests {
         CAPTURE_AUTO_TURN_COMMIT_STUB,
         GIT_DIFF_NAME_ONLY_BETWEEN_STUB,
     };
+    use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
     use crate::chatwidget::auto_coordinator::{
@@ -22541,6 +22728,7 @@ mod tests {
 
         chat.auto_state.active = true;
         chat.auto_state.review_enabled = true;
+        chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
 
         chat.auto_handle_decision(
             AutoCoordinatorStatus::Continue,
@@ -22587,6 +22775,112 @@ mod tests {
                 })
             });
         assert!(write_notice_present);
+    }
+
+    #[test]
+    fn coordinator_router_emits_notice_for_status_question() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_state.active = true;
+            chat.config.tui.auto_drive.coordinator_routing = true;
+            chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+        }
+
+        let baseline_notice_count = {
+            let chat = harness.chat();
+            chat.history_cells
+                .iter()
+                .filter(|cell| matches!(cell.kind(), HistoryCellType::Notice))
+                .count()
+        };
+
+        {
+            let chat = harness.chat();
+            chat.auto_handle_user_reply(
+                Some("Two active agents reporting steady progress.".to_string()),
+                None,
+            );
+        }
+
+        let notice_count = {
+            let chat = harness.chat();
+            chat.history_cells
+                .iter()
+                .filter(|cell| matches!(cell.kind(), HistoryCellType::Notice))
+                .count()
+        };
+        assert!(notice_count > baseline_notice_count);
+
+        let header_span = {
+            let chat = harness.chat();
+            let notice_cell = chat
+                .history_cells
+                .iter()
+                .rev()
+                .find(|cell| matches!(cell.kind(), HistoryCellType::Notice))
+                .expect("notice cell");
+            let lines = notice_cell.display_lines_trimmed();
+            assert!(!lines.is_empty());
+            lines
+                .first()
+                .and_then(|line| line.spans.first())
+                .map(|span| span.content.to_string())
+                .unwrap_or_default()
+        };
+        assert_eq!(header_span, "AUTO DRIVE RESPONSE");
+    }
+
+    #[test]
+    fn coordinator_router_injects_cli_for_plan_requests() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_state.active = true;
+            chat.config.tui.auto_drive.coordinator_routing = true;
+            chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
+        }
+
+        harness.drain_events();
+
+        {
+            let chat = harness.chat();
+            chat.auto_handle_user_reply(None, Some("/plan".to_string()));
+        }
+
+        let events = harness.drain_events();
+        let (command, payload) = events
+            .iter()
+            .find_map(|event| match event {
+                AppEvent::DispatchCommand(cmd, payload) => Some((cmd, payload.clone())),
+                _ => None,
+            })
+            .expect("dispatch for /plan");
+        assert_eq!(*command, SlashCommand::Auto);
+        assert!(payload.contains("/plan"), "payload={payload}");
+    }
+
+    #[test]
+    fn coordinator_router_bypasses_slash_commands() {
+        let mut harness = ChatWidgetHarness::new();
+        {
+            let chat = harness.chat();
+            chat.auto_state.active = true;
+            chat.config.tui.auto_drive.coordinator_routing = true;
+        }
+
+        harness.drain_events();
+        {
+            let chat = harness.chat();
+            chat.submit_user_message(UserMessage::from("/status".to_string()));
+        }
+
+        let events = harness.drain_events();
+        assert!(
+            events.iter().any(|event| matches!(event, AppEvent::DispatchCommand(_, _))
+                || matches!(event, AppEvent::CodexOp(_))),
+            "slash command should follow existing dispatch path"
+        );
     }
 
     #[test]
@@ -22664,7 +22958,7 @@ mod tests {
             .history_cells
             .iter()
             .flat_map(|cell| cell.display_lines_trimmed())
-            .flat_map(|line| line.spans.iter())
+            .flat_map(|line| line.spans.clone())
             .filter(|span| span.content.contains("Observer guidance: Tighten up the summary"))
             .count();
         assert_eq!(guidance_hits, 1);
@@ -22756,6 +23050,9 @@ mod tests {
 
         chat.auto_on_assistant_final();
         assert!(chat.auto_state.waiting_for_review);
+
+        let descriptor_snapshot = chat.pending_turn_descriptor.clone();
+        chat.auto_handle_post_turn_review(turn_config.clone(), descriptor_snapshot.as_ref());
 
         chat.handle_code_event(Event {
             id: "turn".to_string(),

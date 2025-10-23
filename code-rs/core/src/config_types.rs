@@ -747,6 +747,10 @@ pub struct AutoDriveSettings {
     #[serde(default = "default_true")]
     pub observer_enabled: bool,
 
+    /// Enable coordinator routing of user prompts during Auto Drive turns.
+    #[serde(default = "default_true")]
+    pub coordinator_routing: bool,
+
     #[serde(default)]
     pub continue_mode: AutoDriveContinueMode,
 }
@@ -759,6 +763,7 @@ impl Default for AutoDriveSettings {
             qa_automation_enabled: true,
             cross_check_enabled: true,
             observer_enabled: true,
+            coordinator_routing: true,
             continue_mode: AutoDriveContinueMode::TenSeconds,
         }
     }

@@ -20,6 +20,7 @@ use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
+use super::coordinator_user_schema::{user_turn_schema, parse_user_turn_reply};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -63,7 +64,7 @@ const MAX_DECISION_RECOVERY_ATTEMPTS: u32 = 3;
 struct AutoCoordinatorCancelled;
 
 pub(super) const MODEL_SLUG: &str = "gpt-5";
-const SCHEMA_NAME: &str = "auto_coordinator_flow";
+const USER_TURN_SCHEMA_NAME: &str = "auto_coordinator_user_turn";
 pub(super) const CROSS_CHECK_RESTART_BANNER: &str = "Cross-check restart with minimal context";
 const COORDINATOR_PROMPT_PATH: &str = "code-rs/core/prompt_coordinator.md";
 
@@ -90,6 +91,10 @@ impl AutoCoordinatorHandle {
 #[derive(Debug)]
 pub(super) enum AutoCoordinatorCommand {
     UpdateConversation(Vec<ResponseItem>),
+    HandleUserPrompt {
+        _prompt: String,
+        conversation: Vec<ResponseItem>,
+    },
     ObserverResult(ObserverOutcome),
     ObserverThinking {
         mode: ObserverMode,
@@ -1020,6 +1025,40 @@ fn run_auto_loop(
         }
 
         match cmd_rx.recv() {
+            Ok(AutoCoordinatorCommand::HandleUserPrompt { _prompt, conversation }) => {
+                let developer_intro = compose_developer_intro(&base_developer_intro, &observer_guidance);
+                let mut updated_conversation = conversation.clone();
+                let schema = user_turn_schema();
+                match request_user_turn_decision(
+                    &runtime,
+                    client.as_ref(),
+                    developer_intro.as_str(),
+                    &primary_goal_message,
+                    &schema,
+                    updated_conversation.clone(),
+                    auto_instructions.as_deref(),
+                    &app_event_tx,
+                    &cancel_token,
+                ) {
+                    Ok((user_response, cli_command)) => {
+                        if let Some(response_text) = user_response.clone() {
+                            updated_conversation.push(make_message("assistant", response_text.clone()));
+                        }
+                        pending_conversation = Some(updated_conversation);
+                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                            user_response,
+                            cli_command,
+                        });
+                    }
+                    Err(err) => {
+                        tracing::warn!("failed to handle coordinator user prompt: {err:#}");
+                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                            user_response: Some(format!("Coordinator error: {err}")),
+                            cli_command: None,
+                        });
+                    }
+                }
+            }
             Ok(AutoCoordinatorCommand::UpdateConversation(conv)) => {
                 requests_completed = requests_completed.saturating_add(1);
                 consecutive_decision_failures = 0;
@@ -1598,6 +1637,32 @@ fn request_decision(
     }
 }
 
+fn request_user_turn_decision(
+    runtime: &tokio::runtime::Runtime,
+    client: &ModelClient,
+    developer_intro: &str,
+    primary_goal: &str,
+    schema: &Value,
+    conversation: Vec<ResponseItem>,
+    auto_instructions: Option<&str>,
+    app_event_tx: &AppEventSender,
+    cancel_token: &CancellationToken,
+) -> Result<(Option<String>, Option<String>)> {
+    let (raw, _response_items) = request_decision(
+        runtime,
+        client,
+        developer_intro,
+        primary_goal,
+        schema,
+        &conversation,
+        auto_instructions,
+        app_event_tx,
+        cancel_token,
+    )?;
+    let (user_response, cli_command) = parse_user_turn_reply(&raw)?;
+    Ok((user_response, cli_command))
+}
+
 fn request_decision_with_model(
     runtime: &tokio::runtime::Runtime,
     client: &ModelClient,
@@ -1624,7 +1689,7 @@ fn request_decision_with_model(
         retry_with_backoff(
             || {
                 let instructions = auto_instructions.clone();
-                let prompt = build_prompt_for_model(
+                let prompt = build_user_turn_prompt(
                     &developer_intro,
                     &primary_goal,
                     &schema,
@@ -1643,16 +1708,20 @@ fn request_decision_with_model(
                     let mut out = String::new();
                     let mut response_items: Vec<ResponseItem> = Vec::new();
                     let mut reasoning_delta_accumulator = String::new();
+                    let mut saw_output_text_delta = false;
                     while let Some(ev) = stream.next().await {
                         match ev {
                             Ok(ResponseEvent::OutputTextDelta { delta, .. }) => {
                                 out.push_str(&delta);
+                                saw_output_text_delta = true;
                             }
                             Ok(ResponseEvent::OutputItemDone { item, .. }) => {
                                 if let ResponseItem::Message { content, .. } = &item {
-                                    for c in content {
-                                        if let ContentItem::OutputText { text } = c {
-                                            out.push_str(text);
+                                    if !saw_output_text_delta {
+                                        for c in content {
+                                            if let ContentItem::OutputText { text } = c {
+                                                out.push_str(text);
+                                            }
                                         }
                                     }
                                 }
@@ -1660,6 +1729,7 @@ fn request_decision_with_model(
                                     reasoning_delta_accumulator.clear();
                                 }
                                 response_items.push(item);
+                                saw_output_text_delta = false;
                             }
                             Ok(ResponseEvent::ReasoningSummaryDelta {
                                 delta,
@@ -1764,11 +1834,11 @@ fn request_decision_with_model(
     }
 }
 
-fn build_prompt_for_model(
+fn build_user_turn_prompt(
     developer_intro: &str,
     primary_goal: &str,
     schema: &Value,
-    conversation: &[ResponseItem],
+    conversation: &Vec<ResponseItem>,
     model_slug: &str,
     auto_instructions: Option<&str>,
 ) -> Prompt {
@@ -1791,7 +1861,7 @@ fn build_prompt_for_model(
     prompt.input.extend(conversation.iter().cloned());
     prompt.text_format = Some(TextFormat {
         r#type: "json_schema".to_string(),
-        name: Some(SCHEMA_NAME.to_string()),
+        name: Some(USER_TURN_SCHEMA_NAME.to_string()),
         strict: Some(true),
         schema: Some(schema.clone()),
     });
@@ -2125,7 +2195,10 @@ fn push_unique_guidance(guidance: &mut Vec<String>, message: &str) {
     if trimmed.is_empty() {
         return;
     }
-    if guidance.iter().any(|existing| existing == trimmed) {
+    if guidance
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
         return;
     }
     guidance.push(trimmed.to_string());
