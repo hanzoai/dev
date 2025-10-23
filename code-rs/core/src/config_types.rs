@@ -666,9 +666,9 @@ pub struct Tui {
     #[serde(default)]
     pub theme: ThemeConfig,
 
-    /// Auto Drive behavioral defaults.
+    /// Auto Drive behavioral defaults (legacy location; prefer top-level `[auto_drive]`).
     #[serde(default)]
-    pub auto_drive: AutoDriveSettings,
+    pub auto_drive: Option<AutoDriveSettings>,
 
     /// Cached autodetect result so we can skip probing the terminal repeatedly.
     #[serde(default)]
@@ -716,7 +716,7 @@ impl Default for Tui {
     fn default() -> Self {
         Self {
             theme: ThemeConfig::default(),
-            auto_drive: AutoDriveSettings::default(),
+            auto_drive: None,
             cached_terminal_background: None,
             highlight: HighlightConfig::default(),
             show_reasoning: false,

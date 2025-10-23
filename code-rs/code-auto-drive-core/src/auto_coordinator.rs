@@ -759,7 +759,7 @@ fn run_auto_loop(
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
     let (base_developer_intro, primary_goal_message) =
         build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
-    let schema_features = SchemaFeatures::from_auto_settings(&config.tui.auto_drive);
+    let schema_features = SchemaFeatures::from_auto_settings(&config.auto_drive);
     let include_agents = schema_features.include_agents;
     let schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;

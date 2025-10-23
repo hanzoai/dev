@@ -242,6 +242,9 @@ pub struct Config {
     /// Collection of settings that are specific to the TUI.
     pub tui: Tui,
 
+    /// Shared Auto Drive defaults.
+    pub auto_drive: AutoDriveSettings,
+
     /// Path to the `codex-linux-sandbox` executable. This must be set if
     /// [`crate::exec::SandboxType::LinuxSeccomp`] is used. Note that this
     /// cannot be set in the config file: it must be set in code via
@@ -981,8 +984,8 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist Auto Drive defaults under `[tui.auto_drive]`.
-pub fn set_tui_auto_drive_settings(
+/// Persist Auto Drive defaults under `[auto_drive]`.
+pub fn set_auto_drive_settings(
     code_home: &Path,
     settings: &AutoDriveSettings,
 ) -> anyhow::Result<()> {
@@ -995,14 +998,20 @@ pub fn set_tui_auto_drive_settings(
         Err(e) => return Err(e.into()),
     };
 
-    doc["tui"]["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
-    doc["tui"]["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
-    doc["tui"]["auto_drive"]["qa_automation_enabled"] =
+    if let Some(tui_tbl) = doc["tui"].as_table_mut() {
+        tui_tbl.remove("auto_drive");
+    }
+
+    doc["auto_drive"]["review_enabled"] = toml_edit::value(settings.review_enabled);
+    doc["auto_drive"]["agents_enabled"] = toml_edit::value(settings.agents_enabled);
+    doc["auto_drive"]["qa_automation_enabled"] =
         toml_edit::value(settings.qa_automation_enabled);
-    doc["tui"]["auto_drive"]["cross_check_enabled"] =
+    doc["auto_drive"]["cross_check_enabled"] =
         toml_edit::value(settings.cross_check_enabled);
-    doc["tui"]["auto_drive"]["observer_enabled"] =
+    doc["auto_drive"]["observer_enabled"] =
         toml_edit::value(settings.observer_enabled);
+    doc["auto_drive"]["coordinator_routing"] =
+        toml_edit::value(settings.coordinator_routing);
 
     let mode_str = match settings.continue_mode {
         AutoDriveContinueMode::Immediate => "immediate",
@@ -1010,7 +1019,7 @@ pub fn set_tui_auto_drive_settings(
         AutoDriveContinueMode::SixtySeconds => "sixty-seconds",
         AutoDriveContinueMode::Manual => "manual",
     };
-    doc["tui"]["auto_drive"]["continue_mode"] = toml_edit::value(mode_str);
+    doc["auto_drive"]["continue_mode"] = toml_edit::value(mode_str);
 
     std::fs::create_dir_all(code_home)?;
     let tmp_file = NamedTempFile::new_in(code_home)?;
@@ -1018,6 +1027,16 @@ pub fn set_tui_auto_drive_settings(
     tmp_file.persist(config_path)?;
 
     Ok(())
+}
+
+/// Legacy helper: persist Auto Drive defaults under `[auto_drive]` while
+/// accepting the former API surface.
+#[deprecated(note = "use set_auto_drive_settings instead")]
+pub fn set_tui_auto_drive_settings(
+    code_home: &Path,
+    settings: &AutoDriveSettings,
+) -> anyhow::Result<()> {
+    set_auto_drive_settings(code_home, settings)
 }
 
 /// Persist the GitHub workflow check preference under `[github].check_workflows_on_push`.
@@ -1702,6 +1721,9 @@ pub struct ConfigToml {
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
 
+    /// Auto Drive behavioral defaults.
+    pub auto_drive: Option<AutoDriveSettings>,
+
     #[serde(default)]
     pub auto_drive_observer_cadence: Option<u32>,
 
@@ -2287,6 +2309,11 @@ impl Config {
             history,
             file_opener: cfg.file_opener.unwrap_or(UriBasedFileOpener::VsCode),
             tui: cfg.tui.clone().unwrap_or_default(),
+            auto_drive: cfg
+                .auto_drive
+                .clone()
+                .or_else(|| cfg.tui.as_ref().and_then(|t| t.auto_drive.clone()))
+                .unwrap_or_default(),
             code_linux_sandbox_exe,
             active_profile: active_profile_name,
 

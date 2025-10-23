@@ -78,63 +78,12 @@ pub(crate) enum BackgroundPlacement {
 }
 
 pub(crate) use code_auto_drive_core::{
+    AutoContinueMode,
     AutoCoordinatorStatus,
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
     AutoTurnCliAction,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AutoContinueMode {
-    Immediate,
-    TenSeconds,
-    SixtySeconds,
-    Manual,
-}
-
-impl Default for AutoContinueMode {
-    fn default() -> Self {
-        Self::TenSeconds
-    }
-}
-
-impl AutoContinueMode {
-    pub fn seconds(self) -> Option<u8> {
-        match self {
-            Self::Immediate => Some(0),
-            Self::TenSeconds => Some(10),
-            Self::SixtySeconds => Some(60),
-            Self::Manual => None,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Immediate => "Immediate",
-            Self::TenSeconds => "10 seconds",
-            Self::SixtySeconds => "60 seconds",
-            Self::Manual => "Manual approval",
-        }
-    }
-
-    pub fn cycle_forward(self) -> Self {
-        match self {
-            Self::Immediate => Self::TenSeconds,
-            Self::TenSeconds => Self::SixtySeconds,
-            Self::SixtySeconds => Self::Manual,
-            Self::Manual => Self::Immediate,
-        }
-    }
-
-    pub fn cycle_backward(self) -> Self {
-        match self {
-            Self::Immediate => Self::Manual,
-            Self::TenSeconds => Self::Immediate,
-            Self::SixtySeconds => Self::TenSeconds,
-            Self::Manual => Self::SixtySeconds,
-        }
-    }
-}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
