@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
 use code_common::elapsed::format_duration;
+use code_core::history::state::MAX_EXEC_STREAM_RETAINED_BYTES;
 use code_core::parse_command::ParsedCommand;
 use ratatui::prelude::{Buffer, Rect};
 use ratatui::style::{Modifier, Style};
@@ -116,6 +117,40 @@ fn chunks_to_string(chunks: &[ExecStreamChunk]) -> String {
     combined
 }
 
+fn render_exec_stream(chunks: &[ExecStreamChunk], stream_name: &str) -> String {
+    let mut body = chunks_to_string(chunks);
+    if let Some(first) = chunks.first() {
+        if first.offset > 0 {
+            let mut notice = String::new();
+            notice.push_str(&format!(
+                "… clipped {} from the start of {} (showing last {}).\n\n",
+                format_bytes(first.offset),
+                stream_name,
+                format_bytes(MAX_EXEC_STREAM_RETAINED_BYTES),
+            ));
+            notice.push_str(&body);
+            body = notice;
+        }
+    }
+    body
+}
+
+fn format_bytes(bytes: usize) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes >= GIB as usize {
+        format!("{:.1} GiB", bytes_f / GIB)
+    } else if bytes >= MIB as usize {
+        format!("{:.1} MiB", bytes_f / MIB)
+    } else if bytes >= KIB as usize {
+        format!("{:.1} KiB", bytes_f / KIB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 fn wait_notes_from_record(notes: &[RecordExecWaitNote]) -> Vec<ExecWaitNote> {
     notes
         .iter()
@@ -128,8 +163,8 @@ fn wait_notes_from_record(notes: &[RecordExecWaitNote]) -> Vec<ExecWaitNote> {
 
 fn record_output(record: &ExecRecord) -> Option<CommandOutput> {
     if !matches!(record.status, ExecStatus::Running) {
-        let stdout = chunks_to_string(&record.stdout_chunks);
-        let stderr = chunks_to_string(&record.stderr_chunks);
+        let stdout = render_exec_stream(&record.stdout_chunks, "stdout");
+        let stderr = render_exec_stream(&record.stderr_chunks, "stderr");
         let exit_code = record.exit_code.unwrap_or_default();
         return Some(CommandOutput {
             exit_code,
@@ -321,8 +356,8 @@ impl ExecCell {
         let parsed = record.parsed.clone();
         let output = record_output(&record);
         let stream_preview = if matches!(record.status, ExecStatus::Running) {
-            let stdout = chunks_to_string(&record.stdout_chunks);
-            let stderr = chunks_to_string(&record.stderr_chunks);
+            let stdout = render_exec_stream(&record.stdout_chunks, "stdout");
+            let stderr = render_exec_stream(&record.stderr_chunks, "stderr");
             if stdout.is_empty() && stderr.is_empty() {
                 None
             } else {
@@ -647,8 +682,8 @@ impl ExecCell {
         }
 
         if matches!(record.status, ExecStatus::Running) {
-            let stdout = chunks_to_string(&record.stdout_chunks);
-            let stderr = chunks_to_string(&record.stderr_chunks);
+            let stdout = render_exec_stream(&record.stdout_chunks, "stdout");
+            let stderr = render_exec_stream(&record.stderr_chunks, "stderr");
             if stdout.is_empty() && stderr.is_empty() {
                 self.stream_preview = None;
             } else {
