@@ -669,6 +669,18 @@ fn stream_len(chunks: &[ExecStreamChunk]) -> usize {
         .unwrap_or(0)
 }
 
+fn retained_stream_len(chunks: &[ExecStreamChunk]) -> usize {
+    if chunks.is_empty() {
+        return 0;
+    }
+    let first_offset = chunks.first().map(|chunk| chunk.offset).unwrap_or(0);
+    stream_len(chunks).saturating_sub(first_offset)
+}
+
+fn truncated_prefix_len(chunks: &[ExecStreamChunk]) -> usize {
+    chunks.first().map(|chunk| chunk.offset).unwrap_or(0)
+}
+
 fn truncate_exec_stream(chunks: &mut Vec<ExecStreamChunk>, truncate_at: usize) {
     while let Some(last) = chunks.last_mut() {
         let last_start = last.offset;
@@ -692,10 +704,48 @@ fn append_exec_chunk(chunks: &mut Vec<ExecStreamChunk>, chunk: ExecStreamChunk) 
         let last_end = last.offset.saturating_add(last.content.len());
         if chunk.offset == last_end {
             last.content.push_str(&chunk.content);
+            prune_exec_stream(chunks, MAX_EXEC_STREAM_RETAINED_BYTES);
             return;
         }
     }
     chunks.push(chunk);
+    prune_exec_stream(chunks, MAX_EXEC_STREAM_RETAINED_BYTES);
+}
+
+fn prune_exec_stream(chunks: &mut Vec<ExecStreamChunk>, max_bytes: usize) {
+    if chunks.is_empty() {
+        return;
+    }
+
+    let retained = retained_stream_len(chunks);
+    if retained <= max_bytes {
+        return;
+    }
+
+    let mut bytes_to_drop = retained.saturating_sub(max_bytes);
+    let mut drop_chunks = 0usize;
+
+    while drop_chunks < chunks.len() {
+        let chunk_len = chunks[drop_chunks].content.len();
+        if bytes_to_drop >= chunk_len {
+            bytes_to_drop = bytes_to_drop.saturating_sub(chunk_len);
+            drop_chunks += 1;
+        } else {
+            break;
+        }
+    }
+
+    if drop_chunks > 0 {
+        chunks.drain(..drop_chunks);
+    }
+
+    if bytes_to_drop > 0 {
+        if let Some(first) = chunks.first_mut() {
+            let drain = bytes_to_drop.min(first.content.len());
+            first.offset = first.offset.saturating_add(drain);
+            first.content.drain(..drain);
+        }
+    }
 }
 
 fn append_assistant_delta(deltas: &mut Vec<AssistantStreamDelta>, delta: AssistantStreamDelta) {
@@ -889,6 +939,10 @@ const EXEC_STREAM_CHUNK_STEP: usize = 256;
 const EXEC_STREAM_BYTE_THRESHOLD: usize = 8 * 1024 * 1024;
 const EXEC_STREAM_BYTE_STEP: usize = 2 * 1024 * 1024;
 
+/// Maximum per-stream payload we retain in memory for exec stdout/stderr.
+/// Older bytes are truncated from the front once this threshold is exceeded.
+pub const MAX_EXEC_STREAM_RETAINED_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
+
 const ASSISTANT_STREAM_CHUNK_THRESHOLD: usize = 2048;
 const ASSISTANT_STREAM_CHUNK_STEP: usize = 256;
 const ASSISTANT_STREAM_BYTE_THRESHOLD: usize = 6 * 1024 * 1024;
@@ -900,6 +954,8 @@ struct StreamLogState {
     last_byte_log: usize,
     total_chunks: usize,
     total_bytes: usize,
+    last_truncated_log: usize,
+    truncated_bytes: usize,
 }
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
@@ -1008,10 +1064,17 @@ impl HistoryUsageTracker {
         let observed_chunks = stdout_chunks.saturating_add(stderr_chunks);
         let stdout_bytes = stream_len(&record.stdout_chunks);
         let stderr_bytes = stream_len(&record.stderr_chunks);
+        let stdout_retained = retained_stream_len(&record.stdout_chunks);
+        let stderr_retained = retained_stream_len(&record.stderr_chunks);
+        let stdout_truncated = truncated_prefix_len(&record.stdout_chunks);
+        let stderr_truncated = truncated_prefix_len(&record.stderr_chunks);
         let observed_bytes = stdout_bytes.saturating_add(stderr_bytes);
         let state = self.exec.entry(record.id).or_default();
         state.total_chunks = state.total_chunks.max(observed_chunks);
         state.total_bytes = state.total_bytes.max(observed_bytes);
+        state.truncated_bytes = state
+            .truncated_bytes
+            .max(stdout_truncated.saturating_add(stderr_truncated));
         let total_chunks = state.total_chunks;
         let total_bytes = state.total_bytes;
 
@@ -1029,6 +1092,12 @@ impl HistoryUsageTracker {
             should_log = true;
         }
 
+        let truncated_bytes = stdout_truncated.saturating_add(stderr_truncated);
+        if truncated_bytes > state.last_truncated_log {
+            state.last_truncated_log = truncated_bytes;
+            should_log = true;
+        }
+
         if should_log {
             let preview = command_preview(&record.command);
             tracing::warn!(
@@ -1040,10 +1109,14 @@ impl HistoryUsageTracker {
                 stderr_chunks,
                 stdout_bytes,
                 stderr_bytes,
+                stdout_retained,
+                stderr_retained,
+                stdout_truncated,
+                stderr_truncated,
                 total_chunks,
                 total_bytes,
                 command = %preview,
-                "exec stream buffers accumulating many chunks"
+                "exec stream buffers accumulating many chunks or bytes"
             );
         }
     }
@@ -2138,6 +2211,54 @@ mod tests {
             }
             other => panic!("expected exec record, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn exec_stream_truncates_to_memory_cap() {
+        let mut state = HistoryState::new();
+        let inserted_id = match state.apply_domain_event(HistoryDomainEvent::StartExec {
+            index: state.records.len(),
+            call_id: Some("call-clip".into()),
+            command: vec!["cat".into(), "large.log".into()],
+            parsed: Vec::new(),
+            action: ExecAction::Run,
+            started_at: SystemTime::UNIX_EPOCH,
+            working_dir: None,
+            env: Vec::new(),
+            tags: Vec::new(),
+        }) {
+            HistoryMutation::Inserted { id, .. } => id,
+            other => panic!("unexpected mutation: {other:?}"),
+        };
+
+        let oversized = "x".repeat(MAX_EXEC_STREAM_RETAINED_BYTES + 1024);
+        let exec_index = state.index_of(inserted_id).expect("exec index present");
+        state.apply_domain_event(HistoryDomainEvent::UpdateExecStream {
+            index: exec_index,
+            stdout_chunk: Some(ExecStreamChunk { offset: 0, content: oversized.clone() }),
+            stderr_chunk: None,
+        });
+
+        let exec_record = match state.record(inserted_id).expect("exec record") {
+            HistoryRecord::Exec(record) => record.clone(),
+            other => panic!("expected exec record, got {other:?}"),
+        };
+
+        let retained = retained_stream_len(&exec_record.stdout_chunks);
+        assert_eq!(retained, MAX_EXEC_STREAM_RETAINED_BYTES);
+
+        let truncated = truncated_prefix_len(&exec_record.stdout_chunks);
+        assert_eq!(truncated, oversized.len() - MAX_EXEC_STREAM_RETAINED_BYTES);
+
+        let mut flattened = String::new();
+        let mut sorted = exec_record.stdout_chunks.clone();
+        sorted.sort_by_key(|chunk| chunk.offset);
+        for chunk in sorted {
+            flattened.push_str(&chunk.content);
+        }
+        assert_eq!(flattened.len(), MAX_EXEC_STREAM_RETAINED_BYTES);
+        let expected_tail = oversized[oversized.len() - MAX_EXEC_STREAM_RETAINED_BYTES..].to_string();
+        assert_eq!(flattened, expected_tail);
     }
 
     #[test]
