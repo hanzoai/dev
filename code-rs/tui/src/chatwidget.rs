@@ -17564,6 +17564,10 @@ use crate::chatwidget::message::UserMessage;
                 return EscRoute::new(EscIntent::AutoPauseCountdown, true, false);
             }
 
+            if self.has_cancelable_agents() {
+                return EscRoute::new(EscIntent::CancelAgents, true, false);
+            }
+
             if self.auto_state.awaiting_submission {
                 return EscRoute::new(EscIntent::AutoStopDuringApproval, true, false);
             }
@@ -17571,12 +17575,12 @@ use crate::chatwidget::message::UserMessage;
             return EscRoute::new(EscIntent::AutoStopActive, true, false);
         }
 
-        if self.auto_state.last_run_summary.is_some() {
-            return EscRoute::new(EscIntent::AutoDismissSummary, true, false);
-        }
-
         if self.has_cancelable_agents() {
             return EscRoute::new(EscIntent::CancelAgents, true, false);
+        }
+
+        if self.auto_state.last_run_summary.is_some() {
+            return EscRoute::new(EscIntent::AutoDismissSummary, true, false);
         }
 
         if self.auto_manual_entry_active() && !self.composer_is_empty() {
