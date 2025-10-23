@@ -55,15 +55,6 @@ use code_protocol::protocol::SessionSource;
 use code_protocol::num_format::format_with_separators;
 
 
-pub(crate) mod auto_coordinator;
-mod auto_drive_history;
-mod auto_observer;
-mod coordinator_router;
-mod coordinator_user_schema;
-mod qa_orchestrator;
-#[cfg(feature = "dev-faults")]
-mod faults;
-mod retry;
 mod diff_handlers;
 mod agent_install;
 mod diff_ui;
@@ -96,17 +87,30 @@ use self::agent_install::{
     start_upgrade_terminal_session,
     wrap_command,
 };
-use self::auto_drive_history::AutoDriveHistory;
-use self::coordinator_router::{CoordinatorContext, CoordinatorRouterResponse};
-use self::auto_coordinator::{
+use code_auto_drive_core::{
     start_auto_coordinator,
     AutoCoordinatorCommand,
+    AutoCoordinatorEvent,
+    AutoCoordinatorEventSender,
     AutoCoordinatorHandle,
+    AutoCoordinatorStatus,
+    AutoDriveHistory,
+    AutoDriveController,
+    AutoControllerEffect,
+    AutoTurnAgentsAction,
+    AutoTurnAgentsTiming,
+    AutoTurnCliAction,
+    AutoTurnReviewState,
+    AutoResolveState,
+    AutoResolvePhase,
+    AUTO_RESTART_MAX_ATTEMPTS,
+    AUTO_RESOLVE_REVIEW_FOLLOWUP,
+    CoordinatorContext,
+    CoordinatorRouterResponse,
+    route_user_message,
     TurnConfig,
     TurnDescriptor,
-    CROSS_CHECK_RESTART_BANNER,
 };
-use self::qa_orchestrator::start_qa_orchestrator;
 use self::limits_overlay::{LimitsOverlayContent, LimitsTab};
 use crate::chrome_launch::ChromeLaunchOption;
 use self::rate_limit_refresh::start_rate_limit_refresh;
@@ -396,16 +400,8 @@ fn describe_cloud_error(err: &CloudTaskError) -> String {
 use crate::account_label::{account_display_label, account_mode_priority};
 use crate::app_event::{
     AppEvent,
-    AutoCoordinatorStatus,
-    AutoObserverReason,
-    AutoObserverStatus,
-    AutoObserverTelemetry,
     AutoContinueMode,
-    AutoTurnAgentsAction,
-    AutoTurnAgentsTiming,
-    AutoTurnCliAction,
     BackgroundPlacement,
-    ObserverMode,
     TerminalAfter,
     TerminalCommandGate,
     TerminalLaunch,
@@ -680,279 +676,13 @@ pub(crate) struct GhostState {
     queued_user_messages: VecDeque<UserMessage>,
 }
 
-struct AutoCoordinatorUiState {
-    active: bool,
-    goal: Option<String>,
-    current_summary: Option<String>,
-    current_progress_past: Option<String>,
-    current_progress_current: Option<String>,
-    current_cli_prompt: Option<String>,
-    current_cli_context: Option<String>,
-    current_display_line: Option<String>,
-    current_display_is_summary: bool,
-    current_reasoning_title: Option<String>,
-    placeholder_phrase: Option<String>,
-    thinking_prefix_stripped: bool,
-    current_summary_index: Option<u32>,
-    awaiting_submission: bool,
-    waiting_for_response: bool,
-    paused_for_manual_edit: bool,
-    resume_after_manual_submit: bool,
-    waiting_for_review: bool,
-    countdown_id: u64,
-    seconds_remaining: u8,
-    awaiting_goal_input: bool,
-    last_broadcast_summary: Option<String>,
-    last_decision_summary: Option<String>,
-    last_decision_progress_past: Option<String>,
-    last_decision_progress_current: Option<String>,
-    last_decision_display: Option<String>,
-    last_decision_display_is_summary: bool,
-    observer_telemetry: Option<AutoObserverTelemetry>,
-    observer_status: AutoObserverStatus,
-    pending_observer_banners: Vec<String>,
-    coordinator_waiting: bool,
-    review_enabled: bool,
-    subagents_enabled: bool,
-    cross_check_enabled: bool,
-    qa_automation_enabled: bool,
-    observer_enabled: bool,
-    observer_ready: bool,
-    pending_agent_actions: Vec<AutoTurnAgentsAction>,
-    pending_agent_timing: Option<AutoTurnAgentsTiming>,
-    continue_mode: AutoContinueMode,
-    started_at: Option<Instant>,
-    turns_completed: usize,
-    last_run_summary: Option<AutoRunSummary>,
-    waiting_for_transient_recovery: bool,
-    pending_restart: Option<AutoRestartState>,
-    restart_token: u64,
-    transient_restart_attempts: u32,
-    intro_started_at: Option<Instant>,
-    intro_reduced_motion: bool,
-    intro_pending: bool,
-    elapsed_override: Option<Duration>,
-}
-
-impl AutoCoordinatorUiState {
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    fn reset_intro_timing(&mut self) {
-        self.intro_started_at = None;
-        self.intro_reduced_motion = false;
-    }
-
-    fn ensure_intro_timing(&mut self, reduced_motion: bool) {
-        if self.intro_started_at.is_none() {
-            self.intro_started_at = Some(Instant::now());
-        }
-        self.intro_reduced_motion = reduced_motion;
-    }
-
-    fn mark_intro_pending(&mut self) {
-        self.intro_pending = true;
-    }
-
-    fn take_intro_pending(&mut self) -> bool {
-        if self.intro_pending {
-            self.intro_pending = false;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn countdown_active(&self) -> bool {
-        self.awaiting_submission
-            && !self.paused_for_manual_edit
-            && self
-                .countdown_seconds()
-                .map(|seconds| seconds > 0)
-                .unwrap_or(false)
-    }
-
-    fn countdown_seconds(&self) -> Option<u8> {
-        self.continue_mode.seconds()
-    }
-
-    fn reset_countdown(&mut self) {
-        self.seconds_remaining = self.countdown_seconds().unwrap_or(0);
-    }
-}
-
-impl Default for AutoCoordinatorUiState {
-    fn default() -> Self {
-        let continue_mode = AutoContinueMode::default();
-        let seconds = continue_mode.seconds().unwrap_or(0);
-        Self {
-            active: false,
-            goal: None,
-            current_summary: None,
-            current_progress_past: None,
-            current_progress_current: None,
-            current_cli_prompt: None,
-            current_cli_context: None,
-            current_display_line: None,
-            current_display_is_summary: false,
-            current_reasoning_title: None,
-            placeholder_phrase: None,
-            thinking_prefix_stripped: false,
-            current_summary_index: None,
-            awaiting_submission: false,
-            waiting_for_response: false,
-            paused_for_manual_edit: false,
-            resume_after_manual_submit: false,
-            waiting_for_review: false,
-            countdown_id: 0,
-            seconds_remaining: seconds,
-            awaiting_goal_input: false,
-            last_broadcast_summary: None,
-            last_decision_summary: None,
-            last_decision_progress_past: None,
-            last_decision_progress_current: None,
-            last_decision_display: None,
-            last_decision_display_is_summary: false,
-            observer_telemetry: None,
-            observer_status: AutoObserverStatus::default(),
-            pending_observer_banners: Vec::new(),
-            coordinator_waiting: false,
-            review_enabled: true,
-            subagents_enabled: true,
-            cross_check_enabled: true,
-            qa_automation_enabled: true,
-            observer_enabled: true,
-            observer_ready: false,
-            pending_agent_actions: Vec::new(),
-            pending_agent_timing: None,
-            continue_mode,
-            started_at: None,
-            turns_completed: 0,
-            last_run_summary: None,
-            waiting_for_transient_recovery: false,
-            pending_restart: None,
-            restart_token: 0,
-            transient_restart_attempts: 0,
-            intro_started_at: None,
-            intro_reduced_motion: false,
-            intro_pending: false,
-            elapsed_override: None,
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-struct ObserverExchange {
-    mode: ObserverMode,
-    status: AutoObserverStatus,
-    request: Vec<ResponseItem>,
-    raw_output: Option<String>,
-    replace_message: Option<String>,
-    additional_instructions: Option<String>,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-struct ObserverThinkingFrame {
-    mode: ObserverMode,
-    summary_index: Option<u32>,
-    text: String,
-}
-
-#[derive(Clone, Debug)]
-struct ObserverHistory {
-    exchanges: Vec<ObserverExchange>,
-    thinking: Vec<ObserverThinkingFrame>,
-    bootstrap_len: usize,
-    last_sent_index: usize,
-}
-
-impl ObserverHistory {
-    fn new() -> Self {
-        Self {
-            exchanges: Vec::new(),
-            thinking: Vec::new(),
-            bootstrap_len: 0,
-            last_sent_index: 0,
-        }
-    }
-
-    fn clear(&mut self) {
-        self.exchanges.clear();
-        self.thinking.clear();
-        self.bootstrap_len = 0;
-        self.last_sent_index = 0;
-    }
-
-    fn record_exchange(
-        &mut self,
-        mode: ObserverMode,
-        status: AutoObserverStatus,
-        request: Vec<ResponseItem>,
-        raw_output: Option<String>,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
-    ) -> usize {
-        let exchange = ObserverExchange {
-            mode,
-            status,
-            request,
-            raw_output,
-            replace_message,
-            additional_instructions,
-        };
-        let index = self.exchanges.len();
-        self.exchanges.push(exchange);
-        index
-    }
-
-    fn record_thinking(
-        &mut self,
-        mode: ObserverMode,
-        summary_index: Option<u32>,
-        text: String,
-    ) {
-        self.thinking.push(ObserverThinkingFrame {
-            mode,
-            summary_index,
-            text,
-        });
-    }
-}
-
-#[derive(Clone)]
-struct AutoRunSummary {
-    duration: Duration,
-    turns_completed: usize,
-    message: Option<String>,
-    goal: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct AutoRestartState {
-    token: u64,
-    attempt: u32,
-    reason: String,
-}
-
-const AUTO_RESTART_MAX_ATTEMPTS: u32 = 6;
-const AUTO_RESTART_BASE_DELAY: Duration = Duration::from_secs(5);
-const AUTO_RESTART_MAX_DELAY: Duration = Duration::from_secs(120);
-const AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS: u32 = 3;
-const AUTO_RESOLVE_REVIEW_FOLLOWUP: &str = "This issue has been resolved. Please continue your search and return all remaining issues you find.";
-
-#[derive(Default, Clone)]
-struct AutoTurnReviewState {
-    base_commit: Option<GhostCommit>,
-}
-
+#[cfg(any(test, feature = "test-helpers"))]
 struct AutoReviewCommitScope {
     commit: String,
     file_count: usize,
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
 enum AutoReviewOutcome {
     Skip,
     Workspace,
@@ -978,41 +708,6 @@ pub(super) static GIT_DIFF_NAME_ONLY_BETWEEN_STUB: Lazy<Mutex<Option<GitDiffName
 
 #[cfg(test)]
 pub(super) static AUTO_STUB_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-#[derive(Clone)]
-struct AutoResolveState {
-    prompt: String,
-    hint: String,
-    metadata: Option<ReviewContextMetadata>,
-    attempt: u32,
-    max_attempts: u32,
-    phase: AutoResolvePhase,
-    last_review: Option<ReviewOutputEvent>,
-    last_fix_message: Option<String>,
-}
-
-impl AutoResolveState {
-    fn new(prompt: String, hint: String, metadata: Option<ReviewContextMetadata>) -> Self {
-        Self {
-            prompt,
-            hint,
-            metadata,
-            attempt: 0,
-            max_attempts: AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
-            phase: AutoResolvePhase::WaitingForReview,
-            last_review: None,
-            last_fix_message: None,
-        }
-    }
-}
-
-#[derive(Clone)]
-enum AutoResolvePhase {
-    WaitingForReview,
-    PendingFix { review: ReviewOutputEvent },
-    AwaitingFix { review: ReviewOutputEvent },
-    AwaitingJudge { review: ReviewOutputEvent },
-}
 
 #[derive(Deserialize)]
 struct AutoResolveDecision {
@@ -1137,7 +832,6 @@ pub(crate) struct ChatWidget<'a> {
 
     // State for the Agents Terminal view
     agents_terminal: AgentsTerminalState,
-    auto_threads_overlay: AutoThreadsOverlayState,
 
     pending_upgrade_notice: Option<(u64, String)>,
 
@@ -1186,11 +880,9 @@ pub(crate) struct ChatWidget<'a> {
     pending_snapshot_dispatches: VecDeque<PendingSnapshotDispatch>,
 
     auto_drive_variant: AutoDriveVariant,
-    auto_state: AutoCoordinatorUiState,
+    auto_state: AutoDriveController,
     auto_handle: Option<AutoCoordinatorHandle>,
-    qa_handle: Option<qa_orchestrator::QaOrchestratorHandle>,
     auto_history: AutoDriveHistory,
-    observer_history: ObserverHistory,
     auto_turn_review_state: Option<AutoTurnReviewState>,
     cloud_tasks_selected_env: Option<CloudEnvironment>,
     cloud_tasks_environments: Vec<CloudEnvironment>,
@@ -1642,143 +1334,6 @@ enum AgentsTerminalFocus {
     Detail,
 }
 
-const AUTO_THREADS_MAX_ENTRIES: usize = 50;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AutoThreadsOverlayFocus {
-    List,
-    Detail,
-}
-
-struct AutoThreadEntry {
-    list_label: String,
-    detail_text: String,
-    detail_scroll: u16,
-}
-
-impl AutoThreadEntry {
-    fn reset_scroll(&mut self) {
-        self.detail_scroll = 0;
-    }
-}
-
-struct AutoThreadsOverlayState {
-    active: bool,
-    entries: Vec<AutoThreadEntry>,
-    selected_index: usize,
-    focus: AutoThreadsOverlayFocus,
-}
-
-impl AutoThreadsOverlayState {
-    fn new() -> Self {
-        Self {
-            active: false,
-            entries: Vec::new(),
-            selected_index: 0,
-            focus: AutoThreadsOverlayFocus::List,
-        }
-    }
-
-    fn activate(&mut self) {
-        self.active = true;
-        if self.selected_index >= self.entries.len() {
-            self.selected_index = self.entries.len().saturating_sub(1);
-        }
-        if let Some(entry) = self.selected_entry_mut() {
-            entry.reset_scroll();
-        }
-    }
-
-    fn deactivate(&mut self) {
-        self.active = false;
-        self.focus = AutoThreadsOverlayFocus::List;
-    }
-
-    fn is_active(&self) -> bool {
-        self.active
-    }
-
-    fn focus(&self) -> AutoThreadsOverlayFocus {
-        self.focus
-    }
-
-    fn set_focus(&mut self, focus: AutoThreadsOverlayFocus) {
-        self.focus = focus;
-    }
-
-    fn push_entry(&mut self, entry: AutoThreadEntry) {
-        if self.entries.len() >= AUTO_THREADS_MAX_ENTRIES {
-            self.entries.remove(0);
-            if self.selected_index > 0 {
-                self.selected_index -= 1;
-            }
-        }
-
-        self.entries.push(entry);
-        self.selected_index = self.entries.len().saturating_sub(1);
-        if let Some(entry) = self.selected_entry_mut() {
-            entry.reset_scroll();
-        }
-    }
-
-    fn entries(&self) -> &Vec<AutoThreadEntry> {
-        &self.entries
-    }
-
-    fn selected_index(&self) -> usize {
-        self.selected_index
-    }
-
-    fn selected_entry_mut(&mut self) -> Option<&mut AutoThreadEntry> {
-        self.entries.get_mut(self.selected_index)
-    }
-
-    fn navigate(&mut self, delta: isize) {
-        if self.entries.is_empty() {
-            return;
-        }
-        let len = self.entries.len() as isize;
-        let mut idx = self.selected_index as isize + delta;
-        if idx < 0 {
-            idx = 0;
-        } else if idx >= len {
-            idx = len - 1;
-        }
-        if self.selected_index != idx as usize {
-            self.selected_index = idx as usize;
-            if let Some(entry) = self.selected_entry_mut() {
-                entry.reset_scroll();
-            }
-        }
-    }
-
-    fn scroll_detail(&mut self, delta: i16) {
-        if let Some(entry) = self.selected_entry_mut() {
-            let current = entry.detail_scroll as i32;
-            let new = (current + delta as i32).max(0);
-            entry.detail_scroll = new as u16;
-        }
-    }
-}
-
-fn format_response_items_for_overlay(items: &[ResponseItem]) -> String {
-    if items.is_empty() {
-        return "None".to_string();
-    }
-
-    let mut parts: Vec<String> = Vec::new();
-    for (idx, item) in items.iter().enumerate() {
-        let header = format!("Message {}", idx.saturating_add(1));
-        let body = serde_json::to_string_pretty(item).unwrap_or_else(|_| format!("{item:?}"));
-        parts.push(format!("{header}:\n{body}"));
-    }
-
-    parts.join("\n\n")
-}
-
-fn format_json_value_for_overlay(value: &JsonValue) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
-}
 // ---------- Stable ordering & routing helpers ----------
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OrderKey {
@@ -4336,7 +3891,6 @@ impl ChatWidget<'_> {
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             agents_terminal: AgentsTerminalState::new(),
-            auto_threads_overlay: AutoThreadsOverlayState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             render_theme_epoch: 0,
@@ -4376,11 +3930,9 @@ impl ChatWidget<'_> {
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
             auto_drive_variant,
-            auto_state: AutoCoordinatorUiState::default(),
+            auto_state: AutoDriveController::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
-            observer_history: ObserverHistory::new(),
-            qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
@@ -4432,12 +3984,11 @@ impl ChatWidget<'_> {
         // appears below it. Also insert the Popular commands immediately so users
         // don't wait for MCP initialization to finish.
         let mut w = new_widget;
-        let auto_defaults = w.config.tui.auto_drive.clone();
+        let auto_defaults = w.config.auto_drive.clone();
         w.auto_state.review_enabled = auto_defaults.review_enabled;
         w.auto_state.subagents_enabled = auto_defaults.agents_enabled;
         w.auto_state.cross_check_enabled = auto_defaults.cross_check_enabled;
         w.auto_state.qa_automation_enabled = auto_defaults.qa_automation_enabled;
-        w.auto_state.observer_enabled = auto_defaults.observer_enabled;
         w.auto_state.continue_mode = auto_continue_from_config(auto_defaults.continue_mode);
         w.auto_state.reset_countdown();
         w.set_standard_terminal_mode(!config.tui.alternate_screen);
@@ -4643,7 +4194,6 @@ impl ChatWidget<'_> {
             pending_manual_terminal: HashMap::new(),
             agents_overview_selected_index: 0,
             agents_terminal: AgentsTerminalState::new(),
-            auto_threads_overlay: AutoThreadsOverlayState::new(),
             pending_upgrade_notice: None,
             history_render: HistoryRenderState::new(),
             render_theme_epoch: 0,
@@ -4683,11 +4233,9 @@ impl ChatWidget<'_> {
             next_ghost_snapshot_id: 0,
             pending_snapshot_dispatches: VecDeque::new(),
             auto_drive_variant,
-            auto_state: AutoCoordinatorUiState::default(),
+            auto_state: AutoDriveController::default(),
             auto_handle: None,
             auto_history: AutoDriveHistory::new(),
-            observer_history: ObserverHistory::new(),
-            qa_handle: None,
             auto_turn_review_state: None,
             cloud_tasks_selected_env: None,
             cloud_tasks_environments: Vec::new(),
@@ -5172,11 +4720,6 @@ impl ChatWidget<'_> {
         if self.diffs.overlay.is_some() {
             return;
         }
-        if self.auto_threads_overlay.is_active() {
-            if self.handle_auto_threads_overlay_key(key_event) {
-                return;
-            }
-        }
         if self.browser_overlay_visible {
             let is_ctrl_b = matches!(
                 key_event,
@@ -5242,21 +4785,6 @@ impl ChatWidget<'_> {
             self.toggle_agents_hud();
             return;
         }
-        if let KeyEvent {
-            code: crossterm::event::KeyCode::Char(c),
-            modifiers,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        } = key_event
-        {
-            if (c == 'o' || c == 'O')
-                && modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-            {
-                self.toggle_auto_threads_overlay();
-                return;
-            }
-        }
-
         if self.agents_terminal.active {
             use crossterm::event::KeyCode;
             if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
@@ -7856,7 +7384,7 @@ impl ChatWidget<'_> {
         if !self.auto_state.active {
             return None;
         }
-        if !self.config.tui.auto_drive.coordinator_routing {
+        if !self.config.auto_drive.coordinator_routing {
             return None;
         }
         if trimmed.starts_with('/') {
@@ -7876,7 +7404,7 @@ impl ChatWidget<'_> {
         }
 
         let context = CoordinatorContext::new(self.auto_state.pending_agent_actions.len(), updates);
-        let response = coordinator_router::route_user_message(trimmed, &context);
+        let response = route_user_message(trimmed, &context);
         if response.user_response.is_some() || response.cli_command.is_some() {
             Some(response)
         } else {
@@ -7940,7 +7468,7 @@ impl ChatWidget<'_> {
         if !message.suppress_persistence
             && !original_text.trim().starts_with('/')
             && self.auto_state.active
-            && self.config.tui.auto_drive.coordinator_routing
+            && self.config.auto_drive.coordinator_routing
         {
             let mut conversation = self.current_auto_history();
             if let Some(user_item) = Self::auto_drive_make_user_message(original_text.clone()) {
@@ -11389,7 +10917,6 @@ impl ChatWidget<'_> {
                 }
                 let hint = self.active_review_hint.take();
                 let prompt = self.active_review_prompt.take();
-                self.record_auto_review_thread(hint.clone(), prompt.clone(), review_output.clone());
                 match review_output {
                     Some(output) => {
                         let summary_cell = self.build_review_summary_cell(
@@ -12419,7 +11946,6 @@ impl ChatWidget<'_> {
         let agents = self.auto_state.subagents_enabled;
         let cross = self.auto_state.cross_check_enabled;
         let qa = self.auto_state.qa_automation_enabled;
-        let observer = self.auto_state.observer_enabled;
         let mode = self.auto_state.continue_mode;
         let view = AutoDriveSettingsView::new(
             self.app_event_tx.clone(),
@@ -12427,7 +11953,6 @@ impl ChatWidget<'_> {
             agents,
             cross,
             qa,
-            observer,
             mode,
         );
         AutoDriveSettingsContent::new(view)
@@ -13033,157 +12558,6 @@ impl ChatWidget<'_> {
         self.restore_selected_agent_scroll();
         self.request_redraw();
     }
-
-
-    fn open_auto_threads_overlay(&mut self) {
-        if self.agents_terminal.active {
-            self.exit_agents_terminal_mode();
-        }
-        self.auto_threads_overlay.activate();
-        self.request_redraw();
-    }
-
-    fn close_auto_threads_overlay(&mut self) {
-        if !self.auto_threads_overlay.is_active() {
-            return;
-        }
-        self.auto_threads_overlay.deactivate();
-        self.request_redraw();
-        self.bottom_pane.ensure_input_focus();
-    }
-
-    fn toggle_auto_threads_overlay(&mut self) {
-        if self.auto_threads_overlay.is_active() {
-            self.close_auto_threads_overlay();
-        } else {
-            self.open_auto_threads_overlay();
-        }
-    }
-
-    fn handle_auto_threads_overlay_key(&mut self, key_event: KeyEvent) -> bool {
-        if !self.auto_threads_overlay.is_active() {
-            return false;
-        }
-
-        if !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-            return true;
-        }
-
-        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
-        let shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
-
-        if ctrl
-            && matches!(
-                key_event.code,
-                KeyCode::Char('o') | KeyCode::Char('O') | KeyCode::Char('\u{f}')
-            )
-        {
-            self.close_auto_threads_overlay();
-            return true;
-        }
-
-        if matches!(key_event.code, KeyCode::Char('\u{f}')) {
-            self.close_auto_threads_overlay();
-            return true;
-        }
-
-        if ctrl && shift && matches!(key_event.code, KeyCode::Char('c') | KeyCode::Char('C')) {
-            self.close_auto_threads_overlay();
-            return true;
-        }
-
-        match key_event.code {
-            KeyCode::Esc => {
-                self.close_auto_threads_overlay();
-            }
-            KeyCode::Tab => {
-                let new_focus = match self.auto_threads_overlay.focus() {
-                    AutoThreadsOverlayFocus::List => AutoThreadsOverlayFocus::Detail,
-                    AutoThreadsOverlayFocus::Detail => AutoThreadsOverlayFocus::List,
-                };
-                self.auto_threads_overlay.set_focus(new_focus);
-                if let Some(entry) = self.auto_threads_overlay.selected_entry_mut() {
-                    if matches!(new_focus, AutoThreadsOverlayFocus::Detail) {
-                        entry.reset_scroll();
-                    }
-                }
-                self.request_redraw();
-            }
-            KeyCode::Left => {
-                self.auto_threads_overlay.set_focus(AutoThreadsOverlayFocus::List);
-                self.request_redraw();
-            }
-            KeyCode::Right => {
-                self.auto_threads_overlay.set_focus(AutoThreadsOverlayFocus::Detail);
-                if let Some(entry) = self.auto_threads_overlay.selected_entry_mut() {
-                    entry.reset_scroll();
-                }
-                self.request_redraw();
-            }
-            KeyCode::Up => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    self.auto_threads_overlay.navigate(-1);
-                } else {
-                    self.auto_threads_overlay.scroll_detail(-1);
-                }
-                self.request_redraw();
-            }
-            KeyCode::Down => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    self.auto_threads_overlay.navigate(1);
-                } else {
-                    self.auto_threads_overlay.scroll_detail(1);
-                }
-                self.request_redraw();
-            }
-            KeyCode::PageUp => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::Detail) {
-                    self.auto_threads_overlay.scroll_detail(-8);
-                    self.request_redraw();
-                }
-            }
-            KeyCode::PageDown => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::Detail) {
-                    self.auto_threads_overlay.scroll_detail(8);
-                    self.request_redraw();
-                }
-            }
-            KeyCode::Home => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    let current = self.auto_threads_overlay.selected_index() as isize;
-                    if current > 0 {
-                        self.auto_threads_overlay.navigate(-current);
-                        self.request_redraw();
-                    }
-                } else {
-                    self.auto_threads_overlay.scroll_detail(-i16::MAX);
-                    self.request_redraw();
-                }
-            }
-            KeyCode::End => {
-                if matches!(self.auto_threads_overlay.focus(), AutoThreadsOverlayFocus::List) {
-                    let remaining = self
-                        .auto_threads_overlay
-                        .entries()
-                        .len()
-                        .saturating_sub(self.auto_threads_overlay.selected_index())
-                        as isize
-                        - 1;
-                    if remaining > 0 {
-                        self.auto_threads_overlay.navigate(remaining);
-                        self.request_redraw();
-                    }
-                } else {
-                    self.auto_threads_overlay.scroll_detail(i16::MAX);
-                    self.request_redraw();
-                }
-            }
-            _ => {}
-        }
-
-        true
-    }
-
     fn resolve_agent_install_command(&self, agent_name: &str) -> Option<(Vec<String>, String)> {
         let cmd = self
             .config
@@ -13585,97 +12959,82 @@ fi\n\
         subagents_enabled: bool,
         cross_check_enabled: bool,
         qa_automation_enabled: bool,
-        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
         let conversation = self.rebuild_auto_history();
-        let seed_intro = self.auto_state.take_intro_pending();
-        self.auto_state.reset();
-        if seed_intro {
-            self.auto_state.mark_intro_pending();
-        }
-        self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
-        self.config.tui.auto_drive.qa_automation_enabled = qa_automation_enabled;
-        self.config.tui.auto_drive.observer_enabled = observer_enabled;
+        let reduced_motion = Self::auto_reduced_motion_preference();
+        self.auto_state.prepare_launch(
+            goal.clone(),
+            review_enabled,
+            subagents_enabled,
+            cross_check_enabled,
+            qa_automation_enabled,
+            continue_mode,
+            reduced_motion,
+        );
+        self.config.auto_drive.cross_check_enabled = cross_check_enabled;
+        self.config.auto_drive.qa_automation_enabled = qa_automation_enabled;
+        let coordinator_events = {
+            let app_event_tx = self.app_event_tx.clone();
+            AutoCoordinatorEventSender::new(move |event| {
+                match event {
+                    AutoCoordinatorEvent::Decision {
+                        status,
+                        progress_past,
+                        progress_current,
+                        cli,
+                        agents_timing,
+                        agents,
+                        transcript,
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorDecision {
+                            status,
+                            progress_past,
+                            progress_current,
+                            cli,
+                            agents_timing,
+                            agents,
+                            transcript,
+                        });
+                    }
+                    AutoCoordinatorEvent::Thinking { delta, summary_index } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorThinking { delta, summary_index });
+                    }
+                    AutoCoordinatorEvent::UserReply {
+                        user_response,
+                        cli_command,
+                    } => {
+                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                            user_response,
+                            cli_command,
+                        });
+                    }
+                }
+            })
+        };
+
         match start_auto_coordinator(
-            self.app_event_tx.clone(),
+            coordinator_events,
             goal.clone(),
             conversation,
             self.config.clone(),
             self.config.debug,
-            self.config.auto_drive_observer_cadence,
         ) {
             Ok(handle) => {
-                if let Some(handle) = self.qa_handle.take() {
-                    handle.stop();
-                }
-                let should_spawn_qa =
-                    qa_automation_enabled && (review_enabled || cross_check_enabled || observer_enabled);
-                if should_spawn_qa {
-                    self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
-                }
                 self.auto_handle = Some(handle);
-                self.auto_state.review_enabled = review_enabled;
-                self.auto_state.subagents_enabled = subagents_enabled;
-                self.auto_state.cross_check_enabled = cross_check_enabled;
-                self.auto_state.qa_automation_enabled = qa_automation_enabled;
-                self.auto_state.observer_enabled = observer_enabled;
-                self.auto_state.continue_mode = continue_mode;
-                self.auto_state.reset_countdown();
-                if self.auto_state.take_intro_pending() {
-                    self.auto_reset_intro_timing();
-                    self.auto_ensure_intro_timing();
-                }
-                self.auto_state.active = true;
-                self.auto_state.started_at = Some(Instant::now());
-                self.auto_state.turns_completed = 0;
-                self.auto_state.last_run_summary = None;
-                self.auto_state.goal = Some(goal.clone());
-                self.auto_state.current_summary = None;
-                self.auto_state.current_progress_past = None;
-                self.auto_state.current_progress_current = None;
-                self.auto_state.current_cli_prompt = None;
-                self.auto_state.current_cli_context = None;
-                self.auto_state.current_display_line = None;
-                self.auto_state.current_display_is_summary = false;
-                self.auto_state.current_reasoning_title = None;
-                self.auto_state.current_summary_index = None;
-                self.auto_state.placeholder_phrase =
-                    Some(auto_drive_strings::next_auto_drive_phrase().to_string());
-                self.auto_state.thinking_prefix_stripped = false;
-                self.auto_state.last_broadcast_summary = None;
-                self.auto_state.last_decision_progress_past = None;
-                self.auto_state.last_decision_progress_current = None;
-                self.auto_state.waiting_for_response = true;
-                self.auto_state.coordinator_waiting = true;
-                self.auto_rebuild_live_ring();
-                self.auto_update_terminal_hint();
-                self.push_background_tail(format!("Auto Drive started: {goal}"));
-                self.request_redraw();
+                let placeholder = auto_drive_strings::next_auto_drive_phrase().to_string();
+                let effects = self
+                    .auto_state
+                    .launch_succeeded(goal.clone(), Some(placeholder), Instant::now());
+                self.auto_apply_controller_effects(effects);
             }
             Err(err) => {
-                self.push_background_tail(format!("Coordinator failed to start: {err}"));
-                self.auto_state.active = false;
-                self.auto_state.goal = None;
-                self.auto_state.awaiting_goal_input = true;
-                self.auto_state.review_enabled = review_enabled;
-                self.auto_state.subagents_enabled = subagents_enabled;
-                self.auto_state.cross_check_enabled = cross_check_enabled;
-                self.auto_state.qa_automation_enabled = qa_automation_enabled;
-                self.auto_state.observer_enabled = observer_enabled;
-                self.auto_state.continue_mode = continue_mode;
-                self.auto_state.reset_countdown();
-                self.auto_state.mark_intro_pending();
-                self.auto_show_goal_entry_panel();
+                let effects = self
+                    .auto_state
+                    .launch_failed(goal.clone(), err.to_string());
+                self.auto_apply_controller_effects(effects);
             }
         }
-    }
-
-    fn auto_should_run_qa_orchestrator(&self) -> bool {
-        self.auto_state.qa_automation_enabled
-            && (self.auto_state.review_enabled
-                || self.auto_state.cross_check_enabled
-                || self.auto_state.observer_enabled)
     }
 
     pub(crate) fn handle_auto_command(&mut self, goal: Option<String>) {
@@ -13708,7 +13067,7 @@ fi\n\
             self.auto_state.awaiting_goal_input = true;
             self.clear_composer();
             self.bottom_pane.ensure_input_focus();
-            let defaults = self.config.tui.auto_drive.clone();
+            let defaults = self.config.auto_drive.clone();
             self.auto_state.review_enabled = defaults.review_enabled;
             self.auto_state.subagents_enabled = defaults.agents_enabled;
             self.auto_state.cross_check_enabled = defaults.cross_check_enabled;
@@ -13727,7 +13086,7 @@ fi\n\
             self.auto_stop(None);
         }
 
-        let defaults = self.config.tui.auto_drive.clone();
+        let defaults = self.config.auto_drive.clone();
         let default_mode = auto_continue_from_config(defaults.continue_mode);
 
         self.auto_state.mark_intro_pending();
@@ -13737,7 +13096,6 @@ fi\n\
             defaults.agents_enabled,
             defaults.cross_check_enabled,
             defaults.qa_automation_enabled,
-            defaults.observer_enabled,
             default_mode,
         );
     }
@@ -13774,7 +13132,6 @@ fi\n\
         agents_enabled: bool,
         cross_check_enabled: bool,
         qa_automation_enabled: bool,
-        observer_enabled: bool,
         continue_mode: AutoContinueMode,
     ) {
         let mut changed = false;
@@ -13794,19 +13151,9 @@ fi\n\
             self.auto_state.qa_automation_enabled = qa_automation_enabled;
             changed = true;
         }
-        if self.auto_state.observer_enabled != observer_enabled {
-            self.auto_state.observer_enabled = observer_enabled;
-            changed = true;
-        }
         if self.auto_state.continue_mode != continue_mode {
-            self.auto_state.continue_mode = continue_mode;
-            self.auto_state.reset_countdown();
-            if self.auto_state.awaiting_submission && !self.auto_state.paused_for_manual_edit {
-                let countdown = self.auto_state.countdown_seconds();
-                self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-                self.auto_state.seconds_remaining = countdown.unwrap_or(0);
-                self.auto_start_countdown(self.auto_state.countdown_id, countdown);
-            }
+            let effects = self.auto_state.update_continue_mode(continue_mode);
+            self.auto_apply_controller_effects(effects);
             changed = true;
         }
 
@@ -13814,40 +13161,20 @@ fi\n\
             return;
         }
 
-        self.config.tui.auto_drive.review_enabled = review_enabled;
-        self.config.tui.auto_drive.agents_enabled = agents_enabled;
-        self.config.tui.auto_drive.cross_check_enabled = cross_check_enabled;
-        self.config.tui.auto_drive.qa_automation_enabled = qa_automation_enabled;
-        self.config.tui.auto_drive.observer_enabled = observer_enabled;
-        self.config.tui.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
+        self.config.auto_drive.review_enabled = review_enabled;
+        self.config.auto_drive.agents_enabled = agents_enabled;
+        self.config.auto_drive.cross_check_enabled = cross_check_enabled;
+        self.config.auto_drive.qa_automation_enabled = qa_automation_enabled;
+        self.config.auto_drive.continue_mode = auto_continue_to_config(continue_mode);
 
         if let Ok(home) = code_core::config::find_code_home() {
             if let Err(err) =
-                code_core::config::set_tui_auto_drive_settings(&home, &self.config.tui.auto_drive)
+                code_core::config::set_auto_drive_settings(&home, &self.config.auto_drive)
             {
                 tracing::warn!("Failed to persist Auto Drive settings: {err}");
             }
         } else {
             tracing::warn!("Could not locate config home to persist Auto Drive settings");
-        }
-
-        let should_run_qa = self.auto_should_run_qa_orchestrator();
-        if self.auto_state.active {
-            match (self.qa_handle.is_some(), should_run_qa) {
-                (false, true) => {
-                    self.qa_handle = Some(start_qa_orchestrator(self.app_event_tx.clone()));
-                }
-                (true, false) => {
-                    if let Some(handle) = self.qa_handle.take() {
-                        handle.stop();
-                    }
-                }
-                _ => {}
-            }
-        } else if !should_run_qa {
-            if let Some(handle) = self.qa_handle.take() {
-                handle.stop();
-            }
         }
 
         self.refresh_settings_overview_rows();
@@ -13861,7 +13188,6 @@ fi\n\
         }
         self.auto_state.waiting_for_review = false;
         let conversation = self.current_auto_history();
-        self.observer_send_delta(&conversation);
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
@@ -13896,7 +13222,6 @@ fi\n\
             return;
         }
         let conversation = self.current_auto_history();
-        self.observer_send_delta(&conversation);
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
         };
@@ -13956,28 +13281,6 @@ fi\n\
         }
     }
 
-    fn observer_send_delta(&mut self, conversation: &[ResponseItem]) -> usize {
-        let current_len = conversation.len();
-        let last = self.observer_history.last_sent_index.min(current_len);
-        let delta = current_len.saturating_sub(last);
-        self.observer_history.last_sent_index = current_len;
-        delta
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn observer_history_kind_allowed(kind: HistoryCellType) -> bool {
-        matches!(
-            kind,
-            HistoryCellType::User
-                | HistoryCellType::Assistant
-                | HistoryCellType::Error
-                | HistoryCellType::Diff
-                | HistoryCellType::Exec { .. }
-                | HistoryCellType::Tool { .. }
-                | HistoryCellType::Patch { .. }
-        )
-    }
-
     fn auto_failure_is_transient(message: &str) -> bool {
         let lower = message.to_ascii_lowercase();
         const TRANSIENT_MARKERS: &[&str] = &[
@@ -13998,19 +13301,6 @@ fi\n\
         TRANSIENT_MARKERS.iter().any(|needle| lower.contains(needle))
     }
 
-    fn auto_restart_delay(attempt: u32) -> Duration {
-        if attempt == 0 {
-            return AUTO_RESTART_BASE_DELAY.min(AUTO_RESTART_MAX_DELAY);
-        }
-        let exponent = attempt.saturating_sub(1).min(5);
-        let multiplier = 1u32 << exponent;
-        let mut delay = AUTO_RESTART_BASE_DELAY.saturating_mul(multiplier);
-        if delay > AUTO_RESTART_MAX_DELAY {
-            delay = AUTO_RESTART_MAX_DELAY;
-        }
-        delay
-    }
-
     fn auto_schedule_restart_event(&self, token: u64, attempt: u32, delay: Duration) {
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -14022,73 +13312,19 @@ fi\n\
     }
 
     fn auto_pause_for_transient_failure(&mut self, message: String) {
-        let pending_attempt = self.auto_state.transient_restart_attempts.saturating_add(1);
-        let truncated = Self::truncate_with_ellipsis(&message, 160);
-        warn!(attempt = pending_attempt, "auto drive transient failure: {}", truncated);
+        warn!("auto drive transient failure: {}", message);
 
         if let Some(handle) = self.auto_handle.take() {
             handle.cancel();
         }
 
-        self.auto_state.waiting_for_transient_recovery = true;
-        self.auto_state.waiting_for_response = false;
-        self.auto_state.coordinator_waiting = false;
-        self.auto_state.awaiting_submission = false;
-        self.auto_state.paused_for_manual_edit = false;
-        self.auto_state.resume_after_manual_submit = false;
-        self.auto_state.waiting_for_review = false;
-        self.auto_state.current_cli_prompt = None;
-        self.auto_state.current_cli_context = None;
-        self.auto_state.pending_agent_actions.clear();
-        self.auto_state.pending_agent_timing = None;
-
         self.pending_turn_descriptor = None;
         self.pending_auto_turn_config = None;
 
-        if pending_attempt > AUTO_RESTART_MAX_ATTEMPTS {
-            self.push_background_tail(format!(
-                "Auto Drive stopped after {AUTO_RESTART_MAX_ATTEMPTS} reconnect attempts. Last error: {truncated}"
-            ));
-            self.auto_stop(Some(format!(
-                "Auto Drive stopped after {AUTO_RESTART_MAX_ATTEMPTS} reconnect attempts."
-            )));
-            return;
-        }
-
-        self.auto_state.transient_restart_attempts = pending_attempt;
-
-        let delay = Self::auto_restart_delay(pending_attempt);
-        let human_delay = format_duration(delay);
-
-        self.auto_state.current_display_line = Some(format!(
-            "Waiting for connection… retrying in {human_delay} (attempt {pending_attempt}/{AUTO_RESTART_MAX_ATTEMPTS})"
-        ));
-        self.auto_state.current_display_is_summary = true;
-        self.auto_state.current_progress_current = Some(format!("Last error: {truncated}"));
-        self.auto_state.current_progress_past = None;
-        self.auto_state.placeholder_phrase = Some("Waiting for connection…".to_string());
-
-        self.bottom_pane.set_task_running(false);
-        self.bottom_pane.update_status_text("Auto Drive paused".to_string());
-        self.bottom_pane
-            .set_standard_terminal_hint(Some("Press Esc again to exit Auto Drive".to_string()));
-
-        let token = self.auto_state.restart_token.wrapping_add(1);
-        self.auto_state.restart_token = token;
-        self.auto_state.pending_restart = Some(AutoRestartState {
-            token,
-            attempt: pending_attempt,
-            reason: truncated.clone(),
-        });
-
-        self.push_background_tail(format!(
-            "Auto Drive will retry automatically in {human_delay} (attempt {pending_attempt}/{AUTO_RESTART_MAX_ATTEMPTS}). Last error: {truncated}"
-        ));
-
-        self.auto_schedule_restart_event(token, pending_attempt, delay);
-        self.auto_rebuild_live_ring();
-        self.auto_update_terminal_hint();
-        self.request_redraw();
+        let effects = self
+            .auto_state
+            .pause_for_transient_failure(Instant::now(), message);
+        self.auto_apply_controller_effects(effects);
     }
 
     pub(crate) fn auto_handle_decision(
@@ -14164,11 +13400,6 @@ fi\n\
         } else {
             self.auto_state.pending_agent_actions.clear();
             self.auto_state.pending_agent_timing = None;
-
-            let has_diff = self.auto_turn_has_diff();
-            if let Some(handle) = self.qa_handle.as_ref() {
-                handle.notify_turn_finished(has_diff);
-            }
         }
 
         if !promoted_agents.is_empty() {
@@ -14276,98 +13507,154 @@ fi\n\
     }
 
     fn schedule_auto_cli_prompt(&mut self, prompt_text: String) {
-        self.auto_state.current_cli_prompt = Some(prompt_text);
-        self.auto_state.awaiting_submission = true;
-        self.auto_state.reset_countdown();
-        self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-        let countdown_id = self.auto_state.countdown_id;
-        let countdown_seconds = self.auto_state.countdown_seconds();
-        self.auto_flush_observer_banners();
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-        self.auto_start_countdown(countdown_id, countdown_seconds);
+        let effects = self.auto_state.schedule_cli_prompt(prompt_text);
+        self.auto_apply_controller_effects(effects);
     }
 
-    fn auto_queue_observer_banner(&mut self, message: impl Into<String>) {
-        let text = message.into();
-        if text.trim().is_empty() {
-            return;
-        }
-        if self
-            .auto_state
-            .pending_observer_banners
-            .iter()
-            .any(|existing| existing == &text)
-        {
-            return;
-        }
-        self.auto_state.pending_observer_banners.push(text);
-    }
-
-    fn auto_flush_observer_banners(&mut self) {
-        if self.auto_state.pending_observer_banners.is_empty() {
-            return;
-        }
-        let banners = std::mem::take(&mut self.auto_state.pending_observer_banners);
-        for banner in banners {
-            self.push_background_tail(banner);
-        }
-    }
-
-    fn auto_start_countdown(&self, countdown_id: u64, countdown_seconds: Option<u8>) {
-        match countdown_seconds {
-            Some(0) => {
-                let _ = self.app_event_tx.send(AppEvent::AutoCoordinatorCountdown {
+    fn auto_apply_controller_effects(&mut self, effects: Vec<AutoControllerEffect>) {
+        for effect in effects {
+            match effect {
+                AutoControllerEffect::RefreshUi => {
+                    self.auto_rebuild_live_ring();
+                    self.request_redraw();
+                }
+                AutoControllerEffect::StartCountdown {
                     countdown_id,
-                    seconds_left: 0,
-                });
-            }
-            Some(seconds) => {
-                let tx = self.app_event_tx.clone();
-                let fallback_tx = tx.clone();
-                if thread_spawner::spawn_lightweight("countdown", move || {
-                    let mut remaining = seconds;
-                    while remaining > 0 {
-                        std::thread::sleep(std::time::Duration::from_secs(1));
-                        remaining -= 1;
-                        if !tx.send_with_result(AppEvent::AutoCoordinatorCountdown {
+                    seconds,
+                } => {
+                    if seconds == 0 {
+                        let _ = self.app_event_tx.send(AppEvent::AutoCoordinatorCountdown {
                             countdown_id,
-                            seconds_left: remaining,
-                        }) {
-                            break;
+                            seconds_left: 0,
+                        });
+                    } else {
+                        self.auto_spawn_countdown(countdown_id, seconds);
+                    }
+                }
+                AutoControllerEffect::SubmitPrompt => {
+                    self.auto_submit_prompt();
+                }
+                AutoControllerEffect::LaunchStarted { goal } => {
+                    self.bottom_pane.set_task_running(false);
+                    self.bottom_pane.update_status_text("Auto Drive".to_string());
+                    self.push_background_tail(format!("Auto Drive started: {goal}"));
+                }
+                AutoControllerEffect::LaunchFailed { goal, error } => {
+                    self.push_background_tail(format!(
+                        "Coordinator failed to start for goal '{goal}': {error}"
+                    ));
+                }
+                AutoControllerEffect::StopCompleted { summary, message } => {
+                    if let Some(handle) = self.auto_handle.take() {
+                        handle.cancel();
+                        let _ = handle.send(AutoCoordinatorCommand::Stop);
+                    }
+                    if let Some(msg) = message.or_else(|| summary.message.clone()) {
+                        if !msg.trim().is_empty() {
+                            self.push_background_tail(msg);
                         }
                     }
-                })
-                .is_none()
-                {
-                    let _ = fallback_tx.send(AppEvent::AutoCoordinatorCountdown {
-                        countdown_id,
-                        seconds_left: 0,
-                    });
+                    self.auto_turn_review_state = None;
+                    if ENABLE_WARP_STRIPES {
+                        self.header_wave.set_enabled(false, Instant::now());
+                    }
+                }
+                AutoControllerEffect::TransientPause {
+                    attempt,
+                    delay,
+                    reason,
+                } => {
+                    let human_delay = format_duration(delay);
+                    self.bottom_pane.set_task_running(false);
+                    self.bottom_pane
+                        .update_status_text("Auto Drive paused".to_string());
+                    self.bottom_pane.set_standard_terminal_hint(Some(
+                        "Press Esc again to exit Auto Drive".to_string(),
+                    ));
+                    self.push_background_tail(format!(
+                        "Auto Drive will retry automatically in {human_delay} (attempt {attempt}/{AUTO_RESTART_MAX_ATTEMPTS}). Last error: {reason}"
+                    ));
+                }
+                AutoControllerEffect::ScheduleRestart {
+                    token,
+                    attempt,
+                    delay,
+                } => {
+                    self.auto_schedule_restart_event(token, attempt, delay);
+                }
+                AutoControllerEffect::CancelCoordinator => {
+                    if let Some(handle) = self.auto_handle.take() {
+                        handle.cancel();
+                        let _ = handle.send(AutoCoordinatorCommand::Stop);
+                    }
+                }
+                AutoControllerEffect::ResetHistory => {
+                    self.auto_history.clear();
+                }
+                AutoControllerEffect::UpdateTerminalHint { hint } => {
+                    self.bottom_pane.set_standard_terminal_hint(hint);
+                }
+                AutoControllerEffect::SetTaskRunning { running } => {
+                    let has_activity = running
+                        || !self.exec.running_commands.is_empty()
+                        || !self.tools_state.running_custom_tools.is_empty()
+                        || !self.tools_state.running_web_search.is_empty()
+                        || !self.tools_state.running_wait_tools.is_empty()
+                        || !self.tools_state.running_kill_tools.is_empty()
+                        || self.stream.is_write_cycle_active()
+                        || !self.active_task_ids.is_empty();
+
+                    self.bottom_pane.set_task_running(has_activity);
+                    if !has_activity {
+                        self.bottom_pane.update_status_text(String::new());
+                    }
+                }
+                AutoControllerEffect::EnsureInputFocus => {
+                    self.bottom_pane.ensure_input_focus();
+                }
+                AutoControllerEffect::ClearCoordinatorView => {
+                    self.bottom_pane.clear_auto_coordinator_view(true);
+                }
+                AutoControllerEffect::ShowGoalEntry => {
+                    self.auto_show_goal_entry_panel();
                 }
             }
-            None => {
-                // Manual approval mode: do not start countdown automatically.
+        }
+    }
+
+    fn auto_spawn_countdown(&self, countdown_id: u64, seconds: u8) {
+        let tx = self.app_event_tx.clone();
+        let fallback_tx = tx.clone();
+        if thread_spawner::spawn_lightweight("countdown", move || {
+            let mut remaining = seconds;
+            while remaining > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                remaining -= 1;
+                if !tx.send_with_result(AppEvent::AutoCoordinatorCountdown {
+                    countdown_id,
+                    seconds_left: remaining,
+                }) {
+                    break;
+                }
             }
+        })
+        .is_none()
+        {
+            let _ = fallback_tx.send(AppEvent::AutoCoordinatorCountdown {
+                countdown_id,
+                seconds_left: 0,
+            });
         }
     }
 
     pub(crate) fn auto_handle_countdown(&mut self, countdown_id: u64, seconds_left: u8) {
-        if !self.auto_state.active
-            || countdown_id != self.auto_state.countdown_id
-            || !self.auto_state.awaiting_submission
-            || self.auto_state.paused_for_manual_edit
-        {
+        let effects = self
+            .auto_state
+            .handle_countdown_tick(countdown_id, seconds_left);
+        if effects.is_empty() {
             return;
         }
-
-        self.auto_state.seconds_remaining = seconds_left;
-        if seconds_left == 0 {
-            self.auto_submit_prompt();
-        } else {
-            self.auto_rebuild_live_ring();
-            self.request_redraw();
-        }
+        self.auto_apply_controller_effects(effects);
     }
 
     pub(crate) fn auto_handle_restart(&mut self, token: u64, attempt: u32) {
@@ -14392,7 +13679,6 @@ fi\n\
         };
 
         let cross_check_enabled = self.auto_state.cross_check_enabled;
-        let observer_enabled = self.auto_state.observer_enabled;
         let continue_mode = self.auto_state.continue_mode;
         let previous_turns = self.auto_state.turns_completed;
         let previous_started_at = self.auto_state.started_at;
@@ -14404,7 +13690,6 @@ fi\n\
         self.auto_state.pending_restart = None;
         self.auto_state.waiting_for_transient_recovery = false;
         self.auto_state.restart_token = token;
-        self.observer_reset_state();
 
         if restart.reason.is_empty() {
             self.push_background_tail(format!(
@@ -14423,7 +13708,6 @@ fi\n\
             agents_enabled,
             cross_check_enabled,
             qa_automation_enabled,
-            observer_enabled,
             continue_mode,
         );
 
@@ -14442,413 +13726,14 @@ fi\n\
         self.rebuild_auto_history();
     }
 
-    fn record_auto_observer_thread(
-        &mut self,
-        mode: ObserverMode,
-        reason: AutoObserverReason,
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
-        conversation: Vec<ResponseItem>,
-        raw_output: Option<String>,
-        parsed_response: Option<JsonValue>,
-    ) {
-        let kind_label = match mode {
-            ObserverMode::Bootstrap => "Bootstrap",
-            ObserverMode::Cadence => "Observer",
-            ObserverMode::CrossCheck => "Cross-check",
-        };
-
-        let heading = match reason {
-            AutoObserverReason::Cadence => "Observer cadence".to_string(),
-            AutoObserverReason::CrossCheck { forced, ref summary, .. } => {
-                let base = if forced { "Cross-check (forced)" } else { "Cross-check" };
-                let summary_snippet = summary
-                    .as_ref()
-                    .and_then(|text| {
-                        let trimmed = text.trim();
-                        if trimmed.is_empty() {
-                            None
-                        } else {
-                            Some(Self::truncate_with_ellipsis(trimmed, 48))
-                        }
-                    });
-                match summary_snippet {
-                    Some(snippet) => format!("{base}: {snippet}"),
-                    None => base.to_string(),
-                }
-            }
-        };
-
-        let status_label = match status {
-            AutoObserverStatus::Ok => "OK",
-            AutoObserverStatus::Failing => "Failing",
-        }
-        .to_string();
-
-        let mut detail_sections: Vec<String> = Vec::new();
-        detail_sections.push(format!("Kind: {kind_label}"));
-        detail_sections.push(format!("Status: {status_label}"));
-
-        if let AutoObserverReason::CrossCheck { forced, ref summary, ref focus } = reason {
-            detail_sections.push(format!("Forced: {}", if forced { "yes" } else { "no" }));
-            if let Some(text) = summary.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-                detail_sections.push(format!("Summary focus:\n{}", text));
-            }
-            if let Some(text) = focus.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-                detail_sections.push(format!("Inspection targets:\n{}", text));
-            }
-        }
-
-        let mut telemetry_section = format!(
-            "Telemetry: triggers={} • last_status={:?}",
-            telemetry.trigger_count,
-            telemetry.last_status
-        );
-        if let Some(intervention) = telemetry
-            .last_intervention
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            telemetry_section.push_str(&format!(" • last_intervention={}", intervention));
-        }
-        detail_sections.push(telemetry_section);
-
-        if let Some(text) = replace_message
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            detail_sections.push(format!("Replacement prompt:\n{}", text));
-        }
-        if let Some(text) = additional_instructions.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            detail_sections.push(format!("Additional instructions:\n{}", text));
-        }
-
-        if let Some(raw) = raw_output.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            detail_sections.push(format!("Raw output:\n{}", raw));
-        }
-
-        if let Some(value) = parsed_response.as_ref() {
-            detail_sections.push(format!("Parsed response:\n{}", format_json_value_for_overlay(value)));
-        }
-
-        let conversation_block = format_response_items_for_overlay(&conversation);
-        if !conversation_block.trim().is_empty() {
-            detail_sections.push(format!("Conversation:\n{}", conversation_block));
-        }
-
-        let detail_text = detail_sections
-            .into_iter()
-            .filter(|section| !section.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        let mode_label = match mode {
-            ObserverMode::Bootstrap => "Bootstrap",
-            ObserverMode::Cadence => "Observer",
-            ObserverMode::CrossCheck => "Cross-check",
-        };
-
-        let entry = AutoThreadEntry {
-            list_label: format!("{mode_label} · {heading} · {status_label}"),
-            detail_text,
-            detail_scroll: 0,
-        };
-
-        self.auto_threads_overlay.push_entry(entry);
-    }
-
-    fn record_auto_review_thread(
-        &mut self,
-        hint: Option<String>,
-        prompt: Option<String>,
-        output: Option<ReviewOutputEvent>,
-    ) {
-        let heading = hint
-            .as_ref()
-            .and_then(|h| {
-                let trimmed = h.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(format!("Review – {}", Self::truncate_with_ellipsis(trimmed, 48)))
-                }
-            })
-            .unwrap_or_else(|| "Review".to_string());
-
-        let status_label = match output {
-            Some(ref out) if out.findings.is_empty() => "No findings".to_string(),
-            Some(ref out) => format!("Findings {}", out.findings.len()),
-            None => "No response".to_string(),
-        };
-
-        let mut sections: Vec<String> = Vec::new();
-        if let Some(h) = hint
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            sections.push(format!("Hint:\n{}", h));
-        }
-        if let Some(p) = prompt
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            sections.push(format!("Prompt:\n{}", p));
-        }
-
-        match output {
-            Some(ref review) => {
-                let json = serde_json::to_string_pretty(review)
-                    .unwrap_or_else(|_| format!("{review:?}"));
-                sections.push(format!("Review output:\n{}", json));
-            }
-            None => sections.push("Review output: <none>".to_string()),
-        }
-
-        let detail_text = sections
-            .into_iter()
-            .filter(|section| !section.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        let entry = AutoThreadEntry {
-            list_label: format!("{heading} · {status_label}"),
-            detail_text,
-            detail_scroll: 0,
-        };
-
-        self.auto_threads_overlay.push_entry(entry);
-    }
-
-    pub(crate) fn auto_handle_observer_report(
-        &mut self,
-        mode: ObserverMode,
-        status: AutoObserverStatus,
-        telemetry: AutoObserverTelemetry,
-        replace_message: Option<String>,
-        additional_instructions: Option<String>,
-        reason: AutoObserverReason,
-        conversation: Vec<ResponseItem>,
-        raw_output: Option<String>,
-        parsed_response: Option<JsonValue>,
-    ) {
-        self.observer_history.record_exchange(
-            mode,
-            status,
-            conversation.clone(),
-            raw_output.clone(),
-            replace_message.clone(),
-            additional_instructions.clone(),
-        );
-        if matches!(mode, ObserverMode::Bootstrap) {
-            self.observer_history.bootstrap_len = conversation.len();
-        }
-
-        match mode {
-            ObserverMode::Bootstrap => {
-                self.auto_queue_observer_banner("Observer baseline recorded.".to_string());
-            }
-            ObserverMode::CrossCheck => {
-                self.auto_queue_observer_banner("Cross-check in progress.".to_string());
-            }
-            ObserverMode::Cadence => {}
-        }
-
-        let reason_for_check = reason.clone();
-        if matches!(reason_for_check, AutoObserverReason::Cadence)
-            && !self.auto_state.observer_enabled
-        {
-            return;
-        }
-
-        self.record_auto_observer_thread(
-            mode,
-            reason,
-            status,
-            telemetry.clone(),
-            replace_message.clone(),
-            additional_instructions.clone(),
-            conversation,
-            raw_output,
-            parsed_response,
-        );
-
-        if !self.auto_state.active {
-            return;
-        }
-
-        self.auto_state.observer_status = status;
-        self.auto_state.observer_telemetry = Some(telemetry);
-
-        let flush_on_failing = self.auto_state.awaiting_submission;
-
-        if matches!(mode, ObserverMode::CrossCheck) && matches!(status, AutoObserverStatus::Ok) {
-            self.auto_queue_observer_banner("Cross-check successful.".to_string());
-        }
-
-        if matches!(status, AutoObserverStatus::Failing) {
-            let guidance = additional_instructions
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty());
-            let banner = guidance
-                .map(|text| format!("Observer guidance: {text}"))
-                .unwrap_or_else(|| "Observer flagged the last Auto Drive step.".to_string());
-            self.auto_queue_observer_banner(banner);
-
-            if let Some(message) = replace_message
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                self.auto_state.current_cli_prompt = Some(message.to_string());
-                let summary = Self::truncate_with_ellipsis(message, 160);
-                self.auto_queue_observer_banner(format!("Observer replaced prompt with: {summary}"));
-                if self.auto_state.awaiting_submission {
-                    self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-                    self.auto_state.reset_countdown();
-                    let countdown_seconds = self.auto_state.countdown_seconds();
-                    self.auto_flush_observer_banners();
-                    self.auto_start_countdown(self.auto_state.countdown_id, countdown_seconds);
-                }
-            } else if flush_on_failing {
-                self.auto_flush_observer_banners();
-            }
-        } else if let Some(note) = additional_instructions
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            self.auto_queue_observer_banner(format!("Observer note: {note}"));
-        } else if matches!(mode, ObserverMode::CrossCheck) {
-            self.auto_queue_observer_banner("Cross-check completed with no findings.".to_string());
-        }
-
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
-    pub(crate) fn auto_handle_observer_ready(
-        &mut self,
-        baseline_summary: Option<String>,
-        bootstrap_len: usize,
-    ) {
-        self.auto_state.observer_ready = true;
-        let len = self.observer_history.exchanges.len();
-        self.observer_history.bootstrap_len = if bootstrap_len == 0 {
-            len
-        } else {
-            bootstrap_len.min(len)
-        };
-        self.observer_history.last_sent_index = self.observer_history.bootstrap_len;
-
-        if let Some(summary) = baseline_summary
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-        {
-            self.push_background_tail(format!("Observer ready: {summary}"));
-        } else {
-            self.push_background_tail("Observer ready.".to_string());
-        }
-
-        self.auto_queue_observer_banner("Observer bootstrap completed.".to_string());
-        self.auto_flush_observer_banners();
-
-        if let Some(handle) = self.auto_handle.as_ref() {
-            let len = self.observer_history.bootstrap_len;
-            let _ = handle.send(AutoCoordinatorCommand::ObserverBootstrapLen(len));
-        }
-
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
-    fn observer_reset_state(&mut self) {
-        self.observer_history.clear();
-        self.auto_state.observer_ready = false;
-        if let Some(handle) = self.auto_handle.as_ref() {
-            let _ = handle.send(AutoCoordinatorCommand::ResetObserver);
-        }
-    }
-
-    pub(crate) fn auto_handle_observer_thinking(
-        &mut self,
-        mode: ObserverMode,
-        delta: String,
-        summary_index: Option<u32>,
-    ) {
-        let trimmed = delta.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        self.observer_history
-            .record_thinking(mode, summary_index, trimmed.to_string());
-
-        let mode_label = match mode {
-            ObserverMode::Bootstrap => "Bootstrap",
-            ObserverMode::Cadence => "Observer",
-            ObserverMode::CrossCheck => "Cross-check",
-        };
-
-        self.auto_threads_overlay.push_entry(AutoThreadEntry {
-            list_label: format!("{mode_label} thinking"),
-            detail_text: trimmed.to_string(),
-            detail_scroll: 0,
-        });
-    }
-
     pub(crate) fn auto_handle_thinking(&mut self, delta: String, summary_index: Option<u32>) {
         if !self.auto_state.active {
-            return;
-        }
-        if delta == CROSS_CHECK_RESTART_BANNER {
-            if self.auto_state.cross_check_enabled {
-                self.auto_on_cross_check_restart();
-            }
             return;
         }
         self.auto_on_reasoning_delta(&delta, summary_index);
     }
 
-    fn auto_on_cross_check_restart(&mut self) {
-        if !self.auto_state.cross_check_enabled {
-            return;
-        }
-        self.auto_queue_observer_banner(CROSS_CHECK_RESTART_BANNER);
-        self.auto_state.current_cli_prompt = None;
-        self.auto_state.current_cli_context = None;
-        self.auto_state.awaiting_submission = false;
-        self.auto_state.paused_for_manual_edit = false;
-        self.auto_state.resume_after_manual_submit = false;
-        self.auto_state.waiting_for_response = true;
-        self.auto_state.coordinator_waiting = true;
-        self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
-        self.auto_state.reset_countdown();
-        self.auto_state.seconds_remaining = 0;
-        self.auto_state.current_summary = None;
-        self.auto_state.current_progress_past = None;
-        self.auto_state.current_progress_current = None;
-        self.auto_state.current_display_line = None;
-        self.auto_state.current_display_is_summary = false;
-        self.auto_state.current_reasoning_title = None;
-        self.auto_state.current_summary_index = None;
-        self.auto_state.placeholder_phrase =
-            Some(auto_drive_strings::next_auto_drive_phrase().to_string());
-        self.auto_state.thinking_prefix_stripped = false;
-        self.auto_state.pending_agent_actions.clear();
-        self.auto_state.pending_agent_timing = None;
-        self.clear_composer();
-        self.auto_flush_observer_banners();
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
-    }
-
+    #[cfg(any(test, feature = "test-helpers"))]
     fn auto_handle_post_turn_review(
         &mut self,
         cfg: TurnConfig,
@@ -14881,6 +13766,7 @@ fi\n\
         }
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     fn auto_prepare_commit_scope(&mut self) -> AutoReviewOutcome {
         let Some(state) = self.auto_turn_review_state.take() else {
             return AutoReviewOutcome::Workspace;
@@ -14917,6 +13803,7 @@ fi\n\
         })
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     fn auto_turn_has_diff(&self) -> bool {
         if self.worktree_has_uncommitted_changes().unwrap_or(false) {
             return true;
@@ -14937,52 +13824,6 @@ fi\n\
         }
 
         false
-    }
-
-    pub(crate) fn handle_auto_qa_update(&mut self, note: String) {
-        let trimmed = note.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-
-        let banner = format!("Auto QA update: {trimmed}");
-        self.auto_queue_observer_banner(banner);
-        self.auto_flush_observer_banners();
-        self.bottom_pane.update_status_text(trimmed.to_string());
-        self.request_redraw();
-    }
-
-    pub(crate) fn handle_auto_review_request(&mut self, summary: Option<String>) {
-        let summary_text = summary
-            .as_ref()
-            .map(|text| text.trim())
-            .filter(|text| !text.is_empty())
-            .map(|text| text.to_string());
-
-        match summary_text.as_ref() {
-            Some(text) => self.push_background_tail(format!("QA review requested: {text}")),
-            None => self.push_background_tail("QA review requested.".to_string()),
-        }
-
-        if !self.auto_state.review_enabled {
-            self.push_background_tail(
-                "QA review skipped: Auto Drive reviews are disabled in settings.".to_string(),
-            );
-            self.request_redraw();
-            return;
-        }
-
-        self.prepare_auto_turn_review_state();
-        let cfg = self
-            .pending_auto_turn_config
-            .clone()
-            .unwrap_or_else(|| TurnConfig {
-                read_only: false,
-                complexity: None,
-            });
-
-        let descriptor = self.pending_turn_descriptor.clone();
-        self.auto_handle_post_turn_review(cfg, descriptor.as_ref());
     }
 
     fn prepare_auto_turn_review_state(&mut self) {
@@ -15032,6 +13873,7 @@ fi\n\
         create_ghost_commit(&options)
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     fn git_diff_name_only_between(
         &self,
         base_commit: &str,
@@ -15234,60 +14076,10 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn auto_stop(&mut self, message: Option<String>) {
-        self.auto_flush_observer_banners();
-        let duration = self
+        let effects = self
             .auto_state
-            .started_at
-            .map(|start| start.elapsed())
-            .unwrap_or_default();
-        let turns_completed = self.auto_state.turns_completed;
-        let goal = self.auto_state.goal.clone();
-        let has_diff = self.auto_turn_has_diff();
-        if let Some(handle) = self.auto_handle.take() {
-            handle.cancel();
-            let _ = handle.send(AutoCoordinatorCommand::Stop);
-        }
-        if let Some(handle) = self.qa_handle.take() {
-            handle.notify_finalize(has_diff);
-            handle.stop();
-        }
-        self.bottom_pane.clear_auto_coordinator_view(true);
-        if let Some(msg) = message.clone() {
-            self.push_background_tail(msg);
-        }
-
-        self.bottom_pane.set_standard_terminal_hint(None);
-        self.auto_history.clear();
-        self.auto_turn_review_state = None;
-        self.observer_reset_state();
-        let any_exec_running = !self.exec.running_commands.is_empty();
-        let any_tools_running = !self.tools_state.running_custom_tools.is_empty()
-            || !self.tools_state.running_web_search.is_empty()
-            || !self.tools_state.running_wait_tools.is_empty()
-            || !self.tools_state.running_kill_tools.is_empty();
-        let any_streaming = self.stream.is_write_cycle_active();
-        let any_tasks_active = !self.active_task_ids.is_empty();
-
-        if any_exec_running || any_tools_running || any_streaming || any_tasks_active {
-            self.bottom_pane.set_task_running(true);
-        } else {
-            self.bottom_pane.set_task_running(false);
-            self.bottom_pane.update_status_text(String::new());
-        }
-        self.bottom_pane.ensure_input_focus();
-        if ENABLE_WARP_STRIPES {
-            self.header_wave.set_enabled(false, Instant::now());
-        }
-        let summary = AutoRunSummary {
-            duration,
-            turns_completed,
-            message,
-            goal,
-        };
-        self.auto_state.reset();
-        self.auto_state.last_run_summary = Some(summary);
-        self.auto_rebuild_live_ring();
-        self.request_redraw();
+            .stop_run(Instant::now(), message);
+        self.auto_apply_controller_effects(effects);
     }
 
     fn auto_on_assistant_final(&mut self) {
@@ -15327,6 +14119,7 @@ use crate::chatwidget::message::UserMessage;
         self.auto_send_conversation();
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     fn auto_start_post_turn_review(
         &mut self,
         scope: Option<AutoReviewCommitScope>,
@@ -15567,27 +14360,6 @@ use crate::chatwidget::message::UserMessage;
                 }
             }
         }
-        if let Some(telemetry) = self.auto_state.observer_telemetry.as_ref() {
-            let status_label = match self.auto_state.observer_status {
-                AutoObserverStatus::Ok => "ok",
-                AutoObserverStatus::Failing => "failing",
-            };
-            let mut telemetry_line = format!(
-                "Observer: {status_label} (triggers: {})",
-                telemetry.trigger_count
-            );
-            if let Some(intervention) = telemetry
-                .last_intervention
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                let display = Self::truncate_with_ellipsis(intervention, 80);
-                telemetry_line.push_str(" — ");
-                telemetry_line.push_str(&display);
-            }
-            status_lines.push(telemetry_line);
-        }
         let cli_running = self.is_cli_running();
         let progress_hint_active = self.auto_state.awaiting_submission
             || (self.auto_state.waiting_for_response && !self.auto_state.coordinator_waiting)
@@ -15752,7 +14524,8 @@ use crate::chatwidget::message::UserMessage;
         } else {
             "Agents Disabled"
         };
-        let diagnostics_enabled = self.auto_should_run_qa_orchestrator();
+        let diagnostics_enabled = self.auto_state.qa_automation_enabled
+            && (self.auto_state.review_enabled || self.auto_state.cross_check_enabled);
         let diagnostics_label = if diagnostics_enabled {
             "Diagnostics Enabled"
         } else {
@@ -18149,7 +16922,8 @@ use crate::chatwidget::message::UserMessage;
     }
 
     fn settings_summary_auto_drive(&self) -> Option<String> {
-        let diagnostics_enabled = self.auto_should_run_qa_orchestrator();
+        let diagnostics_enabled = self.auto_state.qa_automation_enabled
+            && (self.auto_state.review_enabled || self.auto_state.cross_check_enabled);
         Some(format!(
             "Agents: {} · Diagnostics: {} · Continue: {}",
             Self::on_off_label(self.auto_state.subagents_enabled),
@@ -18908,7 +17682,7 @@ use crate::chatwidget::message::UserMessage;
 
     pub(crate) fn has_active_modal_view(&self) -> bool {
         // Treat bottom‑pane views (approval, selection popups) and top‑level overlays
-        // (diff viewer, help overlay, Auto Threads overlay) as "modals" for Esc routing. This ensures that
+        // (diff viewer, help overlay) as "modals" for Esc routing. This ensures that
         // a single Esc keypress closes the visible overlay instead of engaging the
         // global Esc policy (clear input / backtrack).
         self.bottom_pane.has_active_modal_view()
@@ -18916,7 +17690,6 @@ use crate::chatwidget::message::UserMessage;
             || self.diffs.overlay.is_some()
             || self.help.overlay.is_some()
             || self.terminal.overlay.is_some()
-            || self.auto_threads_overlay.is_active()
     }
 
     /// Forward an `Op` directly to codex.
@@ -22300,7 +21073,6 @@ use crate::chatwidget::message::UserMessage;
             || self.help.overlay.is_some()
             || self.settings.overlay.is_some()
             || self.terminal.overlay().is_some()
-            || self.auto_threads_overlay.is_active()
             || self.browser_overlay_visible
             || self.agents_terminal.active
         {
@@ -22774,9 +21546,10 @@ mod tests {
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::ChatWidgetHarness;
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
-    use crate::chatwidget::auto_coordinator::{
+    use code_auto_drive_core::{
         TurnComplexity,
         TurnMode,
+        AUTO_RESOLVE_MAX_REVIEW_ATTEMPTS,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use code_core::history::state::{
@@ -23038,62 +21811,6 @@ mod tests {
 
         let route = chat.describe_esc_context();
         assert_eq!(route.intent, EscIntent::AgentsTerminal);
-    }
-
-    #[test]
-    fn esc_router_prioritizes_auto_threads_overlay_before_auto_stop() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_threads_overlay.activate();
-
-        let route = chat.describe_esc_context();
-        assert_eq!(route.intent, EscIntent::DismissModal);
-        assert!(!route.allows_double_esc);
-
-        let esc_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let performed = chat.execute_esc_intent(route.intent, esc_event);
-        assert!(performed, "Esc intent should close the overlay");
-        assert!(chat.auto_state.active, "Auto Drive should remain active after closing overlay");
-        assert!(
-            !chat.auto_threads_overlay.is_active(),
-            "Overlay should deactivate after Esc is routed"
-        );
-    }
-
-    #[test]
-    fn ctrl_o_closes_auto_threads_overlay_when_active() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.toggle_auto_threads_overlay();
-        assert!(chat.auto_threads_overlay.is_active());
-
-        let ctrl_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL);
-        chat.handle_key_event(ctrl_o);
-
-        assert!(
-            !chat.auto_threads_overlay.is_active(),
-            "Ctrl+O should deactivate the overlay"
-        );
-    }
-
-    #[test]
-    fn control_character_closes_auto_threads_overlay() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.toggle_auto_threads_overlay();
-        assert!(chat.auto_threads_overlay.is_active());
-
-        let control_char = KeyEvent::new(KeyCode::Char('\u{f}'), KeyModifiers::NONE);
-        chat.handle_key_event(control_char);
-
-        assert!(
-            !chat.auto_threads_overlay.is_active(),
-            "Control character produced by Ctrl+O should close the overlay"
-        );
     }
 
     #[test]
@@ -23395,7 +22112,7 @@ mod tests {
         {
             let chat = harness.chat();
             chat.auto_state.active = true;
-            chat.config.tui.auto_drive.coordinator_routing = true;
+            chat.config.auto_drive.coordinator_routing = true;
             chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         }
 
@@ -23449,7 +22166,7 @@ mod tests {
         {
             let chat = harness.chat();
             chat.auto_state.active = true;
-            chat.config.tui.auto_drive.coordinator_routing = true;
+            chat.config.auto_drive.coordinator_routing = true;
             chat.config.sandbox_policy = SandboxPolicy::DangerFullAccess;
         }
 
@@ -23478,7 +22195,7 @@ mod tests {
         {
             let chat = harness.chat();
             chat.auto_state.active = true;
-            chat.config.tui.auto_drive.coordinator_routing = true;
+            chat.config.auto_drive.coordinator_routing = true;
         }
 
         harness.drain_events();
@@ -23493,88 +22210,6 @@ mod tests {
                 || matches!(event, AppEvent::CodexOp(_))),
             "slash command should follow existing dispatch path"
         );
-    }
-
-    #[test]
-    fn observer_history_filters_noise_cells() {
-        use crate::history::state::ExecStatus;
-        use crate::history_cell::{ExecKind, HistoryCellType, ToolCellStatus};
-
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::User));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Assistant));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Exec {
-            kind: ExecKind::Run,
-            status: ExecStatus::Success,
-        }));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Tool {
-            status: ToolCellStatus::Success,
-        }));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Error));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Diff));
-        assert!(ChatWidget::observer_history_kind_allowed(HistoryCellType::Patch {
-            kind: crate::history_cell::PatchKind::ApplyFailure,
-        }));
-
-        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::PlanUpdate));
-        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::BackgroundEvent));
-        assert!(!ChatWidget::observer_history_kind_allowed(HistoryCellType::Plain));
-    }
-
-    #[test]
-    fn auto_observer_failing_reports_flush_duplicate_banners_on_success() {
-        let mut harness = ChatWidgetHarness::new();
-        let chat = harness.chat();
-
-        chat.auto_state.active = true;
-        chat.auto_state.awaiting_submission = false;
-        chat.auto_state.waiting_for_response = false;
-
-        let telemetry = AutoObserverTelemetry {
-            last_status: AutoObserverStatus::Failing,
-            ..AutoObserverTelemetry::default()
-        };
-        let instruction = "Tighten up the summary";
-
-        for _ in 0..3 {
-            chat.auto_handle_observer_report(
-                ObserverMode::Cadence,
-                AutoObserverStatus::Failing,
-                telemetry.clone(),
-                None,
-                Some(instruction.to_string()),
-                AutoObserverReason::Cadence,
-                Vec::new(),
-                None,
-                None,
-            );
-        }
-
-        assert_eq!(chat.auto_state.pending_observer_banners.len(), 1);
-
-        let baseline_cells = chat.history_cells.len();
-
-        chat.auto_handle_decision(
-            AutoCoordinatorStatus::Success,
-            Some("Resolved outstanding actions".to_string()),
-            Some("Ready to wrap up".to_string()),
-            None,
-            None,
-            Vec::new(),
-            Vec::new(),
-        );
-
-        let new_cells = chat.history_cells.len() - baseline_cells;
-        assert!(new_cells >= 2);
-
-        let guidance_hits = chat
-            .history_cells
-            .iter()
-            .flat_map(|cell| cell.display_lines_trimmed())
-            .flat_map(|line| line.spans.clone())
-            .filter(|span| span.content.contains("Observer guidance: Tighten up the summary"))
-            .count();
-        assert_eq!(guidance_hits, 1);
-        assert!(chat.auto_state.pending_observer_banners.is_empty());
     }
 
     #[test]
@@ -27648,193 +26283,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    fn render_auto_threads_overlay(
-        &self,
-        frame_area: Rect,
-        history_area: Rect,
-        bottom_pane_area: Rect,
-        buf: &mut Buffer,
-    ) {
-        use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect as RtRect};
-        use ratatui::style::{Modifier, Style};
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
-        use ratatui::widgets::StatefulWidget;
-
-        let scrim_style = Style::default()
-            .bg(crate::colors::overlay_scrim())
-            .fg(crate::colors::text_dim());
-        fill_rect(buf, frame_area, None, scrim_style);
-
-        let padding = 1u16;
-        let footer_reserved = bottom_pane_area.height.min(1);
-        let overlay_bottom = (bottom_pane_area.y + bottom_pane_area.height).saturating_sub(footer_reserved);
-        let overlay_height = overlay_bottom
-            .saturating_sub(history_area.y)
-            .max(1)
-            .min(frame_area.height);
-
-        let window_area = Rect {
-            x: history_area.x + padding,
-            y: history_area.y,
-            width: history_area.width.saturating_sub(padding * 2),
-            height: overlay_height,
-        };
-        Clear.render(window_area, buf);
-
-        let title_spans = vec![
-            Span::styled(" Auto QA Threads ", Style::default().fg(crate::colors::text())),
-            Span::styled(
-                "— Ctrl+O to close",
-                Style::default().fg(crate::colors::text_dim()),
-            ),
-        ];
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(title_spans))
-            .style(Style::default().bg(crate::colors::background()))
-            .border_style(Style::default().fg(crate::colors::border()));
-        let inner = block.inner(window_area);
-        block.render(window_area, buf);
-
-        let inner_bg = Style::default().bg(crate::colors::background());
-        for y in inner.y..inner.y + inner.height {
-            for x in inner.x..inner.x + inner.width {
-                buf[(x, y)].set_style(inner_bg);
-            }
-        }
-
-        if inner.width == 0 || inner.height == 0 {
-            return;
-        }
-
-        let content = inner.inner(Margin::new(1, 1));
-        if content.width == 0 || content.height == 0 {
-            return;
-        }
-
-        let hint_height = if content.height >= 2 { 1 } else { 0 };
-        let body_height = content.height.saturating_sub(hint_height);
-        let body_area = RtRect {
-            x: content.x,
-            y: content.y,
-            width: content.width,
-            height: body_height,
-        };
-        let hint_area = RtRect {
-            x: content.x,
-            y: content.y.saturating_add(body_height),
-            width: content.width,
-            height: hint_height,
-        };
-
-        let entries = self.auto_threads_overlay.entries();
-        let sidebar_target = 28u16;
-        let sidebar_width = if body_area.width <= sidebar_target + 12 {
-            body_area.width.saturating_mul(35).saturating_div(100).clamp(16, body_area.width)
-        } else {
-            sidebar_target.min(body_area.width.saturating_sub(12)).max(16)
-        };
-
-        let constraints = if body_area.width <= sidebar_width {
-            [Constraint::Length(body_area.width), Constraint::Length(0)]
-        } else {
-            [Constraint::Length(sidebar_width), Constraint::Min(12)]
-        };
-
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(constraints)
-            .split(body_area);
-
-        let list_area = chunks[0];
-        let detail_area = if chunks.len() > 1 { chunks[1] } else { chunks[0] };
-
-        let mut list_items: Vec<ListItem> = Vec::new();
-        if entries.is_empty() {
-            list_items.push(ListItem::new(Line::from(vec![Span::styled(
-                "No QA threads yet",
-                Style::default().fg(crate::colors::text_dim()),
-            )])));
-        } else {
-            for entry in entries {
-                list_items.push(ListItem::new(Line::from(vec![Span::raw(entry.list_label.clone())])));
-            }
-        }
-
-        let mut list_state = ListState::default();
-        if !entries.is_empty() {
-            list_state.select(Some(self.auto_threads_overlay.selected_index()));
-        }
-
-        StatefulWidget::render(
-            List::new(list_items)
-                .highlight_style(
-                    Style::default()
-                        .fg(crate::colors::primary())
-                        .add_modifier(Modifier::BOLD),
-                )
-                .highlight_symbol("› "),
-            list_area,
-            buf,
-            &mut list_state,
-        );
-
-        let focus = self.auto_threads_overlay.focus();
-        let detail_border = if matches!(focus, AutoThreadsOverlayFocus::Detail) {
-            crate::colors::primary()
-        } else {
-            crate::colors::border()
-        };
-
-        let detail_block = Block::default()
-            .borders(if chunks.len() > 1 { Borders::LEFT } else { Borders::NONE })
-            .border_style(Style::default().fg(detail_border))
-            .style(Style::default().bg(crate::colors::background()));
-        let detail_inner = detail_block.inner(detail_area);
-        detail_block.render(detail_area, buf);
-
-        for y in detail_inner.y..detail_inner.y + detail_inner.height {
-            for x in detail_inner.x..detail_inner.x + detail_inner.width {
-                buf[(x, y)].set_style(inner_bg);
-            }
-        }
-
-        let detail_text = if let Some(entry) = entries
-            .get(self.auto_threads_overlay.selected_index())
-        {
-            entry.detail_text.clone()
-        } else {
-            "Run Auto Drive with observer, cross-check, or review enabled to capture QA threads.".to_string()
-        };
-
-        let scroll = entries
-            .get(self.auto_threads_overlay.selected_index())
-            .map(|entry| entry.detail_scroll)
-            .unwrap_or(0);
-
-        Paragraph::new(detail_text)
-            .wrap(Wrap { trim: false })
-            .style(Style::default().fg(crate::colors::text()))
-            .scroll((scroll, 0))
-            .render(detail_inner, buf);
-
-        if hint_area.height > 0 {
-            let list_focus = matches!(focus, AutoThreadsOverlayFocus::List);
-            let hint_text = if list_focus {
-                "Up/Down navigate · Tab detail · Esc close"
-            } else {
-                "Up/Down scroll · Tab list · Esc close"
-            };
-            Paragraph::new(Line::from(vec![Span::styled(
-                hint_text,
-                Style::default().fg(crate::colors::text_dim()),
-            )]))
-            .render(hint_area, buf);
-        }
-    }
-
     fn render_agents_terminal_overlay(
         &self,
         frame_area: Rect,
@@ -30199,11 +28647,6 @@ impl WidgetRef for &ChatWidget<'_> {
                     .alignment(ratatui::layout::Alignment::Left)
                     .render(instructions_area, buf);
             }
-        }
-
-        if self.terminal.overlay().is_none() && self.auto_threads_overlay.is_active() {
-            self.render_auto_threads_overlay(area, history_area, bottom_pane_area, buf);
-            return;
         }
 
         if self.terminal.overlay().is_none() && self.browser_overlay_visible {

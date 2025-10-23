@@ -4,12 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
-use code_browser::global as browser_global;
 use code_core::config::Config;
 use code_core::config_types::{AutoDriveSettings, ReasoningEffort};
 use code_core::debug_logger::DebugLogger;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
-use code_core::get_openai_tools;
 use code_core::project_doc::read_auto_drive_docs;
 use code_core::protocol::SandboxPolicy;
 use code_core::slash_commands::get_enabled_agents;
@@ -20,39 +18,18 @@ use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{self, json, Value};
-use super::coordinator_user_schema::{user_turn_schema, parse_user_turn_reply};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::app_event::{
-    AppEvent,
-    AutoCoordinatorStatus,
-    AutoObserverReason,
-    AutoObserverTelemetry,
-    AutoTurnAgentsAction,
-    AutoTurnAgentsTiming,
-    AutoTurnCliAction,
-};
-use crate::app_event_sender::AppEventSender;
-use crate::chatwidget::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
-use crate::thread_spawner;
+use crate::coordinator_user_schema::{parse_user_turn_reply, user_turn_schema};
+use crate::retry::{retry_with_backoff, RetryDecision, RetryError, RetryOptions};
 #[cfg(feature = "dev-faults")]
-use crate::chatwidget::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
+use crate::faults::{fault_to_error, next_fault, FaultScope, InjectedFault};
 use code_common::elapsed::format_duration;
 use std::fs;
 use chrono::{DateTime, Local, Utc};
 use rand::Rng;
-use super::auto_observer::{
-    build_observer_conversation,
-    start_auto_observer,
-    AutoObserverCommand,
-    AutoObserverHandle,
-    ObserverOutcome,
-    ObserverReason,
-    ObserverTrigger,
-};
-use crate::app_event::{ObserverMode, AutoObserverStatus};
 
 const RATE_LIMIT_BUFFER: Duration = Duration::from_secs(120);
 const RATE_LIMIT_JITTER_MAX: Duration = Duration::from_secs(30);
@@ -63,13 +40,79 @@ const MAX_DECISION_RECOVERY_ATTEMPTS: u32 = 3;
 #[error("auto coordinator cancelled")]
 struct AutoCoordinatorCancelled;
 
-pub(super) const MODEL_SLUG: &str = "gpt-5";
+pub const MODEL_SLUG: &str = "gpt-5";
 const USER_TURN_SCHEMA_NAME: &str = "auto_coordinator_user_turn";
-pub(super) const CROSS_CHECK_RESTART_BANNER: &str = "Cross-check restart with minimal context";
 const COORDINATOR_PROMPT_PATH: &str = "code-rs/core/prompt_coordinator.md";
 
+#[derive(Clone)]
+pub struct AutoCoordinatorEventSender {
+    inner: Arc<dyn Fn(AutoCoordinatorEvent) + Send + Sync>,
+}
+
+impl AutoCoordinatorEventSender {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(AutoCoordinatorEvent) + Send + Sync + 'static,
+    {
+        Self { inner: Arc::new(f) }
+    }
+
+    pub fn send(&self, event: AutoCoordinatorEvent) {
+        (self.inner)(event);
+    }
+}
+
 #[derive(Debug, Clone)]
-pub(super) struct AutoCoordinatorHandle {
+pub struct AutoTurnCliAction {
+    pub prompt: String,
+    pub context: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoTurnAgentsTiming {
+    Parallel,
+    Blocking,
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoTurnAgentsAction {
+    pub prompt: String,
+    pub context: Option<String>,
+    pub write: bool,
+    pub write_requested: Option<bool>,
+    pub models: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCoordinatorStatus {
+    Continue,
+    Success,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub enum AutoCoordinatorEvent {
+    Decision {
+        status: AutoCoordinatorStatus,
+        progress_past: Option<String>,
+        progress_current: Option<String>,
+        cli: Option<AutoTurnCliAction>,
+        agents_timing: Option<AutoTurnAgentsTiming>,
+        agents: Vec<AutoTurnAgentsAction>,
+        transcript: Vec<ResponseItem>,
+    },
+    Thinking {
+        delta: String,
+        summary_index: Option<u32>,
+    },
+    UserReply {
+        user_response: Option<String>,
+        cli_command: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoCoordinatorHandle {
     pub tx: Sender<AutoCoordinatorCommand>,
     cancel_token: CancellationToken,
 }
@@ -85,24 +128,15 @@ impl AutoCoordinatorHandle {
     pub fn cancel(&self) {
         self.cancel_token.cancel();
     }
-
 }
 
 #[derive(Debug)]
-pub(super) enum AutoCoordinatorCommand {
+pub enum AutoCoordinatorCommand {
     UpdateConversation(Vec<ResponseItem>),
     HandleUserPrompt {
         _prompt: String,
         conversation: Vec<ResponseItem>,
     },
-    ObserverResult(ObserverOutcome),
-    ObserverThinking {
-        mode: ObserverMode,
-        delta: String,
-        summary_index: Option<u32>,
-    },
-    ObserverBootstrapLen(usize),
-    ResetObserver,
     Stop,
 }
 
@@ -118,8 +152,8 @@ struct PendingDecision {
 }
 
 impl PendingDecision {
-    fn into_event(self) -> AppEvent {
-        AppEvent::AutoCoordinatorDecision {
+    fn into_event(self) -> AutoCoordinatorEvent {
+        AutoCoordinatorEvent::Decision {
             status: self.status,
             progress_past: self.progress_past,
             progress_current: self.progress_current,
@@ -133,14 +167,14 @@ impl PendingDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum TurnComplexity {
+pub enum TurnComplexity {
     Low,
     Medium,
     High,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TurnConfig {
+pub struct TurnConfig {
     #[serde(default)]
     pub read_only: bool,
     #[serde(default)]
@@ -150,7 +184,7 @@ pub(crate) struct TurnConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum TurnMode {
+pub enum TurnMode {
     Normal,
     SubAgentWrite,
     SubAgentReadOnly,
@@ -165,7 +199,7 @@ impl Default for TurnMode {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, Default)]
-pub(crate) struct AgentPreferences {
+pub struct AgentPreferences {
     #[serde(default)]
     pub prefer_research: bool,
     #[serde(default)]
@@ -176,7 +210,7 @@ pub(crate) struct AgentPreferences {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ReviewTiming {
+pub enum ReviewTiming {
     PostTurn,
     PreWrite,
     Immediate,
@@ -190,7 +224,7 @@ impl Default for ReviewTiming {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ReviewStrategy {
+pub struct ReviewStrategy {
     #[serde(default)]
     pub timing: ReviewTiming,
     #[serde(default)]
@@ -211,7 +245,7 @@ impl Default for ReviewStrategy {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct TurnDescriptor {
+pub struct TurnDescriptor {
     #[serde(default)]
     pub mode: TurnMode,
     #[serde(default)]
@@ -614,38 +648,37 @@ struct AgentAction {
     models: Option<Vec<String>>,
 }
 
-pub(super) fn start_auto_coordinator(
-    app_event_tx: AppEventSender,
+pub fn start_auto_coordinator(
+    event_tx: AutoCoordinatorEventSender,
     goal_text: String,
     conversation: Vec<ResponseItem>,
     config: Config,
     debug_enabled: bool,
-    observer_cadence: u32,
 ) -> Result<AutoCoordinatorHandle> {
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let thread_tx = cmd_tx.clone();
-    let loop_tx = cmd_tx.clone();
     let cancel_token = CancellationToken::new();
     let thread_cancel = cancel_token.clone();
 
-    if thread_spawner::spawn_lightweight("auto-coordinator", move || {
+    let builder = std::thread::Builder::new()
+        .name("code-auto-coordinator".to_string())
+        .stack_size(256 * 1024);
+    let handle = builder.spawn(move || {
         if let Err(err) = run_auto_loop(
-            app_event_tx,
+            event_tx,
             goal_text,
             conversation,
             config,
             cmd_rx,
-            loop_tx,
             debug_enabled,
-            observer_cadence,
             thread_cancel,
         ) {
             tracing::error!("auto coordinator loop error: {err:#}");
         }
-    })
-    .is_none()
-    {
-        tracing::error!("auto coordinator spawn rejected: background thread limit reached");
+    });
+
+    if handle.is_err() {
+        tracing::error!("auto coordinator spawn failed: {:#}", handle.unwrap_err());
         return Err(anyhow!("auto coordinator worker unavailable"));
     }
 
@@ -656,14 +689,12 @@ pub(super) fn start_auto_coordinator(
 }
 
 fn run_auto_loop(
-    app_event_tx: AppEventSender,
+    event_tx: AutoCoordinatorEventSender,
     goal_text: String,
     initial_conversation: Vec<ResponseItem>,
     config: Config,
     cmd_rx: Receiver<AutoCoordinatorCommand>,
-    cmd_tx: Sender<AutoCoordinatorCommand>,
     debug_enabled: bool,
-    observer_cadence: u32,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let preferred_auth = if config.using_chatgpt_auth {
@@ -704,30 +735,6 @@ fn run_auto_loop(
         .build()
         .context("creating runtime for auto coordinator")?;
 
-    let browser_enabled = runtime.block_on(async {
-        browser_global::get_browser_manager().await.is_some()
-    });
-
-    let read_only_tools_config = client
-        .as_ref()
-        .build_tools_config_with_sandbox(SandboxPolicy::ReadOnly);
-    let read_only_tools = get_openai_tools(
-        &read_only_tools_config,
-        None,
-        browser_enabled,
-        false,
-    );
-
-    let full_access_tools_config = client
-        .as_ref()
-        .build_tools_config_with_sandbox(SandboxPolicy::DangerFullAccess);
-    let full_access_tools = get_openai_tools(
-        &full_access_tools_config,
-        None,
-        browser_enabled,
-        false,
-    );
-
     let auto_instructions = match runtime.block_on(read_auto_drive_docs(config.as_ref())) {
         Ok(Some(text)) => {
             let trimmed = text.trim().to_string();
@@ -752,7 +759,7 @@ fn run_auto_loop(
     let coordinator_prompt = read_coordinator_prompt(config.as_ref());
     let (base_developer_intro, primary_goal_message) =
         build_developer_message(&goal_text, &environment_details, coordinator_prompt.as_deref());
-    let schema_features = SchemaFeatures::from_auto_settings(&config.tui.auto_drive);
+    let schema_features = SchemaFeatures::from_auto_settings(&config.auto_drive);
     let include_agents = schema_features.include_agents;
     let schema = build_schema(&active_agent_names, schema_features);
     let platform = std::env::consts::OS;
@@ -762,54 +769,6 @@ fn run_auto_loop(
     let mut stopped = false;
     let mut requests_completed: u64 = 0;
     let mut consecutive_decision_failures: u32 = 0;
-    let mut observer_guidance: Vec<String> = Vec::new();
-    let mut _observer_telemetry = AutoObserverTelemetry::default();
-    let mut _last_cli_context: Option<String> = None;
-    let mut _last_cli_prompt: Option<String> = None;
-    let mut _last_progress_summary: Option<String> = None;
-    let mut awaiting_cross_check = false;
-    let mut pending_success: Option<PendingDecision> = None;
-    let mut observer_last_sent = 0usize;
-    let mut observer_current_len = 0usize;
-    let mut observer_bootstrap_len = 0usize;
-    let cross_check_enabled = config.tui.auto_drive.cross_check_enabled;
-    let observer_cadence_enabled = config.tui.auto_drive.observer_enabled;
-    let observer_thread_enabled = observer_cadence_enabled || cross_check_enabled;
-    let mut observer_bootstrapped = !observer_thread_enabled;
-    let mut cross_check_restart_conversation: Option<Vec<ResponseItem>> = None;
-    let mut observer_handle = if observer_thread_enabled {
-        match start_auto_observer(client.clone(), observer_cadence, cmd_tx.clone()) {
-            Ok(handle) => Some(handle),
-            Err(err) => {
-                tracing::error!("failed to start auto observer: {err:#}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    if let Some(handle) = observer_handle.as_ref() {
-        if handle
-            .tx
-            .send(AutoObserverCommand::Bootstrap {
-                goal_text: goal_text.clone(),
-                environment_details: environment_details.clone(),
-                tools: read_only_tools.clone(),
-            })
-            .is_err()
-        {
-            warn!("failed to trigger observer bootstrap");
-        } else {
-            observer_bootstrapped = false;
-        }
-    }
-    let observer_cadence_interval = if observer_cadence_enabled && observer_cadence != 0 {
-        observer_handle
-            .as_ref()
-            .map(|handle: &AutoObserverHandle| handle.cadence() as u64)
-    } else {
-        None
-    };
 
     loop {
         if stopped {
@@ -822,19 +781,17 @@ fn run_auto_loop(
                 continue;
             }
 
-            let conv_for_observer = conv.clone();
-            observer_current_len = conv_for_observer.len();
-            let developer_intro =
-                compose_developer_intro(&base_developer_intro, &observer_guidance);
+            let developer_intro = base_developer_intro.as_str();
+            let mut retry_conversation = Some(conv.clone());
             match request_coordinator_decision(
                 &runtime,
                 client.as_ref(),
-                developer_intro.as_str(),
+                developer_intro,
                 &primary_goal_message,
                 &schema,
                 conv,
                 auto_instructions.as_deref(),
-                &app_event_tx,
+                &event_tx,
                 &cancel_token,
             ) {
                 Ok(ParsedCoordinatorDecision {
@@ -846,67 +803,14 @@ fn run_auto_loop(
                     mut agents,
                     mut response_items,
                 }) => {
+                    retry_conversation.take();
                     if !include_agents {
                         agents_timing = None;
                         agents.clear();
                     }
                     consecutive_decision_failures = 0;
-                    let (turn_cli_prompt, turn_cli_context) = if let Some(cli_action) = &cli {
-                        let prompt = Some(cli_action.prompt.clone());
-                        let context = cli_action
-                            .context
-                            .as_ref()
-                            .map(|ctx| ctx.trim().to_string())
-                            .filter(|ctx| !ctx.is_empty());
-                        (prompt, context)
-                    } else {
-                        (None, None)
-                    };
-                    _last_cli_prompt = turn_cli_prompt.clone();
-                    _last_cli_context = turn_cli_context.clone();
-
-                    let mut latest_summary = progress_current.clone();
-                    if latest_summary.is_none() {
-                        latest_summary = progress_past.clone();
-                    }
-                    if let Some(summary_text) = latest_summary.clone() {
-                        _last_progress_summary = Some(summary_text);
-                    } else {
-                        _last_progress_summary = None;
-                    }
-
-                    let cli_prompt_for_observer = turn_cli_prompt.as_deref();
-
                     if matches!(status, AutoCoordinatorStatus::Continue) {
-                        if observer_bootstrapped {
-                            let slice_start = observer_last_sent.min(observer_current_len);
-                            let delta_slice = conv_for_observer[slice_start..].to_vec();
-                            let conversation = build_observer_conversation(
-                                delta_slice,
-                                cli_prompt_for_observer,
-                            );
-                            if !conversation.is_empty() {
-                                if let (Some(handle), Some(cadence)) =
-                                    (observer_handle.as_ref(), observer_cadence_interval)
-                                {
-                                    if should_trigger_observer(requests_completed, cadence) {
-                                        observer_last_sent = observer_current_len;
-                                        let trigger = ObserverTrigger {
-                                            conversation,
-                                            goal_text: goal_text.clone(),
-                                            environment_details: environment_details.clone(),
-                                            reason: ObserverReason::Cadence,
-                                            turn_snapshot: None,
-                                            tools: read_only_tools.clone(),
-                                        };
-                                        if handle.tx.send(AutoObserverCommand::Trigger(trigger)).is_err() {
-                                            warn!("failed to trigger auto observer");
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let event = AppEvent::AutoCoordinatorDecision {
+                        let event = AutoCoordinatorEvent::Decision {
                             status,
                             progress_past,
                             progress_current,
@@ -915,7 +819,7 @@ fn run_auto_loop(
                             agents: agents.iter().map(agent_action_to_event).collect(),
                             transcript: std::mem::take(&mut response_items),
                         };
-                        app_event_tx.send(event);
+                        event_tx.send(event);
                         continue;
                     }
 
@@ -929,45 +833,7 @@ fn run_auto_loop(
                         transcript: response_items,
                     };
 
-                    if observer_bootstrapped
-                        && matches!(decision_event.status, AutoCoordinatorStatus::Success)
-                        && cross_check_enabled
-                        && !awaiting_cross_check
-                    {
-                        if let Some(handle) = observer_handle.as_ref() {
-                            let start = observer_bootstrap_len.min(observer_current_len);
-                            let delta_slice = conv_for_observer[start..].to_vec();
-                            let conversation = build_observer_conversation(
-                                delta_slice,
-                                cli_prompt_for_observer,
-                            );
-                            match handle.tx.send(AutoObserverCommand::BeginCrossCheck {
-                                conversation,
-                                _from_index: start,
-                                forced: true,
-                                summary: latest_summary.clone(),
-                                focus: None,
-                                tools: full_access_tools.clone(),
-                            }) {
-                                Ok(()) => {
-                                    awaiting_cross_check = true;
-                                    observer_last_sent = observer_current_len;
-                                    cross_check_restart_conversation = Some(conv_for_observer.clone());
-                                    pending_success = Some(decision_event);
-                                    continue;
-                                }
-                                Err(err) => {
-                                    warn!("failed to trigger cross-check observer: {err:#}");
-                                }
-                            }
-                        } else {
-                            warn!(
-                                "cross-check enabled but observer thread unavailable; finishing without cross-check"
-                            );
-                        }
-                    }
-
-                    app_event_tx.send(decision_event.into_event());
+                    event_tx.send(decision_event.into_event());
                     stopped = true;
                     continue;
                 }
@@ -987,18 +853,15 @@ fn run_auto_loop(
                                 MAX_DECISION_RECOVERY_ATTEMPTS,
                                 err
                             );
-                            if let Some(hint) = recoverable.guidance.as_deref() {
-                                push_unique_guidance(&mut observer_guidance, hint);
-                            }
                             let message = format!(
                                 "Coordinator response invalid (attempt {attempt}/{MAX_DECISION_RECOVERY_ATTEMPTS}): {}. Retrying…",
                                 recoverable.summary
                             );
-                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
+                            let _ = event_tx.send(AutoCoordinatorEvent::Thinking {
                                 delta: message,
                                 summary_index: None,
                             });
-                            pending_conversation = Some(conv_for_observer);
+                            pending_conversation = retry_conversation.take();
                             continue;
                         }
                         warn!(
@@ -1008,7 +871,7 @@ fn run_auto_loop(
                         );
                     }
                     consecutive_decision_failures = 0;
-                    let event = AppEvent::AutoCoordinatorDecision {
+                    let event = AutoCoordinatorEvent::Decision {
                         status: AutoCoordinatorStatus::Failed,
                         progress_past: None,
                         progress_current: Some(format!("Coordinator error: {err}")),
@@ -1017,7 +880,7 @@ fn run_auto_loop(
                         agents: Vec::new(),
                         transcript: Vec::new(),
                     };
-                    app_event_tx.send(event);
+                    event_tx.send(event);
                     stopped = true;
                     continue;
                 }
@@ -1026,18 +889,18 @@ fn run_auto_loop(
 
         match cmd_rx.recv() {
             Ok(AutoCoordinatorCommand::HandleUserPrompt { _prompt, conversation }) => {
-                let developer_intro = compose_developer_intro(&base_developer_intro, &observer_guidance);
+                let developer_intro = base_developer_intro.as_str();
                 let mut updated_conversation = conversation.clone();
                 let schema = user_turn_schema();
                 match request_user_turn_decision(
                     &runtime,
                     client.as_ref(),
-                    developer_intro.as_str(),
+                    developer_intro,
                     &primary_goal_message,
                     &schema,
                     updated_conversation.clone(),
                     auto_instructions.as_deref(),
-                    &app_event_tx,
+                    &event_tx,
                     &cancel_token,
                 ) {
                     Ok((user_response, cli_command)) => {
@@ -1045,14 +908,14 @@ fn run_auto_loop(
                             updated_conversation.push(make_message("assistant", response_text.clone()));
                         }
                         pending_conversation = Some(updated_conversation);
-                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                        event_tx.send(AutoCoordinatorEvent::UserReply {
                             user_response,
                             cli_command,
                         });
                     }
                     Err(err) => {
                         tracing::warn!("failed to handle coordinator user prompt: {err:#}");
-                        app_event_tx.send(AppEvent::AutoCoordinatorUserReply {
+                        event_tx.send(AutoCoordinatorEvent::UserReply {
                             user_response: Some(format!("Coordinator error: {err}")),
                             cli_command: None,
                         });
@@ -1064,181 +927,13 @@ fn run_auto_loop(
                 consecutive_decision_failures = 0;
                 pending_conversation = Some(conv);
             }
-            Ok(AutoCoordinatorCommand::ObserverResult(outcome)) => {
-                let ObserverOutcome {
-                    mode,
-                    status,
-                    replace_message,
-                    additional_instructions,
-                    telemetry,
-                    reason,
-                    conversation,
-                    turn_snapshot: _turn_snapshot,
-                    raw_output,
-                    parsed_response,
-                } = outcome;
-
-                if let Some(instr) = additional_instructions.as_deref() {
-                    push_unique_guidance(&mut observer_guidance, instr);
-                }
-
-                _observer_telemetry = telemetry.clone();
-                let report_raw = raw_output.clone();
-                let report_parsed = parsed_response.clone();
-
-                let event = AppEvent::AutoObserverReport {
-                    mode,
-                    status,
-                    telemetry,
-                    replace_message: replace_message.clone(),
-                    additional_instructions: additional_instructions.clone(),
-                    reason: AutoObserverReason::from(reason.clone()),
-                    conversation: conversation.clone(),
-                    raw_output: report_raw.clone(),
-                    parsed_response: report_parsed.clone(),
-                };
-                app_event_tx.send(event);
-
-                if matches!(mode, ObserverMode::Bootstrap) {
-                    observer_bootstrapped = true;
-                    observer_current_len = conversation.len();
-                    observer_bootstrap_len = observer_current_len;
-                    observer_last_sent = observer_current_len;
-                    let baseline = report_raw
-                        .or_else(|| replace_message.clone())
-                        .or_else(|| additional_instructions.clone());
-                    let ready_event = AppEvent::AutoObserverReady {
-                        baseline_summary: baseline,
-                        bootstrap_len: conversation.len(),
-                    };
-                    app_event_tx.send(ready_event);
-                }
-
-                if awaiting_cross_check && matches!(mode, ObserverMode::CrossCheck) {
-                    if let ObserverReason::CrossCheck { summary, .. } = reason {
-                        awaiting_cross_check = false;
-                        if matches!(status, AutoObserverStatus::Ok) {
-                            cross_check_restart_conversation = None;
-                            if let Some(decision) = pending_success.take() {
-                                app_event_tx.send(decision.into_event());
-                                stopped = true;
-                                continue;
-                            } else {
-                                warn!("cross-check completed but no pending success decision to finalize");
-                            }
-                        } else {
-                            pending_success = None;
-                            let mut detail = additional_instructions
-                                .as_ref()
-                                .and_then(|text| {
-                                    let trimmed = text.trim();
-                                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                                });
-                            if detail.is_none() {
-                                detail = summary
-                                    .as_ref()
-                                    .and_then(|text| {
-                                        let trimmed = text.trim();
-                                        (!trimmed.is_empty()).then(|| trimmed.to_string())
-                                    });
-                            }
-                            let failure_message = detail
-                                .clone()
-                                .map(|text| format!("Cross-check failed: {text}"))
-                                .unwrap_or_else(|| "Cross-check failed".to_string());
-                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
-                                delta: CROSS_CHECK_RESTART_BANNER.to_string(),
-                                summary_index: None,
-                            });
-                            let _ = app_event_tx.send(AppEvent::AutoCoordinatorThinking {
-                                delta: failure_message.clone(),
-                                summary_index: None,
-                            });
-
-                            let mut restart_conversation = cross_check_restart_conversation
-                                .take()
-                                .unwrap_or_else(|| conversation.clone());
-
-                            if let Some(text) = detail {
-                                let prompt = format!(
-                                    "Observer cross-check flagged unresolved issues:\n{text}\nPlease address these items before retrying completion."
-                                );
-                                restart_conversation.push(ResponseItem::Message {
-                                    id: None,
-                                    role: "user".to_string(),
-                                    content: vec![ContentItem::InputText { text: prompt }],
-                                });
-                            }
-
-                            if restart_conversation.is_empty() {
-                                restart_conversation = conversation;
-                            }
-
-                            pending_conversation = Some(restart_conversation);
-                            continue;
-                        }
-                    }
-                }
-
-            }
-            Ok(AutoCoordinatorCommand::ObserverThinking {
-                mode,
-                delta,
-                summary_index,
-            }) => {
-                let _ = app_event_tx.send(AppEvent::AutoObserverThinking {
-                    mode,
-                    delta,
-                    summary_index,
-                });
-            }
-            Ok(AutoCoordinatorCommand::ObserverBootstrapLen(len)) => {
-                observer_bootstrap_len = len;
-                observer_last_sent = observer_bootstrap_len.min(observer_current_len);
-            }
-            Ok(AutoCoordinatorCommand::ResetObserver) => {
-                observer_bootstrapped = false;
-                observer_last_sent = 0;
-                observer_current_len = 0;
-                observer_bootstrap_len = 0;
-                awaiting_cross_check = false;
-                pending_success = None;
-            }
             Ok(AutoCoordinatorCommand::Stop) | Err(_) => {
                 stopped = true;
             }
         }
     }
 
-    if let Some(handle) = observer_handle.take() {
-        let _ = handle.tx.send(AutoObserverCommand::Stop);
-    }
-
     Ok(())
-}
-
-fn compose_developer_intro(base: &str, guidance: &[String]) -> String {
-    if guidance.is_empty() {
-        return base.to_string();
-    }
-
-    let mut intro = String::with_capacity(base.len() + guidance.len() * 64);
-    intro.push_str(base);
-    intro.push_str("\n\n**Observer Guidance**\n");
-    for hint in guidance {
-        let trimmed = hint.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        intro.push_str("- ");
-        intro.push_str(trimmed);
-        intro.push('\n');
-    }
-    intro
-}
-
-fn should_trigger_observer(requests_completed: u64, cadence: u64) -> bool {
-    cadence != 0 && requests_completed > 0 && requests_completed % cadence == 0
 }
 fn read_coordinator_prompt(_config: &Config) -> Option<String> {
     match fs::read_to_string(COORDINATOR_PROMPT_PATH) {
@@ -1256,17 +951,6 @@ fn read_coordinator_prompt(_config: &Config) -> Option<String> {
                 COORDINATOR_PROMPT_PATH
             );
             None
-        }
-    }
-}
-
-impl From<ObserverReason> for AutoObserverReason {
-    fn from(reason: ObserverReason) -> Self {
-        match reason {
-            ObserverReason::Cadence => AutoObserverReason::Cadence,
-            ObserverReason::CrossCheck { forced, summary, focus } => {
-                AutoObserverReason::CrossCheck { forced, summary, focus }
-            }
         }
     }
 }
@@ -1559,7 +1243,7 @@ fn request_coordinator_decision(
     schema: &Value,
     conversation: Vec<ResponseItem>,
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<ParsedCoordinatorDecision> {
     let (raw, response_items) = request_decision(
@@ -1570,7 +1254,7 @@ fn request_coordinator_decision(
         schema,
         &conversation,
         auto_instructions,
-        app_event_tx,
+        event_tx,
         cancel_token,
     )?;
     let (mut decision, value) = parse_decision(&raw)?;
@@ -1587,7 +1271,7 @@ fn request_decision(
     schema: &Value,
     conversation: &[ResponseItem],
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<(String, Vec<ResponseItem>)> {
     match request_decision_with_model(
@@ -1598,7 +1282,7 @@ fn request_decision(
         schema,
         conversation,
         auto_instructions,
-        app_event_tx,
+        event_tx,
         cancel_token,
         MODEL_SLUG,
     ) {
@@ -1620,7 +1304,7 @@ fn request_decision(
                     schema,
                     conversation,
                     auto_instructions,
-                    app_event_tx,
+                    event_tx,
                     cancel_token,
                     &fallback_slug,
                 )
@@ -1645,7 +1329,7 @@ fn request_user_turn_decision(
     schema: &Value,
     conversation: Vec<ResponseItem>,
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
 ) -> Result<(Option<String>, Option<String>)> {
     let (raw, _response_items) = request_decision(
@@ -1656,7 +1340,7 @@ fn request_user_turn_decision(
         schema,
         &conversation,
         auto_instructions,
-        app_event_tx,
+        event_tx,
         cancel_token,
     )?;
     let (user_response, cli_command) = parse_user_turn_reply(&raw)?;
@@ -1671,7 +1355,7 @@ fn request_decision_with_model(
     schema: &Value,
     conversation: &[ResponseItem],
     auto_instructions: Option<&str>,
-    app_event_tx: &AppEventSender,
+    event_tx: &AutoCoordinatorEventSender,
     cancel_token: &CancellationToken,
     model_slug: &str,
 ) -> Result<RequestStreamResult> {
@@ -1680,7 +1364,7 @@ fn request_decision_with_model(
     let schema = schema.clone();
     let conversation: Vec<ResponseItem> = conversation.to_vec();
     let auto_instructions = auto_instructions.map(|text| text.to_string());
-    let tx = app_event_tx.clone();
+    let tx = event_tx.clone();
     let cancel = cancel_token.clone();
     let classify = |error: &anyhow::Error| classify_model_error(error);
     let options = RetryOptions::with_defaults(MAX_RETRY_ELAPSED);
@@ -1739,7 +1423,7 @@ fn request_decision_with_model(
                                 let cleaned = strip_role_prefix(&delta);
                                 reasoning_delta_accumulator.push_str(cleaned);
                                 let message = cleaned.to_string();
-                                tx_inner.send(AppEvent::AutoCoordinatorThinking {
+                                tx_inner.send(AutoCoordinatorEvent::Thinking {
                                     delta: message,
                                     summary_index,
                                 });
@@ -1748,7 +1432,7 @@ fn request_decision_with_model(
                                 let cleaned = strip_role_prefix(&delta);
                                 reasoning_delta_accumulator.push_str(cleaned);
                                 let message = cleaned.to_string();
-                                tx_inner.send(AppEvent::AutoCoordinatorThinking {
+                                tx_inner.send(AutoCoordinatorEvent::Thinking {
                                     delta: message,
                                     summary_index: None,
                                 });
@@ -1814,7 +1498,7 @@ fn request_decision_with_model(
                         .map(|s| format!("; next attempt at {s}"))
                         .unwrap_or_default()
                 );
-                let _ = tx.send(AppEvent::AutoCoordinatorThinking {
+                let _ = tx.send(AutoCoordinatorEvent::Thinking {
                     delta: message,
                     summary_index: None,
                 });
@@ -2108,6 +1792,7 @@ fn find_in_chain<'a, T: std::error::Error + 'static>(error: &'a anyhow::Error) -
 
 struct RecoverableDecisionError {
     summary: String,
+    #[cfg_attr(not(test), allow(dead_code))]
     guidance: Option<String>,
 }
 
@@ -2190,6 +1875,7 @@ fn classify_recoverable_decision_error(err: &anyhow::Error) -> Option<Recoverabl
     None
 }
 
+#[cfg(test)]
 fn push_unique_guidance(guidance: &mut Vec<String>, message: &str) {
     let trimmed = message.trim();
     if trimmed.is_empty() {

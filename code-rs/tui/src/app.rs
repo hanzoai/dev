@@ -1773,7 +1773,6 @@ impl App<'_> {
                     agents_enabled,
                     cross_check_enabled,
                     qa_automation_enabled,
-                    observer_enabled,
                     continue_mode,
                 } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
@@ -1782,7 +1781,6 @@ impl App<'_> {
                             agents_enabled,
                             cross_check_enabled,
                             qa_automation_enabled,
-                            observer_enabled,
                             continue_mode,
                         );
                     }
@@ -1804,16 +1802,6 @@ impl App<'_> {
                     AppState::Chat { widget } => widget.submit_op(op),
                     AppState::Onboarding { .. } => {}
                 },
-                AppEvent::AutoQaUpdate { note } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.handle_auto_qa_update(note);
-                    }
-                }
-                AppEvent::AutoReviewRequest { summary } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.handle_auto_review_request(summary);
-                    }
-                }
                 AppEvent::AutoCoordinatorDecision {
                     status,
                     progress_past,
@@ -1856,48 +1844,6 @@ impl App<'_> {
                 AppEvent::AutoCoordinatorRestart { token, attempt } => {
                     if let AppState::Chat { widget } = &mut self.app_state {
                         widget.auto_handle_restart(token, attempt);
-                    }
-                }
-                AppEvent::AutoObserverReport {
-                    mode,
-                    status,
-                    telemetry,
-                    replace_message,
-                    additional_instructions,
-                    reason,
-                    conversation,
-                    raw_output,
-                    parsed_response,
-                } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_observer_report(
-                            mode,
-                            status,
-                            telemetry,
-                            replace_message,
-                            additional_instructions,
-                            reason,
-                            conversation,
-                            raw_output,
-                            parsed_response,
-                        );
-                    }
-                }
-                AppEvent::AutoObserverThinking {
-                    mode,
-                    delta,
-                    summary_index,
-                } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_observer_thinking(mode, delta, summary_index);
-                    }
-                }
-                AppEvent::AutoObserverReady {
-                    baseline_summary,
-                    bootstrap_len,
-                } => {
-                    if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.auto_handle_observer_ready(baseline_summary, bootstrap_len);
                     }
                 }
                 AppEvent::PerformUndoRestore {
