@@ -96,6 +96,7 @@ use code_auto_drive_core::{
     AutoCoordinatorStatus,
     AutoDriveHistory,
     AutoDriveController,
+    AutoRunPhase,
     AutoControllerEffect,
     AutoTurnAgentsAction,
     AutoTurnAgentsTiming,
@@ -4759,7 +4760,9 @@ impl ChatWidget<'_> {
             match key_event.code {
                 crossterm::event::KeyCode::Enter
                 | crossterm::event::KeyCode::Char(' ') if key_event.modifiers.is_empty() => {
-                    self.auto_submit_prompt();
+                    if !self.auto_state.should_bypass_coordinator_next_submit() {
+                        self.auto_submit_prompt();
+                    }
                     return;
                 }
                 crossterm::event::KeyCode::Char('e') | crossterm::event::KeyCode::Char('E')
@@ -7391,7 +7394,12 @@ impl ChatWidget<'_> {
         if trimmed.is_empty() {
             return None;
         }
-        if !self.auto_state.active {
+        if !self.auto_state.is_auto_active() {
+            return None;
+        }
+        if self.auto_state.current_phase() == AutoRunPhase::PausedManual
+            && self.auto_state.should_bypass_coordinator_next_submit()
+        {
             return None;
         }
         if !self.config.auto_drive.coordinator_routing {
@@ -7477,7 +7485,8 @@ impl ChatWidget<'_> {
         let mut submitted_cli = false;
         if !message.suppress_persistence
             && !original_text.trim().starts_with('/')
-            && self.auto_state.active
+            && self.auto_state.is_auto_active()
+            && !self.auto_state.should_bypass_coordinator_next_submit()
             && self.config.auto_drive.coordinator_routing
         {
             let mut conversation = self.current_auto_history();
@@ -7492,7 +7501,9 @@ impl ChatWidget<'_> {
             }
         }
 
-        if !message.suppress_persistence {
+        if !message.suppress_persistence
+            && !self.auto_state.should_bypass_coordinator_next_submit()
+        {
             if let Some(mut routed) = self.try_coordinator_route(&original_text) {
                 self.finalize_sent_user_message(message);
                 self.consume_pending_prompt_for_ui_only_turn();
@@ -9192,9 +9203,11 @@ impl ChatWidget<'_> {
             self.auto_state.paused_for_manual_edit = false;
             self.auto_state.awaiting_submission = false;
             self.auto_state.seconds_remaining = 0;
+            self.auto_state.clear_bypass_coordinator_flag();
             self.auto_rebuild_live_ring();
             self.bottom_pane.update_status_text(String::new());
             self.bottom_pane.set_task_running(false);
+            self.auto_state.set_phase(AutoRunPhase::Active);
         }
 
         self.request_redraw();
@@ -12959,6 +12972,8 @@ fi\n\
         self.bottom_pane.update_status_text("Auto Drive".to_string());
         self.auto_update_terminal_hint();
         self.bottom_pane.ensure_input_focus();
+        self.auto_state.awaiting_goal_input = true;
+        self.clear_composer();
         self.request_redraw();
     }
 
@@ -13073,7 +13088,8 @@ fi\n\
             if self.auto_state.active {
                 self.auto_stop(None);
             }
-            self.reset_auto_state_to_defaults();
+            self.auto_state.reset();
+            self.auto_state.set_phase(AutoRunPhase::Idle);
             self.auto_show_goal_entry_panel();
             self.request_redraw();
             return;
@@ -13186,6 +13202,7 @@ fi\n\
             return;
         }
         self.auto_state.waiting_for_review = false;
+        self.auto_state.clear_bypass_coordinator_flag();
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
@@ -13220,6 +13237,7 @@ fi\n\
         if !self.auto_state.active {
             return;
         }
+        self.auto_state.clear_bypass_coordinator_flag();
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
@@ -13531,7 +13549,9 @@ fi\n\
                     }
                 }
                 AutoControllerEffect::SubmitPrompt => {
-                    self.auto_submit_prompt();
+                    if !self.auto_state.should_bypass_coordinator_next_submit() {
+                        self.auto_submit_prompt();
+                    }
                 }
                 AutoControllerEffect::LaunchStarted { goal } => {
                     self.bottom_pane.set_task_running(false);
@@ -13919,6 +13939,8 @@ fi\n\
         self.auto_state.coordinator_waiting = false;
         self.auto_state.paused_for_manual_edit = false;
         self.auto_state.resume_after_manual_submit = false;
+        self.auto_state.clear_bypass_coordinator_flag();
+        self.auto_state.set_phase(AutoRunPhase::Active);
         self.auto_state.seconds_remaining = 0;
         let post_submit_display = self.auto_state.last_decision_display.clone();
         self.auto_state.current_summary = None;
@@ -13974,6 +13996,8 @@ use crate::chatwidget::message::UserMessage;
 
         self.auto_state.paused_for_manual_edit = true;
         self.auto_state.resume_after_manual_submit = true;
+        self.auto_state.set_phase(AutoRunPhase::PausedManual);
+        self.auto_state.set_bypass_coordinator_next_submit();
         self.auto_state.countdown_id = self.auto_state.countdown_id.wrapping_add(1);
         self.auto_state.reset_countdown();
         self.clear_composer();
@@ -14115,7 +14139,9 @@ use crate::chatwidget::message::UserMessage;
             return;
         }
 
-        self.auto_send_conversation();
+        if !self.auto_state.should_bypass_coordinator_next_submit() {
+            self.auto_send_conversation();
+        }
     }
 
     #[cfg(any(test, feature = "test-helpers"))]
@@ -23249,7 +23275,9 @@ impl ChatWidget<'_> {
             return;
         }
         self.auto_state.waiting_for_review = false;
-        self.auto_send_conversation();
+        if !self.auto_state.should_bypass_coordinator_next_submit() {
+            self.auto_send_conversation();
+        }
         self.request_redraw();
     }
 
