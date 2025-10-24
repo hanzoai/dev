@@ -3,7 +3,7 @@ source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: "&output"
 ---
  +--------------------------------------------------------------------------------------------+
- |  Code  •  Directory: ~/.code/working/code/branches/code-branch-20251022-070716/code-rs/tui |
+ |  Code  •  Directory: ~/.code/working/code/branches/code-branch-20251024-135958/code-rs/tui |
  +--------------------------------------------------------------------------------------------+
  + Agents - Ctrl+A to close-------------------------------------------------------------------+
  |                                                                                            |
@@ -16,16 +16,16 @@ expression: "&output"
  |                             |                                                            | |
  |                             | Action History                                             | |
  |                             |                                                            | |
- |                             | [MM:SS:13] claude-3-opus status: Status → Running          | |
+ |                             | [MM:SS:29] claude-3-opus status: Status → Running          | |
  |                             |                                                            | |
- |                             | [MM:SS:13] claude-3-opus progress: Collecting release notes| |
+ |                             | [MM:SS:29] claude-3-opus progress: Collecting release notes| |
  |                             |                                    Reviewing eng updates   | |
  |                             |                                                            | |
- |                             | [MM:SS:13] gpt-4o status: Status → Pending                 | |
+ |                             | [MM:SS:29] gpt-4o status: Status → Pending                 | |
  |                             |                                                            | |
- |                             | [MM:SS:13] claude-3-opus status: Status → Completed        | |
+ |                             | [MM:SS:29] claude-3-opus status: Status → Completed        | |
  |                             |                                                            | |
- |                             | [MM:SS:13] claude-3-opus result: Highlights                | |
+ |                             | [MM:SS:29] claude-3-opus result: Highlights                | |
  |                             |                                  - New Auto Drive controls | |
  |                             +------------------------------------------------------------+ |
  | ↑/↓ Navigate/Scroll  →/Enter Focus output  ← Back to list  Tab Next agent  PgUp/PgDn Page  |
