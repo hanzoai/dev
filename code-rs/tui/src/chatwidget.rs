@@ -7487,12 +7487,16 @@ impl ChatWidget<'_> {
             .auto_state
             .paused_for_manual_edit
             && self.auto_state.resume_after_manual_submit;
+        let manual_override_active =
+            self.auto_state.current_phase() == AutoRunPhase::PausedManual;
 
         let should_route_through_coordinator = !message.suppress_persistence
             && !original_text.trim().starts_with('/')
             && self.auto_state.is_auto_active()
             && self.config.auto_drive.coordinator_routing
-            && (!self.auto_state.should_bypass_coordinator_next_submit() || manual_edit_pending);
+            && (!self.auto_state.should_bypass_coordinator_next_submit()
+                || manual_edit_pending
+                || manual_override_active);
 
         if should_route_through_coordinator
         {
@@ -7509,7 +7513,9 @@ impl ChatWidget<'_> {
         }
 
         if !message.suppress_persistence
-            && (!self.auto_state.should_bypass_coordinator_next_submit() || manual_edit_pending)
+            && (!self.auto_state.should_bypass_coordinator_next_submit()
+                || manual_edit_pending
+                || manual_override_active)
         {
             if let Some(mut routed) = self.try_coordinator_route(&original_text) {
                 self.finalize_sent_user_message(message);
@@ -13207,7 +13213,9 @@ fi\n\
             return;
         }
         self.auto_state.waiting_for_review = false;
-        self.auto_state.clear_bypass_coordinator_flag();
+        if self.auto_state.current_phase() != AutoRunPhase::PausedManual {
+            self.auto_state.clear_bypass_coordinator_flag();
+        }
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
@@ -13242,7 +13250,9 @@ fi\n\
         if !self.auto_state.active {
             return;
         }
-        self.auto_state.clear_bypass_coordinator_flag();
+        if self.auto_state.current_phase() != AutoRunPhase::PausedManual {
+            self.auto_state.clear_bypass_coordinator_flag();
+        }
         let conversation = self.current_auto_history();
         let Some(handle) = self.auto_handle.as_ref() else {
             return;
@@ -13554,6 +13564,12 @@ fi\n\
                     }
                 }
                 AutoControllerEffect::SubmitPrompt => {
+                    if self.auto_state.should_bypass_coordinator_next_submit()
+                        && self.auto_state.current_phase() == AutoRunPhase::PausedManual
+                    {
+                        self.auto_state.clear_bypass_coordinator_flag();
+                        self.auto_state.set_phase(AutoRunPhase::Active);
+                    }
                     if !self.auto_state.should_bypass_coordinator_next_submit() {
                         self.auto_submit_prompt();
                     }
