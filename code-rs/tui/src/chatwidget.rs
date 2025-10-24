@@ -14092,7 +14092,15 @@ use crate::chatwidget::message::UserMessage;
         let agent_actions = &self.auto_state.pending_agent_actions;
         if !agent_actions.is_empty() {
             let agent_timing = self.auto_state.pending_agent_timing;
-            let mut agent_lines = Vec::with_capacity(agent_actions.len() + 1);
+            let mut agent_lines = Vec::with_capacity(agent_actions.len() * 4 + 5);
+            const BLOCK_PREFIX: &str = "   ";
+            const LINE_PREFIX: &str = "      ";
+
+            agent_lines.push(format!("{BLOCK_PREFIX}<agents>"));
+            agent_lines.push(format!(
+                "{LINE_PREFIX}Please use agents to help you complete this task."
+            ));
+
             for action in agent_actions {
                 let prompt = action
                     .prompt
@@ -14100,26 +14108,37 @@ use crate::chatwidget::message::UserMessage;
                     .replace('\n', " ")
                     .replace('"', "\\\"");
                 let write_text = if action.write { "write: true" } else { "write: false" };
-                let mut line = format!(
-                    "Please run agent.create with {write_text} and prompt like \"{prompt}\"."
-                );
+
+                agent_lines.push(String::new());
+                agent_lines.push(format!(
+                    "{LINE_PREFIX}Please run agent.create with {write_text} and prompt like \"{prompt}\"."
+                ));
+
                 if let Some(ctx) = action
                     .context
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                 {
-                    line.push_str(&format!(" Context: {}.", ctx.replace('\n', " ")));
+                    agent_lines.push(format!(
+                        "{LINE_PREFIX}Context: {}",
+                        ctx.replace('\n', " ")
+                    ));
                 }
+
                 if let Some(models) = action
                     .models
                     .as_ref()
                     .filter(|list| !list.is_empty())
                 {
-                    line.push_str(&format!(" Models: [{}].", models.join(", ")));
+                    agent_lines.push(format!(
+                        "{LINE_PREFIX}Models: [{}]",
+                        models.join(", ")
+                    ));
                 }
-                agent_lines.push(line);
             }
+
+            agent_lines.push(String::new());
             let timing_line = match agent_timing {
                 Some(AutoTurnAgentsTiming::Parallel) =>
                     "Timing (parallel): Launch these agents in the background while you continue the CLI prompt. Call agent.wait with the batch_id when you are ready to merge their results.".to_string(),
@@ -14128,7 +14147,25 @@ use crate::chatwidget::message::UserMessage;
                 None =>
                     "Timing (default blocking): After launching the agents, wait with agent.wait (use the batch_id returned by agent.create) and fold their output into your plan.".to_string(),
             };
-            agent_lines.push(timing_line);
+            agent_lines.push(format!("{LINE_PREFIX}{timing_line}"));
+            agent_lines.push(String::new());
+
+            if agent_actions.iter().any(|action| !action.write) {
+                agent_lines.push(format!(
+                    "{LINE_PREFIX}Call agent.result to get the results from the agent if needed."
+                ));
+                agent_lines.push(String::new());
+            }
+
+            if agent_actions.iter().any(|action| action.write) {
+                agent_lines.push(format!(
+                    "{LINE_PREFIX}When agents run with write: true, they perform edits in their own worktree. Considering reviewing and merging the best worktree once they complete."
+                ));
+                agent_lines.push(String::new());
+            }
+
+            agent_lines.push(format!("{BLOCK_PREFIX}</agents>"));
+
             sections.push(agent_lines.join("\n"));
         }
 
