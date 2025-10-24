@@ -18,7 +18,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +------------------+
  | Send prompt (9s) |   Esc to edit
  +------------------+
-   Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -34,26 +34,26 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  + Next Prompt ---------------------------------------------------------------+
  |  cargo nextest run --no-fail-fast                                          |
  +----------------------------------------------------------------------------+
- +-------------+
- | Send prompt |   Esc to edit
- +-------------+
-   Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
+ +------------------+
+ | Send prompt (9s) |   Esc to edit
+ +------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
-
-
- ★ Popular commands:
    /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
-  Auto Drive > Working                                          ✶ Thinking (1s)
+  Auto Drive > Working                                           ✶ Waiting (1s)
+ + Next Prompt ---------------------------------------------------------------+
+ |  cargo nextest run --no-fail-fast                                          |
  +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
-   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive
+ +------------------+
+ | Send prompt (9s) |   Esc to edit
+ +------------------+
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive

@@ -292,15 +292,37 @@ pub(crate) fn explore_lines_from_record_with_force(
         return lines;
     }
 
-    let max_label_len = record
-        .entries
+    const MAX_VISIBLE_ENTRIES: usize = 6;
+    const HEAD_ENTRIES: usize = 2;
+    const TAIL_ENTRIES: usize = 4;
+
+    let entry_count = record.entries.len();
+    let (visible_indices, truncated) = if entry_count <= MAX_VISIBLE_ENTRIES {
+        ((0..entry_count).collect::<Vec<_>>(), false)
+    } else {
+        let tail_start = entry_count.saturating_sub(TAIL_ENTRIES);
+        let mut indices = Vec::with_capacity(HEAD_ENTRIES + TAIL_ENTRIES);
+        indices.extend(0..HEAD_ENTRIES.min(entry_count));
+        indices.extend(tail_start..entry_count);
+        (indices, true)
+    };
+
+    let max_label_len = visible_indices
         .iter()
-        .map(entry_label_width)
+        .map(|&idx| entry_label_width(&record.entries[idx]))
         .max()
         .unwrap_or(0);
 
-    for (idx, entry) in record.entries.iter().enumerate() {
-        let prefix = if idx == 0 { "└ " } else { "  " };
+    for (display_idx, entry_idx) in visible_indices.iter().enumerate() {
+        if truncated && display_idx == HEAD_ENTRIES {
+            lines.push(Line::styled(
+                "⋮",
+                Style::default().add_modifier(Modifier::DIM),
+            ));
+        }
+
+        let entry = &record.entries[*entry_idx];
+        let prefix = if *entry_idx == 0 { "└ " } else { "  " };
         let mut spans: Vec<Span<'static>> = vec![Span::styled(
             prefix,
             Style::default().add_modifier(Modifier::DIM),

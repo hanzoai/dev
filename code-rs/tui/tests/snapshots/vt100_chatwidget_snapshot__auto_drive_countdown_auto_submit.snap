@@ -18,7 +18,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +------------------+
  | Send prompt (3s) |   Esc to edit
  +------------------+
-   Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
+   Agents Disabled  •  Diagnostics Enabl… Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -37,12 +37,14 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +------------------+
  | Send prompt (1s) |   Esc to edit
  +------------------+
-   Awaiting approval  •  Agents Disabled  •  Revi… Enter approve  •  Esc cancel
+   Agents Disabled  •  Diagnostics Enabl… Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
+
+
  ★ Popular commands:
    /settings - manage all settings in one place NEW
    /auto - work autonomously on long tasks with Auto Drive UPDATED
@@ -50,10 +52,8 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
 
- › cargo fmt --check
-
   Auto Drive > Running cargo fmt --check.                       ✶ Thinking (1s)
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Agents Disabled  •  Review Enabled  •  Cross-check Enab… Esc stop Auto Drive
+   Agents Disabled  •  Diagnostics Enabl… Ctrl+S settings • Esc stop Auto Drive

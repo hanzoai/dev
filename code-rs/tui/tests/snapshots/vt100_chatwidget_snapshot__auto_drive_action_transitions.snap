@@ -1,6 +1,5 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 344
 expression: "frames.join(\"\\n---FRAME---\\n\")"
 ---
  +----------------------------------------------------------------------------+
@@ -19,7 +18,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -38,7 +37,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +------------------+
  | Send prompt (6s) |   Esc to edit
  +------------------+
-   Awaiting approval  •  Agents Enabled  •  Revie… Enter approve  •  Esc cancel
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -57,7 +56,7 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive
 
 ---FRAME---
  +----------------------------------------------------------------------------+
@@ -76,4 +75,4 @@ expression: "frames.join(\"\\n---FRAME---\\n\")"
  +----------------------------------------------------------------------------+
  | What can I code for you today?                                             |
  +----------------------------------------------------------------------------+
-   Agents Enabled  •  Review Enabled  •  Cross-check Enabl… Esc stop Auto Drive
+   Agents Enabled  •  Diagnostics Enabled Ctrl+S settings • Esc stop Auto Drive

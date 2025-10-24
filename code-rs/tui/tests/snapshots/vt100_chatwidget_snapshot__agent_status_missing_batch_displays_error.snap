@@ -1,14 +1,13 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 1409
 expression: output
 ---
  +----------------------------------------------------------------------------+
  |                                    Code                                    |
  +----------------------------------------------------------------------------+
- + Agents --------------------------------------------------------------------+
- | • Orphan (running 0s) - trying something risky        Ctrl+A open terminal |
- +----------------------------------------------------------------------------+
+ ★ Popular commands:
+   /settings - manage all settings in one place NEW
+   /auto - work autonomously on long tasks with Auto Drive UPDATED
    /chrome - connect to your Chrome browser
    /plan - create a comprehensive plan (multiple agents)
    /code - perform a coding task (multiple agents)
