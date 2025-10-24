@@ -257,6 +257,81 @@ pub struct AutoDriveController {
 }
 
 impl AutoDriveController {
+    fn sync_booleans_from_phase(&mut self) {
+        match &self.phase {
+            AutoRunPhase::Idle | AutoRunPhase::Launching => {
+                self.active = false;
+                self.awaiting_submission = false;
+                self.waiting_for_response = false;
+                self.coordinator_waiting = false;
+                self.paused_for_manual_edit = false;
+                self.resume_after_manual_submit = false;
+                self.waiting_for_review = false;
+                self.waiting_for_transient_recovery = false;
+            }
+            AutoRunPhase::Active => {
+                self.active = true;
+                self.awaiting_submission = false;
+                self.waiting_for_response = false;
+                self.coordinator_waiting = false;
+                self.paused_for_manual_edit = false;
+                self.resume_after_manual_submit = false;
+                self.waiting_for_review = false;
+                self.waiting_for_transient_recovery = false;
+            }
+            AutoRunPhase::AwaitingCoordinator { .. } => {
+                self.active = true;
+                self.awaiting_submission = true;
+                self.waiting_for_response = false;
+                self.coordinator_waiting = true;
+                self.paused_for_manual_edit = false;
+                self.resume_after_manual_submit = false;
+                self.waiting_for_review = false;
+                self.waiting_for_transient_recovery = false;
+            }
+            AutoRunPhase::AwaitingDiagnostics => {
+                self.active = true;
+                self.awaiting_submission = false;
+                self.waiting_for_response = true;
+                self.coordinator_waiting = false;
+                self.paused_for_manual_edit = false;
+                self.resume_after_manual_submit = false;
+                self.waiting_for_review = false;
+                self.waiting_for_transient_recovery = false;
+            }
+            AutoRunPhase::AwaitingReview { .. } => {
+                self.active = true;
+                self.awaiting_submission = false;
+                self.waiting_for_response = false;
+                self.coordinator_waiting = false;
+                self.paused_for_manual_edit = false;
+                self.resume_after_manual_submit = false;
+                self.waiting_for_review = true;
+                self.waiting_for_transient_recovery = false;
+            }
+            AutoRunPhase::PausedManual { resume_after_submit } => {
+                self.active = true;
+                self.awaiting_submission = false;
+                self.waiting_for_response = false;
+                self.coordinator_waiting = false;
+                self.paused_for_manual_edit = true;
+                self.resume_after_manual_submit = *resume_after_submit;
+                self.waiting_for_review = false;
+                self.waiting_for_transient_recovery = false;
+            }
+            AutoRunPhase::TransientRecovery { .. } => {
+                self.active = true;
+                self.awaiting_submission = false;
+                self.waiting_for_response = false;
+                self.coordinator_waiting = false;
+                self.paused_for_manual_edit = false;
+                self.resume_after_manual_submit = false;
+                self.waiting_for_review = false;
+                self.waiting_for_transient_recovery = true;
+            }
+        }
+    }
+
     pub fn set_waiting_for_response(&mut self, waiting: bool) {
         self.waiting_for_response = waiting;
     }
@@ -266,19 +341,13 @@ impl AutoDriveController {
     }
 
     pub fn on_prompt_ready(&mut self, prompt_ready: bool) {
-        self.awaiting_submission = true;
-        self.coordinator_waiting = true;
-        self.waiting_for_response = false;
         self.phase = AutoRunPhase::AwaitingCoordinator { prompt_ready };
+        self.sync_booleans_from_phase();
     }
 
     pub fn on_prompt_submitted(&mut self) {
-        self.awaiting_submission = false;
-        self.waiting_for_response = true;
-        self.coordinator_waiting = false;
-        self.paused_for_manual_edit = false;
-        self.resume_after_manual_submit = false;
-        self.phase = AutoRunPhase::Active;
+        self.phase = AutoRunPhase::AwaitingDiagnostics;
+        self.sync_booleans_from_phase();
     }
 
     pub fn on_pause_for_manual(&mut self, resume_after_submit: bool) {
